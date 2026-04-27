@@ -1,8 +1,13 @@
+import { Button } from "@/components/ui/button";
+
 export function App(): JSX.Element {
   return (
-    <main className="app-shell">
-      <h1>MSI Toolbox v3</h1>
-      <p>Stage 1 scaffold. Renderer is alive.</p>
+    <main className="flex min-h-screen flex-col items-start gap-4 p-6">
+      <h1 className="text-2xl font-medium">MSI Toolbox v3</h1>
+      <p className="text-muted-foreground">
+        Stage 1 scaffold. Tailwind v4 + shadcn/ui are wired up.
+      </p>
+      <Button>Sample shadcn Button</Button>
     </main>
   );
 }
