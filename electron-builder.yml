@@ -28,3 +28,15 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: MSI Toolbox
   uninstallDisplayName: MSI Toolbox ${version}
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: build/icon.icns
+  category: public.app-category.graphics-design
+  identity: null
+  artifactName: ${productName}-${version}-${arch}.${ext}
+dmg:
+  writeUpdateInfo: false
