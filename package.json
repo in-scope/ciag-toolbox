@@ -1,13 +1,19 @@
 {
   "name": "ciag-toolbox",
+  "productName": "MSI Toolbox",
   "version": "0.1.0",
   "description": "MSI Toolbox v3 - cross-platform desktop application for multispectral image analysis",
+  "author": {
+    "name": "Cultural-heritage Imaging and Analysis Group (CIAG)",
+    "email": "evan.morgan@inscope.sh"
+  },
   "main": "out/main/index.js",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
@@ -43,6 +49,7 @@
     "@typescript-eslint/parser": "^8.18.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.1",
+    "electron-builder": "^26.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.2",

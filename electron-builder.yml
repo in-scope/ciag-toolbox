@@ -1,0 +1,30 @@
+appId: sh.inscope.ciag.toolbox
+productName: MSI Toolbox
+copyright: Copyright (c) 2026 Cultural-heritage Imaging and Analysis Group (CIAG)
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/*.{ts,tsx,map}"
+  - "!**/.{eslintrc,eslintrc.cjs,prettierrc,gitignore}"
+asar: true
+publish: null
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: MSI Toolbox
+  uninstallDisplayName: MSI Toolbox ${version}

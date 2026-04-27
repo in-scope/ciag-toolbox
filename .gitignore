@@ -13,7 +13,6 @@ tasks/
 node_modules/
 out/
 dist/
-build/
 
 # Editor / logs
 *.log
