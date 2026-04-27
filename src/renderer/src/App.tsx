@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AboutDialog } from "@/components/about-dialog";
 import { Toolbar, type GridLayout } from "@/components/toolbar";
+import { Viewport } from "@/components/viewport";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -27,11 +28,8 @@ export function App(): JSX.Element {
 
 function ApplicationStageContent(): JSX.Element {
   return (
-    <main className="flex flex-1 flex-col items-start gap-4 p-6">
-      <h1 className="text-2xl font-medium">MSI Toolbox v3</h1>
-      <p className="text-muted-foreground">
-        Stage 1 scaffold. Toolbar, viewport grid, and panels are coming online.
-      </p>
+    <main className="flex min-h-0 flex-1 p-4">
+      <Viewport />
     </main>
   );
 }
