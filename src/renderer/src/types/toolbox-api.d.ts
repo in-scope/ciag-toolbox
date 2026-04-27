@@ -3,6 +3,15 @@ interface ToolboxAppInfo {
   version: string;
 }
 
+type ToolboxOpenImageDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      filePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+    };
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxUnsubscribeMenuListener = () => void;
 
@@ -27,6 +36,7 @@ interface ToolboxApi {
     node: string;
   };
   getAppInfo: () => Promise<ToolboxAppInfo>;
+  openImageDialog: () => Promise<ToolboxOpenImageDialogResult>;
   onMenuOpenImage: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;

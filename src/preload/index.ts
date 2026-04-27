@@ -5,15 +5,31 @@ export interface AppInfo {
   version: string;
 }
 
+export type OpenImageDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      filePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+    };
+
 export type MenuEventListener = () => void;
 export type UnsubscribeMenuListener = () => void;
 
 const GET_APP_INFO_CHANNEL = "app:get-info";
+const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_ABOUT_CHANNEL = "menu:about";
 
 function fetchAppInfoFromMainProcess(): Promise<AppInfo> {
   return ipcRenderer.invoke(GET_APP_INFO_CHANNEL) as Promise<AppInfo>;
+}
+
+function showOpenImageDialogThroughMainProcess(): Promise<OpenImageDialogResult> {
+  return ipcRenderer.invoke(
+    OPEN_IMAGE_DIALOG_CHANNEL,
+  ) as Promise<OpenImageDialogResult>;
 }
 
 function subscribeToMenuChannel(
@@ -45,6 +61,7 @@ const apiBridge = {
     node: process.versions.node,
   },
   getAppInfo: fetchAppInfoFromMainProcess,
+  openImageDialog: showOpenImageDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
 } as const;

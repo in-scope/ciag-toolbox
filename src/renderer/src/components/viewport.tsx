@@ -8,6 +8,7 @@ import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
+  fileName?: string | null;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
@@ -28,6 +29,22 @@ export function Viewport(props: ViewportProps): JSX.Element {
         className="block h-full w-full touch-none select-none"
         aria-label="Image viewport"
       />
+      {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
+    </div>
+  );
+}
+
+function ViewportFileNameLabel({
+  fileName,
+}: {
+  fileName: string;
+}): JSX.Element {
+  return (
+    <div
+      className="pointer-events-none absolute left-2 top-2 max-w-[80%] truncate rounded border bg-card/80 px-2 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
+      title={fileName}
+    >
+      {fileName}
     </div>
   );
 }
