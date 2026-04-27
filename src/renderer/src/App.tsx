@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   type Dispatch,
   type MouseEvent,
@@ -11,13 +12,22 @@ import { toast } from "sonner";
 import { AboutDialog } from "@/components/about-dialog";
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
+import {
+  DuplicateOverwriteAlertDialog,
+  type PendingDuplicateOverwrite,
+} from "@/components/viewport-duplicate-overwrite-dialog";
 import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
 import {
   getGridLayoutCellCount,
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
+import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import {
+  ViewportDuplicationProvider,
+  type ViewportDuplicationApi,
+} from "@/state/duplication-context";
 import { ViewportSelectionProvider, useViewportSelection } from "@/state/selection-context";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
@@ -25,6 +35,7 @@ const DEFAULT_OPEN_TARGET_VIEWPORT_INDEX = 0;
 
 type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
+type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateOverwrite | null>>;
 
 export function App(): JSX.Element {
   return (
@@ -39,6 +50,7 @@ export function App(): JSX.Element {
 function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
+  const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateOverwrite | null>(null);
   const { pruneSelectionToCellCount } = useViewportSelection();
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
@@ -50,6 +62,12 @@ function ApplicationShell(): JSX.Element {
   const handleOpenImageRequested = useOpenImageThroughDialogHandler(setImagesByIndex);
   const handleApplyToSelected = useCallback(logApplyToSelected, []);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
+  const duplicationApi = useViewportDuplicationApi({
+    cellCount: getGridLayoutCellCount(gridLayout),
+    imagesByIndex,
+    setImagesByIndex,
+    setPendingDuplicate,
+  });
   return (
     <div className="flex h-full flex-col">
       <Toolbar
@@ -58,7 +76,14 @@ function ApplicationShell(): JSX.Element {
         onGridLayoutChange={handleGridLayoutChange}
         onApplyToSelected={handleApplyToSelected}
       />
-      <ApplicationStageContent gridLayout={gridLayout} imagesByIndex={imagesByIndex} />
+      <ViewportDuplicationProvider value={duplicationApi}>
+        <ApplicationStageContent gridLayout={gridLayout} imagesByIndex={imagesByIndex} />
+      </ViewportDuplicationProvider>
+      <DuplicateOverwriteAlertDialog
+        pending={pendingDuplicate}
+        onCancel={() => setPendingDuplicate(null)}
+        onConfirm={() => confirmPendingDuplicateOverwrite(pendingDuplicate, setImagesByIndex, setPendingDuplicate)}
+      />
     </div>
   );
 }
@@ -218,6 +243,96 @@ function filterImagesToWithinCellCount(
     if (index < newCellCount) next.set(index, content);
   }
   return next;
+}
+
+interface ViewportDuplicationApiBindings {
+  cellCount: number;
+  imagesByIndex: ImagesByIndexMap;
+  setImagesByIndex: SetImagesByIndex;
+  setPendingDuplicate: SetPendingDuplicate;
+}
+
+function useViewportDuplicationApi(
+  bindings: ViewportDuplicationApiBindings,
+): ViewportDuplicationApi {
+  const { cellCount, imagesByIndex, setImagesByIndex, setPendingDuplicate } = bindings;
+  return useMemo(
+    () =>
+      buildViewportDuplicationApi({
+        cellCount,
+        imagesByIndex,
+        setImagesByIndex,
+        setPendingDuplicate,
+      }),
+    [cellCount, imagesByIndex, setImagesByIndex, setPendingDuplicate],
+  );
+}
+
+function buildViewportDuplicationApi(
+  bindings: ViewportDuplicationApiBindings,
+): ViewportDuplicationApi {
+  return {
+    cellCount: bindings.cellCount,
+    getCellFileName: (index) => bindings.imagesByIndex.get(index)?.fileName ?? null,
+    hasSourceContent: (index) => bindings.imagesByIndex.has(index),
+    requestDuplicateTo: (sourceIndex, targetIndex) =>
+      requestDuplicateBetweenIndices(bindings, sourceIndex, targetIndex),
+  };
+}
+
+function requestDuplicateBetweenIndices(
+  bindings: ViewportDuplicationApiBindings,
+  sourceIndex: number,
+  targetIndex: number,
+): void {
+  if (sourceIndex === targetIndex) return;
+  const sourceContent = bindings.imagesByIndex.get(sourceIndex);
+  if (!sourceContent) return;
+  const existingTarget = bindings.imagesByIndex.get(targetIndex);
+  if (existingTarget) {
+    bindings.setPendingDuplicate({
+      sourceIndex,
+      targetIndex,
+      sourceContent,
+      targetFileName: existingTarget.fileName,
+    });
+    return;
+  }
+  void applyDuplicateToTargetIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
+}
+
+async function applyDuplicateToTargetIndex(
+  sourceContent: ViewportCellContent,
+  targetIndex: number,
+  setImagesByIndex: SetImagesByIndex,
+): Promise<void> {
+  try {
+    const independentSource = await cloneViewportImageSource(sourceContent.source);
+    setImagesByIndex((previous) =>
+      assignViewportContentAtIndex(previous, targetIndex, {
+        fileName: sourceContent.fileName,
+        source: independentSource,
+      }),
+    );
+    toast.success(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
+  } catch (error) {
+    toast.error(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
+  }
+}
+
+function formatDuplicateSuccessMessage(fileName: string, targetIndex: number): string {
+  const targetNumber = getViewportNumberFromIndex(targetIndex);
+  return `Duplicated ${fileName} to viewport ${targetNumber}`;
+}
+
+function confirmPendingDuplicateOverwrite(
+  pending: PendingDuplicateOverwrite | null,
+  setImagesByIndex: SetImagesByIndex,
+  setPendingDuplicate: SetPendingDuplicate,
+): void {
+  if (!pending) return;
+  setPendingDuplicate(null);
+  void applyDuplicateToTargetIndex(pending.sourceContent, pending.targetIndex, setImagesByIndex);
 }
 
 function describeUnknownError(error: unknown): string {
