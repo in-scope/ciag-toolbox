@@ -1,0 +1,17 @@
+# Local agent runner files (kept on disk, not tracked)
+prd.json
+progress.txt
+.last-branch
+archive/
+run.sh
+AGENTS.md
+CLAUDE.md
+.devcontainer/
+tasks/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude local config
+.claude/
