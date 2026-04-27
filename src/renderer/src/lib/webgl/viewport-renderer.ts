@@ -10,14 +10,28 @@ import {
 import {
   createTextureFromSource,
   deleteTextureSafely,
+  getImageSourceDimensions,
   type ViewportImageSource,
 } from "./texture";
+import {
+  IDENTITY_PAN,
+  clampUserZoom,
+  computeFitToViewportScale,
+  computePanForZoomAtCursor,
+  computeWheelZoomFactor,
+  convertCanvasPointToClipSpace,
+  convertPixelDeltaToClipDelta,
+  type ClipPoint,
+  type ViewportSize,
+} from "./view-transform";
 
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const TEXCOORD_ATTRIBUTE_LOCATION = 1;
 const VERTEX_FLOAT_COUNT = 4;
 const VERTEX_STRIDE_BYTES = VERTEX_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
 const TEXCOORD_OFFSET_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT;
+const INITIAL_USER_ZOOM = 1;
+const FALLBACK_SIZE: ViewportSize = { width: 1, height: 1 };
 
 const FULLSCREEN_TEXTURED_QUAD_VERTICES = new Float32Array([
   -1, -1, 0, 1,
@@ -26,10 +40,21 @@ const FULLSCREEN_TEXTURED_QUAD_VERTICES = new Float32Array([
   1, 1, 1, 0,
 ]);
 
+interface QuadTransformUniformLocations {
+  quadScale: WebGLUniformLocation | null;
+  quadTranslate: WebGLUniformLocation | null;
+}
+
 interface RendererProgramResources {
   program: WebGLProgram;
   vao: WebGLVertexArrayObject;
   vertexBuffer: WebGLBuffer;
+  uniforms: QuadTransformUniformLocations;
+}
+
+interface QuadTransform {
+  scale: ClipPoint;
+  translate: ClipPoint;
 }
 
 export class ViewportRenderer {
@@ -37,6 +62,10 @@ export class ViewportRenderer {
   private programResources: RendererProgramResources | null = null;
   private texture: WebGLTexture | null = null;
   private currentSource: ViewportImageSource | null = null;
+  private displaySize: ViewportSize = FALLBACK_SIZE;
+  private imageSize: ViewportSize = FALLBACK_SIZE;
+  private userZoom = INITIAL_USER_ZOOM;
+  private userPan: ClipPoint = IDENTITY_PAN;
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
   private readonly handleContextRestored = (): void =>
@@ -49,19 +78,57 @@ export class ViewportRenderer {
 
   setImageSource(source: ViewportImageSource): void {
     this.currentSource = source;
+    this.imageSize = getImageSourceDimensions(source);
+    this.resetViewState();
     this.uploadCurrentSourceIfReady();
     this.draw();
   }
 
   resizeToDisplaySize(displayWidthPx: number, displayHeightPx: number): void {
+    this.displaySize = { width: displayWidthPx, height: displayHeightPx };
     syncCanvasBackingResolution(this.canvas, displayWidthPx, displayHeightPx);
     this.applyViewportToCanvasSize();
+    this.draw();
+  }
+
+  panByPixels(deltaXPx: number, deltaYPx: number): void {
+    const delta = convertPixelDeltaToClipDelta(
+      deltaXPx,
+      deltaYPx,
+      this.displaySize,
+    );
+    this.userPan = { x: this.userPan.x + delta.x, y: this.userPan.y + delta.y };
+    this.draw();
+  }
+
+  zoomAtCanvasPoint(xPx: number, yPx: number, wheelDeltaY: number): void {
+    const factor = computeWheelZoomFactor(wheelDeltaY);
+    const newZoom = clampUserZoom(this.userZoom * factor);
+    if (newZoom === this.userZoom) return;
+    const cursorClip = convertCanvasPointToClipSpace(xPx, yPx, this.displaySize);
+    this.userPan = computePanForZoomAtCursor(
+      cursorClip,
+      this.userPan,
+      this.userZoom,
+      newZoom,
+    );
+    this.userZoom = newZoom;
+    this.draw();
+  }
+
+  resetView(): void {
+    this.resetViewState();
     this.draw();
   }
 
   dispose(): void {
     this.detachContextLifecycleListeners();
     this.releaseAllWebGlResources();
+  }
+
+  private resetViewState(): void {
+    this.userZoom = INITIAL_USER_ZOOM;
+    this.userPan = IDENTITY_PAN;
   }
 
   private attachContextLifecycleListeners(): void {
@@ -126,7 +193,16 @@ export class ViewportRenderer {
     if (!gl || !programResources) return;
     clearCanvasToTransparentBlack(gl);
     if (!texture) return;
-    drawTexturedFullscreenQuad(gl, programResources, texture);
+    const transform = this.computeCurrentQuadTransform();
+    drawTexturedFullscreenQuad(gl, programResources, texture, transform);
+  }
+
+  private computeCurrentQuadTransform(): QuadTransform {
+    const fitScale = computeFitToViewportScale(this.imageSize, this.displaySize);
+    return {
+      scale: { x: fitScale.x * this.userZoom, y: fitScale.y * this.userZoom },
+      translate: this.userPan,
+    };
   }
 
   private releaseAllWebGlResources(): void {
@@ -160,13 +236,32 @@ function drawTexturedFullscreenQuad(
   gl: WebGL2RenderingContext,
   resources: RendererProgramResources,
   texture: WebGLTexture,
+  transform: QuadTransform,
 ): void {
   gl.useProgram(resources.program);
+  applyQuadTransformUniforms(gl, resources.uniforms, transform);
   gl.bindVertexArray(resources.vao);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
+}
+
+function applyQuadTransformUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: QuadTransformUniformLocations,
+  transform: QuadTransform,
+): void {
+  if (uniforms.quadScale !== null) {
+    gl.uniform2f(uniforms.quadScale, transform.scale.x, transform.scale.y);
+  }
+  if (uniforms.quadTranslate !== null) {
+    gl.uniform2f(
+      uniforms.quadTranslate,
+      transform.translate.x,
+      transform.translate.y,
+    );
+  }
 }
 
 function createViewportRendererProgram(
@@ -176,7 +271,18 @@ function createViewportRendererProgram(
   const vertexBuffer = createFullscreenQuadVertexBuffer(gl);
   const vao = createFullscreenQuadVertexArray(gl, vertexBuffer);
   bindTextureSamplerToUnitZero(gl, program);
-  return { program, vao, vertexBuffer };
+  const uniforms = lookUpQuadTransformUniformLocations(gl, program);
+  return { program, vao, vertexBuffer, uniforms };
+}
+
+function lookUpQuadTransformUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): QuadTransformUniformLocations {
+  return {
+    quadScale: gl.getUniformLocation(program, "u_quadScale"),
+    quadTranslate: gl.getUniformLocation(program, "u_quadTranslate"),
+  };
 }
 
 function compileAndLinkPassThroughProgram(

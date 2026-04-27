@@ -8,6 +8,16 @@ export type ViewportImageSource =
       height: number;
     };
 
+export function getImageSourceDimensions(source: ViewportImageSource): {
+  width: number;
+  height: number;
+} {
+  if (source.kind === "pixels") {
+    return { width: source.width, height: source.height };
+  }
+  return { width: source.image.width, height: source.image.height };
+}
+
 export function createTextureFromSource(
   gl: WebGL2RenderingContext,
   source: ViewportImageSource,

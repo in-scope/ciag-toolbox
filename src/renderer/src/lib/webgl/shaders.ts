@@ -1,10 +1,13 @@
 export const VIEWPORT_VERTEX_SHADER_SOURCE = `#version 300 es
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_texCoord;
+uniform vec2 u_quadScale;
+uniform vec2 u_quadTranslate;
 out vec2 v_texCoord;
 void main() {
   v_texCoord = a_texCoord;
-  gl_Position = vec4(a_position, 0.0, 1.0);
+  vec2 transformed = a_position * u_quadScale + u_quadTranslate;
+  gl_Position = vec4(transformed, 0.0, 1.0);
 }
 `;
 
