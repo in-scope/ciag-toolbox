@@ -9,6 +9,7 @@ import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
   fileName?: string | null;
+  viewportNumber?: number | null;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
@@ -16,6 +17,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const fallbackTestImageSource = useFallbackTestImageSource();
   const effectiveSource = props.imageSource ?? fallbackTestImageSource;
+  const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
   useImageSourceUploadEffect(rendererRef, effectiveSource);
@@ -27,11 +29,19 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <canvas
         ref={canvasRef}
         className="block h-full w-full touch-none select-none"
-        aria-label="Image viewport"
+        aria-label={viewportAriaLabel}
       />
       {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
+      {typeof props.viewportNumber === "number" ? (
+        <ViewportNumberBadge viewportNumber={props.viewportNumber} />
+      ) : null}
     </div>
   );
+}
+
+function describeViewportAriaLabel(viewportNumber: number | null | undefined): string {
+  if (typeof viewportNumber === "number") return `Viewport ${viewportNumber}`;
+  return "Image viewport";
 }
 
 function ViewportFileNameLabel({
@@ -41,10 +51,25 @@ function ViewportFileNameLabel({
 }): JSX.Element {
   return (
     <div
-      className="pointer-events-none absolute left-2 top-2 max-w-[80%] truncate rounded border bg-card/80 px-2 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
+      className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-3rem)] truncate rounded border bg-card/80 px-2 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
       title={fileName}
     >
       {fileName}
+    </div>
+  );
+}
+
+function ViewportNumberBadge({
+  viewportNumber,
+}: {
+  viewportNumber: number;
+}): JSX.Element {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded border bg-card/80 px-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
+    >
+      {viewportNumber}
     </div>
   );
 }

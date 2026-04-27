@@ -16,17 +16,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  SELECTABLE_GRID_LAYOUTS,
+  type GridLayout,
+} from "@/lib/grid/grid-layout";
 
-export type GridLayout = "1x1" | "1x2" | "2x1" | "2x2" | "2x3" | "3x2";
-
-const SELECTABLE_GRID_LAYOUTS: ReadonlyArray<GridLayout> = [
-  "1x1",
-  "1x2",
-  "2x1",
-  "2x2",
-  "2x3",
-  "3x2",
-];
+export type { GridLayout };
 
 interface ToolbarProps {
   onOpenImage: () => void;
