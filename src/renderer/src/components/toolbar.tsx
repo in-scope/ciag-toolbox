@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ViewportAction } from "@/lib/actions/viewport-action";
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
 import { useViewportSelection } from "@/state/selection-context";
 
@@ -20,7 +22,8 @@ interface ToolbarProps {
   onOpenImage: () => void;
   gridLayout: GridLayout;
   onGridLayoutChange: (layout: GridLayout) => void;
-  onApplyToSelected: () => void;
+  registeredActions: ReadonlyArray<ViewportAction>;
+  onInvokeAction: (action: ViewportAction) => void;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -32,7 +35,10 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           gridLayout={props.gridLayout}
           onGridLayoutChange={props.onGridLayoutChange}
         />
-        <ApplyToSelectedButton onApplyToSelected={props.onApplyToSelected} />
+        <ApplyToSelectedActionMenu
+          registeredActions={props.registeredActions}
+          onInvokeAction={props.onInvokeAction}
+        />
       </div>
     </TooltipProvider>
   );
@@ -96,22 +102,74 @@ function GridLayoutRadioOptions(props: GridLayoutDropdownProps): JSX.Element {
   );
 }
 
-interface ApplyToSelectedButtonProps {
-  onApplyToSelected: () => void;
+interface ApplyToSelectedActionMenuProps {
+  registeredActions: ReadonlyArray<ViewportAction>;
+  onInvokeAction: (action: ViewportAction) => void;
 }
 
-function ApplyToSelectedButton(props: ApplyToSelectedButtonProps): JSX.Element {
+function ApplyToSelectedActionMenu(props: ApplyToSelectedActionMenuProps): JSX.Element {
   const { selectedCount } = useViewportSelection();
   const label = describeApplyToSelected(selectedCount);
+  if (selectedCount === 0) {
+    return <DisabledApplyToSelectedButton label={label} />;
+  }
+  return <EnabledApplyToSelectedDropdown label={label} {...props} />;
+}
+
+function DisabledApplyToSelectedButton({ label }: { label: string }): JSX.Element {
   return (
-    <IconButtonWithTooltip
-      label={label}
-      onClick={props.onApplyToSelected}
-      disabled={selectedCount === 0}
-    >
+    <IconButtonWithTooltip label={label} onClick={noopApplyHandler} disabled>
       <Play className="size-5" />
     </IconButtonWithTooltip>
   );
+}
+
+function noopApplyHandler(): void {
+  // Apply-to-selected is a no-op when nothing is selected.
+}
+
+interface EnabledApplyToSelectedDropdownProps extends ApplyToSelectedActionMenuProps {
+  label: string;
+}
+
+function EnabledApplyToSelectedDropdown(
+  props: EnabledApplyToSelectedDropdownProps,
+): JSX.Element {
+  return (
+    <DropdownMenu>
+      <ApplyToSelectedDropdownTrigger label={props.label} />
+      <DropdownMenuContent align="start">
+        <DropdownMenuLabel>Apply to selected</DropdownMenuLabel>
+        {renderActionMenuItems(props.registeredActions, props.onInvokeAction)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ApplyToSelectedDropdownTrigger({ label }: { label: string }): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label={label}>
+            <Play className="size-5" />
+          </Button>
+        </DropdownMenuTrigger>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function renderActionMenuItems(
+  actions: ReadonlyArray<ViewportAction>,
+  onInvokeAction: (action: ViewportAction) => void,
+): ReadonlyArray<JSX.Element> {
+  return actions.map((action) => (
+    <DropdownMenuItem key={action.id} onSelect={() => onInvokeAction(action)}>
+      {action.label}
+    </DropdownMenuItem>
+  ));
 }
 
 function describeApplyToSelected(selectedCount: number): string {

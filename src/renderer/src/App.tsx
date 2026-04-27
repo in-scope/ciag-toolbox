@@ -17,6 +17,12 @@ import {
   type PendingDuplicateOverwrite,
 } from "@/components/viewport-duplicate-overwrite-dialog";
 import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
+import { REGISTERED_VIEWPORT_ACTIONS } from "@/lib/actions/registered-actions";
+import {
+  applyActionToSelectedViewports,
+  type ApplyActionFailure,
+  type ViewportAction,
+} from "@/lib/actions/viewport-action";
 import {
   getGridLayoutCellCount,
   getViewportNumberFromIndex,
@@ -29,6 +35,11 @@ import {
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
 import { ViewportSelectionProvider, useViewportSelection } from "@/state/selection-context";
+import {
+  ViewportRenderingProvider,
+  useViewportRendering,
+  type ViewportRenderingApi,
+} from "@/state/viewport-rendering-context";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 const DEFAULT_OPEN_TARGET_VIEWPORT_INDEX = 0;
@@ -40,9 +51,11 @@ type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateOverwrite | n
 export function App(): JSX.Element {
   return (
     <ViewportSelectionProvider>
-      <ApplicationShell />
-      <AboutDialog />
-      <Toaster />
+      <ViewportRenderingProvider>
+        <ApplicationShell />
+        <AboutDialog />
+        <Toaster />
+      </ViewportRenderingProvider>
     </ViewportSelectionProvider>
   );
 }
@@ -51,16 +64,18 @@ function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateOverwrite | null>(null);
-  const { pruneSelectionToCellCount } = useViewportSelection();
+  const { selectedIndices, pruneSelectionToCellCount } = useViewportSelection();
+  const renderingApi = useViewportRendering();
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
     setGridLayout,
     setImagesByIndex,
     pruneSelectionToCellCount,
+    pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
   });
   const handleOpenImageRequested = useOpenImageThroughDialogHandler(setImagesByIndex);
-  const handleApplyToSelected = useCallback(logApplyToSelected, []);
+  const handleInvokeAction = useInvokeActionHandler(selectedIndices, renderingApi);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
   const duplicationApi = useViewportDuplicationApi({
     cellCount: getGridLayoutCellCount(gridLayout),
@@ -74,7 +89,8 @@ function ApplicationShell(): JSX.Element {
         onOpenImage={handleOpenImageRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
-        onApplyToSelected={handleApplyToSelected}
+        registeredActions={REGISTERED_VIEWPORT_ACTIONS}
+        onInvokeAction={handleInvokeAction}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ApplicationStageContent gridLayout={gridLayout} imagesByIndex={imagesByIndex} />
@@ -179,6 +195,7 @@ interface GridLayoutChangeBindings {
   setGridLayout: (layout: GridLayout) => void;
   setImagesByIndex: SetImagesByIndex;
   pruneSelectionToCellCount: (cellCount: number) => void;
+  pruneRenderingStateToCellCount: (cellCount: number) => void;
 }
 
 function createGridLayoutChangeHandler(
@@ -193,6 +210,7 @@ function applyGridLayoutChange(newLayout: GridLayout, bindings: GridLayoutChange
   notifyAboutClosedLoadedViewports(bindings.imagesByIndex, newCellCount);
   bindings.setImagesByIndex(filterImagesToWithinCellCount(bindings.imagesByIndex, newCellCount));
   bindings.pruneSelectionToCellCount(newCellCount);
+  bindings.pruneRenderingStateToCellCount(newCellCount);
   bindings.setGridLayout(newLayout);
 }
 
@@ -340,6 +358,35 @@ function describeUnknownError(error: unknown): string {
   return String(error);
 }
 
-function logApplyToSelected(): void {
-  console.info("[toolbox] apply to selected requested");
+function useInvokeActionHandler(
+  selectedIndices: ReadonlySet<number>,
+  renderingApi: ViewportRenderingApi,
+): (action: ViewportAction) => void {
+  return useCallback(
+    (action) => invokeActionAgainstSelection(action, selectedIndices, renderingApi),
+    [selectedIndices, renderingApi],
+  );
+}
+
+function invokeActionAgainstSelection(
+  action: ViewportAction,
+  selectedIndices: ReadonlySet<number>,
+  renderingApi: ViewportRenderingApi,
+): void {
+  if (selectedIndices.size === 0) return;
+  applyActionToSelectedViewports(action, selectedIndices, {
+    getViewportRenderingState: renderingApi.getRenderingState,
+    setViewportRenderingState: renderingApi.setRenderingState,
+    reportApplyFailure: (failure) => reportActionApplyFailure(action, failure),
+  });
+}
+
+function reportActionApplyFailure(action: ViewportAction, failure: ApplyActionFailure): void {
+  const viewportNumber = getViewportNumberFromIndex(failure.viewportIndex);
+  const reason = describeUnknownError(failure.error);
+  console.error(
+    `[toolbox] Action "${action.id}" failed on viewport ${viewportNumber}:`,
+    failure.error,
+  );
+  toast.error(`${action.label} failed on viewport ${viewportNumber}: ${reason}`);
 }

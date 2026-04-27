@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { MutableRefObject, RefObject } from "react";
 
 import { Switch } from "@/components/ui/switch";
@@ -11,19 +11,20 @@ interface ViewportProps {
   imageSource?: ViewportImageSource | null;
   fileName?: string | null;
   viewportNumber?: number | null;
+  normalizationEnabled: boolean;
+  onNormalizationEnabledChange: (enabled: boolean) => void;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
-  const [normalizationEnabled, setNormalizationEnabled] = useState(false);
   const fallbackTestImageSource = useFallbackTestImageSource();
   const effectiveSource = props.imageSource ?? fallbackTestImageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
   useImageSourceUploadEffect(rendererRef, effectiveSource);
-  useNormalizationToggleEffect(rendererRef, normalizationEnabled);
+  useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef);
 
@@ -32,8 +33,8 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
-        normalizationEnabled={normalizationEnabled}
-        onNormalizationEnabledChange={setNormalizationEnabled}
+        normalizationEnabled={props.normalizationEnabled}
+        onNormalizationEnabledChange={props.onNormalizationEnabledChange}
       />
       <div className="relative min-h-0 flex-1">
         <canvas

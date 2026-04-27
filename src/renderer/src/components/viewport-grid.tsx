@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { forwardRef, useCallback, type MouseEvent } from "react";
 
 import {
   ContextMenu,
@@ -22,6 +22,11 @@ import {
   useViewportDuplication,
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
+import type { ViewportRenderingState } from "@/lib/actions/viewport-action";
+import {
+  useViewportRendering,
+  type ViewportRenderingApi,
+} from "@/state/viewport-rendering-context";
 import {
   useViewportSelection,
   type ViewportSelectionClickModifiers,
@@ -72,31 +77,96 @@ interface ViewportCellProps {
 }
 
 function ViewportCell(props: ViewportCellProps): JSX.Element {
-  const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
-  const isSelected = isViewportSelected(props.cellIndex);
+  const settings = useViewportCellInteractionSettings(props.cellIndex);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div
-          role="gridcell"
-          aria-selected={isSelected}
-          onClick={(event) => selectViewportFromClick(props.cellIndex, extractClickModifiers(event))}
-          className={getViewportCellClassName(isSelected)}
-        >
-          <Viewport
-            viewportNumber={props.viewportNumber}
-            imageSource={props.content?.source ?? null}
-            fileName={props.content?.fileName ?? null}
-          />
-        </div>
+        <ViewportGridcell {...props} settings={settings} />
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        <DuplicateToContextMenuItems
-          sourceIndex={props.cellIndex}
-          sourceHasContent={props.content !== null}
-        />
-      </ContextMenuContent>
+      <ViewportCellContextMenuContent
+        sourceIndex={props.cellIndex}
+        sourceHasContent={props.content !== null}
+      />
     </ContextMenu>
+  );
+}
+
+interface ViewportGridcellProps extends ViewportCellProps {
+  settings: ViewportCellInteractionSettings;
+}
+
+const ViewportGridcell = forwardRef<HTMLDivElement, ViewportGridcellProps>(
+  ({ settings, viewportNumber, content }, ref) => (
+    <div
+      ref={ref}
+      role="gridcell"
+      aria-selected={settings.isSelected}
+      onClick={settings.handleClick}
+      className={getViewportCellClassName(settings.isSelected)}
+    >
+      <Viewport
+        viewportNumber={viewportNumber}
+        imageSource={content?.source ?? null}
+        fileName={content?.fileName ?? null}
+        normalizationEnabled={settings.normalizationEnabled}
+        onNormalizationEnabledChange={settings.onNormalizationEnabledChange}
+      />
+    </div>
+  ),
+);
+ViewportGridcell.displayName = "ViewportGridcell";
+
+function ViewportCellContextMenuContent(props: {
+  sourceIndex: number;
+  sourceHasContent: boolean;
+}): JSX.Element {
+  return (
+    <ContextMenuContent>
+      <DuplicateToContextMenuItems
+        sourceIndex={props.sourceIndex}
+        sourceHasContent={props.sourceHasContent}
+      />
+    </ContextMenuContent>
+  );
+}
+
+interface ViewportCellInteractionSettings {
+  isSelected: boolean;
+  handleClick: (event: MouseEvent<HTMLDivElement>) => void;
+  normalizationEnabled: boolean;
+  onNormalizationEnabledChange: (enabled: boolean) => void;
+}
+
+function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
+  const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
+  const { getRenderingState, setRenderingState } = useViewportRendering();
+  const isSelected = isViewportSelected(cellIndex);
+  const renderingState = getRenderingState(cellIndex);
+  const handleClick = (event: MouseEvent<HTMLDivElement>) =>
+    selectViewportFromClick(cellIndex, extractClickModifiers(event));
+  const onNormalizationEnabledChange = useNormalizationChangeCallback(
+    cellIndex,
+    renderingState,
+    setRenderingState,
+  );
+  return {
+    isSelected,
+    handleClick,
+    normalizationEnabled: renderingState.normalizationEnabled,
+    onNormalizationEnabledChange,
+  };
+}
+
+function useNormalizationChangeCallback(
+  cellIndex: number,
+  renderingState: ViewportRenderingState,
+  setRenderingState: ViewportRenderingApi["setRenderingState"],
+): (enabled: boolean) => void {
+  return useCallback(
+    (enabled) => {
+      setRenderingState(cellIndex, { ...renderingState, normalizationEnabled: enabled });
+    },
+    [cellIndex, renderingState, setRenderingState],
   );
 }
 
