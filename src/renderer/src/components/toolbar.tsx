@@ -10,16 +10,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  SELECTABLE_GRID_LAYOUTS,
-  type GridLayout,
-} from "@/lib/grid/grid-layout";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
+import { useViewportSelection } from "@/state/selection-context";
 
 export type { GridLayout };
 
@@ -27,7 +20,6 @@ interface ToolbarProps {
   onOpenImage: () => void;
   gridLayout: GridLayout;
   onGridLayoutChange: (layout: GridLayout) => void;
-  selectedViewportCount: number;
   onApplyToSelected: () => void;
 }
 
@@ -40,23 +32,15 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           gridLayout={props.gridLayout}
           onGridLayoutChange={props.onGridLayoutChange}
         />
-        <ApplyToSelectedButton
-          selectedCount={props.selectedViewportCount}
-          onApplyToSelected={props.onApplyToSelected}
-        />
+        <ApplyToSelectedButton onApplyToSelected={props.onApplyToSelected} />
       </div>
     </TooltipProvider>
   );
 }
 
-const TOOLBAR_CLASSES =
-  "flex w-full flex-wrap items-center gap-2 border-b bg-card px-2 py-1.5";
+const TOOLBAR_CLASSES = "flex w-full flex-wrap items-center gap-2 border-b bg-card px-2 py-1.5";
 
-function OpenImageButton({
-  onOpenImage,
-}: {
-  onOpenImage: () => void;
-}): JSX.Element {
+function OpenImageButton({ onOpenImage }: { onOpenImage: () => void }): JSX.Element {
   return (
     <IconButtonWithTooltip label="Open image" onClick={onOpenImage}>
       <FolderOpen className="size-5" />
@@ -113,17 +97,17 @@ function GridLayoutRadioOptions(props: GridLayoutDropdownProps): JSX.Element {
 }
 
 interface ApplyToSelectedButtonProps {
-  selectedCount: number;
   onApplyToSelected: () => void;
 }
 
 function ApplyToSelectedButton(props: ApplyToSelectedButtonProps): JSX.Element {
-  const label = describeApplyToSelected(props.selectedCount);
+  const { selectedCount } = useViewportSelection();
+  const label = describeApplyToSelected(selectedCount);
   return (
     <IconButtonWithTooltip
       label={label}
       onClick={props.onApplyToSelected}
-      disabled={props.selectedCount === 0}
+      disabled={selectedCount === 0}
     >
       <Play className="size-5" />
     </IconButtonWithTooltip>

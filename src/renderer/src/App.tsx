@@ -3,6 +3,7 @@ import {
   useEffect,
   useState,
   type Dispatch,
+  type MouseEvent,
   type SetStateAction,
 } from "react";
 import { toast } from "sonner";
@@ -10,16 +11,14 @@ import { toast } from "sonner";
 import { AboutDialog } from "@/components/about-dialog";
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
-import {
-  ViewportGrid,
-  type ViewportCellContent,
-} from "@/components/viewport-grid";
+import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
 import {
   getGridLayoutCellCount,
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { ViewportSelectionProvider, useViewportSelection } from "@/state/selection-context";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 const DEFAULT_OPEN_TARGET_VIEWPORT_INDEX = 0;
@@ -28,14 +27,26 @@ type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
 
 export function App(): JSX.Element {
+  return (
+    <ViewportSelectionProvider>
+      <ApplicationShell />
+      <AboutDialog />
+      <Toaster />
+    </ViewportSelectionProvider>
+  );
+}
+
+function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
-  const handleGridLayoutChange = useGridLayoutChangeHandler(
-    gridLayout,
+  const { pruneSelectionToCellCount } = useViewportSelection();
+  const handleGridLayoutChange = createGridLayoutChangeHandler({
+    currentLayout: gridLayout,
     imagesByIndex,
     setGridLayout,
     setImagesByIndex,
-  );
+    pruneSelectionToCellCount,
+  });
   const handleOpenImageRequested = useOpenImageThroughDialogHandler(setImagesByIndex);
   const handleApplyToSelected = useCallback(logApplyToSelected, []);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
@@ -45,12 +56,9 @@ export function App(): JSX.Element {
         onOpenImage={handleOpenImageRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
-        selectedViewportCount={0}
         onApplyToSelected={handleApplyToSelected}
       />
       <ApplicationStageContent gridLayout={gridLayout} imagesByIndex={imagesByIndex} />
-      <AboutDialog />
-      <Toaster />
     </div>
   );
 }
@@ -66,28 +74,37 @@ function ApplicationStageContent({
   gridLayout: GridLayout;
   imagesByIndex: ImagesByIndexMap;
 }): JSX.Element {
+  const { clearSelection } = useViewportSelection();
   return (
-    <main className="flex min-h-0 flex-1 p-4">
+    <main
+      className="flex min-h-0 flex-1 p-4"
+      onClick={(event) => clearSelectionWhenClickIsOutsideAnyCell(event, clearSelection)}
+    >
       <ViewportGrid layout={gridLayout} cellsByIndex={imagesByIndex} />
     </main>
   );
+}
+
+function clearSelectionWhenClickIsOutsideAnyCell(
+  event: MouseEvent<HTMLElement>,
+  clearSelection: () => void,
+): void {
+  const targetElement = event.target as HTMLElement;
+  if (targetElement.closest('[role="gridcell"]')) return;
+  clearSelection();
 }
 
 function useMenuOpenImageTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuOpenImage(handler), [handler]);
 }
 
-function useOpenImageThroughDialogHandler(
-  setImagesByIndex: SetImagesByIndex,
-): () => Promise<void> {
+function useOpenImageThroughDialogHandler(setImagesByIndex: SetImagesByIndex): () => Promise<void> {
   return useCallback(async () => {
     await runOpenImageDialogFlow(setImagesByIndex);
   }, [setImagesByIndex]);
 }
 
-async function runOpenImageDialogFlow(
-  setImagesByIndex: SetImagesByIndex,
-): Promise<void> {
+async function runOpenImageDialogFlow(setImagesByIndex: SetImagesByIndex): Promise<void> {
   const result = await invokeOpenImageDialogSafely();
   if (!result || result.canceled) return;
   await tryDecodeAndApplyImage(result.fileName, result.bytes, setImagesByIndex);
@@ -131,22 +148,27 @@ function assignViewportContentAtIndex(
   return next;
 }
 
-function useGridLayoutChangeHandler(
-  currentLayout: GridLayout,
-  imagesByIndex: ImagesByIndexMap,
-  setGridLayout: (layout: GridLayout) => void,
-  setImagesByIndex: SetImagesByIndex,
+interface GridLayoutChangeBindings {
+  currentLayout: GridLayout;
+  imagesByIndex: ImagesByIndexMap;
+  setGridLayout: (layout: GridLayout) => void;
+  setImagesByIndex: SetImagesByIndex;
+  pruneSelectionToCellCount: (cellCount: number) => void;
+}
+
+function createGridLayoutChangeHandler(
+  bindings: GridLayoutChangeBindings,
 ): (layout: GridLayout) => void {
-  return useCallback(
-    (newLayout: GridLayout) => {
-      if (newLayout === currentLayout) return;
-      const newCellCount = getGridLayoutCellCount(newLayout);
-      notifyAboutClosedLoadedViewports(imagesByIndex, newCellCount);
-      setImagesByIndex(filterImagesToWithinCellCount(imagesByIndex, newCellCount));
-      setGridLayout(newLayout);
-    },
-    [currentLayout, imagesByIndex, setGridLayout, setImagesByIndex],
-  );
+  return (newLayout) => applyGridLayoutChange(newLayout, bindings);
+}
+
+function applyGridLayoutChange(newLayout: GridLayout, bindings: GridLayoutChangeBindings): void {
+  if (newLayout === bindings.currentLayout) return;
+  const newCellCount = getGridLayoutCellCount(newLayout);
+  notifyAboutClosedLoadedViewports(bindings.imagesByIndex, newCellCount);
+  bindings.setImagesByIndex(filterImagesToWithinCellCount(bindings.imagesByIndex, newCellCount));
+  bindings.pruneSelectionToCellCount(newCellCount);
+  bindings.setGridLayout(newLayout);
 }
 
 function notifyAboutClosedLoadedViewports(
@@ -178,16 +200,12 @@ function collectClosedLoadedViewports(
   return closed.sort((a, b) => a.viewportNumber - b.viewportNumber);
 }
 
-function formatClosedViewportsMessage(
-  closed: ReadonlyArray<ClosedViewportSummary>,
-): string {
+function formatClosedViewportsMessage(closed: ReadonlyArray<ClosedViewportSummary>): string {
   if (closed.length === 1) {
     const only = closed[0]!;
     return `Closed viewport ${only.viewportNumber} (${only.fileName})`;
   }
-  const list = closed
-    .map((entry) => `${entry.viewportNumber} (${entry.fileName})`)
-    .join(", ");
+  const list = closed.map((entry) => `${entry.viewportNumber} (${entry.fileName})`).join(", ");
   return `Closed viewports: ${list}`;
 }
 
