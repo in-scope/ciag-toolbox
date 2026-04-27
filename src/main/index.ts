@@ -1,12 +1,16 @@
 import { app, BrowserWindow, shell } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { installApplicationMenu } from "./menu";
+import {
+  attachWindowStatePersistence,
+  loadSavedWindowBounds,
+  type WindowBounds,
+} from "./window-state";
+import { registerAppInfoIpcHandler } from "./app-info";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const DEFAULT_WINDOW_WIDTH = 1280;
-const DEFAULT_WINDOW_HEIGHT = 800;
 
 function buildPreloadScriptPath(): string {
   return join(__dirname, "../preload/index.js");
@@ -36,10 +40,14 @@ function attachExternalLinkHandler(window: BrowserWindow): void {
   });
 }
 
-function createMainWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: DEFAULT_WINDOW_WIDTH,
-    height: DEFAULT_WINDOW_HEIGHT,
+function buildBrowserWindowOptionsFrom(
+  bounds: WindowBounds,
+): Electron.BrowserWindowConstructorOptions {
+  return {
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     show: false,
     autoHideMenuBar: false,
     webPreferences: {
@@ -48,9 +56,24 @@ function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
     },
-  });
+  };
+}
+
+function maximizeWindowIfPreviouslyMaximized(
+  window: BrowserWindow,
+  bounds: WindowBounds,
+): void {
+  if (bounds.isMaximized) window.maximize();
+}
+
+function createMainWindow(): BrowserWindow {
+  const savedBounds = loadSavedWindowBounds();
+  const window = new BrowserWindow(buildBrowserWindowOptionsFrom(savedBounds));
+  maximizeWindowIfPreviouslyMaximized(window, savedBounds);
   window.on("ready-to-show", () => window.show());
   attachExternalLinkHandler(window);
+  attachWindowStatePersistence(window);
+  installApplicationMenu(window);
   loadRendererIntoWindow(window);
   if (isRunningInDevelopment()) {
     window.webContents.openDevTools({ mode: "detach" });
@@ -71,6 +94,7 @@ function quitWhenAllWindowsClosed(): void {
 }
 
 app.whenReady().then(() => {
+  registerAppInfoIpcHandler();
   createMainWindow();
   app.on("activate", reopenWindowOnMacActivate);
 });

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { AboutDialog } from "@/components/about-dialog";
 
 export function App(): JSX.Element {
   return (
@@ -8,6 +9,7 @@ export function App(): JSX.Element {
         Stage 1 scaffold. Tailwind v4 + shadcn/ui are wired up.
       </p>
       <Button>Sample shadcn Button</Button>
+      <AboutDialog />
     </main>
   );
 }
