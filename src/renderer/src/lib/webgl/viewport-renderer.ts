@@ -2,7 +2,7 @@
 // minimal and to give later stages direct control over uniforms (CT-011 onward).
 
 import {
-  VIEWPORT_PASS_THROUGH_FRAGMENT_SHADER_SOURCE,
+  VIEWPORT_FRAGMENT_SHADER_SOURCE,
   VIEWPORT_VERTEX_SHADER_SOURCE,
   compileShaderOrThrow,
   linkProgramOrThrow,
@@ -24,6 +24,11 @@ import {
   type ClipPoint,
   type ViewportSize,
 } from "./view-transform";
+import {
+  IDENTITY_RGB_CHANNEL_EXTENTS,
+  computeImageRgbChannelExtents,
+  type RgbChannelExtents,
+} from "@/lib/image/compute-image-channel-extents";
 
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const TEXCOORD_ATTRIBUTE_LOCATION = 1;
@@ -45,16 +50,32 @@ interface QuadTransformUniformLocations {
   quadTranslate: WebGLUniformLocation | null;
 }
 
+interface NormalizationUniformLocations {
+  enabled: WebGLUniformLocation | null;
+  minColor: WebGLUniformLocation | null;
+  maxColor: WebGLUniformLocation | null;
+}
+
+interface ProgramUniformLocations {
+  quadTransform: QuadTransformUniformLocations;
+  normalization: NormalizationUniformLocations;
+}
+
 interface RendererProgramResources {
   program: WebGLProgram;
   vao: WebGLVertexArrayObject;
   vertexBuffer: WebGLBuffer;
-  uniforms: QuadTransformUniformLocations;
+  uniforms: ProgramUniformLocations;
 }
 
 interface QuadTransform {
   scale: ClipPoint;
   translate: ClipPoint;
+}
+
+interface NormalizationState {
+  enabled: boolean;
+  extents: RgbChannelExtents;
 }
 
 export class ViewportRenderer {
@@ -66,6 +87,10 @@ export class ViewportRenderer {
   private imageSize: ViewportSize = FALLBACK_SIZE;
   private userZoom = INITIAL_USER_ZOOM;
   private userPan: ClipPoint = IDENTITY_PAN;
+  private normalization: NormalizationState = {
+    enabled: false,
+    extents: IDENTITY_RGB_CHANNEL_EXTENTS,
+  };
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
   private readonly handleContextRestored = (): void =>
@@ -79,9 +104,23 @@ export class ViewportRenderer {
   setImageSource(source: ViewportImageSource): void {
     this.currentSource = source;
     this.imageSize = getImageSourceDimensions(source);
+    this.cacheNormalizationExtentsForSource(source);
     this.resetViewState();
     this.uploadCurrentSourceIfReady();
     this.draw();
+  }
+
+  setNormalizationEnabled(enabled: boolean): void {
+    if (this.normalization.enabled === enabled) return;
+    this.normalization = { ...this.normalization, enabled };
+    this.draw();
+  }
+
+  private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
+    this.normalization = {
+      enabled: this.normalization.enabled,
+      extents: computeImageRgbChannelExtents(source),
+    };
   }
 
   resizeToDisplaySize(displayWidthPx: number, displayHeightPx: number): void {
@@ -194,7 +233,13 @@ export class ViewportRenderer {
     clearCanvasToTransparentBlack(gl);
     if (!texture) return;
     const transform = this.computeCurrentQuadTransform();
-    drawTexturedFullscreenQuad(gl, programResources, texture, transform);
+    drawTexturedFullscreenQuad(
+      gl,
+      programResources,
+      texture,
+      transform,
+      this.normalization,
+    );
   }
 
   private computeCurrentQuadTransform(): QuadTransform {
@@ -237,9 +282,11 @@ function drawTexturedFullscreenQuad(
   resources: RendererProgramResources,
   texture: WebGLTexture,
   transform: QuadTransform,
+  normalization: NormalizationState,
 ): void {
   gl.useProgram(resources.program);
-  applyQuadTransformUniforms(gl, resources.uniforms, transform);
+  applyQuadTransformUniforms(gl, resources.uniforms.quadTransform, transform);
+  applyNormalizationUniforms(gl, resources.uniforms.normalization, normalization);
   gl.bindVertexArray(resources.vao);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -264,15 +311,46 @@ function applyQuadTransformUniforms(
   }
 }
 
+function applyNormalizationUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: NormalizationUniformLocations,
+  normalization: NormalizationState,
+): void {
+  if (uniforms.enabled !== null) {
+    gl.uniform1i(uniforms.enabled, normalization.enabled ? 1 : 0);
+  }
+  applyVec3UniformFromTriple(gl, uniforms.minColor, normalization.extents.min);
+  applyVec3UniformFromTriple(gl, uniforms.maxColor, normalization.extents.max);
+}
+
+function applyVec3UniformFromTriple(
+  gl: WebGL2RenderingContext,
+  location: WebGLUniformLocation | null,
+  triple: readonly [number, number, number],
+): void {
+  if (location === null) return;
+  gl.uniform3f(location, triple[0], triple[1], triple[2]);
+}
+
 function createViewportRendererProgram(
   gl: WebGL2RenderingContext,
 ): RendererProgramResources {
-  const program = compileAndLinkPassThroughProgram(gl);
+  const program = compileAndLinkViewportProgram(gl);
   const vertexBuffer = createFullscreenQuadVertexBuffer(gl);
   const vao = createFullscreenQuadVertexArray(gl, vertexBuffer);
   bindTextureSamplerToUnitZero(gl, program);
-  const uniforms = lookUpQuadTransformUniformLocations(gl, program);
+  const uniforms = lookUpProgramUniformLocations(gl, program);
   return { program, vao, vertexBuffer, uniforms };
+}
+
+function lookUpProgramUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): ProgramUniformLocations {
+  return {
+    quadTransform: lookUpQuadTransformUniformLocations(gl, program),
+    normalization: lookUpNormalizationUniformLocations(gl, program),
+  };
 }
 
 function lookUpQuadTransformUniformLocations(
@@ -285,7 +363,18 @@ function lookUpQuadTransformUniformLocations(
   };
 }
 
-function compileAndLinkPassThroughProgram(
+function lookUpNormalizationUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): NormalizationUniformLocations {
+  return {
+    enabled: gl.getUniformLocation(program, "u_normalizeEnabled"),
+    minColor: gl.getUniformLocation(program, "u_normalizeMinColor"),
+    maxColor: gl.getUniformLocation(program, "u_normalizeMaxColor"),
+  };
+}
+
+function compileAndLinkViewportProgram(
   gl: WebGL2RenderingContext,
 ): WebGLProgram {
   const vertexShader = compileShaderOrThrow(
@@ -296,7 +385,7 @@ function compileAndLinkPassThroughProgram(
   const fragmentShader = compileShaderOrThrow(
     gl,
     gl.FRAGMENT_SHADER,
-    VIEWPORT_PASS_THROUGH_FRAGMENT_SHADER_SOURCE,
+    VIEWPORT_FRAGMENT_SHADER_SOURCE,
   );
   const program = linkProgramOrThrow(gl, vertexShader, fragmentShader);
   gl.deleteShader(vertexShader);

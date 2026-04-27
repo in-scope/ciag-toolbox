@@ -11,13 +11,22 @@ void main() {
 }
 `;
 
-export const VIEWPORT_PASS_THROUGH_FRAGMENT_SHADER_SOURCE = `#version 300 es
+export const VIEWPORT_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 in vec2 v_texCoord;
 uniform sampler2D u_texture;
+uniform bool u_normalizeEnabled;
+uniform vec3 u_normalizeMinColor;
+uniform vec3 u_normalizeMaxColor;
 out vec4 outColor;
 void main() {
-  outColor = texture(u_texture, v_texCoord);
+  vec4 sampled = texture(u_texture, v_texCoord);
+  vec3 rgb = sampled.rgb;
+  if (u_normalizeEnabled) {
+    vec3 range = max(u_normalizeMaxColor - u_normalizeMinColor, vec3(1.0 / 255.0));
+    rgb = clamp((rgb - u_normalizeMinColor) / range, 0.0, 1.0);
+  }
+  outColor = vec4(rgb, sampled.a);
 }
 `;
 

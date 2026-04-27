@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, RefObject } from "react";
 
+import { Switch } from "@/components/ui/switch";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import { generateBuiltInTestImage } from "@/lib/webgl/test-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -15,26 +16,32 @@ interface ViewportProps {
 export function Viewport(props: ViewportProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
+  const [normalizationEnabled, setNormalizationEnabled] = useState(false);
   const fallbackTestImageSource = useFallbackTestImageSource();
   const effectiveSource = props.imageSource ?? fallbackTestImageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
   useImageSourceUploadEffect(rendererRef, effectiveSource);
+  useNormalizationToggleEffect(rendererRef, normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-md border bg-card">
-      <canvas
-        ref={canvasRef}
-        className="block h-full w-full touch-none select-none"
-        aria-label={viewportAriaLabel}
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-md border bg-card">
+      <ViewportHeaderStrip
+        viewportNumber={props.viewportNumber ?? null}
+        fileName={props.fileName ?? null}
+        normalizationEnabled={normalizationEnabled}
+        onNormalizationEnabledChange={setNormalizationEnabled}
       />
-      {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
-      {typeof props.viewportNumber === "number" ? (
-        <ViewportNumberBadge viewportNumber={props.viewportNumber} />
-      ) : null}
+      <div className="relative min-h-0 flex-1">
+        <canvas
+          ref={canvasRef}
+          className="block h-full w-full touch-none select-none"
+          aria-label={viewportAriaLabel}
+        />
+      </div>
     </div>
   );
 }
@@ -44,18 +51,36 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
   return "Image viewport";
 }
 
-function ViewportFileNameLabel({
-  fileName,
-}: {
-  fileName: string;
-}): JSX.Element {
+interface ViewportHeaderStripProps {
+  viewportNumber: number | null;
+  fileName: string | null;
+  normalizationEnabled: boolean;
+  onNormalizationEnabledChange: (enabled: boolean) => void;
+}
+
+function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
   return (
-    <div
-      className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-3rem)] truncate rounded border bg-card/80 px-2 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2 text-xs">
+      {typeof props.viewportNumber === "number" ? (
+        <ViewportNumberBadge viewportNumber={props.viewportNumber} />
+      ) : null}
+      {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
+      <ViewportNormalizationToggle
+        enabled={props.normalizationEnabled}
+        onChange={props.onNormalizationEnabledChange}
+      />
+    </div>
+  );
+}
+
+function ViewportFileNameLabel({ fileName }: { fileName: string }): JSX.Element {
+  return (
+    <span
+      className="truncate font-medium text-foreground"
       title={fileName}
     >
       {fileName}
-    </div>
+    </span>
   );
 }
 
@@ -65,12 +90,32 @@ function ViewportNumberBadge({
   viewportNumber: number;
 }): JSX.Element {
   return (
-    <div
+    <span
       aria-hidden="true"
-      className="pointer-events-none absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded border bg-card/80 px-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm"
+      className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded border bg-background px-1 text-xs font-medium text-muted-foreground"
     >
       {viewportNumber}
-    </div>
+    </span>
+  );
+}
+
+interface ViewportNormalizationToggleProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
+function ViewportNormalizationToggle(
+  props: ViewportNormalizationToggleProps,
+): JSX.Element {
+  return (
+    <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5">
+      <span className="select-none text-muted-foreground">Normalize</span>
+      <Switch
+        checked={props.enabled}
+        onCheckedChange={props.onChange}
+        aria-label="Toggle linear normalization"
+      />
+    </label>
   );
 }
 
@@ -109,6 +154,15 @@ function useImageSourceUploadEffect(
   useEffect(() => {
     rendererRef.current?.setImageSource(source);
   }, [rendererRef, source]);
+}
+
+function useNormalizationToggleEffect(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  enabled: boolean,
+): void {
+  useEffect(() => {
+    rendererRef.current?.setNormalizationEnabled(enabled);
+  }, [rendererRef, enabled]);
 }
 
 function useCanvasResizeObserverEffect(
