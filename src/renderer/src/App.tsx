@@ -2,14 +2,20 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type MouseEvent,
+  type MutableRefObject,
   type SetStateAction,
 } from "react";
 import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
+import {
+  OpenImageReplaceTargetPicker,
+  type PendingOpenImageReplace,
+} from "@/components/open-image-replace-target-picker";
 import {
   OperationTargetPicker,
   type OperationTargetPickerViewportEntry,
@@ -38,10 +44,18 @@ import {
 import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import {
+  findLowestIndexEmptyViewport,
+  listOccupiedViewportEntries,
+} from "@/lib/image/find-empty-viewport";
+import {
   ViewportDuplicationProvider,
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
-import { ViewportSelectionProvider, useViewportSelection } from "@/state/selection-context";
+import {
+  ViewportSelectionProvider,
+  useViewportSelection,
+  type ViewportSelectionState,
+} from "@/state/selection-context";
 import {
   ViewportRenderingProvider,
   useViewportRendering,
@@ -49,12 +63,13 @@ import {
 } from "@/state/viewport-rendering-context";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
-const DEFAULT_OPEN_TARGET_VIEWPORT_INDEX = 0;
 
 type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
 type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateOverwrite | null>>;
 type SetActivePickerAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
+type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
+type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
 
 export function App(): JSX.Element {
   return (
@@ -73,9 +88,14 @@ function ApplicationShell(): JSX.Element {
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateOverwrite | null>(null);
   const [activePickerAction, setActivePickerAction] = useState<RegisteredViewportAction | null>(null);
-  const { selectedIndices, pruneSelectionToCellCount } = useViewportSelection();
+  const [pendingOpenImageReplace, setPendingOpenImageReplace] =
+    useState<PendingOpenImageReplace | null>(null);
+  const { selectedIndices, pruneSelectionToCellCount, selectViewportFromClick } =
+    useViewportSelection();
   const renderingApi = useViewportRendering();
   const cellCount = getGridLayoutCellCount(gridLayout);
+  const imagesByIndexRef = useLatestRef(imagesByIndex);
+  const cellCountRef = useLatestRef(cellCount);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
@@ -84,7 +104,13 @@ function ApplicationShell(): JSX.Element {
     pruneSelectionToCellCount,
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
   });
-  const handleOpenImageRequested = useOpenImageThroughDialogHandler(setImagesByIndex);
+  const handleOpenImageRequested = useOpenImageThroughDialogHandler({
+    imagesByIndexRef,
+    cellCountRef,
+    setImagesByIndex,
+    setPendingOpenImageReplace,
+    selectViewportFromClick,
+  });
   const handleInvokeAction = useOpenPickerForActionHandler(setActivePickerAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
   const duplicationApi = useViewportDuplicationApi({
@@ -119,8 +145,26 @@ function ApplicationShell(): JSX.Element {
         onCancel={() => setActivePickerAction(null)}
         onConfirm={(targets) => confirmPickerAndRunAction(targets, activePickerAction, renderingApi, setActivePickerAction)}
       />
+      <OpenImageReplaceTargetPicker
+        pending={pendingOpenImageReplace}
+        viewports={listOccupiedViewportEntries(imagesByIndex, cellCount, (content) => content.fileName)}
+        onCancel={() => setPendingOpenImageReplace(null)}
+        onConfirm={(targetIndex) =>
+          confirmOpenImageReplaceAtTargetIndex(targetIndex, pendingOpenImageReplace, {
+            setImagesByIndex,
+            setPendingOpenImageReplace,
+            selectViewportFromClick,
+          })
+        }
+      />
     </div>
   );
+}
+
+function useLatestRef<T>(value: T): MutableRefObject<T> {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
 }
 
 function createEmptyImagesMap(): ImagesByIndexMap {
@@ -158,16 +202,43 @@ function useMenuOpenImageTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuOpenImage(handler), [handler]);
 }
 
-function useOpenImageThroughDialogHandler(setImagesByIndex: SetImagesByIndex): () => Promise<void> {
-  return useCallback(async () => {
-    await runOpenImageDialogFlow(setImagesByIndex);
-  }, [setImagesByIndex]);
+interface OpenImageBindings {
+  imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
+  cellCountRef: MutableRefObject<number>;
+  setImagesByIndex: SetImagesByIndex;
+  setPendingOpenImageReplace: SetPendingOpenImageReplace;
+  selectViewportFromClick: SelectViewportFromClick;
 }
 
-async function runOpenImageDialogFlow(setImagesByIndex: SetImagesByIndex): Promise<void> {
+function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Promise<void> {
+  const {
+    imagesByIndexRef,
+    cellCountRef,
+    setImagesByIndex,
+    setPendingOpenImageReplace,
+    selectViewportFromClick,
+  } = bindings;
+  return useCallback(async () => {
+    await runOpenImageDialogFlow({
+      imagesByIndexRef,
+      cellCountRef,
+      setImagesByIndex,
+      setPendingOpenImageReplace,
+      selectViewportFromClick,
+    });
+  }, [
+    imagesByIndexRef,
+    cellCountRef,
+    setImagesByIndex,
+    setPendingOpenImageReplace,
+    selectViewportFromClick,
+  ]);
+}
+
+async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void> {
   const result = await invokeOpenImageDialogSafely();
   if (!result || result.canceled) return;
-  await tryDecodeAndApplyImage(result.fileName, result.bytes, setImagesByIndex);
+  await tryDecodeAndRouteImage(result.fileName, result.bytes, bindings);
 }
 
 async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResult | null> {
@@ -179,23 +250,64 @@ async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResu
   }
 }
 
-async function tryDecodeAndApplyImage(
+async function tryDecodeAndRouteImage(
   fileName: string,
   bytes: Uint8Array,
-  setImagesByIndex: SetImagesByIndex,
+  bindings: OpenImageBindings,
 ): Promise<void> {
   try {
     const source = await decodeImageBytesToViewportSource(bytes);
-    setImagesByIndex((previous) =>
-      assignViewportContentAtIndex(previous, DEFAULT_OPEN_TARGET_VIEWPORT_INDEX, {
-        fileName,
-        source,
-      }),
-    );
-    toast.success(`Loaded ${fileName}`);
+    routeDecodedImageToTargetViewport({ fileName, source }, bindings);
   } catch (error) {
     toast.error(`Could not open ${fileName}: ${describeUnknownError(error)}`);
   }
+}
+
+function routeDecodedImageToTargetViewport(
+  pending: PendingOpenImageReplace,
+  bindings: OpenImageBindings,
+): void {
+  const cellCount = bindings.cellCountRef.current;
+  const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndexRef.current, cellCount);
+  if (emptyIndex !== null) {
+    applyLoadedImageAtIndex(emptyIndex, pending, bindings);
+    return;
+  }
+  bindings.setPendingOpenImageReplace(pending);
+}
+
+interface ApplyLoadedImageBindings {
+  setImagesByIndex: SetImagesByIndex;
+  selectViewportFromClick: SelectViewportFromClick;
+}
+
+function applyLoadedImageAtIndex(
+  index: number,
+  pending: PendingOpenImageReplace,
+  bindings: ApplyLoadedImageBindings,
+): void {
+  bindings.setImagesByIndex((previous) =>
+    assignViewportContentAtIndex(previous, index, {
+      fileName: pending.fileName,
+      source: pending.source,
+    }),
+  );
+  bindings.selectViewportFromClick(index, { ctrlOrMeta: false, shift: false });
+  toast.success(`Loaded ${pending.fileName}`);
+}
+
+interface ConfirmReplaceBindings extends ApplyLoadedImageBindings {
+  setPendingOpenImageReplace: SetPendingOpenImageReplace;
+}
+
+function confirmOpenImageReplaceAtTargetIndex(
+  targetIndex: number,
+  pending: PendingOpenImageReplace | null,
+  bindings: ConfirmReplaceBindings,
+): void {
+  bindings.setPendingOpenImageReplace(null);
+  if (!pending) return;
+  applyLoadedImageAtIndex(targetIndex, pending, bindings);
 }
 
 function assignViewportContentAtIndex(
