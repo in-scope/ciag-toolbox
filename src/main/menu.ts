@@ -11,6 +11,7 @@ import {
 import type { ThemeMode } from "./theme-state";
 
 const isRunningOnMac = process.platform === "darwin";
+const isRunningInDevMode = process.env.NODE_ENV === "development";
 
 function buildMacAppMenu(): MenuItemConstructorOptions {
   return {
@@ -83,17 +84,28 @@ function buildThemeSubmenu(): MenuItemConstructorOptions {
   };
 }
 
+function buildDeveloperRefreshMenuItems(): MenuItemConstructorOptions[] {
+  if (!isRunningInDevMode) return [];
+  return [
+    { type: "separator" },
+    { role: "reload" },
+    { role: "toggleDevTools" },
+  ];
+}
+
+function buildViewMenuSubmenu(): MenuItemConstructorOptions[] {
+  return [
+    buildThemeSubmenu(),
+    ...buildDeveloperRefreshMenuItems(),
+    { type: "separator" },
+    { role: "togglefullscreen" },
+  ];
+}
+
 function buildViewMenu(): MenuItemConstructorOptions {
   return {
     label: "View",
-    submenu: [
-      buildThemeSubmenu(),
-      { type: "separator" },
-      { role: "reload" },
-      { role: "toggleDevTools" },
-      { type: "separator" },
-      { role: "togglefullscreen" },
-    ],
+    submenu: buildViewMenuSubmenu(),
   };
 }
 
