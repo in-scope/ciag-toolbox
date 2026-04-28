@@ -10,6 +10,10 @@ import {
 import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
+import {
+  OperationTargetPicker,
+  type OperationTargetPickerViewportEntry,
+} from "@/components/operation-target-picker";
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
 import {
@@ -17,7 +21,10 @@ import {
   type PendingDuplicateOverwrite,
 } from "@/components/viewport-duplicate-overwrite-dialog";
 import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
-import { REGISTERED_VIEWPORT_ACTIONS } from "@/lib/actions/registered-actions";
+import {
+  REGISTERED_VIEWPORT_ACTIONS,
+  type RegisteredViewportAction,
+} from "@/lib/actions/registered-actions";
 import {
   applyActionToSelectedViewports,
   type ApplyActionFailure,
@@ -47,6 +54,7 @@ const DEFAULT_OPEN_TARGET_VIEWPORT_INDEX = 0;
 type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
 type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateOverwrite | null>>;
+type SetActivePickerAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
 
 export function App(): JSX.Element {
   return (
@@ -64,8 +72,10 @@ function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateOverwrite | null>(null);
+  const [activePickerAction, setActivePickerAction] = useState<RegisteredViewportAction | null>(null);
   const { selectedIndices, pruneSelectionToCellCount } = useViewportSelection();
   const renderingApi = useViewportRendering();
+  const cellCount = getGridLayoutCellCount(gridLayout);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
@@ -75,10 +85,10 @@ function ApplicationShell(): JSX.Element {
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
   });
   const handleOpenImageRequested = useOpenImageThroughDialogHandler(setImagesByIndex);
-  const handleInvokeAction = useInvokeActionHandler(selectedIndices, renderingApi);
+  const handleInvokeAction = useOpenPickerForActionHandler(setActivePickerAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
   const duplicationApi = useViewportDuplicationApi({
-    cellCount: getGridLayoutCellCount(gridLayout),
+    cellCount,
     imagesByIndex,
     setImagesByIndex,
     setPendingDuplicate,
@@ -99,6 +109,15 @@ function ApplicationShell(): JSX.Element {
         pending={pendingDuplicate}
         onCancel={() => setPendingDuplicate(null)}
         onConfirm={() => confirmPendingDuplicateOverwrite(pendingDuplicate, setImagesByIndex, setPendingDuplicate)}
+      />
+      <OperationTargetPicker
+        open={activePickerAction !== null}
+        action={activePickerAction}
+        cellCount={cellCount}
+        viewports={buildPickerViewportEntries(cellCount, imagesByIndex)}
+        initiallySelectedIndices={selectedIndices}
+        onCancel={() => setActivePickerAction(null)}
+        onConfirm={(targets) => confirmPickerAndRunAction(targets, activePickerAction, renderingApi, setActivePickerAction)}
       />
     </div>
   );
@@ -358,23 +377,33 @@ function describeUnknownError(error: unknown): string {
   return String(error);
 }
 
-function useInvokeActionHandler(
-  selectedIndices: ReadonlySet<number>,
-  renderingApi: ViewportRenderingApi,
-): (action: ViewportAction) => void {
+function useOpenPickerForActionHandler(
+  setActivePickerAction: SetActivePickerAction,
+): (action: RegisteredViewportAction) => void {
   return useCallback(
-    (action) => invokeActionAgainstSelection(action, selectedIndices, renderingApi),
-    [selectedIndices, renderingApi],
+    (action) => setActivePickerAction(action),
+    [setActivePickerAction],
   );
 }
 
-function invokeActionAgainstSelection(
+function confirmPickerAndRunAction(
+  targetIndices: ReadonlySet<number>,
+  action: RegisteredViewportAction | null,
+  renderingApi: ViewportRenderingApi,
+  setActivePickerAction: SetActivePickerAction,
+): void {
+  setActivePickerAction(null);
+  if (!action) return;
+  runActionAgainstTargetIndices(action, targetIndices, renderingApi);
+}
+
+function runActionAgainstTargetIndices(
   action: ViewportAction,
-  selectedIndices: ReadonlySet<number>,
+  targetIndices: ReadonlySet<number>,
   renderingApi: ViewportRenderingApi,
 ): void {
-  if (selectedIndices.size === 0) return;
-  applyActionToSelectedViewports(action, selectedIndices, {
+  if (targetIndices.size === 0) return;
+  applyActionToSelectedViewports(action, targetIndices, {
     getViewportRenderingState: renderingApi.getRenderingState,
     setViewportRenderingState: renderingApi.setRenderingState,
     reportApplyFailure: (failure) => reportActionApplyFailure(action, failure),
@@ -389,4 +418,15 @@ function reportActionApplyFailure(action: ViewportAction, failure: ApplyActionFa
     failure.error,
   );
   toast.error(`${action.label} failed on viewport ${viewportNumber}: ${reason}`);
+}
+
+function buildPickerViewportEntries(
+  cellCount: number,
+  imagesByIndex: ImagesByIndexMap,
+): ReadonlyArray<OperationTargetPickerViewportEntry> {
+  const entries: OperationTargetPickerViewportEntry[] = [];
+  for (let index = 0; index < cellCount; index++) {
+    entries.push({ index, fileName: imagesByIndex.get(index)?.fileName ?? null });
+  }
+  return entries;
 }

@@ -1,20 +1,18 @@
 import type { ReactNode } from "react";
-import { FolderOpen, Grid2x2, Play } from "lucide-react";
+import { FolderOpen, Grid2x2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ViewportAction } from "@/lib/actions/viewport-action";
+import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
-import { useViewportSelection } from "@/state/selection-context";
 
 export type { GridLayout };
 
@@ -22,8 +20,8 @@ interface ToolbarProps {
   onOpenImage: () => void;
   gridLayout: GridLayout;
   onGridLayoutChange: (layout: GridLayout) => void;
-  registeredActions: ReadonlyArray<ViewportAction>;
-  onInvokeAction: (action: ViewportAction) => void;
+  registeredActions: ReadonlyArray<RegisteredViewportAction>;
+  onInvokeAction: (action: RegisteredViewportAction) => void;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -35,7 +33,8 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           gridLayout={props.gridLayout}
           onGridLayoutChange={props.onGridLayoutChange}
         />
-        <ApplyToSelectedActionMenu
+        <ToolbarSeparator />
+        <RegisteredActionButtons
           registeredActions={props.registeredActions}
           onInvokeAction={props.onInvokeAction}
         />
@@ -102,79 +101,44 @@ function GridLayoutRadioOptions(props: GridLayoutDropdownProps): JSX.Element {
   );
 }
 
-interface ApplyToSelectedActionMenuProps {
-  registeredActions: ReadonlyArray<ViewportAction>;
-  onInvokeAction: (action: ViewportAction) => void;
-}
-
-function ApplyToSelectedActionMenu(props: ApplyToSelectedActionMenuProps): JSX.Element {
-  const { selectedCount } = useViewportSelection();
-  const label = describeApplyToSelected(selectedCount);
-  if (selectedCount === 0) {
-    return <DisabledApplyToSelectedButton label={label} />;
-  }
-  return <EnabledApplyToSelectedDropdown label={label} {...props} />;
-}
-
-function DisabledApplyToSelectedButton({ label }: { label: string }): JSX.Element {
+function ToolbarSeparator(): JSX.Element {
   return (
-    <IconButtonWithTooltip label={label} onClick={noopApplyHandler} disabled>
-      <Play className="size-5" />
+    <div role="separator" aria-orientation="vertical" className="mx-1 h-6 w-px bg-border" />
+  );
+}
+
+interface RegisteredActionButtonsProps {
+  registeredActions: ReadonlyArray<RegisteredViewportAction>;
+  onInvokeAction: (action: RegisteredViewportAction) => void;
+}
+
+function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Element {
+  return (
+    <>
+      {props.registeredActions.map((action) => (
+        <ActionToolbarButton
+          key={action.id}
+          action={action}
+          onInvoke={() => props.onInvokeAction(action)}
+        />
+      ))}
+    </>
+  );
+}
+
+function ActionToolbarButton({
+  action,
+  onInvoke,
+}: {
+  action: RegisteredViewportAction;
+  onInvoke: () => void;
+}): JSX.Element {
+  const Icon = action.icon;
+  return (
+    <IconButtonWithTooltip label={action.label} onClick={onInvoke}>
+      <Icon className="size-5" />
     </IconButtonWithTooltip>
   );
-}
-
-function noopApplyHandler(): void {
-  // Apply-to-selected is a no-op when nothing is selected.
-}
-
-interface EnabledApplyToSelectedDropdownProps extends ApplyToSelectedActionMenuProps {
-  label: string;
-}
-
-function EnabledApplyToSelectedDropdown(
-  props: EnabledApplyToSelectedDropdownProps,
-): JSX.Element {
-  return (
-    <DropdownMenu>
-      <ApplyToSelectedDropdownTrigger label={props.label} />
-      <DropdownMenuContent align="start">
-        <DropdownMenuLabel>Apply to selected</DropdownMenuLabel>
-        {renderActionMenuItems(props.registeredActions, props.onInvokeAction)}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function ApplyToSelectedDropdownTrigger({ label }: { label: string }): JSX.Element {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={label}>
-            <Play className="size-5" />
-          </Button>
-        </DropdownMenuTrigger>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function renderActionMenuItems(
-  actions: ReadonlyArray<ViewportAction>,
-  onInvokeAction: (action: ViewportAction) => void,
-): ReadonlyArray<JSX.Element> {
-  return actions.map((action) => (
-    <DropdownMenuItem key={action.id} onSelect={() => onInvokeAction(action)}>
-      {action.label}
-    </DropdownMenuItem>
-  ));
-}
-
-function describeApplyToSelected(selectedCount: number): string {
-  if (selectedCount === 0) return "Apply to selected (none selected)";
-  return `Apply to selected (${selectedCount})`;
 }
 
 interface IconButtonWithTooltipProps {
