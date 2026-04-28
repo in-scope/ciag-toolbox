@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { MutableRefObject, RefObject } from "react";
 
-import { Switch } from "@/components/ui/switch";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import { generateBuiltInTestImage } from "@/lib/webgl/test-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -12,7 +11,6 @@ interface ViewportProps {
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
-  onNormalizationEnabledChange: (enabled: boolean) => void;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
@@ -33,8 +31,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
-        normalizationEnabled={props.normalizationEnabled}
-        onNormalizationEnabledChange={props.onNormalizationEnabledChange}
       />
       <div className="relative min-h-0 flex-1">
         <canvas
@@ -55,8 +51,6 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
-  normalizationEnabled: boolean;
-  onNormalizationEnabledChange: (enabled: boolean) => void;
 }
 
 function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
@@ -66,10 +60,6 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
         <ViewportNumberBadge viewportNumber={props.viewportNumber} />
       ) : null}
       {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
-      <ViewportNormalizationToggle
-        enabled={props.normalizationEnabled}
-        onChange={props.onNormalizationEnabledChange}
-      />
     </div>
   );
 }
@@ -97,26 +87,6 @@ function ViewportNumberBadge({
     >
       {viewportNumber}
     </span>
-  );
-}
-
-interface ViewportNormalizationToggleProps {
-  enabled: boolean;
-  onChange: (enabled: boolean) => void;
-}
-
-function ViewportNormalizationToggle(
-  props: ViewportNormalizationToggleProps,
-): JSX.Element {
-  return (
-    <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5">
-      <span className="select-none text-muted-foreground">Normalize</span>
-      <Switch
-        checked={props.enabled}
-        onCheckedChange={props.onChange}
-        aria-label="Toggle linear normalization"
-      />
-    </label>
   );
 }
 

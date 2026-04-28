@@ -1,4 +1,4 @@
-import { useCallback, type MouseEvent } from "react";
+import { type MouseEvent } from "react";
 
 import {
   ContextMenu,
@@ -22,11 +22,7 @@ import {
   useViewportDuplication,
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
-import type { ViewportRenderingState } from "@/lib/actions/viewport-action";
-import {
-  useViewportRendering,
-  type ViewportRenderingApi,
-} from "@/state/viewport-rendering-context";
+import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
   useViewportSelection,
   type ViewportSelectionClickModifiers,
@@ -117,7 +113,6 @@ function renderViewportCellViewport(
       imageSource={props.content?.source ?? null}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
-      onNormalizationEnabledChange={settings.onNormalizationEnabledChange}
     />
   );
 }
@@ -140,40 +135,20 @@ interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   normalizationEnabled: boolean;
-  onNormalizationEnabledChange: (enabled: boolean) => void;
 }
 
 function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
-  const { getRenderingState, setRenderingState } = useViewportRendering();
+  const { getRenderingState } = useViewportRendering();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
-  const onNormalizationEnabledChange = useNormalizationChangeCallback(
-    cellIndex,
-    renderingState,
-    setRenderingState,
-  );
   return {
     isSelected,
     handleClick,
     normalizationEnabled: renderingState.normalizationEnabled,
-    onNormalizationEnabledChange,
   };
-}
-
-function useNormalizationChangeCallback(
-  cellIndex: number,
-  renderingState: ViewportRenderingState,
-  setRenderingState: ViewportRenderingApi["setRenderingState"],
-): (enabled: boolean) => void {
-  return useCallback(
-    (enabled) => {
-      setRenderingState(cellIndex, { ...renderingState, normalizationEnabled: enabled });
-    },
-    [cellIndex, renderingState, setRenderingState],
-  );
 }
 
 function getViewportCellClassName(isSelected: boolean): string {
