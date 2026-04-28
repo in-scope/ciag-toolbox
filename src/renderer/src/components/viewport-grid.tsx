@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, type MouseEvent } from "react";
+import { useCallback, type MouseEvent } from "react";
 
 import {
   ContextMenu,
@@ -81,7 +81,7 @@ function ViewportCell(props: ViewportCellProps): JSX.Element {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <ViewportGridcell {...props} settings={settings} />
+        {renderViewportCellGridcellElement(props, settings)}
       </ContextMenuTrigger>
       <ViewportCellContextMenuContent
         sourceIndex={props.cellIndex}
@@ -91,30 +91,36 @@ function ViewportCell(props: ViewportCellProps): JSX.Element {
   );
 }
 
-interface ViewportGridcellProps extends ViewportCellProps {
-  settings: ViewportCellInteractionSettings;
-}
-
-const ViewportGridcell = forwardRef<HTMLDivElement, ViewportGridcellProps>(
-  ({ settings, viewportNumber, content }, ref) => (
+function renderViewportCellGridcellElement(
+  props: ViewportCellProps,
+  settings: ViewportCellInteractionSettings,
+): JSX.Element {
+  return (
     <div
-      ref={ref}
       role="gridcell"
       aria-selected={settings.isSelected}
       onClick={settings.handleClick}
       className={getViewportCellClassName(settings.isSelected)}
     >
-      <Viewport
-        viewportNumber={viewportNumber}
-        imageSource={content?.source ?? null}
-        fileName={content?.fileName ?? null}
-        normalizationEnabled={settings.normalizationEnabled}
-        onNormalizationEnabledChange={settings.onNormalizationEnabledChange}
-      />
+      {renderViewportCellViewport(props, settings)}
     </div>
-  ),
-);
-ViewportGridcell.displayName = "ViewportGridcell";
+  );
+}
+
+function renderViewportCellViewport(
+  props: ViewportCellProps,
+  settings: ViewportCellInteractionSettings,
+): JSX.Element {
+  return (
+    <Viewport
+      viewportNumber={props.viewportNumber}
+      imageSource={props.content?.source ?? null}
+      fileName={props.content?.fileName ?? null}
+      normalizationEnabled={settings.normalizationEnabled}
+      onNormalizationEnabledChange={settings.onNormalizationEnabledChange}
+    />
+  );
+}
 
 function ViewportCellContextMenuContent(props: {
   sourceIndex: number;
