@@ -4,6 +4,11 @@ import {
   type BrowserWindow,
   type MenuItemConstructorOptions,
 } from "electron";
+import {
+  applyThemeModeFromMenu,
+  getCurrentThemeMode,
+} from "./theme-controller";
+import type { ThemeMode } from "./theme-state";
 
 const isRunningOnMac = process.platform === "darwin";
 
@@ -53,10 +58,37 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   };
 }
 
+function buildThemeRadioItem(
+  label: string,
+  mode: ThemeMode,
+  currentMode: ThemeMode,
+): MenuItemConstructorOptions {
+  return {
+    label,
+    type: "radio",
+    checked: currentMode === mode,
+    click: () => applyThemeModeFromMenu(mode),
+  };
+}
+
+function buildThemeSubmenu(): MenuItemConstructorOptions {
+  const currentMode = getCurrentThemeMode();
+  return {
+    label: "Theme",
+    submenu: [
+      buildThemeRadioItem("System", "system", currentMode),
+      buildThemeRadioItem("Light", "light", currentMode),
+      buildThemeRadioItem("Dark", "dark", currentMode),
+    ],
+  };
+}
+
 function buildViewMenu(): MenuItemConstructorOptions {
   return {
     label: "View",
     submenu: [
+      buildThemeSubmenu(),
+      { type: "separator" },
       { role: "reload" },
       { role: "toggleDevTools" },
       { type: "separator" },

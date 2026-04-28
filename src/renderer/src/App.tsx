@@ -43,6 +43,8 @@ import {
 } from "@/lib/grid/grid-layout";
 import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
+import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 import {
   findLowestIndexEmptyViewport,
   listOccupiedViewportEntries,
@@ -72,6 +74,7 @@ type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplac
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
 
 export function App(): JSX.Element {
+  useThemeClassSyncedWithMainProcess();
   return (
     <ViewportSelectionProvider>
       <ViewportRenderingProvider>
@@ -81,6 +84,11 @@ export function App(): JSX.Element {
       </ViewportRenderingProvider>
     </ViewportSelectionProvider>
   );
+}
+
+function useThemeClassSyncedWithMainProcess(): void {
+  const snapshot = useCurrentThemeSnapshot();
+  useEffect(() => applyDarkClassToDocumentRoot(snapshot.isDark), [snapshot.isDark]);
 }
 
 function ApplicationShell(): JSX.Element {

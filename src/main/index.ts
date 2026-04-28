@@ -9,6 +9,7 @@ import {
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
+import { initializeThemeControllerFromDisk } from "./theme-controller";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -95,6 +96,7 @@ function quitWhenAllWindowsClosed(): void {
 }
 
 app.whenReady().then(() => {
+  initializeThemeControllerFromDisk();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   createMainWindow();

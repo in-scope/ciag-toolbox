@@ -12,8 +12,17 @@ type ToolboxOpenImageDialogResult =
       bytes: Uint8Array;
     };
 
+type ToolboxThemeMode = "system" | "light" | "dark";
+
+interface ToolboxThemeSnapshot {
+  mode: ToolboxThemeMode;
+  isDark: boolean;
+}
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxUnsubscribeMenuListener = () => void;
+type ToolboxThemeChangeListener = (snapshot: ToolboxThemeSnapshot) => void;
+type ToolboxUnsubscribeThemeListener = () => void;
 
 type ToolboxPlatform =
   | "aix"
@@ -43,6 +52,10 @@ interface ToolboxApi {
   onMenuAbout: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
+  initialTheme: ToolboxThemeSnapshot;
+  onThemeChange: (
+    listener: ToolboxThemeChangeListener,
+  ) => ToolboxUnsubscribeThemeListener;
 }
 
 interface Window {

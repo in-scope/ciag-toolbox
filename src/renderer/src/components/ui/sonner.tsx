@@ -1,14 +1,17 @@
 import { Toaster as SonnerToaster, type ToasterProps } from "sonner";
+import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 
-function detectDocumentTheme(): ToasterProps["theme"] {
-  if (typeof document === "undefined") return "system";
-  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+function selectSonnerThemeFromSnapshot(
+  snapshot: ToolboxThemeSnapshot,
+): ToasterProps["theme"] {
+  return snapshot.isDark ? "dark" : "light";
 }
 
 function Toaster(props: ToasterProps): JSX.Element {
+  const snapshot = useCurrentThemeSnapshot();
   return (
     <SonnerToaster
-      theme={detectDocumentTheme()}
+      theme={selectSonnerThemeFromSnapshot(snapshot)}
       className="toaster group"
       toastOptions={{
         classNames: {
