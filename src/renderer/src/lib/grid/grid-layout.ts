@@ -44,3 +44,14 @@ export function getGridLayoutTailwindTrackClasses(layout: GridLayout): string {
 export function getViewportNumberFromIndex(index: number): number {
   return index + 1;
 }
+
+const NEXT_LARGER_GRID_LAYOUT: Partial<Record<GridLayout, GridLayout>> = {
+  "1x1": "1x2",
+  "1x2": "2x2",
+  "2x1": "2x2",
+  "2x2": "2x3",
+};
+
+export function getNextLargerGridLayout(layout: GridLayout): GridLayout | null {
+  return NEXT_LARGER_GRID_LAYOUT[layout] ?? null;
+}

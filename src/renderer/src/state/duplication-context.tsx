@@ -1,10 +1,8 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 export interface ViewportDuplicationApi {
-  cellCount: number;
-  getCellFileName: (index: number) => string | null;
   hasSourceContent: (sourceIndex: number) => boolean;
-  requestDuplicateTo: (sourceIndex: number, targetIndex: number) => void;
+  requestDuplicate: (sourceIndex: number) => void;
 }
 
 const ViewportDuplicationContext = createContext<ViewportDuplicationApi | null>(null);
