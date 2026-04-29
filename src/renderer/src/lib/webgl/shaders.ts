@@ -23,8 +23,12 @@ void main() {
   vec4 sampled = texture(u_texture, v_texCoord);
   vec3 rgb = sampled.rgb;
   if (u_normalizeEnabled) {
-    vec3 range = max(u_normalizeMaxColor - u_normalizeMinColor, vec3(1.0 / 255.0));
-    rgb = clamp((rgb - u_normalizeMinColor) / range, 0.0, 1.0);
+    // Per-band stretch to [0, 1]. For flat bands (max == min) we substitute
+    // a divisor of 1; the numerator is also 0 in that case, so the result is 0.
+    vec3 range = u_normalizeMaxColor - u_normalizeMinColor;
+    bvec3 hasRange = greaterThan(range, vec3(0.0));
+    vec3 safeRange = mix(vec3(1.0), range, hasRange);
+    rgb = clamp((rgb - u_normalizeMinColor) / safeRange, 0.0, 1.0);
   }
   outColor = vec4(rgb, sampled.a);
 }

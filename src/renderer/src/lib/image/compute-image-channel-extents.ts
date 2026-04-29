@@ -11,7 +11,7 @@ export const IDENTITY_RGB_CHANNEL_EXTENTS: RgbChannelExtents = {
 };
 
 const BYTES_PER_PIXEL = 4;
-const MAX_BYTE_VALUE = 255;
+const BYTE_TO_UNIT_SCALE = 1 / 255;
 
 export function computeImageRgbChannelExtents(
   source: ViewportImageSource,
@@ -62,30 +62,30 @@ function computeRgbChannelExtentsFromBytes(
 ): RgbChannelExtents {
   const range = createInitialChannelRange();
   for (let offset = 0; offset < rgba.length; offset += BYTES_PER_PIXEL) {
-    expandChannelRangeWithPixelAtOffset(range, rgba, offset);
+    expandChannelRangeWithUnitPixelAtOffset(range, rgba, offset);
   }
-  return convertChannelRangeToNormalizedExtents(range);
+  return convertChannelRangeToExtents(range);
 }
 
 function createInitialChannelRange(): MutableRgbChannelRange {
   return {
-    minR: MAX_BYTE_VALUE,
-    minG: MAX_BYTE_VALUE,
-    minB: MAX_BYTE_VALUE,
-    maxR: 0,
-    maxG: 0,
-    maxB: 0,
+    minR: Number.POSITIVE_INFINITY,
+    minG: Number.POSITIVE_INFINITY,
+    minB: Number.POSITIVE_INFINITY,
+    maxR: Number.NEGATIVE_INFINITY,
+    maxG: Number.NEGATIVE_INFINITY,
+    maxB: Number.NEGATIVE_INFINITY,
   };
 }
 
-function expandChannelRangeWithPixelAtOffset(
+function expandChannelRangeWithUnitPixelAtOffset(
   range: MutableRgbChannelRange,
   rgba: Uint8Array | Uint8ClampedArray,
   offset: number,
 ): void {
-  const r = rgba[offset] ?? 0;
-  const g = rgba[offset + 1] ?? 0;
-  const b = rgba[offset + 2] ?? 0;
+  const r = (rgba[offset] ?? 0) * BYTE_TO_UNIT_SCALE;
+  const g = (rgba[offset + 1] ?? 0) * BYTE_TO_UNIT_SCALE;
+  const b = (rgba[offset + 2] ?? 0) * BYTE_TO_UNIT_SCALE;
   if (r < range.minR) range.minR = r;
   if (g < range.minG) range.minG = g;
   if (b < range.minB) range.minB = b;
@@ -94,19 +94,12 @@ function expandChannelRangeWithPixelAtOffset(
   if (b > range.maxB) range.maxB = b;
 }
 
-function convertChannelRangeToNormalizedExtents(
+function convertChannelRangeToExtents(
   range: MutableRgbChannelRange,
 ): RgbChannelExtents {
+  if (!Number.isFinite(range.minR)) return IDENTITY_RGB_CHANNEL_EXTENTS;
   return {
-    min: [
-      range.minR / MAX_BYTE_VALUE,
-      range.minG / MAX_BYTE_VALUE,
-      range.minB / MAX_BYTE_VALUE,
-    ],
-    max: [
-      range.maxR / MAX_BYTE_VALUE,
-      range.maxG / MAX_BYTE_VALUE,
-      range.maxB / MAX_BYTE_VALUE,
-    ],
+    min: [range.minR, range.minG, range.minB],
+    max: [range.maxR, range.maxG, range.maxB],
   };
 }
