@@ -4,9 +4,6 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Viewport } from "@/components/viewport";
@@ -18,10 +15,7 @@ import {
 } from "@/lib/grid/grid-layout";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
-import {
-  useViewportDuplication,
-  type ViewportDuplicationApi,
-} from "@/state/duplication-context";
+import { useViewportDuplication } from "@/state/duplication-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
   useViewportSelection,
@@ -36,9 +30,14 @@ export interface ViewportCellContent {
 interface ViewportGridProps {
   layout: GridLayout;
   cellsByIndex: ReadonlyMap<number, ViewportCellContent>;
+  onOpenImage: () => void;
 }
 
-export function ViewportGrid({ layout, cellsByIndex }: ViewportGridProps): JSX.Element {
+export function ViewportGrid({
+  layout,
+  cellsByIndex,
+  onOpenImage,
+}: ViewportGridProps): JSX.Element {
   const cellCount = getGridLayoutCellCount(layout);
   const trackClasses = getGridLayoutTailwindTrackClasses(layout);
   return (
@@ -47,7 +46,7 @@ export function ViewportGrid({ layout, cellsByIndex }: ViewportGridProps): JSX.E
       aria-label="Viewport grid"
       className={cn("grid h-full w-full gap-2", trackClasses)}
     >
-      {renderViewportCells(cellCount, cellsByIndex)}
+      {renderViewportCells(cellCount, cellsByIndex, onOpenImage)}
     </div>
   );
 }
@@ -55,6 +54,7 @@ export function ViewportGrid({ layout, cellsByIndex }: ViewportGridProps): JSX.E
 function renderViewportCells(
   cellCount: number,
   cellsByIndex: ReadonlyMap<number, ViewportCellContent>,
+  onOpenImage: () => void,
 ): ReadonlyArray<JSX.Element> {
   return Array.from({ length: cellCount }, (_, cellIndex) => (
     <ViewportCell
@@ -62,6 +62,7 @@ function renderViewportCells(
       cellIndex={cellIndex}
       viewportNumber={getViewportNumberFromIndex(cellIndex)}
       content={cellsByIndex.get(cellIndex) ?? null}
+      onOpenImage={onOpenImage}
     />
   ));
 }
@@ -70,6 +71,7 @@ interface ViewportCellProps {
   cellIndex: number;
   viewportNumber: number;
   content: ViewportCellContent | null;
+  onOpenImage: () => void;
 }
 
 function ViewportCell(props: ViewportCellProps): JSX.Element {
@@ -113,6 +115,7 @@ function renderViewportCellViewport(
       imageSource={props.content?.source ?? null}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
+      onOpenImage={props.onOpenImage}
     />
   );
 }
@@ -123,7 +126,7 @@ function ViewportCellContextMenuContent(props: {
 }): JSX.Element {
   return (
     <ContextMenuContent>
-      <DuplicateToContextMenuItems
+      <DuplicateContextMenuItem
         sourceIndex={props.sourceIndex}
         sourceHasContent={props.sourceHasContent}
       />
@@ -165,58 +168,19 @@ function extractClickModifiers(event: MouseEvent<HTMLDivElement>): ViewportSelec
   };
 }
 
-interface DuplicateToContextMenuItemsProps {
+interface DuplicateContextMenuItemProps {
   sourceIndex: number;
   sourceHasContent: boolean;
 }
 
-function DuplicateToContextMenuItems(props: DuplicateToContextMenuItemsProps): JSX.Element {
+function DuplicateContextMenuItem(props: DuplicateContextMenuItemProps): JSX.Element {
   const duplication = useViewportDuplication();
-  if (!props.sourceHasContent || duplication.cellCount <= 1) {
-    return <ContextMenuItem disabled>Duplicate to...</ContextMenuItem>;
+  if (!props.sourceHasContent) {
+    return <ContextMenuItem disabled>Duplicate</ContextMenuItem>;
   }
   return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger>Duplicate to...</ContextMenuSubTrigger>
-      <ContextMenuSubContent>
-        {renderDuplicateTargetItems(props.sourceIndex, duplication)}
-      </ContextMenuSubContent>
-    </ContextMenuSub>
-  );
-}
-
-function renderDuplicateTargetItems(
-  sourceIndex: number,
-  duplication: ViewportDuplicationApi,
-): ReadonlyArray<JSX.Element> {
-  const items: JSX.Element[] = [];
-  for (let index = 0; index < duplication.cellCount; index++) {
-    if (index === sourceIndex) continue;
-    items.push(<DuplicateTargetItem key={index} sourceIndex={sourceIndex} targetIndex={index} />);
-  }
-  return items;
-}
-
-interface DuplicateTargetItemProps {
-  sourceIndex: number;
-  targetIndex: number;
-}
-
-function DuplicateTargetItem(props: DuplicateTargetItemProps): JSX.Element {
-  const duplication = useViewportDuplication();
-  const targetFileName = duplication.getCellFileName(props.targetIndex);
-  const label = describeDuplicateTargetLabel(props.targetIndex, targetFileName);
-  return (
-    <ContextMenuItem
-      onSelect={() => duplication.requestDuplicateTo(props.sourceIndex, props.targetIndex)}
-    >
-      {label}
+    <ContextMenuItem onSelect={() => duplication.requestDuplicate(props.sourceIndex)}>
+      Duplicate
     </ContextMenuItem>
   );
-}
-
-function describeDuplicateTargetLabel(targetIndex: number, fileName: string | null): string {
-  const number = getViewportNumberFromIndex(targetIndex);
-  if (fileName) return `Viewport ${number} (${fileName})`;
-  return `Viewport ${number} (empty)`;
 }

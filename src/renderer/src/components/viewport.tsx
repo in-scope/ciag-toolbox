@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { MutableRefObject, RefObject } from "react";
+import { FolderOpen } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
-import { generateBuiltInTestImage } from "@/lib/webgl/test-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 
@@ -11,17 +12,17 @@ interface ViewportProps {
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
+  onOpenImage: () => void;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
-  const fallbackTestImageSource = useFallbackTestImageSource();
-  const effectiveSource = props.imageSource ?? fallbackTestImageSource;
+  const imageSource = props.imageSource ?? null;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
-  useImageSourceUploadEffect(rendererRef, effectiveSource);
+  useImageSourceUploadEffect(rendererRef, imageSource);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef);
@@ -38,7 +39,22 @@ export function Viewport(props: ViewportProps): JSX.Element {
           className="block h-full w-full touch-none select-none"
           aria-label={viewportAriaLabel}
         />
+        {imageSource === null ? (
+          <ViewportEmptyState onOpenImage={props.onOpenImage} />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.Element {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card">
+      <p className="text-sm text-muted-foreground">No image loaded</p>
+      <Button variant="outline" size="sm" onClick={onOpenImage}>
+        <FolderOpen className="size-4" />
+        Open image
+      </Button>
     </div>
   );
 }
@@ -90,18 +106,6 @@ function ViewportNumberBadge({
   );
 }
 
-function useFallbackTestImageSource(): ViewportImageSource {
-  return useMemo<ViewportImageSource>(() => {
-    const testImage = generateBuiltInTestImage();
-    return {
-      kind: "pixels",
-      pixels: testImage.pixels,
-      width: testImage.width,
-      height: testImage.height,
-    };
-  }, []);
-}
-
 function useViewportRendererLifecycle(
   canvasRef: RefObject<HTMLCanvasElement>,
   rendererRef: MutableRefObject<ViewportRenderer | null>,
@@ -120,9 +124,10 @@ function useViewportRendererLifecycle(
 
 function useImageSourceUploadEffect(
   rendererRef: MutableRefObject<ViewportRenderer | null>,
-  source: ViewportImageSource,
+  source: ViewportImageSource | null,
 ): void {
   useEffect(() => {
+    if (source === null) return;
     rendererRef.current?.setImageSource(source);
   }, [rendererRef, source]);
 }

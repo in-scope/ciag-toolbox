@@ -23,9 +23,10 @@ import {
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
 import {
-  DuplicateOverwriteAlertDialog,
-  type PendingDuplicateOverwrite,
-} from "@/components/viewport-duplicate-overwrite-dialog";
+  DuplicateReplaceTargetPicker,
+  type DuplicateReplaceTargetEntry,
+  type PendingDuplicateReplace,
+} from "@/components/viewport-duplicate-replace-target-picker";
 import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
 import {
   REGISTERED_VIEWPORT_ACTIONS,
@@ -38,6 +39,7 @@ import {
 } from "@/lib/actions/viewport-action";
 import {
   getGridLayoutCellCount,
+  getNextLargerGridLayout,
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
@@ -68,7 +70,8 @@ const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
 type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
-type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateOverwrite | null>>;
+type SetGridLayout = Dispatch<SetStateAction<GridLayout>>;
+type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateReplace | null>>;
 type SetActivePickerAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
 type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
@@ -94,7 +97,7 @@ function useThemeClassSyncedWithMainProcess(): void {
 function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
-  const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateOverwrite | null>(null);
+  const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activePickerAction, setActivePickerAction] = useState<RegisteredViewportAction | null>(null);
   const [pendingOpenImageReplace, setPendingOpenImageReplace] =
     useState<PendingOpenImageReplace | null>(null);
@@ -122,8 +125,10 @@ function ApplicationShell(): JSX.Element {
   const handleInvokeAction = useOpenPickerForActionHandler(setActivePickerAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
   const duplicationApi = useViewportDuplicationApi({
+    gridLayout,
     cellCount,
     imagesByIndex,
+    setGridLayout,
     setImagesByIndex,
     setPendingDuplicate,
   });
@@ -137,12 +142,22 @@ function ApplicationShell(): JSX.Element {
         onInvokeAction={handleInvokeAction}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
-        <ApplicationStageContent gridLayout={gridLayout} imagesByIndex={imagesByIndex} />
+        <ApplicationStageContent
+          gridLayout={gridLayout}
+          imagesByIndex={imagesByIndex}
+          onOpenImage={handleOpenImageRequested}
+        />
       </ViewportDuplicationProvider>
-      <DuplicateOverwriteAlertDialog
+      <DuplicateReplaceTargetPicker
         pending={pendingDuplicate}
+        viewports={buildDuplicateReplaceTargetEntries(pendingDuplicate, imagesByIndex, cellCount)}
         onCancel={() => setPendingDuplicate(null)}
-        onConfirm={() => confirmPendingDuplicateOverwrite(pendingDuplicate, setImagesByIndex, setPendingDuplicate)}
+        onConfirm={(targetIndex) =>
+          confirmPendingDuplicateReplaceAtTargetIndex(targetIndex, pendingDuplicate, {
+            setImagesByIndex,
+            setPendingDuplicate,
+          })
+        }
       />
       <OperationTargetPicker
         open={activePickerAction !== null}
@@ -182,9 +197,11 @@ function createEmptyImagesMap(): ImagesByIndexMap {
 function ApplicationStageContent({
   gridLayout,
   imagesByIndex,
+  onOpenImage,
 }: {
   gridLayout: GridLayout;
   imagesByIndex: ImagesByIndexMap;
+  onOpenImage: () => void;
 }): JSX.Element {
   const { clearSelection } = useViewportSelection();
   return (
@@ -192,7 +209,11 @@ function ApplicationStageContent({
       className="flex min-h-0 flex-1 p-4"
       onClick={(event) => clearSelectionWhenClickIsOutsideAnyCell(event, clearSelection)}
     >
-      <ViewportGrid layout={gridLayout} cellsByIndex={imagesByIndex} />
+      <ViewportGrid
+        layout={gridLayout}
+        cellsByIndex={imagesByIndex}
+        onOpenImage={onOpenImage}
+      />
     </main>
   );
 }
@@ -403,8 +424,10 @@ function filterImagesToWithinCellCount(
 }
 
 interface ViewportDuplicationApiBindings {
+  gridLayout: GridLayout;
   cellCount: number;
   imagesByIndex: ImagesByIndexMap;
+  setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
 }
@@ -412,16 +435,25 @@ interface ViewportDuplicationApiBindings {
 function useViewportDuplicationApi(
   bindings: ViewportDuplicationApiBindings,
 ): ViewportDuplicationApi {
-  const { cellCount, imagesByIndex, setImagesByIndex, setPendingDuplicate } = bindings;
+  const {
+    gridLayout,
+    cellCount,
+    imagesByIndex,
+    setGridLayout,
+    setImagesByIndex,
+    setPendingDuplicate,
+  } = bindings;
   return useMemo(
     () =>
       buildViewportDuplicationApi({
+        gridLayout,
         cellCount,
         imagesByIndex,
+        setGridLayout,
         setImagesByIndex,
         setPendingDuplicate,
       }),
-    [cellCount, imagesByIndex, setImagesByIndex, setPendingDuplicate],
+    [gridLayout, cellCount, imagesByIndex, setGridLayout, setImagesByIndex, setPendingDuplicate],
   );
 }
 
@@ -429,33 +461,42 @@ function buildViewportDuplicationApi(
   bindings: ViewportDuplicationApiBindings,
 ): ViewportDuplicationApi {
   return {
-    cellCount: bindings.cellCount,
-    getCellFileName: (index) => bindings.imagesByIndex.get(index)?.fileName ?? null,
     hasSourceContent: (index) => bindings.imagesByIndex.has(index),
-    requestDuplicateTo: (sourceIndex, targetIndex) =>
-      requestDuplicateBetweenIndices(bindings, sourceIndex, targetIndex),
+    requestDuplicate: (sourceIndex) => routeDuplicateRequest(bindings, sourceIndex),
   };
 }
 
-function requestDuplicateBetweenIndices(
+function routeDuplicateRequest(
   bindings: ViewportDuplicationApiBindings,
   sourceIndex: number,
-  targetIndex: number,
 ): void {
-  if (sourceIndex === targetIndex) return;
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
-  const existingTarget = bindings.imagesByIndex.get(targetIndex);
-  if (existingTarget) {
-    bindings.setPendingDuplicate({
-      sourceIndex,
-      targetIndex,
-      sourceContent,
-      targetFileName: existingTarget.fileName,
-    });
-    return;
-  }
-  void applyDuplicateToTargetIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
+  if (placeDuplicateInExistingEmptyViewport(bindings, sourceContent)) return;
+  if (placeDuplicateByExpandingGrid(bindings, sourceContent)) return;
+  bindings.setPendingDuplicate({ sourceIndex, sourceContent });
+}
+
+function placeDuplicateInExistingEmptyViewport(
+  bindings: ViewportDuplicationApiBindings,
+  sourceContent: ViewportCellContent,
+): boolean {
+  const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
+  if (emptyIndex === null) return false;
+  void applyDuplicateToTargetIndex(sourceContent, emptyIndex, bindings.setImagesByIndex);
+  return true;
+}
+
+function placeDuplicateByExpandingGrid(
+  bindings: ViewportDuplicationApiBindings,
+  sourceContent: ViewportCellContent,
+): boolean {
+  const expandedLayout = getNextLargerGridLayout(bindings.gridLayout);
+  if (expandedLayout === null) return false;
+  const newCellIndex = bindings.cellCount;
+  bindings.setGridLayout(expandedLayout);
+  void applyDuplicateToTargetIndex(sourceContent, newCellIndex, bindings.setImagesByIndex);
+  return true;
 }
 
 async function applyDuplicateToTargetIndex(
@@ -482,14 +523,29 @@ function formatDuplicateSuccessMessage(fileName: string, targetIndex: number): s
   return `Duplicated ${fileName} to viewport ${targetNumber}`;
 }
 
-function confirmPendingDuplicateOverwrite(
-  pending: PendingDuplicateOverwrite | null,
-  setImagesByIndex: SetImagesByIndex,
-  setPendingDuplicate: SetPendingDuplicate,
+interface ConfirmDuplicateReplaceBindings {
+  setImagesByIndex: SetImagesByIndex;
+  setPendingDuplicate: SetPendingDuplicate;
+}
+
+function confirmPendingDuplicateReplaceAtTargetIndex(
+  targetIndex: number,
+  pending: PendingDuplicateReplace | null,
+  bindings: ConfirmDuplicateReplaceBindings,
 ): void {
+  bindings.setPendingDuplicate(null);
   if (!pending) return;
-  setPendingDuplicate(null);
-  void applyDuplicateToTargetIndex(pending.sourceContent, pending.targetIndex, setImagesByIndex);
+  void applyDuplicateToTargetIndex(pending.sourceContent, targetIndex, bindings.setImagesByIndex);
+}
+
+function buildDuplicateReplaceTargetEntries(
+  pending: PendingDuplicateReplace | null,
+  imagesByIndex: ImagesByIndexMap,
+  cellCount: number,
+): ReadonlyArray<DuplicateReplaceTargetEntry> {
+  if (!pending) return [];
+  const occupied = listOccupiedViewportEntries(imagesByIndex, cellCount, (content) => content.fileName);
+  return occupied.filter((entry) => entry.index !== pending.sourceIndex);
 }
 
 function describeUnknownError(error: unknown): string {
