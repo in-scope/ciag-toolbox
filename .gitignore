@@ -9,9 +9,21 @@ CLAUDE.md
 .devcontainer/
 tasks/
 
+# Build output
+node_modules/
+out/
+dist/
+
+# Editor / logs
+*.log
+.vite/
+.eslintcache
+
 # OS files
 .DS_Store
 Thumbs.db
 
 # Claude local config
 .claude/
+
+test-images/
