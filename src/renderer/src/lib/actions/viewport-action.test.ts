@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { TOGGLE_NORMALIZATION_ACTION } from "./registered-actions";
+import { NORMALIZE_ACTION } from "./registered-actions";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   applyActionToSelectedViewports,
@@ -11,7 +11,7 @@ import {
 describe("applyActionToSelectedViewports", () => {
   it("does nothing when the selection is empty", () => {
     const callbacks = createMockApplyActionCallbacks();
-    applyActionToSelectedViewports(TOGGLE_NORMALIZATION_ACTION, new Set(), callbacks);
+    applyActionToSelectedViewports(NORMALIZE_ACTION, new Set(), callbacks);
     expect(callbacks.getViewportRenderingState).not.toHaveBeenCalled();
     expect(callbacks.setViewportRenderingState).not.toHaveBeenCalled();
     expect(callbacks.reportApplyFailure).not.toHaveBeenCalled();
@@ -19,7 +19,7 @@ describe("applyActionToSelectedViewports", () => {
 
   it("applies the action to every selected index in ascending order", () => {
     const callbacks = createMockApplyActionCallbacks();
-    applyActionToSelectedViewports(TOGGLE_NORMALIZATION_ACTION, new Set([2, 0, 5]), callbacks);
+    applyActionToSelectedViewports(NORMALIZE_ACTION, new Set([2, 0, 5]), callbacks);
     const writes = callbacks.setViewportRenderingState.mock.calls;
     expect(writes.map((call) => call[0])).toEqual([0, 2, 5]);
     for (const [, state] of writes) {
@@ -36,18 +36,17 @@ describe("applyActionToSelectedViewports", () => {
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledTimes(1);
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledWith(1, {
       normalizationEnabled: true,
+      lastAppliedOperationLabel: null,
     });
   });
 });
 
-describe("TOGGLE_NORMALIZATION_ACTION", () => {
-  it("flips normalizationEnabled on apply", () => {
-    expect(TOGGLE_NORMALIZATION_ACTION.apply({ normalizationEnabled: false })).toEqual({
-      normalizationEnabled: true,
-    });
-    expect(TOGGLE_NORMALIZATION_ACTION.apply({ normalizationEnabled: true })).toEqual({
-      normalizationEnabled: false,
-    });
+describe("NORMALIZE_ACTION", () => {
+  it("enables normalization regardless of the previous state", () => {
+    expect(NORMALIZE_ACTION.apply({ normalizationEnabled: false, lastAppliedOperationLabel: null }))
+      .toEqual({ normalizationEnabled: true, lastAppliedOperationLabel: null });
+    expect(NORMALIZE_ACTION.apply({ normalizationEnabled: true, lastAppliedOperationLabel: null }))
+      .toEqual({ normalizationEnabled: true, lastAppliedOperationLabel: null });
   });
 });
 
@@ -73,7 +72,7 @@ function makeActionThatThrowsOnFirstApplyCall(): ViewportAction {
     apply: (state) => {
       invocations += 1;
       if (invocations === 1) throw new Error("boom");
-      return { ...state, normalizationEnabled: !state.normalizationEnabled };
+      return { ...state, normalizationEnabled: true };
     },
   };
 }

@@ -17,9 +17,10 @@ import {
   type PendingOpenImageReplace,
 } from "@/components/open-image-replace-target-picker";
 import {
-  OperationTargetPicker,
-  type OperationTargetPickerViewportEntry,
-} from "@/components/operation-target-picker";
+  ToolOptionsPanel,
+  type ToolOptionsApplyOptions,
+  type ToolOptionsSourceViewport,
+} from "@/components/tool-options-panel";
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
 import {
@@ -29,28 +30,29 @@ import {
 } from "@/components/viewport-duplicate-replace-target-picker";
 import { ViewportGrid, type ViewportCellContent } from "@/components/viewport-grid";
 import {
+  applyActionInPlaceAtSourceIndex,
+  applyActionToDuplicateOfSource,
+  runDuplicateAndApplyAtTargetIndex,
+  type ApplyActionFlowBindings,
+} from "@/lib/actions/apply-action-flow";
+import {
   REGISTERED_VIEWPORT_ACTIONS,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
-import {
-  applyActionToSelectedViewports,
-  type ApplyActionFailure,
-  type ViewportAction,
-} from "@/lib/actions/viewport-action";
 import {
   getGridLayoutCellCount,
   getNextLargerGridLayout,
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
-import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
-import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
-import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 import {
   findLowestIndexEmptyViewport,
   listOccupiedViewportEntries,
 } from "@/lib/image/find-empty-viewport";
+import { placeClonedSourceContentAtIndex } from "@/lib/image/place-cloned-source-content";
+import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
+import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 import {
   ViewportDuplicationProvider,
   type ViewportDuplicationApi,
@@ -72,9 +74,14 @@ type ImagesByIndexMap = ReadonlyMap<number, ViewportCellContent>;
 type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
 type SetGridLayout = Dispatch<SetStateAction<GridLayout>>;
 type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateReplace | null>>;
-type SetActivePickerAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
+type SetActiveAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
 type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
+
+interface SingleSelectedSource {
+  readonly index: number;
+  readonly summary: ToolOptionsSourceViewport;
+}
 
 export function App(): JSX.Element {
   useThemeClassSyncedWithMainProcess();
@@ -98,7 +105,7 @@ function ApplicationShell(): JSX.Element {
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
-  const [activePickerAction, setActivePickerAction] = useState<RegisteredViewportAction | null>(null);
+  const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [pendingOpenImageReplace, setPendingOpenImageReplace] =
     useState<PendingOpenImageReplace | null>(null);
   const { selectedIndices, pruneSelectionToCellCount, selectViewportFromClick } =
@@ -122,8 +129,27 @@ function ApplicationShell(): JSX.Element {
     setPendingOpenImageReplace,
     selectViewportFromClick,
   });
-  const handleInvokeAction = useOpenPickerForActionHandler(setActivePickerAction);
+  const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
+  const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
+  const applyActionFlowBindings = buildApplyActionFlowBindings({
+    gridLayout,
+    cellCount,
+    imagesByIndex,
+    setGridLayout,
+    setImagesByIndex,
+    setPendingDuplicate,
+    renderingApi,
+  });
+  const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
+  const handleApplyAction = (options: ToolOptionsApplyOptions) =>
+    runApplyActionFromPanel(
+      activeAction,
+      singleSelectedSource,
+      options,
+      applyActionFlowBindings,
+      setActiveAction,
+    );
   const duplicationApi = useViewportDuplicationApi({
     gridLayout,
     cellCount,
@@ -146,6 +172,10 @@ function ApplicationShell(): JSX.Element {
           gridLayout={gridLayout}
           imagesByIndex={imagesByIndex}
           onOpenImage={handleOpenImageRequested}
+          activeAction={activeAction}
+          sourceViewport={singleSelectedSource?.summary ?? null}
+          onCancelAction={handleCancelAction}
+          onApplyAction={handleApplyAction}
         />
       </ViewportDuplicationProvider>
       <DuplicateReplaceTargetPicker
@@ -156,17 +186,9 @@ function ApplicationShell(): JSX.Element {
           confirmPendingDuplicateReplaceAtTargetIndex(targetIndex, pendingDuplicate, {
             setImagesByIndex,
             setPendingDuplicate,
+            applyActionFlowBindings,
           })
         }
-      />
-      <OperationTargetPicker
-        open={activePickerAction !== null}
-        action={activePickerAction}
-        cellCount={cellCount}
-        viewports={buildPickerViewportEntries(cellCount, imagesByIndex)}
-        initiallySelectedIndices={selectedIndices}
-        onCancel={() => setActivePickerAction(null)}
-        onConfirm={(targets) => confirmPickerAndRunAction(targets, activePickerAction, renderingApi, setActivePickerAction)}
       />
       <OpenImageReplaceTargetPicker
         pending={pendingOpenImageReplace}
@@ -194,25 +216,35 @@ function createEmptyImagesMap(): ImagesByIndexMap {
   return new Map();
 }
 
-function ApplicationStageContent({
-  gridLayout,
-  imagesByIndex,
-  onOpenImage,
-}: {
+interface ApplicationStageContentProps {
   gridLayout: GridLayout;
   imagesByIndex: ImagesByIndexMap;
   onOpenImage: () => void;
-}): JSX.Element {
+  activeAction: RegisteredViewportAction | null;
+  sourceViewport: ToolOptionsSourceViewport | null;
+  onCancelAction: () => void;
+  onApplyAction: (options: ToolOptionsApplyOptions) => void;
+}
+
+function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Element {
   const { clearSelection } = useViewportSelection();
   return (
-    <main
-      className="flex min-h-0 flex-1 p-4"
-      onClick={(event) => clearSelectionWhenClickIsOutsideAnyCell(event, clearSelection)}
-    >
-      <ViewportGrid
-        layout={gridLayout}
-        cellsByIndex={imagesByIndex}
-        onOpenImage={onOpenImage}
+    <main className="flex min-h-0 flex-1">
+      <div
+        className="min-w-0 flex-1 p-4"
+        onClick={(event) => clearSelectionWhenClickIsOutsideAnyCell(event, clearSelection)}
+      >
+        <ViewportGrid
+          layout={props.gridLayout}
+          cellsByIndex={props.imagesByIndex}
+          onOpenImage={props.onOpenImage}
+        />
+      </div>
+      <ToolOptionsPanel
+        action={props.activeAction}
+        sourceViewport={props.sourceViewport}
+        onCancel={props.onCancelAction}
+        onApply={props.onApplyAction}
       />
     </main>
   );
@@ -505,13 +537,7 @@ async function applyDuplicateToTargetIndex(
   setImagesByIndex: SetImagesByIndex,
 ): Promise<void> {
   try {
-    const independentSource = await cloneViewportImageSource(sourceContent.source);
-    setImagesByIndex((previous) =>
-      assignViewportContentAtIndex(previous, targetIndex, {
-        fileName: sourceContent.fileName,
-        source: independentSource,
-      }),
-    );
+    await placeClonedSourceContentAtIndex(sourceContent, targetIndex, setImagesByIndex);
     toast.success(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
   } catch (error) {
     toast.error(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
@@ -526,6 +552,7 @@ function formatDuplicateSuccessMessage(fileName: string, targetIndex: number): s
 interface ConfirmDuplicateReplaceBindings {
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
+  applyActionFlowBindings: ApplyActionFlowBindings;
 }
 
 function confirmPendingDuplicateReplaceAtTargetIndex(
@@ -535,6 +562,15 @@ function confirmPendingDuplicateReplaceAtTargetIndex(
 ): void {
   bindings.setPendingDuplicate(null);
   if (!pending) return;
+  if (pending.postDuplicateAction) {
+    void runDuplicateAndApplyAtTargetIndex(
+      pending.postDuplicateAction,
+      pending.sourceContent,
+      targetIndex,
+      bindings.applyActionFlowBindings,
+    );
+    return;
+  }
   void applyDuplicateToTargetIndex(pending.sourceContent, targetIndex, bindings.setImagesByIndex);
 }
 
@@ -553,56 +589,76 @@ function describeUnknownError(error: unknown): string {
   return String(error);
 }
 
-function useOpenPickerForActionHandler(
-  setActivePickerAction: SetActivePickerAction,
+function useOpenPanelForActionHandler(
+  setActiveAction: SetActiveAction,
 ): (action: RegisteredViewportAction) => void {
-  return useCallback(
-    (action) => setActivePickerAction(action),
-    [setActivePickerAction],
-  );
+  return useCallback((action) => setActiveAction(action), [setActiveAction]);
 }
 
-function confirmPickerAndRunAction(
-  targetIndices: ReadonlySet<number>,
-  action: RegisteredViewportAction | null,
-  renderingApi: ViewportRenderingApi,
-  setActivePickerAction: SetActivePickerAction,
-): void {
-  setActivePickerAction(null);
-  if (!action) return;
-  runActionAgainstTargetIndices(action, targetIndices, renderingApi);
+function useCloseToolPanelHandler(setActiveAction: SetActiveAction): () => void {
+  return useCallback(() => setActiveAction(null), [setActiveAction]);
 }
 
-function runActionAgainstTargetIndices(
-  action: ViewportAction,
-  targetIndices: ReadonlySet<number>,
-  renderingApi: ViewportRenderingApi,
-): void {
-  if (targetIndices.size === 0) return;
-  applyActionToSelectedViewports(action, targetIndices, {
-    getViewportRenderingState: renderingApi.getRenderingState,
-    setViewportRenderingState: renderingApi.setRenderingState,
-    reportApplyFailure: (failure) => reportActionApplyFailure(action, failure),
-  });
+interface ApplyActionFlowBindingsInputs {
+  gridLayout: GridLayout;
+  cellCount: number;
+  imagesByIndex: ImagesByIndexMap;
+  setGridLayout: SetGridLayout;
+  setImagesByIndex: SetImagesByIndex;
+  setPendingDuplicate: SetPendingDuplicate;
+  renderingApi: ViewportRenderingApi;
 }
 
-function reportActionApplyFailure(action: ViewportAction, failure: ApplyActionFailure): void {
-  const viewportNumber = getViewportNumberFromIndex(failure.viewportIndex);
-  const reason = describeUnknownError(failure.error);
-  console.error(
-    `[toolbox] Action "${action.id}" failed on viewport ${viewportNumber}:`,
-    failure.error,
-  );
-  toast.error(`${action.label} failed on viewport ${viewportNumber}: ${reason}`);
+function buildApplyActionFlowBindings(
+  inputs: ApplyActionFlowBindingsInputs,
+): ApplyActionFlowBindings {
+  return {
+    gridLayout: inputs.gridLayout,
+    cellCount: inputs.cellCount,
+    imagesByIndex: inputs.imagesByIndex,
+    setGridLayout: inputs.setGridLayout,
+    setImagesByIndex: inputs.setImagesByIndex,
+    setPendingDuplicate: inputs.setPendingDuplicate,
+    getRenderingState: inputs.renderingApi.getRenderingState,
+    setRenderingState: inputs.renderingApi.setRenderingState,
+  };
 }
 
-function buildPickerViewportEntries(
-  cellCount: number,
+function deriveSingleSelectedSource(
+  selectedIndices: ReadonlySet<number>,
   imagesByIndex: ImagesByIndexMap,
-): ReadonlyArray<OperationTargetPickerViewportEntry> {
-  const entries: OperationTargetPickerViewportEntry[] = [];
-  for (let index = 0; index < cellCount; index++) {
-    entries.push({ index, fileName: imagesByIndex.get(index)?.fileName ?? null });
+): SingleSelectedSource | null {
+  if (selectedIndices.size !== 1) return null;
+  const onlyIndex = readSingleIndexFromSelection(selectedIndices);
+  if (onlyIndex === null) return null;
+  const content = imagesByIndex.get(onlyIndex);
+  if (!content) return null;
+  return {
+    index: onlyIndex,
+    summary: {
+      viewportNumber: getViewportNumberFromIndex(onlyIndex),
+      fileName: content.fileName,
+    },
+  };
+}
+
+function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {
+  for (const index of selection) return index;
+  return null;
+}
+
+function runApplyActionFromPanel(
+  action: RegisteredViewportAction | null,
+  source: SingleSelectedSource | null,
+  options: ToolOptionsApplyOptions,
+  bindings: ApplyActionFlowBindings,
+  setActiveAction: SetActiveAction,
+): void {
+  if (!action || !source) return;
+  if (options.openInNewViewport) {
+    applyActionToDuplicateOfSource(action, source.index, bindings);
+  } else {
+    applyActionInPlaceAtSourceIndex(action, source.index, bindings);
   }
-  return entries;
+  setActiveAction(null);
 }

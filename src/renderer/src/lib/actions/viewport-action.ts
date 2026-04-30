@@ -1,9 +1,11 @@
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
+  readonly lastAppliedOperationLabel: string | null;
 }
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
+  lastAppliedOperationLabel: null,
 };
 
 export interface ViewportAction {

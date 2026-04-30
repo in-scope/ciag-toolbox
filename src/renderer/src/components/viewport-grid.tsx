@@ -115,6 +115,7 @@ function renderViewportCellViewport(
       imageSource={props.content?.source ?? null}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
+      lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       onOpenImage={props.onOpenImage}
     />
   );
@@ -138,6 +139,7 @@ interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   normalizationEnabled: boolean;
+  lastAppliedOperationLabel: string | null;
 }
 
 function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
@@ -151,6 +153,7 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
     isSelected,
     handleClick,
     normalizationEnabled: renderingState.normalizationEnabled,
+    lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
   };
 }
 

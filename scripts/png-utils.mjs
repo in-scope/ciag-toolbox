@@ -1,6 +1,4 @@
-// Shared helpers for generating tiny solid-color RGBA PNGs that the icon
-// scripts wrap into ICO (Windows) and ICNS (macOS) container formats.
-// Pure Node (zlib + Buffer); no native deps.
+// Shared helpers for generating PNGs in pure Node (zlib + Buffer; no native deps).
 
 import { deflateSync } from "node:zlib";
 
@@ -49,41 +47,49 @@ function buildPngHeaderChunk(width, height) {
   return buildPngChunk("IHDR", headerData);
 }
 
-function buildSolidColorRgbaPixelStream(width, height, color) {
+function buildSolidColorRgbaPixelBuffer(width, height, color) {
+  const buffer = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < buffer.length; i += 4) {
+    buffer[i] = color.r;
+    buffer[i + 1] = color.g;
+    buffer[i + 2] = color.b;
+    buffer[i + 3] = color.a;
+  }
+  return buffer;
+}
+
+function buildScanlineFilteredStreamFromRgbaBuffer(width, height, rgbaPixelBuffer) {
   const bytesPerScanline = 1 + width * 4;
-  const pixelStream = Buffer.alloc(height * bytesPerScanline);
+  const stream = Buffer.alloc(height * bytesPerScanline);
   for (let y = 0; y < height; y++) {
-    fillScanlineWithColor(pixelStream, y * bytesPerScanline, width, color);
+    const filteredOffset = y * bytesPerScanline;
+    const sourceOffset = y * width * 4;
+    stream[filteredOffset] = 0;
+    rgbaPixelBuffer.copy(stream, filteredOffset + 1, sourceOffset, sourceOffset + width * 4);
   }
-  return pixelStream;
+  return stream;
 }
 
-function fillScanlineWithColor(pixelStream, scanlineOffset, width, color) {
-  pixelStream[scanlineOffset] = 0;
-  for (let x = 0; x < width; x++) {
-    const pixelOffset = scanlineOffset + 1 + x * 4;
-    pixelStream[pixelOffset] = color.r;
-    pixelStream[pixelOffset + 1] = color.g;
-    pixelStream[pixelOffset + 2] = color.b;
-    pixelStream[pixelOffset + 3] = color.a;
-  }
-}
-
-function buildPngImageDataChunk(width, height, color) {
-  const compressed = deflateSync(buildSolidColorRgbaPixelStream(width, height, color));
-  return buildPngChunk("IDAT", compressed);
+function buildPngImageDataChunkFromRgbaBuffer(width, height, rgbaPixelBuffer) {
+  const stream = buildScanlineFilteredStreamFromRgbaBuffer(width, height, rgbaPixelBuffer);
+  return buildPngChunk("IDAT", deflateSync(stream));
 }
 
 function buildPngImageEndChunk() {
   return buildPngChunk("IEND", Buffer.alloc(0));
 }
 
-export function buildSolidColorPng(width, height, color) {
-  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+export function buildRgbaPng(width, height, rgbaPixelBuffer) {
   return Buffer.concat([
-    pngSignature,
+    PNG_SIGNATURE,
     buildPngHeaderChunk(width, height),
-    buildPngImageDataChunk(width, height, color),
+    buildPngImageDataChunkFromRgbaBuffer(width, height, rgbaPixelBuffer),
     buildPngImageEndChunk(),
   ]);
+}
+
+export function buildSolidColorPng(width, height, color) {
+  return buildRgbaPng(width, height, buildSolidColorRgbaPixelBuffer(width, height, color));
 }

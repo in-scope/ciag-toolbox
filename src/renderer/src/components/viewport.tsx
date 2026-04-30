@@ -12,6 +12,7 @@ interface ViewportProps {
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
+  lastAppliedOperationLabel?: string | null;
   onOpenImage: () => void;
 }
 
@@ -32,6 +33,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
       />
       <div className="relative min-h-0 flex-1">
         <canvas
@@ -67,6 +69,7 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  lastAppliedOperationLabel: string | null;
 }
 
 function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
@@ -75,20 +78,36 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
       {typeof props.viewportNumber === "number" ? (
         <ViewportNumberBadge viewportNumber={props.viewportNumber} />
       ) : null}
-      {props.fileName ? <ViewportFileNameLabel fileName={props.fileName} /> : null}
+      {props.fileName ? (
+        <ViewportFileNameLabel
+          fileName={props.fileName}
+          lastAppliedOperationLabel={props.lastAppliedOperationLabel}
+        />
+      ) : null}
     </div>
   );
 }
 
-function ViewportFileNameLabel({ fileName }: { fileName: string }): JSX.Element {
+interface ViewportFileNameLabelProps {
+  fileName: string;
+  lastAppliedOperationLabel: string | null;
+}
+
+function ViewportFileNameLabel(props: ViewportFileNameLabelProps): JSX.Element {
+  const display = formatViewportHeaderLabel(props.fileName, props.lastAppliedOperationLabel);
   return (
-    <span
-      className="truncate font-medium text-foreground"
-      title={fileName}
-    >
-      {fileName}
+    <span className="truncate font-medium text-foreground" title={display}>
+      {display}
     </span>
   );
+}
+
+function formatViewportHeaderLabel(
+  fileName: string,
+  lastAppliedOperationLabel: string | null,
+): string {
+  if (!lastAppliedOperationLabel) return fileName;
+  return `${fileName} (${lastAppliedOperationLabel})`;
 }
 
 function ViewportNumberBadge({

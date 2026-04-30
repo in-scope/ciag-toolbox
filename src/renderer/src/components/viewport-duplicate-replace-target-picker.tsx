@@ -10,11 +10,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ViewportCellContent } from "@/components/viewport-grid";
+import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import { getViewportNumberFromIndex } from "@/lib/grid/grid-layout";
 
 export interface PendingDuplicateReplace {
   readonly sourceIndex: number;
   readonly sourceContent: ViewportCellContent;
+  readonly postDuplicateAction?: RegisteredViewportAction;
 }
 
 export interface DuplicateReplaceTargetEntry {
