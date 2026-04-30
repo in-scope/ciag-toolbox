@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "description": "MSI Toolbox v3 - cross-platform desktop application for multispectral image analysis",
   "author": {
-    "name": "Cultural-heritage Imaging and Analysis Group (CIAG)",
+    "name": "Cambridge Image Analysis Group (CIAG)",
     "email": "evan.morgan@inscope.sh"
   },
   "main": "out/main/index.js",
