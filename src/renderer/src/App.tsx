@@ -184,6 +184,7 @@ function ApplicationShell(): JSX.Element {
         onGridLayoutChange={handleGridLayoutChange}
         registeredActions={REGISTERED_VIEWPORT_ACTIONS}
         onInvokeAction={handleInvokeAction}
+        canInvokeActions={singleSelectedSource !== null}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>

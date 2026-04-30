@@ -22,6 +22,7 @@ interface ToolbarProps {
   onGridLayoutChange: (layout: GridLayout) => void;
   registeredActions: ReadonlyArray<RegisteredViewportAction>;
   onInvokeAction: (action: RegisteredViewportAction) => void;
+  canInvokeActions: boolean;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -37,6 +38,7 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
         <RegisteredActionButtons
           registeredActions={props.registeredActions}
           onInvokeAction={props.onInvokeAction}
+          canInvokeActions={props.canInvokeActions}
         />
       </div>
     </TooltipProvider>
@@ -110,6 +112,7 @@ function ToolbarSeparator(): JSX.Element {
 interface RegisteredActionButtonsProps {
   registeredActions: ReadonlyArray<RegisteredViewportAction>;
   onInvokeAction: (action: RegisteredViewportAction) => void;
+  canInvokeActions: boolean;
 }
 
 function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Element {
@@ -120,25 +123,32 @@ function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Eleme
           key={action.id}
           action={action}
           onInvoke={() => props.onInvokeAction(action)}
+          disabled={!props.canInvokeActions}
         />
       ))}
     </>
   );
 }
 
-function ActionToolbarButton({
-  action,
-  onInvoke,
-}: {
+interface ActionToolbarButtonProps {
   action: RegisteredViewportAction;
   onInvoke: () => void;
-}): JSX.Element {
-  const Icon = action.icon;
+  disabled: boolean;
+}
+
+function ActionToolbarButton(props: ActionToolbarButtonProps): JSX.Element {
+  const Icon = props.action.icon;
+  const tooltipLabel = formatActionToolbarTooltipLabel(props.action.label, props.disabled);
   return (
-    <IconButtonWithTooltip label={action.label} onClick={onInvoke}>
+    <IconButtonWithTooltip label={tooltipLabel} onClick={props.onInvoke} disabled={props.disabled}>
       <Icon className="size-5" />
     </IconButtonWithTooltip>
   );
+}
+
+function formatActionToolbarTooltipLabel(actionLabel: string, disabled: boolean): string {
+  if (disabled) return `${actionLabel} (select a viewport with a loaded image)`;
+  return actionLabel;
 }
 
 interface IconButtonWithTooltipProps {
