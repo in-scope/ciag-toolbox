@@ -15,6 +15,7 @@ import {
 } from "@/lib/grid/grid-layout";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
+import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
@@ -117,6 +118,7 @@ function renderViewportCellViewport(
       normalizationEnabled={settings.normalizationEnabled}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       onOpenImage={props.onOpenImage}
+      onClose={settings.handleClose}
     />
   );
 }
@@ -131,6 +133,10 @@ function ViewportCellContextMenuContent(props: {
         sourceIndex={props.sourceIndex}
         sourceHasContent={props.sourceHasContent}
       />
+      <CloseContextMenuItem
+        sourceIndex={props.sourceIndex}
+        sourceHasContent={props.sourceHasContent}
+      />
     </ContextMenuContent>
   );
 }
@@ -138,6 +144,7 @@ function ViewportCellContextMenuContent(props: {
 interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
+  handleClose: (() => void) | undefined;
   normalizationEnabled: boolean;
   lastAppliedOperationLabel: string | null;
 }
@@ -145,13 +152,18 @@ interface ViewportCellInteractionSettings {
 function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
   const { getRenderingState } = useViewportRendering();
+  const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
+  const handleClose = closing.hasContent(cellIndex)
+    ? () => closing.closeViewport(cellIndex)
+    : undefined;
   return {
     isSelected,
     handleClick,
+    handleClose,
     normalizationEnabled: renderingState.normalizationEnabled,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
   };
@@ -184,6 +196,23 @@ function DuplicateContextMenuItem(props: DuplicateContextMenuItemProps): JSX.Ele
   return (
     <ContextMenuItem onSelect={() => duplication.requestDuplicate(props.sourceIndex)}>
       Duplicate
+    </ContextMenuItem>
+  );
+}
+
+interface CloseContextMenuItemProps {
+  sourceIndex: number;
+  sourceHasContent: boolean;
+}
+
+function CloseContextMenuItem(props: CloseContextMenuItemProps): JSX.Element {
+  const closing = useViewportClosing();
+  if (!props.sourceHasContent) {
+    return <ContextMenuItem disabled>Close</ContextMenuItem>;
+  }
+  return (
+    <ContextMenuItem onSelect={() => closing.closeViewport(props.sourceIndex)}>
+      Close
     </ContextMenuItem>
   );
 }

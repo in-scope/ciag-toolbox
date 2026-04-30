@@ -11,6 +11,11 @@ import {
   type SetStateAction,
 } from "react";
 
+import {
+  compactAnchorAfterRemovingIndex,
+  compactIndexedSetAfterRemovingIndex,
+} from "@/lib/grid/compact-indexed-map";
+
 export interface ViewportSelectionClickModifiers {
   ctrlOrMeta: boolean;
   shift: boolean;
@@ -23,6 +28,7 @@ export interface ViewportSelectionState {
   selectViewportFromClick: (index: number, modifiers: ViewportSelectionClickModifiers) => void;
   clearSelection: () => void;
   pruneSelectionToCellCount: (cellCount: number) => void;
+  compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
 }
 
 const ViewportSelectionContext = createContext<ViewportSelectionState | null>(null);
@@ -62,31 +68,46 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
     anchorRef,
     setSelectedIndices,
   );
+  const compactSelectionAfterRemovingIndex = useCompactSelectionCallback(
+    anchorRef,
+    setSelectedIndices,
+  );
   return useMemo(
     () =>
-      buildSelectionState(
+      buildSelectionState({
         selectedIndices,
         selectViewportFromClick,
         clearSelection,
         pruneSelectionToCellCount,
-      ),
-    [selectedIndices, selectViewportFromClick, clearSelection, pruneSelectionToCellCount],
+        compactSelectionAfterRemovingIndex,
+      }),
+    [
+      selectedIndices,
+      selectViewportFromClick,
+      clearSelection,
+      pruneSelectionToCellCount,
+      compactSelectionAfterRemovingIndex,
+    ],
   );
 }
 
-function buildSelectionState(
-  selectedIndices: ReadonlySet<number>,
-  selectViewportFromClick: ViewportSelectionState["selectViewportFromClick"],
-  clearSelection: ViewportSelectionState["clearSelection"],
-  pruneSelectionToCellCount: ViewportSelectionState["pruneSelectionToCellCount"],
-): ViewportSelectionState {
+interface SelectionStateInputs {
+  selectedIndices: ReadonlySet<number>;
+  selectViewportFromClick: ViewportSelectionState["selectViewportFromClick"];
+  clearSelection: ViewportSelectionState["clearSelection"];
+  pruneSelectionToCellCount: ViewportSelectionState["pruneSelectionToCellCount"];
+  compactSelectionAfterRemovingIndex: ViewportSelectionState["compactSelectionAfterRemovingIndex"];
+}
+
+function buildSelectionState(inputs: SelectionStateInputs): ViewportSelectionState {
   return {
-    selectedIndices,
-    selectedCount: selectedIndices.size,
-    isViewportSelected: (index) => selectedIndices.has(index),
-    selectViewportFromClick,
-    clearSelection,
-    pruneSelectionToCellCount,
+    selectedIndices: inputs.selectedIndices,
+    selectedCount: inputs.selectedIndices.size,
+    isViewportSelected: (index) => inputs.selectedIndices.has(index),
+    selectViewportFromClick: inputs.selectViewportFromClick,
+    clearSelection: inputs.clearSelection,
+    pruneSelectionToCellCount: inputs.pruneSelectionToCellCount,
+    compactSelectionAfterRemovingIndex: inputs.compactSelectionAfterRemovingIndex,
   };
 }
 
@@ -122,6 +143,19 @@ function usePruneSelectionToCellCountCallback(
     (cellCount) => {
       pruneAnchorToCellCount(anchorRef, cellCount);
       setSelectedIndices((previous) => keepIndicesBelowCellCount(previous, cellCount));
+    },
+    [anchorRef, setSelectedIndices],
+  );
+}
+
+function useCompactSelectionCallback(
+  anchorRef: SelectionAnchorRef,
+  setSelectedIndices: SelectionSetter,
+): ViewportSelectionState["compactSelectionAfterRemovingIndex"] {
+  return useCallback(
+    (removedIndex) => {
+      anchorRef.current = compactAnchorAfterRemovingIndex(anchorRef.current, removedIndex);
+      setSelectedIndices((previous) => compactIndexedSetAfterRemovingIndex(previous, removedIndex));
     },
     [anchorRef, setSelectedIndices],
   );

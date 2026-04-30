@@ -23,6 +23,7 @@ import {
 } from "@/components/tool-options-panel";
 import { Toolbar } from "@/components/toolbar";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   DuplicateReplaceTargetPicker,
   type DuplicateReplaceTargetEntry,
@@ -39,6 +40,7 @@ import {
   REGISTERED_VIEWPORT_ACTIONS,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
   getNextLargerGridLayout,
@@ -53,6 +55,10 @@ import {
 import { placeClonedSourceContentAtIndex } from "@/lib/image/place-cloned-source-content";
 import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
 import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
+import {
+  ViewportClosingProvider,
+  type ViewportClosingApi,
+} from "@/state/closing-context";
 import {
   ViewportDuplicationProvider,
   type ViewportDuplicationApi,
@@ -86,13 +92,15 @@ interface SingleSelectedSource {
 export function App(): JSX.Element {
   useThemeClassSyncedWithMainProcess();
   return (
-    <ViewportSelectionProvider>
-      <ViewportRenderingProvider>
-        <ApplicationShell />
-        <AboutDialog />
-        <Toaster />
-      </ViewportRenderingProvider>
-    </ViewportSelectionProvider>
+    <TooltipProvider delayDuration={300}>
+      <ViewportSelectionProvider>
+        <ViewportRenderingProvider>
+          <ApplicationShell />
+          <AboutDialog />
+          <Toaster />
+        </ViewportRenderingProvider>
+      </ViewportSelectionProvider>
+    </TooltipProvider>
   );
 }
 
@@ -108,8 +116,12 @@ function ApplicationShell(): JSX.Element {
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [pendingOpenImageReplace, setPendingOpenImageReplace] =
     useState<PendingOpenImageReplace | null>(null);
-  const { selectedIndices, pruneSelectionToCellCount, selectViewportFromClick } =
-    useViewportSelection();
+  const {
+    selectedIndices,
+    pruneSelectionToCellCount,
+    selectViewportFromClick,
+    compactSelectionAfterRemovingIndex,
+  } = useViewportSelection();
   const renderingApi = useViewportRendering();
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
@@ -158,6 +170,12 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     setPendingDuplicate,
   });
+  const closingApi = useViewportClosingApi({
+    imagesByIndex,
+    setImagesByIndex,
+    compactRenderingStateAfterRemovingIndex: renderingApi.compactRenderingStateAfterRemovingIndex,
+    compactSelectionAfterRemovingIndex,
+  });
   return (
     <div className="flex h-full flex-col">
       <Toolbar
@@ -168,15 +186,17 @@ function ApplicationShell(): JSX.Element {
         onInvokeAction={handleInvokeAction}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
-        <ApplicationStageContent
-          gridLayout={gridLayout}
-          imagesByIndex={imagesByIndex}
-          onOpenImage={handleOpenImageRequested}
-          activeAction={activeAction}
-          sourceViewport={singleSelectedSource?.summary ?? null}
-          onCancelAction={handleCancelAction}
-          onApplyAction={handleApplyAction}
-        />
+        <ViewportClosingProvider value={closingApi}>
+          <ApplicationStageContent
+            gridLayout={gridLayout}
+            imagesByIndex={imagesByIndex}
+            onOpenImage={handleOpenImageRequested}
+            activeAction={activeAction}
+            sourceViewport={singleSelectedSource?.summary ?? null}
+            onCancelAction={handleCancelAction}
+            onApplyAction={handleApplyAction}
+          />
+        </ViewportClosingProvider>
       </ViewportDuplicationProvider>
       <DuplicateReplaceTargetPicker
         pending={pendingDuplicate}
@@ -587,6 +607,60 @@ function buildDuplicateReplaceTargetEntries(
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+interface ViewportClosingApiBindings {
+  imagesByIndex: ImagesByIndexMap;
+  setImagesByIndex: SetImagesByIndex;
+  compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
+  compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
+}
+
+function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
+  const {
+    imagesByIndex,
+    setImagesByIndex,
+    compactRenderingStateAfterRemovingIndex,
+    compactSelectionAfterRemovingIndex,
+  } = bindings;
+  return useMemo(
+    () =>
+      buildViewportClosingApi({
+        imagesByIndex,
+        setImagesByIndex,
+        compactRenderingStateAfterRemovingIndex,
+        compactSelectionAfterRemovingIndex,
+      }),
+    [
+      imagesByIndex,
+      setImagesByIndex,
+      compactRenderingStateAfterRemovingIndex,
+      compactSelectionAfterRemovingIndex,
+    ],
+  );
+}
+
+function buildViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
+  return {
+    hasContent: (index) => bindings.imagesByIndex.has(index),
+    closeViewport: (index) => closeViewportAndCompactRemainingIndices(index, bindings),
+  };
+}
+
+function closeViewportAndCompactRemainingIndices(
+  index: number,
+  bindings: ViewportClosingApiBindings,
+): void {
+  const content = bindings.imagesByIndex.get(index);
+  if (!content) return;
+  bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
+  bindings.compactRenderingStateAfterRemovingIndex(index);
+  bindings.compactSelectionAfterRemovingIndex(index);
+  toast.info(formatClosedSingleViewportMessage(index, content.fileName));
+}
+
+function formatClosedSingleViewportMessage(index: number, fileName: string): string {
+  return `Closed viewport ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
 function useOpenPanelForActionHandler(

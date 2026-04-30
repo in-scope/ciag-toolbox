@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
@@ -14,6 +15,7 @@ interface ViewportProps {
   normalizationEnabled: boolean;
   lastAppliedOperationLabel?: string | null;
   onOpenImage: () => void;
+  onClose?: () => void;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
@@ -34,6 +36,8 @@ export function Viewport(props: ViewportProps): JSX.Element {
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
+        onClose={props.onClose ?? null}
+        showCloseButton={imageSource !== null && Boolean(props.onClose)}
       />
       <div className="relative min-h-0 flex-1">
         <canvas
@@ -70,6 +74,8 @@ interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
   lastAppliedOperationLabel: string | null;
+  onClose: (() => void) | null;
+  showCloseButton: boolean;
 }
 
 function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
@@ -84,8 +90,45 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
+      {props.showCloseButton && props.onClose ? (
+        <ViewportCloseButton viewportNumber={props.viewportNumber} onClose={props.onClose} />
+      ) : null}
     </div>
   );
+}
+
+interface ViewportCloseButtonProps {
+  viewportNumber: number | null;
+  onClose: () => void;
+}
+
+function ViewportCloseButton(props: ViewportCloseButtonProps): JSX.Element {
+  const label = formatCloseButtonLabel(props.viewportNumber);
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    props.onClose();
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-6"
+          aria-label={label}
+          onClick={handleClick}
+        >
+          <X className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function formatCloseButtonLabel(viewportNumber: number | null): string {
+  if (typeof viewportNumber === "number") return `Close viewport ${viewportNumber}`;
+  return "Close viewport";
 }
 
 interface ViewportFileNameLabelProps {

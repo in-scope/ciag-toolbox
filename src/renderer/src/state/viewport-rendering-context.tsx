@@ -13,6 +13,7 @@ import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
+import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 
 export type ViewportRenderingByIndex = ReadonlyMap<number, ViewportRenderingState>;
 
@@ -20,6 +21,7 @@ export interface ViewportRenderingApi {
   getRenderingState: (viewportIndex: number) => ViewportRenderingState;
   setRenderingState: (viewportIndex: number, next: ViewportRenderingState) => void;
   pruneRenderingStateToCellCount: (cellCount: number) => void;
+  compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
 }
 
 const ViewportRenderingContext = createContext<ViewportRenderingApi | null>(null);
@@ -55,9 +57,21 @@ function useViewportRenderingInternalState(): ViewportRenderingApi {
   const getRenderingState = useGetRenderingStateCallback(renderingByIndex);
   const setRenderingState = useSetRenderingStateCallback(setRenderingByIndex);
   const pruneRenderingStateToCellCount = usePruneRenderingStateCallback(setRenderingByIndex);
+  const compactRenderingStateAfterRemovingIndex =
+    useCompactRenderingStateCallback(setRenderingByIndex);
   return useMemo(
-    () => ({ getRenderingState, setRenderingState, pruneRenderingStateToCellCount }),
-    [getRenderingState, setRenderingState, pruneRenderingStateToCellCount],
+    () => ({
+      getRenderingState,
+      setRenderingState,
+      pruneRenderingStateToCellCount,
+      compactRenderingStateAfterRemovingIndex,
+    }),
+    [
+      getRenderingState,
+      setRenderingState,
+      pruneRenderingStateToCellCount,
+      compactRenderingStateAfterRemovingIndex,
+    ],
   );
 }
 
@@ -91,6 +105,19 @@ function usePruneRenderingStateCallback(
   return useCallback(
     (cellCount) => {
       setRenderingByIndex((previous) => keepRenderingEntriesBelowCellCount(previous, cellCount));
+    },
+    [setRenderingByIndex],
+  );
+}
+
+function useCompactRenderingStateCallback(
+  setRenderingByIndex: ViewportRenderingSetter,
+): ViewportRenderingApi["compactRenderingStateAfterRemovingIndex"] {
+  return useCallback(
+    (removedIndex) => {
+      setRenderingByIndex((previous) =>
+        compactIndexedMapAfterRemovingIndex(previous, removedIndex),
+      );
     },
     [setRenderingByIndex],
   );

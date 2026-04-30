@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 
 export interface ToolOptionsApplyOptions {
@@ -47,19 +47,17 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
   const canApply = props.sourceViewport !== null;
   const handleApply = () => props.onApply({ openInNewViewport });
   return (
-    <TooltipProvider delayDuration={300}>
-      <aside aria-label={`${props.action.label} options`} className={PANEL_CLASSES}>
-        <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
-        <ToolOptionsPanelBody sourceViewport={props.sourceViewport} />
-        <ToolOptionsPanelFooter
-          openInNewViewport={openInNewViewport}
-          onChangeOpenInNewViewport={setOpenInNewViewport}
-          onCancel={props.onCancel}
-          onApply={handleApply}
-          canApply={canApply}
-        />
-      </aside>
-    </TooltipProvider>
+    <aside aria-label={`${props.action.label} options`} className={PANEL_CLASSES}>
+      <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
+      <ToolOptionsPanelBody sourceViewport={props.sourceViewport} />
+      <ToolOptionsPanelFooter
+        openInNewViewport={openInNewViewport}
+        onChangeOpenInNewViewport={setOpenInNewViewport}
+        onCancel={props.onCancel}
+        onApply={handleApply}
+        canApply={canApply}
+      />
+    </aside>
   );
 }
 
