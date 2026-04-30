@@ -13,6 +13,7 @@ tasks/
 node_modules/
 out/
 dist/
+electron.vite.config.*.mjs
 
 # Editor / logs
 *.log
