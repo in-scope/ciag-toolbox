@@ -1,7 +1,7 @@
 {
   "name": "ciag-toolbox",
   "productName": "MSI Toolbox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MSI Toolbox v3 - cross-platform desktop application for multispectral image analysis",
   "author": {
     "name": "Cultural-heritage Imaging and Analysis Group (CIAG)",
