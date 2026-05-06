@@ -1,14 +1,35 @@
+import { loadEnviAsRaster } from "@/lib/image/load-envi";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
+export interface OpenedImageBundle {
+  readonly fileName: string;
+  readonly bytes: Uint8Array;
+  readonly sidecarBytes?: Uint8Array;
+}
+
 export async function decodeImageBytesToViewportSource(
-  fileName: string,
-  bytes: Uint8Array,
+  bundle: OpenedImageBundle,
 ): Promise<ViewportImageSource> {
-  if (looksLikeTiffFileName(fileName) || looksLikeTiffByteHeader(bytes)) {
-    return decodeTiffBytesAsRasterSource(bytes);
+  if (looksLikeEnviHeaderFileName(bundle.fileName)) {
+    return decodeEnviHeaderAndBinaryAsRasterSource(bundle);
   }
-  return decodeBrowserImageBytesAsBitmapSource(bytes);
+  if (looksLikeTiffFileName(bundle.fileName) || looksLikeTiffByteHeader(bundle.bytes)) {
+    return decodeTiffBytesAsRasterSource(bundle.bytes);
+  }
+  return decodeBrowserImageBytesAsBitmapSource(bundle.bytes);
+}
+
+function decodeEnviHeaderAndBinaryAsRasterSource(
+  bundle: OpenedImageBundle,
+): ViewportImageSource {
+  if (!bundle.sidecarBytes) {
+    throw new Error(
+      `ENVI header ${bundle.fileName} requires a sibling binary file (.bin/.dat/.img) but none was provided`,
+    );
+  }
+  const raster = loadEnviAsRaster(bundle.bytes, bundle.sidecarBytes);
+  return { kind: "raster", raster };
 }
 
 async function decodeTiffBytesAsRasterSource(
@@ -24,6 +45,10 @@ async function decodeBrowserImageBytesAsBitmapSource(
   const blob = new Blob([copyBytesToOwnArrayBuffer(bytes)]);
   const bitmap = await createImageBitmap(blob);
   return { kind: "image-bitmap", image: bitmap };
+}
+
+function looksLikeEnviHeaderFileName(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith(".hdr");
 }
 
 function looksLikeTiffFileName(fileName: string): boolean {

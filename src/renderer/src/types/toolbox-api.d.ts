@@ -3,6 +3,11 @@ interface ToolboxAppInfo {
   version: string;
 }
 
+interface ToolboxOpenImageDialogSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
 type ToolboxOpenImageDialogResult =
   | { canceled: true }
   | {
@@ -10,6 +15,7 @@ type ToolboxOpenImageDialogResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      sidecar?: ToolboxOpenImageDialogSidecar;
     };
 
 type ToolboxThemeMode = "system" | "light" | "dark";

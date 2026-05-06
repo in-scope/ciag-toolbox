@@ -18,6 +18,7 @@ export interface RasterImage {
   readonly sampleFormat: RasterSampleFormat;
   readonly bandCount: number;
   readonly bandLabels?: ReadonlyArray<string>;
+  readonly bandWavelengths?: ReadonlyArray<number>;
 }
 
 export function cloneRasterImage(raster: RasterImage): RasterImage {
@@ -25,6 +26,7 @@ export function cloneRasterImage(raster: RasterImage): RasterImage {
     ...raster,
     bandPixels: raster.bandPixels.map(copyRasterTypedArray),
     bandLabels: raster.bandLabels ? [...raster.bandLabels] : undefined,
+    bandWavelengths: raster.bandWavelengths ? [...raster.bandWavelengths] : undefined,
   };
 }
 

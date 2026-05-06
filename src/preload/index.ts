@@ -5,6 +5,11 @@ export interface AppInfo {
   version: string;
 }
 
+export interface OpenImageDialogSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
 export type OpenImageDialogResult =
   | { canceled: true }
   | {
@@ -12,6 +17,7 @@ export type OpenImageDialogResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      sidecar?: OpenImageDialogSidecar;
     };
 
 export type ThemeMode = "system" | "light" | "dark";
