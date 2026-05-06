@@ -14,6 +14,7 @@ import {
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
+import { attachPixelClickEventHandlers } from "@/lib/webgl/pixel-click-input";
 import {
   attachPointerReadoutEventHandlers,
   type CanvasCursorPositionPx,
@@ -41,6 +42,7 @@ interface ViewportProps {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   onCommitRoi: (roi: ViewportRoi) => void;
+  onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
   onClose?: () => void;
 }
@@ -69,6 +71,12 @@ export function Viewport(props: ViewportProps): JSX.Element {
     rendererRef,
     onCommitRoi: props.onCommitRoi,
     setInProgressDragRect,
+  });
+  useViewportPixelClickPinAttachment(canvasRef, {
+    isRegionToolActive: props.isRegionToolActive,
+    imageSource,
+    rendererRef,
+    onPinPixelSpectrum: props.onPinPixelSpectrum,
   });
   const transformVersion = useRendererViewTransformVersion(rendererRef);
   const cursorClassName = props.isRegionToolActive ? "cursor-crosshair" : "";
@@ -473,6 +481,47 @@ function isCanvasDragLargerThanClickThreshold(rect: RoiDrawCanvasRect): boolean 
   const heightPx = Math.abs(rect.current.y - rect.start.y);
   return widthPx >= MINIMUM_DRAG_DISTANCE_FOR_COMMIT_PX
     || heightPx >= MINIMUM_DRAG_DISTANCE_FOR_COMMIT_PX;
+}
+
+interface ViewportPixelClickPinInputs {
+  readonly isRegionToolActive: boolean;
+  readonly imageSource: ViewportImageSource | null;
+  readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
+  readonly onPinPixelSpectrum: (imageX: number, imageY: number) => void;
+}
+
+function useViewportPixelClickPinAttachment(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  inputs: ViewportPixelClickPinInputs,
+): void {
+  const inputsRef = useLatestValueRef(inputs);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return attachPixelClickEventHandlers(canvas, {
+      isPixelClickEnabled: () => isPixelClickPinEnabledFromInputs(inputsRef.current),
+      onPixelClick: (point) => pinPixelSpectrumFromCanvasPoint(point, inputsRef.current),
+    });
+    // canvasRef is stable; latest-value ref holds dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function isPixelClickPinEnabledFromInputs(inputs: ViewportPixelClickPinInputs): boolean {
+  if (inputs.isRegionToolActive) return false;
+  if (!inputs.imageSource || inputs.imageSource.kind !== "raster") return false;
+  return inputs.imageSource.raster.bandCount > 1;
+}
+
+function pinPixelSpectrumFromCanvasPoint(
+  point: { x: number; y: number },
+  inputs: ViewportPixelClickPinInputs,
+): void {
+  const renderer = inputs.rendererRef.current;
+  if (!renderer) return;
+  const imagePixel = renderer.getImagePixelAtCanvasPoint(point.x, point.y);
+  if (!imagePixel) return;
+  inputs.onPinPixelSpectrum(imagePixel.x, imagePixel.y);
 }
 
 function useRendererViewTransformVersion(
