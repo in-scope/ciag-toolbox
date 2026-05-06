@@ -10,13 +10,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ViewportCellContent } from "@/components/viewport-grid";
+import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import { getViewportNumberFromIndex } from "@/lib/grid/grid-layout";
+
+export interface PendingDuplicateReplaceAction {
+  readonly action: RegisteredViewportAction;
+  readonly parameterValues: ParameterValuesById;
+}
 
 export interface PendingDuplicateReplace {
   readonly sourceIndex: number;
   readonly sourceContent: ViewportCellContent;
-  readonly postDuplicateAction?: RegisteredViewportAction;
+  readonly postDuplicateAction?: PendingDuplicateReplaceAction;
 }
 
 export interface DuplicateReplaceTargetEntry {

@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ParameterFormSection } from "@/components/parameter-form-section";
+import {
+  buildDefaultParameterValuesForSchemas,
+  type ParameterSchema,
+  type ParameterValue,
+  type ParameterValuesById,
+} from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 
 export interface ToolOptionsApplyOptions {
   readonly openInNewViewport: boolean;
+  readonly parameterValues: ParameterValuesById;
 }
 
 export interface ToolOptionsSourceViewport {
@@ -43,13 +51,29 @@ interface ToolOptionsPanelShellProps {
 
 function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
   const [openInNewViewport, setOpenInNewViewport] = useState(true);
-  useResetOpenInNewViewportWhenActionChanges(props.action.id, setOpenInNewViewport);
+  const parameterSchemas = useStableParameterSchemas(props.action.parameters);
+  const [parameterValues, setParameterValues] = useState<ParameterValuesById>(() =>
+    buildDefaultParameterValuesForSchemas(parameterSchemas),
+  );
+  useResetPanelStateWhenActionChanges(
+    props.action.id,
+    parameterSchemas,
+    setOpenInNewViewport,
+    setParameterValues,
+  );
   const canApply = props.sourceViewport !== null;
-  const handleApply = () => props.onApply({ openInNewViewport });
+  const handleApply = () => props.onApply({ openInNewViewport, parameterValues });
   return (
     <aside aria-label={`${props.action.label} options`} className={PANEL_CLASSES}>
       <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
-      <ToolOptionsPanelBody sourceViewport={props.sourceViewport} />
+      <ToolOptionsPanelBody
+        sourceViewport={props.sourceViewport}
+        parameterSchemas={parameterSchemas}
+        parameterValues={parameterValues}
+        onChangeParameterValue={(id, next) =>
+          setParameterValues((previous) => withParameterValueAtId(previous, id, next))
+        }
+      />
       <ToolOptionsPanelFooter
         openInNewViewport={openInNewViewport}
         onChangeOpenInNewViewport={setOpenInNewViewport}
@@ -64,11 +88,30 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
 const PANEL_CLASSES =
   "flex w-[300px] shrink-0 flex-col border-l bg-card";
 
-function useResetOpenInNewViewportWhenActionChanges(
+function useStableParameterSchemas(
+  parameters: ReadonlyArray<ParameterSchema> | undefined,
+): ReadonlyArray<ParameterSchema> {
+  return useMemo(() => parameters ?? [], [parameters]);
+}
+
+function useResetPanelStateWhenActionChanges(
   actionId: string,
+  parameterSchemas: ReadonlyArray<ParameterSchema>,
   setOpenInNewViewport: (value: boolean) => void,
+  setParameterValues: (values: ParameterValuesById) => void,
 ): void {
-  useEffect(() => setOpenInNewViewport(true), [actionId, setOpenInNewViewport]);
+  useEffect(() => {
+    setOpenInNewViewport(true);
+    setParameterValues(buildDefaultParameterValuesForSchemas(parameterSchemas));
+  }, [actionId, parameterSchemas, setOpenInNewViewport, setParameterValues]);
+}
+
+function withParameterValueAtId(
+  previous: ParameterValuesById,
+  id: string,
+  next: ParameterValue,
+): ParameterValuesById {
+  return Object.freeze({ ...previous, [id]: next });
 }
 
 interface PanelHeaderProps {
@@ -100,19 +143,33 @@ function PanelCloseButton({ onCancel }: { onCancel: () => void }): JSX.Element {
 
 interface PanelBodyProps {
   sourceViewport: ToolOptionsSourceViewport | null;
+  parameterSchemas: ReadonlyArray<ParameterSchema>;
+  parameterValues: ParameterValuesById;
+  onChangeParameterValue: (id: string, next: ParameterValue) => void;
 }
 
 function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
       <SourceViewportSection sourceViewport={props.sourceViewport} />
+      {props.parameterSchemas.length > 0 ? (
+        <ParameterFormSection
+          schemas={props.parameterSchemas}
+          values={props.parameterValues}
+          onChangeValue={props.onChangeParameterValue}
+        />
+      ) : null}
     </div>
   );
 }
 
-function SourceViewportSection(props: PanelBodyProps): JSX.Element {
-  if (!props.sourceViewport) return <SourceViewportEmptyState />;
-  return <SourceViewportDescription sourceViewport={props.sourceViewport} />;
+function SourceViewportSection({
+  sourceViewport,
+}: {
+  sourceViewport: ToolOptionsSourceViewport | null;
+}): JSX.Element {
+  if (!sourceViewport) return <SourceViewportEmptyState />;
+  return <SourceViewportDescription sourceViewport={sourceViewport} />;
 }
 
 function SourceViewportEmptyState(): JSX.Element {

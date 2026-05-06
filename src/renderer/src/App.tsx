@@ -611,7 +611,8 @@ function confirmPendingDuplicateReplaceAtTargetIndex(
   if (!pending) return;
   if (pending.postDuplicateAction) {
     void runDuplicateAndApplyAtTargetIndex(
-      pending.postDuplicateAction,
+      pending.postDuplicateAction.action,
+      pending.postDuplicateAction.parameterValues,
       pending.sourceContent,
       targetIndex,
       bindings.applyActionFlowBindings,
@@ -786,9 +787,9 @@ function runApplyActionFromPanel(
 ): void {
   if (!action || !source) return;
   if (options.openInNewViewport) {
-    applyActionToDuplicateOfSource(action, source.index, bindings);
+    applyActionToDuplicateOfSource(action, options.parameterValues, source.index, bindings);
   } else {
-    applyActionInPlaceAtSourceIndex(action, source.index, bindings);
+    applyActionInPlaceAtSourceIndex(action, options.parameterValues, source.index, bindings);
   }
   setActiveAction(null);
 }
