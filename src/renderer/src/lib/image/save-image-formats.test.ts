@@ -34,6 +34,13 @@ describe("readSaveImageFormatTechnicalDetails", () => {
       targetBitDepth: 8,
     });
   });
+
+  it("maps envi to a 16-bit ENVI descriptor (bit depth follows source)", () => {
+    expect(readSaveImageFormatTechnicalDetails("envi")).toEqual({
+      kind: "envi",
+      targetBitDepth: 16,
+    });
+  });
 });
 
 describe("findSaveImageFormatOptionOrThrow", () => {
@@ -45,8 +52,14 @@ describe("findSaveImageFormatOptionOrThrow", () => {
 });
 
 describe("SAVE_IMAGE_FORMAT_OPTIONS", () => {
-  it("offers TIFF (8/16-bit), PNG, and JPEG as the four save formats", () => {
+  it("offers TIFF (8/16-bit), PNG, JPEG, and ENVI as the five save formats", () => {
     const ids = SAVE_IMAGE_FORMAT_OPTIONS.map((option) => option.id);
-    expect(ids).toEqual(["tiff-16-bit", "tiff-8-bit", "png-8-bit", "jpeg-8-bit"]);
+    expect(ids).toEqual(["tiff-16-bit", "tiff-8-bit", "png-8-bit", "jpeg-8-bit", "envi"]);
+  });
+
+  it("uses .hdr as the primary extension for the ENVI option", () => {
+    const enviOption = SAVE_IMAGE_FORMAT_OPTIONS.find((option) => option.id === "envi");
+    expect(enviOption?.extension).toBe("hdr");
+    expect(enviOption?.fileFilter.extensions).toContain("hdr");
   });
 });

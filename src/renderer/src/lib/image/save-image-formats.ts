@@ -4,7 +4,8 @@ export type SaveImageFormatId =
   | "tiff-16-bit"
   | "tiff-8-bit"
   | "png-8-bit"
-  | "jpeg-8-bit";
+  | "jpeg-8-bit"
+  | "envi";
 
 export interface SaveImageFormatOption {
   readonly id: SaveImageFormatId;
@@ -43,10 +44,19 @@ export const SAVE_IMAGE_FORMAT_OPTIONS: ReadonlyArray<SaveImageFormatOption> = [
     extension: "jpg",
     fileFilter: { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
   },
+  {
+    id: "envi",
+    label: "ENVI (.hdr + .bin)",
+    description: "Multi-band scientific format. Writes a paired header and binary file.",
+    extension: "hdr",
+    fileFilter: { name: "ENVI Header", extensions: ["hdr"] },
+  },
 ];
 
+export type SaveImageFormatKind = "tiff" | "png" | "jpeg" | "envi";
+
 export interface SaveImageFormatTechnicalDetails {
-  readonly kind: "tiff" | "png" | "jpeg";
+  readonly kind: SaveImageFormatKind;
   readonly targetBitDepth: TargetBitDepth;
 }
 
@@ -62,6 +72,8 @@ export function readSaveImageFormatTechnicalDetails(
       return { kind: "png", targetBitDepth: 8 };
     case "jpeg-8-bit":
       return { kind: "jpeg", targetBitDepth: 8 };
+    case "envi":
+      return { kind: "envi", targetBitDepth: 16 };
   }
 }
 

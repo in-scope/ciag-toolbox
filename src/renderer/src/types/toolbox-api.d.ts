@@ -23,10 +23,16 @@ interface ToolboxSaveImageDialogFilter {
   extensions: ReadonlyArray<string>;
 }
 
+interface ToolboxSaveImageDialogSidecar {
+  extension: string;
+  bytes: Uint8Array;
+}
+
 interface ToolboxSaveImageDialogRequest {
   suggestedFileName: string;
   bytes: Uint8Array;
   fileFilter: ToolboxSaveImageDialogFilter;
+  sidecar?: ToolboxSaveImageDialogSidecar;
 }
 
 type ToolboxSaveImageDialogResult =
