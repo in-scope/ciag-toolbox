@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
 import { DivergedSourceWarningDialog } from "@/components/diverged-source-warning-dialog";
+import { StatusBar } from "@/components/status-bar";
 import {
   OpenImageReplaceTargetPicker,
   type PendingOpenImageReplace,
@@ -81,6 +82,7 @@ import {
   ViewportDuplicationProvider,
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
+import { PixelReadoutProvider } from "@/state/pixel-readout-context";
 import {
   ViewportSelectionProvider,
   useViewportSelection,
@@ -131,9 +133,11 @@ export function App(): JSX.Element {
     <TooltipProvider delayDuration={300}>
       <ViewportSelectionProvider>
         <ViewportRenderingProvider>
-          <ApplicationShell />
-          <AboutDialog />
-          <Toaster />
+          <PixelReadoutProvider>
+            <ApplicationShell />
+            <AboutDialog />
+            <Toaster />
+          </PixelReadoutProvider>
         </ViewportRenderingProvider>
       </ViewportSelectionProvider>
     </TooltipProvider>
@@ -325,6 +329,7 @@ function ApplicationShell(): JSX.Element {
         onContinue={() => resolvePendingDivergence(pendingDivergence, true, setPendingDivergence)}
         onCancel={() => resolvePendingDivergence(pendingDivergence, false, setPendingDivergence)}
       />
+      <StatusBar />
     </div>
   );
 }

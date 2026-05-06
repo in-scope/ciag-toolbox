@@ -5,9 +5,19 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readPixelReadoutBandsAtImagePointOrNull } from "@/lib/image/compute-pixel-readout";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
+import {
+  attachPointerReadoutEventHandlers,
+  type CanvasCursorPositionPx,
+} from "@/lib/webgl/pointer-readout-input";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
+import {
+  usePixelReadoutPublisher,
+  type PixelReadoutPublisher,
+  type ViewportPixelReadoutSnapshot,
+} from "@/state/pixel-readout-context";
 
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
@@ -33,6 +43,11 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef);
+  useViewportPixelReadoutPublisher(canvasRef, rendererRef, {
+    viewportNumber: props.viewportNumber ?? null,
+    imageSource,
+    selectedBandIndex: props.selectedBandIndex,
+  });
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md border bg-card">
@@ -293,4 +308,69 @@ function useViewportPanZoomInteractions(
     // canvasRef and rendererRef are stable refs; effect must run once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+}
+
+interface ViewportPixelReadoutInputs {
+  viewportNumber: number | null;
+  imageSource: ViewportImageSource | null;
+  selectedBandIndex: number;
+}
+
+function useViewportPixelReadoutPublisher(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  inputs: ViewportPixelReadoutInputs,
+): void {
+  const publishReadoutSnapshot = usePixelReadoutPublisher();
+  const inputsRef = useLatestValueRef(inputs);
+  const publisherRef = useLatestValueRef(publishReadoutSnapshot);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return attachPointerReadoutEventHandlers(canvas, {
+      onMove: (cursor) => publishReadoutSnapshotForCursor(cursor, rendererRef, inputsRef, publisherRef),
+      onLeave: () => publisherRef.current(null),
+    });
+    // canvasRef and rendererRef are stable refs; latest-value refs hold dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function useLatestValueRef<T>(value: T): MutableRefObject<T> {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
+}
+
+function publishReadoutSnapshotForCursor(
+  cursor: CanvasCursorPositionPx,
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  inputsRef: MutableRefObject<ViewportPixelReadoutInputs>,
+  publisherRef: MutableRefObject<PixelReadoutPublisher>,
+): void {
+  const snapshot = buildPixelReadoutSnapshotForCursorOrNull(cursor, rendererRef.current, inputsRef.current);
+  publisherRef.current(snapshot);
+}
+
+function buildPixelReadoutSnapshotForCursorOrNull(
+  cursor: CanvasCursorPositionPx,
+  renderer: ViewportRenderer | null,
+  inputs: ViewportPixelReadoutInputs,
+): ViewportPixelReadoutSnapshot | null {
+  if (!renderer || !inputs.imageSource || inputs.viewportNumber === null) return null;
+  const imagePixel = renderer.getImagePixelAtCanvasPoint(cursor.xPx, cursor.yPx);
+  if (!imagePixel) return null;
+  return {
+    viewportNumber: inputs.viewportNumber,
+    imagePixelX: imagePixel.x,
+    imagePixelY: imagePixel.y,
+    selectedBandIndex: inputs.selectedBandIndex,
+    bands: readPixelReadoutBandsAtImagePointOrNull(inputs.imageSource, imagePixel.x, imagePixel.y),
+    bandCount: countSourceBandsForReadout(inputs.imageSource),
+  };
+}
+
+function countSourceBandsForReadout(source: ViewportImageSource): number {
+  if (source.kind === "raster") return source.raster.bandCount;
+  return 0;
 }

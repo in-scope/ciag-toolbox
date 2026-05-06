@@ -39,6 +39,10 @@ import {
   type ViewportSize,
 } from "./view-transform";
 import {
+  convertCanvasPixelToImagePixelOrNull,
+  type ImagePixelPoint,
+} from "./canvas-to-image-pixel";
+import {
   IDENTITY_RGB_CHANNEL_EXTENTS,
   computeImageRgbChannelExtents,
   type RgbChannelExtents,
@@ -207,6 +211,18 @@ export class ViewportRenderer {
   resetView(): void {
     this.resetViewState();
     this.draw();
+  }
+
+  getImagePixelAtCanvasPoint(xPx: number, yPx: number): ImagePixelPoint | null {
+    if (!this.currentSource) return null;
+    return convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: xPx, y: yPx },
+      displaySize: this.displaySize,
+      imageSize: this.imageSize,
+      fitScale: computeFitToViewportScale(this.imageSize, this.displaySize),
+      userZoom: this.userZoom,
+      userPan: this.userPan,
+    });
   }
 
   dispose(): void {
