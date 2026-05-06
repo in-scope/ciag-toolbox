@@ -18,6 +18,21 @@ type ToolboxOpenImageDialogResult =
       sidecar?: ToolboxOpenImageDialogSidecar;
     };
 
+interface ToolboxSaveImageDialogFilter {
+  name: string;
+  extensions: ReadonlyArray<string>;
+}
+
+interface ToolboxSaveImageDialogRequest {
+  suggestedFileName: string;
+  bytes: Uint8Array;
+  fileFilter: ToolboxSaveImageDialogFilter;
+}
+
+type ToolboxSaveImageDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
 type ToolboxThemeMode = "system" | "light" | "dark";
 
 interface ToolboxThemeSnapshot {
@@ -52,7 +67,13 @@ interface ToolboxApi {
   };
   getAppInfo: () => Promise<ToolboxAppInfo>;
   openImageDialog: () => Promise<ToolboxOpenImageDialogResult>;
+  saveImageDialog: (
+    request: ToolboxSaveImageDialogRequest,
+  ) => Promise<ToolboxSaveImageDialogResult>;
   onMenuOpenImage: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuSaveImage: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuAbout: (

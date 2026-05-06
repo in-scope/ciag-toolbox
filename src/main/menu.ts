@@ -48,11 +48,22 @@ function buildOpenImageMenuItem(
   };
 }
 
+function buildSaveImageMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Image...",
+    accelerator: "CmdOrCtrl+S",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-image"),
+  };
+}
+
 function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
     submenu: [
       buildOpenImageMenuItem(window),
+      buildSaveImageMenuItem(window),
       { type: "separator" },
       isRunningOnMac ? { role: "close" } : { role: "quit" },
     ],

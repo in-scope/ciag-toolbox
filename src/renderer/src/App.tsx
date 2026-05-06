@@ -16,6 +16,7 @@ import {
   OpenImageReplaceTargetPicker,
   type PendingOpenImageReplace,
 } from "@/components/open-image-replace-target-picker";
+import { SaveImageFormatPicker } from "@/components/save-image-format-picker";
 import {
   ToolOptionsPanel,
   type ToolOptionsApplyOptions,
@@ -52,6 +53,8 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
+import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
   findLowestIndexEmptyViewport,
   listOccupiedViewportEntries,
@@ -86,11 +89,17 @@ type SetGridLayout = Dispatch<SetStateAction<GridLayout>>;
 type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateReplace | null>>;
 type SetActiveAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
 type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
+type SetPendingSaveImage = Dispatch<SetStateAction<PendingSaveImageRequest | null>>;
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
 
 interface SingleSelectedSource {
   readonly index: number;
   readonly summary: ToolOptionsSourceViewport;
+}
+
+interface PendingSaveImageRequest {
+  readonly fileName: string;
+  readonly viewportIndex: number;
 }
 
 export function App(): JSX.Element {
@@ -120,6 +129,8 @@ function ApplicationShell(): JSX.Element {
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [pendingOpenImageReplace, setPendingOpenImageReplace] =
     useState<PendingOpenImageReplace | null>(null);
+  const [pendingSaveImage, setPendingSaveImage] =
+    useState<PendingSaveImageRequest | null>(null);
   const {
     selectedIndices,
     pruneSelectionToCellCount,
@@ -148,6 +159,12 @@ function ApplicationShell(): JSX.Element {
   const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
   const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
+  const handleSaveImageRequested = useSaveImageRequestHandler({
+    imagesByIndexRef,
+    selectedIndicesRef: useLatestRef(selectedIndices),
+    setPendingSaveImage,
+  });
+  useMenuSaveImageTriggersHandler(handleSaveImageRequested);
   const applyActionFlowBindings = buildApplyActionFlowBindings({
     gridLayout,
     cellCount,
@@ -218,6 +235,17 @@ function ApplicationShell(): JSX.Element {
             setImagesByIndex,
             setPendingDuplicate,
             applyActionFlowBindings,
+          })
+        }
+      />
+      <SaveImageFormatPicker
+        pending={pendingSaveImage}
+        onCancel={() => setPendingSaveImage(null)}
+        onConfirm={(formatId) =>
+          confirmSaveImageFormatChoice(formatId, pendingSaveImage, {
+            imagesByIndex,
+            renderingApi,
+            setPendingSaveImage,
           })
         }
       />
@@ -302,6 +330,93 @@ function clearSelectionWhenClickIsOutsideAnyCell(
 
 function useMenuOpenImageTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuOpenImage(handler), [handler]);
+}
+
+function useMenuSaveImageTriggersHandler(handler: () => void): void {
+  useEffect(() => window.toolboxApi.onMenuSaveImage(handler), [handler]);
+}
+
+interface SaveImageRequestBindings {
+  imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
+  selectedIndicesRef: MutableRefObject<ReadonlySet<number>>;
+  setPendingSaveImage: SetPendingSaveImage;
+}
+
+function useSaveImageRequestHandler(
+  bindings: SaveImageRequestBindings,
+): () => void {
+  const { imagesByIndexRef, selectedIndicesRef, setPendingSaveImage } = bindings;
+  return useCallback(() => {
+    const candidate = pickSingleSelectedSourceWithContent(
+      selectedIndicesRef.current,
+      imagesByIndexRef.current,
+    );
+    if (!candidate) {
+      toast.info("Select a viewport with a loaded image to save");
+      return;
+    }
+    setPendingSaveImage({ fileName: candidate.fileName, viewportIndex: candidate.index });
+  }, [imagesByIndexRef, selectedIndicesRef, setPendingSaveImage]);
+}
+
+interface SingleSelectedContentSummary {
+  readonly index: number;
+  readonly fileName: string;
+}
+
+function pickSingleSelectedSourceWithContent(
+  selectedIndices: ReadonlySet<number>,
+  imagesByIndex: ImagesByIndexMap,
+): SingleSelectedContentSummary | null {
+  if (selectedIndices.size !== 1) return null;
+  const onlyIndex = readSingleIndexFromSelection(selectedIndices);
+  if (onlyIndex === null) return null;
+  const content = imagesByIndex.get(onlyIndex);
+  if (!content) return null;
+  return { index: onlyIndex, fileName: content.fileName };
+}
+
+interface ConfirmSaveImageBindings {
+  imagesByIndex: ImagesByIndexMap;
+  renderingApi: ViewportRenderingApi;
+  setPendingSaveImage: SetPendingSaveImage;
+}
+
+function confirmSaveImageFormatChoice(
+  formatId: SaveImageFormatId,
+  pending: PendingSaveImageRequest | null,
+  bindings: ConfirmSaveImageBindings,
+): void {
+  bindings.setPendingSaveImage(null);
+  if (!pending) return;
+  const content = bindings.imagesByIndex.get(pending.viewportIndex);
+  if (!content) return;
+  const renderingState = bindings.renderingApi.getRenderingState(pending.viewportIndex);
+  void runSaveImageFlowAndShowToast({
+    source: content.source,
+    selectedBandIndex: renderingState.selectedBandIndex,
+    originalFileName: content.fileName,
+    formatId,
+  });
+}
+
+interface SaveImageFlowToastInput {
+  source: ViewportCellContent["source"];
+  selectedBandIndex: number;
+  originalFileName: string;
+  formatId: SaveImageFormatId;
+}
+
+async function runSaveImageFlowAndShowToast(
+  input: SaveImageFlowToastInput,
+): Promise<void> {
+  try {
+    const result = await runSaveImageFlowThroughMainProcess(input);
+    if (result.canceled) return;
+    toast.success(`Saved to ${result.filePath}`);
+  } catch (error) {
+    toast.error(`Could not save ${input.originalFileName}: ${describeUnknownError(error)}`);
+  }
 }
 
 interface OpenImageBindings {

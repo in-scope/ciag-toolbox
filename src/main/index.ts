@@ -9,6 +9,7 @@ import {
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
+import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -99,6 +100,7 @@ app.whenReady().then(() => {
   initializeThemeControllerFromDisk();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
+  registerSaveImageDialogIpcHandler();
   createMainWindow();
   app.on("activate", reopenWindowOnMacActivate);
 });
