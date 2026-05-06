@@ -1,13 +1,15 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Layers } from "lucide-react";
 
+import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+import { applyBandKeepToRasterImage } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
 import { canonicalizeViewportRoiCorners } from "@/lib/image/viewport-roi";
 import type { IntegerParameterSchema } from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
 import type { ViewportAction, ViewportActionSourceTransform } from "./viewport-action";
-import type { ViewportRenderingState } from "./viewport-action";
+import { EMPTY_REMOVED_BAND_INDEXES, type ViewportRenderingState } from "./viewport-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -153,6 +155,82 @@ function readIntegerParameterOrThrow(
 function formatCropToRegionAppliedLabel(parameterValues: ParameterValuesById): string {
   const canonical = canonicalizeViewportRoiCorners(readRoiFromCropParameterValues(parameterValues));
   return `Crop to (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
+}
+
+const BAND_KEEP_PARAMETER_ID_KEPT_INDEXES = "keptBandIndexes";
+
+export const BAND_KEEP_ACTION: RegisteredViewportAction = {
+  id: "band-keep",
+  label: "Keep Bands",
+  icon: Layers,
+  successMessage: "Band selection applied",
+  appliedLabel: "Keep bands",
+  formatAppliedLabel: formatBandKeepAppliedLabel,
+  apply: clearBandKeepStateAfterApply,
+  transformSource: createBandKeepSourceTransform(),
+};
+
+function clearBandKeepStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+  return {
+    ...state,
+    removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
+    selectedBandIndex: 0,
+    pinnedSpectra: EMPTY_PINNED_SPECTRA,
+  };
+}
+
+function createBandKeepSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Keep Bands only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
+    return { kind: "raster", raster: applyBandKeepToRasterImage(source.raster, keptBandIndexes) };
+  };
+}
+
+export function buildBandKeepParameterValuesFromKeptIndexes(
+  keptBandIndexes: ReadonlyArray<number>,
+): ParameterValuesById {
+  return Object.freeze({
+    [BAND_KEEP_PARAMETER_ID_KEPT_INDEXES]: encodeKeptBandIndexesAsString(keptBandIndexes),
+  });
+}
+
+function readKeptBandIndexesFromParameterValues(
+  parameterValues: ParameterValuesById,
+): ReadonlyArray<number> {
+  const raw = parameterValues[BAND_KEEP_PARAMETER_ID_KEPT_INDEXES];
+  if (typeof raw !== "string") {
+    throw new Error("Keep Bands missing keptBandIndexes parameter.");
+  }
+  return parseKeptBandIndexesFromString(raw);
+}
+
+function encodeKeptBandIndexesAsString(keptBandIndexes: ReadonlyArray<number>): string {
+  return keptBandIndexes.join(",");
+}
+
+function parseKeptBandIndexesFromString(value: string): ReadonlyArray<number> {
+  if (value.length === 0) {
+    throw new Error("Keep Bands keptBandIndexes parameter is empty.");
+  }
+  return value.split(",").map(parseSingleBandIndexOrThrow);
+}
+
+function parseSingleBandIndexOrThrow(token: string): number {
+  const parsed = Number.parseInt(token.trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Keep Bands received invalid band index '${token}'.`);
+  }
+  return parsed;
+}
+
+function formatBandKeepAppliedLabel(parameterValues: ParameterValuesById): string {
+  const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
+  return `Keep bands [${keptBandIndexes.join(", ")}]`;
 }
 
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [

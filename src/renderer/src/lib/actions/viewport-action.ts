@@ -19,7 +19,10 @@ export interface ViewportRenderingState {
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly pinnedSpectra: PinnedSpectraList;
+  readonly removedBandIndexes: ReadonlyArray<number>;
 }
+
+export const EMPTY_REMOVED_BAND_INDEXES: ReadonlyArray<number> = Object.freeze([]);
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
@@ -28,6 +31,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
+  removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
 };
 
 export type ViewportActionSourceTransform = (

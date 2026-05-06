@@ -47,9 +47,12 @@ import {
   type ApplyActionFlowBindings,
 } from "@/lib/actions/apply-action-flow";
 import {
+  BAND_KEEP_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
+  buildBandKeepParameterValuesFromKeptIndexes,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -252,12 +255,13 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
-  const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection(
+  const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
     selectedIndices,
     imagesByIndex,
     renderingApi,
     currentProjectFilePath,
-  );
+    applyActionFlowBindings,
+  });
   useEscapeKeyClearsActiveViewportRoi({
     selectedIndicesRef: useLatestRef(selectedIndices),
     renderingApi,
@@ -1011,16 +1015,27 @@ function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | 
   return null;
 }
 
+interface DeriveRightPanelActiveSourceInputs {
+  readonly selectedIndices: ReadonlySet<number>;
+  readonly imagesByIndex: ImagesByIndexMap;
+  readonly renderingApi: ViewportRenderingApi;
+  readonly currentProjectFilePath: string | null;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
 function deriveRightPanelActiveSourceFromSelection(
-  selectedIndices: ReadonlySet<number>,
-  imagesByIndex: ImagesByIndexMap,
-  renderingApi: ViewportRenderingApi,
-  currentProjectFilePath: string | null,
+  inputs: DeriveRightPanelActiveSourceInputs,
 ): ViewportRightPanelActiveSource | null {
-  const onlyIndex = readSingleSelectedIndexOrNull(selectedIndices);
+  const onlyIndex = readSingleSelectedIndexOrNull(inputs.selectedIndices);
   if (onlyIndex === null) return null;
-  const content = imagesByIndex.get(onlyIndex) ?? null;
-  return buildRightPanelActiveSource(onlyIndex, content, renderingApi, currentProjectFilePath);
+  const content = inputs.imagesByIndex.get(onlyIndex) ?? null;
+  return buildRightPanelActiveSource({
+    viewportIndex: onlyIndex,
+    content,
+    renderingApi: inputs.renderingApi,
+    currentProjectFilePath: inputs.currentProjectFilePath,
+    applyActionFlowBindings: inputs.applyActionFlowBindings,
+  });
 }
 
 function readSingleSelectedIndexOrNull(
@@ -1037,12 +1052,18 @@ function extractRasterFromContentOrNull(
   return content.source.raster;
 }
 
+interface BuildRightPanelActiveSourceInputs {
+  readonly viewportIndex: number;
+  readonly content: ViewportCellContent | null;
+  readonly renderingApi: ViewportRenderingApi;
+  readonly currentProjectFilePath: string | null;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
 function buildRightPanelActiveSource(
-  viewportIndex: number,
-  content: ViewportCellContent | null,
-  renderingApi: ViewportRenderingApi,
-  currentProjectFilePath: string | null,
+  inputs: BuildRightPanelActiveSourceInputs,
 ): ViewportRightPanelActiveSource {
+  const { viewportIndex, content, renderingApi, currentProjectFilePath } = inputs;
   const renderingState = renderingApi.getRenderingState(viewportIndex);
   const raster = extractRasterFromContentOrNull(content);
   return {
@@ -1054,6 +1075,22 @@ function buildRightPanelActiveSource(
       renderingApi.setRenderingState(viewportIndex, {
         ...renderingState,
         selectedBandIndex: bandIndex,
+      }),
+    removedBandIndexes: renderingState.removedBandIndexes,
+    onToggleRemovedBandIndex: (bandIndex) =>
+      renderingApi.setRenderingState(viewportIndex, {
+        ...renderingState,
+        removedBandIndexes: toggleBandIndexInRemovedList(
+          renderingState.removedBandIndexes,
+          bandIndex,
+        ),
+      }),
+    onApplyBandSelection: () =>
+      runApplyBandSelectionForViewport({
+        viewportIndex,
+        raster,
+        renderingState,
+        applyActionFlowBindings: inputs.applyActionFlowBindings,
       }),
     operationHistory: renderingState.operationHistory,
     roi: renderingState.roi,
@@ -1067,6 +1104,49 @@ function buildRightPanelActiveSource(
         pinnedSpectra: removePinnedSpectrumById(renderingState.pinnedSpectra, spectrumId),
       }),
   };
+}
+
+function toggleBandIndexInRemovedList(
+  removedBandIndexes: ReadonlyArray<number>,
+  bandIndex: number,
+): ReadonlyArray<number> {
+  if (removedBandIndexes.includes(bandIndex)) {
+    return removedBandIndexes.filter((existing) => existing !== bandIndex);
+  }
+  return [...removedBandIndexes, bandIndex].sort((a, b) => a - b);
+}
+
+interface ApplyBandSelectionInputs {
+  readonly viewportIndex: number;
+  readonly raster: ViewportRightPanelActiveSource["raster"];
+  readonly renderingState: ViewportRenderingState;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
+function runApplyBandSelectionForViewport(inputs: ApplyBandSelectionInputs): void {
+  const { raster, renderingState } = inputs;
+  if (!raster) {
+    toast.error("Keep Bands requires a raster source.");
+    return;
+  }
+  const keptBandIndexes = listKeptBandIndexesFromRemoved(
+    raster.bandCount,
+    renderingState.removedBandIndexes,
+  );
+  if (keptBandIndexes.length === 0) {
+    toast.error("Keep at least one band before applying.");
+    return;
+  }
+  if (keptBandIndexes.length === raster.bandCount) {
+    toast.info("Uncheck a band to remove it on apply.");
+    return;
+  }
+  applyActionToDuplicateOfSource(
+    BAND_KEEP_ACTION,
+    buildBandKeepParameterValuesFromKeptIndexes(keptBandIndexes),
+    inputs.viewportIndex,
+    inputs.applyActionFlowBindings,
+  );
 }
 
 function buildRoiMeanSpectrumForDisplayOrNull(
