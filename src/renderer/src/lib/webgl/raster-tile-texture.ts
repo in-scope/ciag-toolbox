@@ -3,10 +3,6 @@ import type { RasterTile } from "@/lib/webgl/raster-tile-splitter";
 
 const HALF_FLOAT_COLOR_BUFFER_EXTENSION_NAME = "EXT_color_buffer_half_float";
 
-// WebGL2 swizzle constants (not present in lib.dom.d.ts).
-const GL_TEXTURE_SWIZZLE_G = 0x8e43;
-const GL_TEXTURE_SWIZZLE_B = 0x8e44;
-
 export interface RasterTileTexture {
   readonly texture: WebGLTexture;
   readonly imageSpaceX: number;
@@ -26,7 +22,7 @@ export function createR16FTextureForRasterTile(
   tile: RasterTile,
   raster: RasterImage,
 ): RasterTileTexture {
-  const texture = createR16FTextureBoundForGrayscaleBroadcast(gl, tile.width, tile.height);
+  const texture = createR16FTextureBoundForSingleChannelSampling(gl, tile.width, tile.height);
   const floatPixels = convertRasterTilePixelsToNormalizedFloat32(tile.pixels, raster);
   uploadFloatPixelsToBoundR16FTexture(gl, floatPixels, tile.width, tile.height);
   return {
@@ -38,7 +34,7 @@ export function createR16FTextureForRasterTile(
   };
 }
 
-function createR16FTextureBoundForGrayscaleBroadcast(
+function createR16FTextureBoundForSingleChannelSampling(
   gl: WebGL2RenderingContext,
   width: number,
   height: number,
@@ -47,7 +43,6 @@ function createR16FTextureBoundForGrayscaleBroadcast(
   if (!texture) throw new Error("Failed to create R16F WebGL texture");
   gl.bindTexture(gl.TEXTURE_2D, texture);
   configureR16FTextureSamplingParameters(gl);
-  configureSingleChannelToGrayscaleSwizzle(gl);
   reserveR16FTextureStorage(gl, width, height);
   return texture;
 }
@@ -57,11 +52,6 @@ function configureR16FTextureSamplingParameters(gl: WebGL2RenderingContext): voi
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-}
-
-function configureSingleChannelToGrayscaleSwizzle(gl: WebGL2RenderingContext): void {
-  gl.texParameteri(gl.TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, gl.RED);
-  gl.texParameteri(gl.TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, gl.RED);
 }
 
 function reserveR16FTextureStorage(

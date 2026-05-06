@@ -74,9 +74,14 @@ interface NormalizationUniformLocations {
   maxColor: WebGLUniformLocation | null;
 }
 
+interface BandModeUniformLocations {
+  isSingleBand: WebGLUniformLocation | null;
+}
+
 interface ProgramUniformLocations {
   quadTransform: QuadTransformUniformLocations;
   normalization: NormalizationUniformLocations;
+  bandMode: BandModeUniformLocations;
 }
 
 interface RendererProgramResources {
@@ -91,6 +96,11 @@ interface NormalizationState {
   extents: RgbChannelExtents;
 }
 
+interface RenderPassState {
+  readonly normalization: NormalizationState;
+  readonly isSingleBand: boolean;
+}
+
 export interface ViewportRendererOptions {
   readonly onError?: (message: string) => void;
 }
@@ -101,6 +111,7 @@ export class ViewportRenderer {
   private singleTexture: WebGLTexture | null = null;
   private rasterTileTextures: RasterTileTexture[] = [];
   private currentSource: ViewportImageSource | null = null;
+  private isSingleBandSource = false;
   private displaySize: ViewportSize = FALLBACK_SIZE;
   private imageSize: ViewportSize = FALLBACK_SIZE;
   private userZoom = INITIAL_USER_ZOOM;
@@ -125,6 +136,7 @@ export class ViewportRenderer {
   setImageSource(source: ViewportImageSource): void {
     this.currentSource = source;
     this.imageSize = getImageSourceDimensions(source);
+    this.isSingleBandSource = isSingleBandImageSource(source);
     this.cacheNormalizationExtentsForSource(source);
     this.resetViewState();
     this.uploadCurrentSourceIfReady();
@@ -270,19 +282,25 @@ export class ViewportRenderer {
     if (!gl || !programResources) return;
     clearCanvasToTransparentBlack(gl);
     const transform = this.computeCurrentQuadTransform();
+    const renderState = this.snapshotCurrentRenderState();
     if (this.singleTexture) {
-      drawSingleTextureWithTransform(gl, programResources, this.singleTexture, transform, this.normalization);
+      drawSingleTextureWithTransform(gl, programResources, this.singleTexture, transform, renderState);
       return;
     }
     if (this.rasterTileTextures.length > 0) {
-      this.drawRasterTilesWithPerTileTransforms(gl, programResources, transform);
+      this.drawRasterTilesWithPerTileTransforms(gl, programResources, transform, renderState);
     }
+  }
+
+  private snapshotCurrentRenderState(): RenderPassState {
+    return { normalization: this.normalization, isSingleBand: this.isSingleBandSource };
   }
 
   private drawRasterTilesWithPerTileTransforms(
     gl: WebGL2RenderingContext,
     programResources: RendererProgramResources,
     globalTransform: QuadTransform,
+    renderState: RenderPassState,
   ): void {
     for (const tile of this.rasterTileTextures) {
       const tileTransform = composeTileQuadTransform(globalTransform, tile, this.imageSize);
@@ -291,7 +309,7 @@ export class ViewportRenderer {
         programResources,
         tile.texture,
         tileTransform,
-        this.normalization,
+        renderState,
       );
     }
   }
@@ -356,16 +374,30 @@ function drawSingleTextureWithTransform(
   resources: RendererProgramResources,
   texture: WebGLTexture,
   transform: QuadTransform,
-  normalization: NormalizationState,
+  renderState: RenderPassState,
 ): void {
   gl.useProgram(resources.program);
   applyQuadTransformUniforms(gl, resources.uniforms.quadTransform, transform);
-  applyNormalizationUniforms(gl, resources.uniforms.normalization, normalization);
+  applyNormalizationUniforms(gl, resources.uniforms.normalization, renderState.normalization);
+  applyBandModeUniforms(gl, resources.uniforms.bandMode, renderState.isSingleBand);
   gl.bindVertexArray(resources.vao);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
+}
+
+function applyBandModeUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: BandModeUniformLocations,
+  isSingleBand: boolean,
+): void {
+  if (uniforms.isSingleBand === null) return;
+  gl.uniform1i(uniforms.isSingleBand, isSingleBand ? 1 : 0);
+}
+
+function isSingleBandImageSource(source: ViewportImageSource): boolean {
+  return source.kind === "raster" && source.raster.bandCount === 1;
 }
 
 function applyQuadTransformUniforms(
@@ -424,6 +456,16 @@ function lookUpProgramUniformLocations(
   return {
     quadTransform: lookUpQuadTransformUniformLocations(gl, program),
     normalization: lookUpNormalizationUniformLocations(gl, program),
+    bandMode: lookUpBandModeUniformLocations(gl, program),
+  };
+}
+
+function lookUpBandModeUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): BandModeUniformLocations {
+  return {
+    isSingleBand: gl.getUniformLocation(program, "u_isSingleBand"),
   };
 }
 
