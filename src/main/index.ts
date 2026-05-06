@@ -9,7 +9,9 @@ import {
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
+import { registerOpenProjectDialogIpcHandlers } from "./open-project-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
+import { registerSaveProjectDialogIpcHandler } from "./save-project-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -101,6 +103,8 @@ app.whenReady().then(() => {
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerSaveImageDialogIpcHandler();
+  registerOpenProjectDialogIpcHandlers();
+  registerSaveProjectDialogIpcHandler();
   createMainWindow();
   app.on("activate", reopenWindowOnMacActivate);
 });

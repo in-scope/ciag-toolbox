@@ -17,6 +17,7 @@ export type OpenImageDialogResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      contentHash: string;
       sidecar?: OpenImageDialogSidecar;
     };
 
@@ -41,6 +42,82 @@ export type SaveImageDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
+export interface SaveProjectDraftViewportSource {
+  absolutePath: string;
+  contentHash: string;
+  fileName: string;
+}
+
+export interface SaveProjectDraftViewportRenderingState {
+  normalizationEnabled: boolean;
+  selectedBandIndex: number;
+  lastAppliedOperationLabel: string | null;
+}
+
+export interface SaveProjectDraftViewportEntry {
+  index: number;
+  source: SaveProjectDraftViewportSource;
+  renderingState: SaveProjectDraftViewportRenderingState;
+}
+
+export interface SaveProjectDraft {
+  formatVersion: number;
+  gridLayout: string;
+  selectedViewportIndices: ReadonlyArray<number>;
+  viewports: ReadonlyArray<SaveProjectDraftViewportEntry>;
+}
+
+export interface SaveProjectDialogRequest {
+  draft: SaveProjectDraft;
+  currentProjectFilePath: string | null;
+  saveAs: boolean;
+}
+
+export type SaveProjectDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
+export type OpenProjectDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string; bytes: Uint8Array };
+
+export interface ResolveProjectSourceRequest {
+  projectFilePath: string;
+  relativePath: string;
+}
+
+export interface ResolveProjectSourceSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export type ResolveProjectSourceResult =
+  | { kind: "missing" }
+  | {
+      kind: "found";
+      absolutePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+      contentHash: string;
+      sidecar?: ResolveProjectSourceSidecar;
+    };
+
+export interface LocateMissingProjectSourceRequest {
+  originalFileName: string;
+  defaultDir: string | null;
+}
+
+export type LocateMissingProjectSourceResult =
+  | { kind: "canceled" }
+  | {
+      kind: "picked";
+      absolutePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+      contentHash: string;
+      sidecar?: ResolveProjectSourceSidecar;
+    };
+
 export type ThemeMode = "system" | "light" | "dark";
 
 export interface ThemeSnapshot {
@@ -56,8 +133,15 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
+const OPEN_PROJECT_DIALOG_CHANNEL = "project:open-dialog";
+const SAVE_PROJECT_DIALOG_CHANNEL = "project:save-dialog";
+const RESOLVE_PROJECT_SOURCE_CHANNEL = "project:resolve-source";
+const LOCATE_MISSING_PROJECT_SOURCE_CHANNEL = "project:locate-missing-source";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
+const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
+const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
+const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -81,6 +165,39 @@ function showSaveImageDialogThroughMainProcess(
   ) as Promise<SaveImageDialogResult>;
 }
 
+function showOpenProjectDialogThroughMainProcess(): Promise<OpenProjectDialogResult> {
+  return ipcRenderer.invoke(
+    OPEN_PROJECT_DIALOG_CHANNEL,
+  ) as Promise<OpenProjectDialogResult>;
+}
+
+function showSaveProjectDialogThroughMainProcess(
+  request: SaveProjectDialogRequest,
+): Promise<SaveProjectDialogResult> {
+  return ipcRenderer.invoke(
+    SAVE_PROJECT_DIALOG_CHANNEL,
+    request,
+  ) as Promise<SaveProjectDialogResult>;
+}
+
+function resolveProjectSourceThroughMainProcess(
+  request: ResolveProjectSourceRequest,
+): Promise<ResolveProjectSourceResult> {
+  return ipcRenderer.invoke(
+    RESOLVE_PROJECT_SOURCE_CHANNEL,
+    request,
+  ) as Promise<ResolveProjectSourceResult>;
+}
+
+function locateMissingProjectSourceThroughMainProcess(
+  request: LocateMissingProjectSourceRequest,
+): Promise<LocateMissingProjectSourceResult> {
+  return ipcRenderer.invoke(
+    LOCATE_MISSING_PROJECT_SOURCE_CHANNEL,
+    request,
+  ) as Promise<LocateMissingProjectSourceResult>;
+}
+
 function subscribeToMenuChannel(
   channel: string,
   listener: MenuEventListener,
@@ -100,6 +217,24 @@ function subscribeToSaveImageMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
   return subscribeToMenuChannel(MENU_SAVE_IMAGE_CHANNEL, listener);
+}
+
+function subscribeToOpenProjectMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_OPEN_PROJECT_CHANNEL, listener);
+}
+
+function subscribeToSaveProjectMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_PROJECT_CHANNEL, listener);
+}
+
+function subscribeToSaveProjectAsMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_PROJECT_AS_CHANNEL, listener);
 }
 
 function subscribeToAboutMenuEvent(
@@ -133,8 +268,15 @@ const apiBridge = {
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
+  openProjectDialog: showOpenProjectDialogThroughMainProcess,
+  saveProjectDialog: showSaveProjectDialogThroughMainProcess,
+  resolveProjectSource: resolveProjectSourceThroughMainProcess,
+  locateMissingProjectSource: locateMissingProjectSourceThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
+  onMenuOpenProject: subscribeToOpenProjectMenuEvent,
+  onMenuSaveProject: subscribeToSaveProjectMenuEvent,
+  onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,

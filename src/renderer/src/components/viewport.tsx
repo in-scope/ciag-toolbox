@@ -12,6 +12,7 @@ import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
   fileName?: string | null;
+  unresolvedFileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
   selectedBandIndex: number;
@@ -38,9 +39,12 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        unresolvedFileName={props.unresolvedFileName ?? null}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
         onClose={props.onClose ?? null}
-        showCloseButton={imageSource !== null && Boolean(props.onClose)}
+        showCloseButton={
+          (imageSource !== null || Boolean(props.unresolvedFileName)) && Boolean(props.onClose)
+        }
       />
       <div className="relative min-h-0 flex-1">
         <canvas
@@ -48,10 +52,30 @@ export function Viewport(props: ViewportProps): JSX.Element {
           className="block h-full w-full touch-none select-none"
           aria-label={viewportAriaLabel}
         />
-        {imageSource === null ? (
-          <ViewportEmptyState onOpenImage={props.onOpenImage} />
-        ) : null}
+        {renderViewportEmptyOrUnresolved(imageSource, props)}
       </div>
+    </div>
+  );
+}
+
+function renderViewportEmptyOrUnresolved(
+  imageSource: ViewportImageSource | null,
+  props: ViewportProps,
+): JSX.Element | null {
+  if (imageSource !== null) return null;
+  if (props.unresolvedFileName) {
+    return <ViewportUnresolvedState fileName={props.unresolvedFileName} />;
+  }
+  return <ViewportEmptyState onOpenImage={props.onOpenImage} />;
+}
+
+function ViewportUnresolvedState({ fileName }: { fileName: string }): JSX.Element {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-card">
+      <span className="rounded border border-destructive bg-card px-2 py-0.5 text-xs font-medium text-destructive">
+        Unresolved
+      </span>
+      <p className="px-3 text-center text-xs text-muted-foreground">{fileName}</p>
     </div>
   );
 }
@@ -76,6 +100,7 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  unresolvedFileName: string | null;
   lastAppliedOperationLabel: string | null;
   onClose: (() => void) | null;
   showCloseButton: boolean;
@@ -90,6 +115,7 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
       {props.fileName ? (
         <ViewportFileNameLabel
           fileName={props.fileName}
+          isUnresolved={Boolean(props.unresolvedFileName)}
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
@@ -136,13 +162,17 @@ function formatCloseButtonLabel(viewportNumber: number | null): string {
 
 interface ViewportFileNameLabelProps {
   fileName: string;
+  isUnresolved: boolean;
   lastAppliedOperationLabel: string | null;
 }
 
 function ViewportFileNameLabel(props: ViewportFileNameLabelProps): JSX.Element {
   const display = formatViewportHeaderLabel(props.fileName, props.lastAppliedOperationLabel);
+  const className = props.isUnresolved
+    ? "truncate font-medium italic text-muted-foreground"
+    : "truncate font-medium text-foreground";
   return (
-    <span className="truncate font-medium text-foreground" title={display}>
+    <span className={className} title={display}>
       {display}
     </span>
   );

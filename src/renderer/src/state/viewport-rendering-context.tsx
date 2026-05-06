@@ -20,6 +20,7 @@ export type ViewportRenderingByIndex = ReadonlyMap<number, ViewportRenderingStat
 export interface ViewportRenderingApi {
   getRenderingState: (viewportIndex: number) => ViewportRenderingState;
   setRenderingState: (viewportIndex: number, next: ViewportRenderingState) => void;
+  replaceAllRenderingStates: (next: ViewportRenderingByIndex) => void;
   pruneRenderingStateToCellCount: (cellCount: number) => void;
   compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
 }
@@ -56,6 +57,7 @@ function useViewportRenderingInternalState(): ViewportRenderingApi {
     useState<ViewportRenderingByIndex>(EMPTY_RENDERING_MAP);
   const getRenderingState = useGetRenderingStateCallback(renderingByIndex);
   const setRenderingState = useSetRenderingStateCallback(setRenderingByIndex);
+  const replaceAllRenderingStates = useReplaceAllRenderingStatesCallback(setRenderingByIndex);
   const pruneRenderingStateToCellCount = usePruneRenderingStateCallback(setRenderingByIndex);
   const compactRenderingStateAfterRemovingIndex =
     useCompactRenderingStateCallback(setRenderingByIndex);
@@ -63,15 +65,26 @@ function useViewportRenderingInternalState(): ViewportRenderingApi {
     () => ({
       getRenderingState,
       setRenderingState,
+      replaceAllRenderingStates,
       pruneRenderingStateToCellCount,
       compactRenderingStateAfterRemovingIndex,
     }),
     [
       getRenderingState,
       setRenderingState,
+      replaceAllRenderingStates,
       pruneRenderingStateToCellCount,
       compactRenderingStateAfterRemovingIndex,
     ],
+  );
+}
+
+function useReplaceAllRenderingStatesCallback(
+  setRenderingByIndex: ViewportRenderingSetter,
+): ViewportRenderingApi["replaceAllRenderingStates"] {
+  return useCallback(
+    (next) => setRenderingByIndex(next),
+    [setRenderingByIndex],
   );
 }
 

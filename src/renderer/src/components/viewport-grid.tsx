@@ -26,44 +26,43 @@ import {
 export interface ViewportCellContent {
   fileName: string;
   source: ViewportImageSource;
+  originalFilePath?: string;
+  originalContentHash?: string;
 }
 
 interface ViewportGridProps {
   layout: GridLayout;
   cellsByIndex: ReadonlyMap<number, ViewportCellContent>;
+  unresolvedFileNamesByIndex?: ReadonlyMap<number, string>;
   onOpenImage: () => void;
 }
 
-export function ViewportGrid({
-  layout,
-  cellsByIndex,
-  onOpenImage,
-}: ViewportGridProps): JSX.Element {
-  const cellCount = getGridLayoutCellCount(layout);
-  const trackClasses = getGridLayoutTailwindTrackClasses(layout);
+export function ViewportGrid(props: ViewportGridProps): JSX.Element {
+  const cellCount = getGridLayoutCellCount(props.layout);
+  const trackClasses = getGridLayoutTailwindTrackClasses(props.layout);
   return (
     <div
       role="grid"
       aria-label="Viewport grid"
       className={cn("grid h-full w-full gap-2", trackClasses)}
     >
-      {renderViewportCells(cellCount, cellsByIndex, onOpenImage)}
+      {renderViewportCells(cellCount, props)}
     </div>
   );
 }
 
 function renderViewportCells(
   cellCount: number,
-  cellsByIndex: ReadonlyMap<number, ViewportCellContent>,
-  onOpenImage: () => void,
+  props: ViewportGridProps,
 ): ReadonlyArray<JSX.Element> {
   return Array.from({ length: cellCount }, (_, cellIndex) => (
     <ViewportCell
       key={cellIndex}
       cellIndex={cellIndex}
       viewportNumber={getViewportNumberFromIndex(cellIndex)}
-      content={cellsByIndex.get(cellIndex) ?? null}
-      onOpenImage={onOpenImage}
+      content={props.cellsByIndex.get(cellIndex) ?? null}
+      unresolvedFileName={props.unresolvedFileNamesByIndex?.get(cellIndex) ?? null}
+      onOpenImage={props.onOpenImage}
     />
   ));
 }
@@ -72,6 +71,7 @@ interface ViewportCellProps {
   cellIndex: number;
   viewportNumber: number;
   content: ViewportCellContent | null;
+  unresolvedFileName: string | null;
   onOpenImage: () => void;
 }
 
@@ -114,7 +114,8 @@ function renderViewportCellViewport(
     <Viewport
       viewportNumber={props.viewportNumber}
       imageSource={props.content?.source ?? null}
-      fileName={props.content?.fileName ?? null}
+      fileName={props.content?.fileName ?? props.unresolvedFileName ?? null}
+      unresolvedFileName={props.unresolvedFileName}
       normalizationEnabled={settings.normalizationEnabled}
       selectedBandIndex={settings.selectedBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
