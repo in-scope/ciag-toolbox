@@ -340,7 +340,14 @@ function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Pr
 async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void> {
   const result = await invokeOpenImageDialogSafely();
   if (!result || result.canceled) return;
-  await tryDecodeAndRouteImage(result.fileName, result.bytes, bindings);
+  await tryDecodeAndRouteImage(
+    {
+      fileName: result.fileName,
+      bytes: result.bytes,
+      sidecarBytes: result.sidecar?.bytes,
+    },
+    bindings,
+  );
 }
 
 async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResult | null> {
@@ -353,15 +360,14 @@ async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResu
 }
 
 async function tryDecodeAndRouteImage(
-  fileName: string,
-  bytes: Uint8Array,
+  bundle: { fileName: string; bytes: Uint8Array; sidecarBytes?: Uint8Array },
   bindings: OpenImageBindings,
 ): Promise<void> {
   try {
-    const source = await decodeImageBytesToViewportSource(fileName, bytes);
-    routeDecodedImageToTargetViewport({ fileName, source }, bindings);
+    const source = await decodeImageBytesToViewportSource(bundle);
+    routeDecodedImageToTargetViewport({ fileName: bundle.fileName, source }, bindings);
   } catch (error) {
-    toast.error(`Could not open ${fileName}: ${describeUnknownError(error)}`);
+    toast.error(`Could not open ${bundle.fileName}: ${describeUnknownError(error)}`);
   }
 }
 
