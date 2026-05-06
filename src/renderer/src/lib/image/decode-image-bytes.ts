@@ -1,4 +1,5 @@
 import { loadEnviAsRaster } from "@/lib/image/load-envi";
+import { loadRawAsRaster } from "@/lib/image/load-raw";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -8,11 +9,25 @@ export interface OpenedImageBundle {
   readonly sidecarBytes?: Uint8Array;
 }
 
+const RAW_CAMERA_FILE_EXTENSIONS: ReadonlyArray<string> = [
+  ".dng",
+  ".cr3",
+  ".arw",
+  ".nef",
+  ".raf",
+  ".orf",
+  ".pef",
+  ".rw2",
+];
+
 export async function decodeImageBytesToViewportSource(
   bundle: OpenedImageBundle,
 ): Promise<ViewportImageSource> {
   if (looksLikeEnviHeaderFileName(bundle.fileName)) {
     return decodeEnviHeaderAndBinaryAsRasterSource(bundle);
+  }
+  if (looksLikeRawCameraFileName(bundle.fileName)) {
+    return decodeRawCameraBytesAsRasterSource(bundle.bytes);
   }
   if (looksLikeTiffFileName(bundle.fileName) || looksLikeTiffByteHeader(bundle.bytes)) {
     return decodeTiffBytesAsRasterSource(bundle.bytes);
@@ -39,6 +54,13 @@ async function decodeTiffBytesAsRasterSource(
   return { kind: "raster", raster };
 }
 
+async function decodeRawCameraBytesAsRasterSource(
+  bytes: Uint8Array,
+): Promise<ViewportImageSource> {
+  const raster = await loadRawAsRaster(bytes);
+  return { kind: "raster", raster };
+}
+
 async function decodeBrowserImageBytesAsBitmapSource(
   bytes: Uint8Array,
 ): Promise<ViewportImageSource> {
@@ -54,6 +76,11 @@ function looksLikeEnviHeaderFileName(fileName: string): boolean {
 function looksLikeTiffFileName(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return lower.endsWith(".tif") || lower.endsWith(".tiff");
+}
+
+function looksLikeRawCameraFileName(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return RAW_CAMERA_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
 function looksLikeTiffByteHeader(bytes: Uint8Array): boolean {
