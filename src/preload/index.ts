@@ -20,6 +20,21 @@ export type OpenImageDialogResult =
       sidecar?: OpenImageDialogSidecar;
     };
 
+export interface SaveImageDialogFilter {
+  name: string;
+  extensions: ReadonlyArray<string>;
+}
+
+export interface SaveImageDialogRequest {
+  suggestedFileName: string;
+  bytes: Uint8Array;
+  fileFilter: SaveImageDialogFilter;
+}
+
+export type SaveImageDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
 export type ThemeMode = "system" | "light" | "dark";
 
 export interface ThemeSnapshot {
@@ -34,7 +49,9 @@ export type UnsubscribeThemeListener = () => void;
 
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
+const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
+const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -47,6 +64,15 @@ function showOpenImageDialogThroughMainProcess(): Promise<OpenImageDialogResult>
   return ipcRenderer.invoke(
     OPEN_IMAGE_DIALOG_CHANNEL,
   ) as Promise<OpenImageDialogResult>;
+}
+
+function showSaveImageDialogThroughMainProcess(
+  request: SaveImageDialogRequest,
+): Promise<SaveImageDialogResult> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_DIALOG_CHANNEL,
+    request,
+  ) as Promise<SaveImageDialogResult>;
 }
 
 function subscribeToMenuChannel(
@@ -62,6 +88,12 @@ function subscribeToOpenImageMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
   return subscribeToMenuChannel(MENU_OPEN_IMAGE_CHANNEL, listener);
+}
+
+function subscribeToSaveImageMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_IMAGE_CHANNEL, listener);
 }
 
 function subscribeToAboutMenuEvent(
@@ -94,7 +126,9 @@ const apiBridge = {
   },
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
+  saveImageDialog: showSaveImageDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
+  onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
