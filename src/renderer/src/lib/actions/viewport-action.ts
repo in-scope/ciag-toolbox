@@ -1,3 +1,9 @@
+import {
+  NO_PARAMETER_VALUES,
+  type ParameterSchema,
+  type ParameterValuesById,
+} from "./parameter-schema";
+
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
   readonly lastAppliedOperationLabel: string | null;
@@ -13,7 +19,11 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
 export interface ViewportAction {
   readonly id: string;
   readonly label: string;
-  readonly apply: (viewportState: ViewportRenderingState) => ViewportRenderingState;
+  readonly parameters?: ReadonlyArray<ParameterSchema>;
+  readonly apply: (
+    viewportState: ViewportRenderingState,
+    parameterValues: ParameterValuesById,
+  ) => ViewportRenderingState;
 }
 
 export interface ApplyActionFailure {
@@ -29,23 +39,25 @@ export interface ApplyActionCallbacks {
 
 export function applyActionToSelectedViewports(
   action: ViewportAction,
+  parameterValues: ParameterValuesById,
   selectedIndices: ReadonlySet<number>,
   callbacks: ApplyActionCallbacks,
 ): void {
   if (selectedIndices.size === 0) return;
   for (const viewportIndex of sortIndicesAscending(selectedIndices)) {
-    applyActionToSingleViewport(action, viewportIndex, callbacks);
+    applyActionToSingleViewport(action, parameterValues, viewportIndex, callbacks);
   }
 }
 
 function applyActionToSingleViewport(
   action: ViewportAction,
+  parameterValues: ParameterValuesById,
   viewportIndex: number,
   callbacks: ApplyActionCallbacks,
 ): void {
   try {
     const previous = callbacks.getViewportRenderingState(viewportIndex);
-    const next = action.apply(previous);
+    const next = action.apply(previous, parameterValues);
     callbacks.setViewportRenderingState(viewportIndex, next);
   } catch (error) {
     callbacks.reportApplyFailure({ viewportIndex, error });
@@ -55,3 +67,5 @@ function applyActionToSingleViewport(
 function sortIndicesAscending(indices: ReadonlySet<number>): readonly number[] {
   return Array.from(indices).sort((a, b) => a - b);
 }
+
+export { NO_PARAMETER_VALUES };
