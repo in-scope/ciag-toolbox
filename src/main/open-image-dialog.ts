@@ -15,7 +15,7 @@ const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 
 const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   name: "Images",
-  extensions: ["png", "jpg", "jpeg"],
+  extensions: ["png", "jpg", "jpeg", "tif", "tiff"],
 };
 
 async function showImageOpenDialog(
