@@ -281,6 +281,8 @@ function ApplicationShell(): JSX.Element {
     setGridLayout,
     setImagesByIndex,
     setPendingDuplicate,
+    getRenderingState: renderingApi.getRenderingState,
+    setRenderingState: renderingApi.setRenderingState,
   });
   const closingApi = useViewportClosingApi({
     imagesByIndex,
@@ -775,6 +777,8 @@ interface ViewportDuplicationApiBindings {
   setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
+  getRenderingState: ViewportRenderingApi["getRenderingState"];
+  setRenderingState: ViewportRenderingApi["setRenderingState"];
 }
 
 function useViewportDuplicationApi(
@@ -787,6 +791,8 @@ function useViewportDuplicationApi(
     setGridLayout,
     setImagesByIndex,
     setPendingDuplicate,
+    getRenderingState,
+    setRenderingState,
   } = bindings;
   return useMemo(
     () =>
@@ -797,8 +803,19 @@ function useViewportDuplicationApi(
         setGridLayout,
         setImagesByIndex,
         setPendingDuplicate,
+        getRenderingState,
+        setRenderingState,
       }),
-    [gridLayout, cellCount, imagesByIndex, setGridLayout, setImagesByIndex, setPendingDuplicate],
+    [
+      gridLayout,
+      cellCount,
+      imagesByIndex,
+      setGridLayout,
+      setImagesByIndex,
+      setPendingDuplicate,
+      getRenderingState,
+      setRenderingState,
+    ],
   );
 }
 
@@ -817,40 +834,50 @@ function routeDuplicateRequest(
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
-  if (placeDuplicateInExistingEmptyViewport(bindings, sourceContent)) return;
-  if (placeDuplicateByExpandingGrid(bindings, sourceContent)) return;
+  if (placeDuplicateInExistingEmptyViewport(bindings, sourceContent, sourceIndex)) return;
+  if (placeDuplicateByExpandingGrid(bindings, sourceContent, sourceIndex)) return;
   bindings.setPendingDuplicate({ sourceIndex, sourceContent });
 }
 
 function placeDuplicateInExistingEmptyViewport(
   bindings: ViewportDuplicationApiBindings,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
 ): boolean {
   const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
   if (emptyIndex === null) return false;
-  void applyDuplicateToTargetIndex(sourceContent, emptyIndex, bindings.setImagesByIndex);
+  void applyDuplicateToTargetIndex(sourceContent, sourceIndex, emptyIndex, bindings);
   return true;
 }
 
 function placeDuplicateByExpandingGrid(
   bindings: ViewportDuplicationApiBindings,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
 ): boolean {
   const expandedLayout = getNextLargerGridLayout(bindings.gridLayout);
   if (expandedLayout === null) return false;
   const newCellIndex = bindings.cellCount;
   bindings.setGridLayout(expandedLayout);
-  void applyDuplicateToTargetIndex(sourceContent, newCellIndex, bindings.setImagesByIndex);
+  void applyDuplicateToTargetIndex(sourceContent, sourceIndex, newCellIndex, bindings);
   return true;
+}
+
+interface DuplicateTargetBindings {
+  setImagesByIndex: SetImagesByIndex;
+  getRenderingState: ViewportRenderingApi["getRenderingState"];
+  setRenderingState: ViewportRenderingApi["setRenderingState"];
 }
 
 async function applyDuplicateToTargetIndex(
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   targetIndex: number,
-  setImagesByIndex: SetImagesByIndex,
+  bindings: DuplicateTargetBindings,
 ): Promise<void> {
   try {
-    await placeClonedSourceContentAtIndex(sourceContent, targetIndex, setImagesByIndex);
+    await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
+    bindings.setRenderingState(targetIndex, bindings.getRenderingState(sourceIndex));
     toast.success(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
   } catch (error) {
     toast.error(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
@@ -880,12 +907,17 @@ function confirmPendingDuplicateReplaceAtTargetIndex(
       pending.postDuplicateAction.action,
       pending.postDuplicateAction.parameterValues,
       pending.sourceContent,
+      pending.sourceIndex,
       targetIndex,
       bindings.applyActionFlowBindings,
     );
     return;
   }
-  void applyDuplicateToTargetIndex(pending.sourceContent, targetIndex, bindings.setImagesByIndex);
+  void applyDuplicateToTargetIndex(pending.sourceContent, pending.sourceIndex, targetIndex, {
+    setImagesByIndex: bindings.setImagesByIndex,
+    getRenderingState: bindings.applyActionFlowBindings.getRenderingState,
+    setRenderingState: bindings.applyActionFlowBindings.setRenderingState,
+  });
 }
 
 function buildDuplicateReplaceTargetEntries(

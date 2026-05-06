@@ -34,7 +34,13 @@ export function applyActionInPlaceAtSourceIndex(
 ): void {
   try {
     replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
-    writeAppliedRenderingStateAtIndex(action, parameterValues, sourceIndex, bindings);
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      sourceIndex,
+      bindings,
+    );
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
@@ -56,16 +62,17 @@ function replaceSourceAtIndexWhenActionTransformsSource(
   );
 }
 
-function writeAppliedRenderingStateAtIndex(
+function writeAppliedRenderingStateInheritingFromSource(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
-  index: number,
+  sourceIndex: number,
+  targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
-  const previous = bindings.getRenderingState(index);
+  const inherited = bindings.getRenderingState(sourceIndex);
   bindings.setRenderingState(
-    index,
-    applyActionAndTagOperationLabel(action, parameterValues, previous),
+    targetIndex,
+    applyActionAndTagOperationLabel(action, parameterValues, inherited),
   );
 }
 
@@ -104,8 +111,8 @@ export function applyActionToDuplicateOfSource(
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
-  if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, bindings)) return;
-  if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, bindings)) return;
+  if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
+  if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   bindings.setPendingDuplicate({
     sourceIndex,
     sourceContent,
@@ -117,11 +124,12 @@ function tryDuplicateAndApplyInEmptyViewport(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
   const empty = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
   if (empty === null) return false;
-  void runDuplicateAndApplyAtTargetIndex(action, parameterValues, sourceContent, empty, bindings);
+  void runDuplicateAndApplyAtTargetIndex(action, parameterValues, sourceContent, sourceIndex, empty, bindings);
   return true;
 }
 
@@ -129,6 +137,7 @@ function tryDuplicateAndApplyByExpandingGrid(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
   const expanded = getNextLargerGridLayout(bindings.gridLayout);
@@ -139,6 +148,7 @@ function tryDuplicateAndApplyByExpandingGrid(
     action,
     parameterValues,
     sourceContent,
+    sourceIndex,
     newIndex,
     bindings,
   );
@@ -149,6 +159,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
@@ -164,7 +175,13 @@ export async function runDuplicateAndApplyAtTargetIndex(
     } else {
       await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
     }
-    writeAppliedRenderingStateAtIndex(action, parameterValues, targetIndex, bindings);
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      targetIndex,
+      bindings,
+    );
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
