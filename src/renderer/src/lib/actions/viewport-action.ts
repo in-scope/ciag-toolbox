@@ -1,3 +1,5 @@
+import type { ViewportImageSource } from "@/lib/webgl/texture";
+
 import {
   NO_PARAMETER_VALUES,
   type ParameterSchema,
@@ -16,6 +18,11 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   selectedBandIndex: 0,
 };
 
+export type ViewportActionSourceTransform = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => ViewportImageSource;
+
 export interface ViewportAction {
   readonly id: string;
   readonly label: string;
@@ -24,6 +31,7 @@ export interface ViewportAction {
     viewportState: ViewportRenderingState,
     parameterValues: ParameterValuesById,
   ) => ViewportRenderingState;
+  readonly transformSource?: ViewportActionSourceTransform;
 }
 
 export interface ApplyActionFailure {
