@@ -8,11 +8,25 @@ import {
   linkProgramOrThrow,
 } from "./shaders";
 import {
-  createTextureFromSource,
+  createTextureFromBrowserSource,
   deleteTextureSafely,
   getImageSourceDimensions,
   type ViewportImageSource,
 } from "./texture";
+import {
+  DEFAULT_RASTER_TILE_SIZE,
+  splitRasterIntoTiles,
+} from "./raster-tile-splitter";
+import {
+  createR16FTextureForRasterTile,
+  deleteRasterTileTexturesSafely,
+  probeHalfFloatColorBufferExtension,
+  type RasterTileTexture,
+} from "./raster-tile-texture";
+import {
+  composeTileQuadTransform,
+  type QuadTransform,
+} from "./tile-quad-transform";
 import {
   IDENTITY_PAN,
   clampUserZoom,
@@ -29,14 +43,18 @@ import {
   computeImageRgbChannelExtents,
   type RgbChannelExtents,
 } from "@/lib/image/compute-image-channel-extents";
+import type { RasterImage } from "@/lib/image/raster-image";
 
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const TEXCOORD_ATTRIBUTE_LOCATION = 1;
 const VERTEX_FLOAT_COUNT = 4;
 const VERTEX_STRIDE_BYTES = VERTEX_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
-const TEXCOORD_OFFSET_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT;
 const INITIAL_USER_ZOOM = 1;
 const FALLBACK_SIZE: ViewportSize = { width: 1, height: 1 };
+
+const HALF_FLOAT_UNSUPPORTED_MESSAGE =
+  "Half-float texture support (EXT_color_buffer_half_float) was not detected. " +
+  "16-bit raster images may not display correctly on this hardware.";
 
 const FULLSCREEN_TEXTURED_QUAD_VERTICES = new Float32Array([
   -1, -1, 0, 1,
@@ -68,20 +86,20 @@ interface RendererProgramResources {
   uniforms: ProgramUniformLocations;
 }
 
-interface QuadTransform {
-  scale: ClipPoint;
-  translate: ClipPoint;
-}
-
 interface NormalizationState {
   enabled: boolean;
   extents: RgbChannelExtents;
 }
 
+export interface ViewportRendererOptions {
+  readonly onError?: (message: string) => void;
+}
+
 export class ViewportRenderer {
   private gl: WebGL2RenderingContext | null = null;
   private programResources: RendererProgramResources | null = null;
-  private texture: WebGLTexture | null = null;
+  private singleTexture: WebGLTexture | null = null;
+  private rasterTileTextures: RasterTileTexture[] = [];
   private currentSource: ViewportImageSource | null = null;
   private displaySize: ViewportSize = FALLBACK_SIZE;
   private imageSize: ViewportSize = FALLBACK_SIZE;
@@ -96,7 +114,10 @@ export class ViewportRenderer {
   private readonly handleContextRestored = (): void =>
     this.respondToContextRestored();
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly options: ViewportRendererOptions = {},
+  ) {
     this.attachContextLifecycleListeners();
     this.initializeWebGl();
   }
@@ -197,6 +218,7 @@ export class ViewportRenderer {
       return;
     }
     this.gl = gl;
+    reportHalfFloatExtensionMissingOnce(gl, this.options.onError);
     this.programResources = createViewportRendererProgram(gl);
     this.applyViewportToCanvasSize();
     this.uploadCurrentSourceIfReady();
@@ -206,7 +228,8 @@ export class ViewportRenderer {
   private respondToContextLost(event: Event): void {
     event.preventDefault();
     this.programResources = null;
-    this.texture = null;
+    this.singleTexture = null;
+    this.rasterTileTextures = [];
     this.gl = null;
     console.warn("[viewport] WebGL context lost");
   }
@@ -218,8 +241,23 @@ export class ViewportRenderer {
 
   private uploadCurrentSourceIfReady(): void {
     if (!this.gl || !this.currentSource) return;
-    deleteTextureSafely(this.gl, this.texture);
-    this.texture = createTextureFromSource(this.gl, this.currentSource);
+    this.releaseCurrentSourceTextures();
+    if (this.currentSource.kind === "raster") {
+      this.rasterTileTextures = createRasterTileTexturesForRasterSource(
+        this.gl,
+        this.currentSource.raster,
+      );
+      return;
+    }
+    this.singleTexture = createTextureFromBrowserSource(this.gl, this.currentSource);
+  }
+
+  private releaseCurrentSourceTextures(): void {
+    if (!this.gl) return;
+    deleteTextureSafely(this.gl, this.singleTexture);
+    this.singleTexture = null;
+    deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
+    this.rasterTileTextures = [];
   }
 
   private applyViewportToCanvasSize(): void {
@@ -228,18 +266,34 @@ export class ViewportRenderer {
   }
 
   private draw(): void {
-    const { gl, programResources, texture } = this;
+    const { gl, programResources } = this;
     if (!gl || !programResources) return;
     clearCanvasToTransparentBlack(gl);
-    if (!texture) return;
     const transform = this.computeCurrentQuadTransform();
-    drawTexturedFullscreenQuad(
-      gl,
-      programResources,
-      texture,
-      transform,
-      this.normalization,
-    );
+    if (this.singleTexture) {
+      drawSingleTextureWithTransform(gl, programResources, this.singleTexture, transform, this.normalization);
+      return;
+    }
+    if (this.rasterTileTextures.length > 0) {
+      this.drawRasterTilesWithPerTileTransforms(gl, programResources, transform);
+    }
+  }
+
+  private drawRasterTilesWithPerTileTransforms(
+    gl: WebGL2RenderingContext,
+    programResources: RendererProgramResources,
+    globalTransform: QuadTransform,
+  ): void {
+    for (const tile of this.rasterTileTextures) {
+      const tileTransform = composeTileQuadTransform(globalTransform, tile, this.imageSize);
+      drawSingleTextureWithTransform(
+        gl,
+        programResources,
+        tile.texture,
+        tileTransform,
+        this.normalization,
+      );
+    }
   }
 
   private computeCurrentQuadTransform(): QuadTransform {
@@ -252,12 +306,32 @@ export class ViewportRenderer {
 
   private releaseAllWebGlResources(): void {
     if (!this.gl) return;
-    deleteTextureSafely(this.gl, this.texture);
+    this.releaseCurrentSourceTextures();
     deleteRendererProgramResources(this.gl, this.programResources);
-    this.texture = null;
     this.programResources = null;
     this.gl = null;
   }
+}
+
+let halfFloatExtensionWarningShown = false;
+
+function reportHalfFloatExtensionMissingOnce(
+  gl: WebGL2RenderingContext,
+  onError: ((message: string) => void) | undefined,
+): void {
+  if (probeHalfFloatColorBufferExtension(gl)) return;
+  if (halfFloatExtensionWarningShown) return;
+  halfFloatExtensionWarningShown = true;
+  if (onError) onError(HALF_FLOAT_UNSUPPORTED_MESSAGE);
+  else console.warn(`[viewport] ${HALF_FLOAT_UNSUPPORTED_MESSAGE}`);
+}
+
+function createRasterTileTexturesForRasterSource(
+  gl: WebGL2RenderingContext,
+  raster: RasterImage,
+): RasterTileTexture[] {
+  const rasterTiles = splitRasterIntoTiles(raster, DEFAULT_RASTER_TILE_SIZE);
+  return rasterTiles.map((tile) => createR16FTextureForRasterTile(gl, tile, raster));
 }
 
 function syncCanvasBackingResolution(
@@ -277,7 +351,7 @@ function clearCanvasToTransparentBlack(gl: WebGL2RenderingContext): void {
   gl.clear(gl.COLOR_BUFFER_BIT);
 }
 
-function drawTexturedFullscreenQuad(
+function drawSingleTextureWithTransform(
   gl: WebGL2RenderingContext,
   resources: RendererProgramResources,
   texture: WebGLTexture,
@@ -427,7 +501,7 @@ function configureFullscreenQuadVertexAttributes(
   enableInterleavedFloat2Attribute(
     gl,
     TEXCOORD_ATTRIBUTE_LOCATION,
-    TEXCOORD_OFFSET_BYTES,
+    2 * Float32Array.BYTES_PER_ELEMENT,
   );
 }
 
