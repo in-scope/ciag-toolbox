@@ -1,11 +1,13 @@
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
   readonly lastAppliedOperationLabel: string | null;
+  readonly selectedBandIndex: number;
 }
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
   lastAppliedOperationLabel: null,
+  selectedBandIndex: 0,
 };
 
 export interface ViewportAction {

@@ -14,6 +14,7 @@ interface ViewportProps {
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
+  selectedBandIndex: number;
   lastAppliedOperationLabel?: string | null;
   onOpenImage: () => void;
   onClose?: () => void;
@@ -26,7 +27,8 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
-  useImageSourceUploadEffect(rendererRef, imageSource);
+  useImageSourceUploadEffect(rendererRef, imageSource, props.selectedBandIndex);
+  useSelectedBandIndexEffect(rendererRef, imageSource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef);
@@ -194,11 +196,25 @@ function showRendererErrorToast(message: string): void {
 function useImageSourceUploadEffect(
   rendererRef: MutableRefObject<ViewportRenderer | null>,
   source: ViewportImageSource | null,
+  selectedBandIndex: number,
 ): void {
   useEffect(() => {
     if (source === null) return;
-    rendererRef.current?.setImageSource(source);
+    rendererRef.current?.setImageSource(source, selectedBandIndex);
+    // Re-uploading on bandIndex change is handled by useSelectedBandIndexEffect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rendererRef, source]);
+}
+
+function useSelectedBandIndexEffect(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  source: ViewportImageSource | null,
+  selectedBandIndex: number,
+): void {
+  useEffect(() => {
+    if (source === null || source.kind !== "raster") return;
+    rendererRef.current?.setSelectedRasterBandIndex(selectedBandIndex);
+  }, [rendererRef, source, selectedBandIndex]);
 }
 
 function useNormalizationToggleEffect(
