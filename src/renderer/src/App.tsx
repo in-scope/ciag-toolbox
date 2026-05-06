@@ -24,7 +24,10 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
-import { Toolbar } from "@/components/toolbar";
+import {
+  Toolbar,
+  type ActionAvailabilityForActiveViewport,
+} from "@/components/toolbar";
 import {
   ViewportRightPanel,
   type ViewportRightPanelActiveSource,
@@ -100,7 +103,11 @@ import {
   type ViewportRenderingApi,
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
-import { DEFAULT_VIEWPORT_RENDERING_STATE } from "@/lib/actions/viewport-action";
+import {
+  DEFAULT_VIEWPORT_RENDERING_STATE,
+  type ViewportRenderingState,
+} from "@/lib/actions/viewport-action";
+import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -285,7 +292,9 @@ function ApplicationShell(): JSX.Element {
         onGridLayoutChange={handleGridLayoutChange}
         registeredActions={REGISTERED_VIEWPORT_ACTIONS}
         onInvokeAction={handleInvokeAction}
-        canInvokeActions={singleSelectedSource !== null}
+        getActionAvailability={(action) =>
+          deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi)
+        }
         isRegionToolActive={regionTool.isRegionToolActive}
         onToggleRegionTool={regionTool.toggleRegionTool}
       />
@@ -1135,12 +1144,57 @@ function runApplyActionFromPanel(
   setActiveAction: SetActiveAction,
 ): void {
   if (!action || !source) return;
+  const merged = mergeParameterValuesWithSourceRenderingState(
+    action,
+    options.parameterValues,
+    bindings.getRenderingState(source.index),
+  );
+  if (merged === null) return;
   if (options.openInNewViewport) {
-    applyActionToDuplicateOfSource(action, options.parameterValues, source.index, bindings);
+    applyActionToDuplicateOfSource(action, merged, source.index, bindings);
   } else {
-    applyActionInPlaceAtSourceIndex(action, options.parameterValues, source.index, bindings);
+    applyActionInPlaceAtSourceIndex(action, merged, source.index, bindings);
   }
   setActiveAction(null);
+}
+
+function deriveActionAvailabilityForActiveViewport(
+  action: RegisteredViewportAction,
+  source: SingleSelectedSource | null,
+  renderingApi: ViewportRenderingApi,
+): ActionAvailabilityForActiveViewport {
+  if (!source) return { isAvailable: false };
+  if (!action.isAvailableForActiveViewport) return { isAvailable: true };
+  const renderingState = renderingApi.getRenderingState(source.index);
+  if (action.isAvailableForActiveViewport(renderingState)) return { isAvailable: true };
+  return {
+    isAvailable: false,
+    disabledReason: describeWhyActionIsUnavailableForViewport(action),
+  };
+}
+
+function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
+  if (action.id === "crop-to-region") return "draw a region first";
+  return "not available for this viewport";
+}
+
+function mergeParameterValuesWithSourceRenderingState(
+  action: RegisteredViewportAction,
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById | null {
+  if (!action.prepareParameterValuesForApply) return rawParameterValues;
+  try {
+    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState);
+  } catch (error) {
+    toast.error(formatActionPreparationErrorMessage(action.label, error));
+    return null;
+  }
+}
+
+function formatActionPreparationErrorMessage(actionLabel: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `${actionLabel} failed: ${message}`;
 }
 
 interface SaveProjectRequestBindings {
