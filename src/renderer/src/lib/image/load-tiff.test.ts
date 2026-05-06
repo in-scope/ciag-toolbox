@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
 
 describe("loadTiffAsRaster", () => {
-  it("decodes a small single-band uint16 TIFF into a raster image", async () => {
+  it("decodes a small single-band uint16 TIFF into a raster image with one band", async () => {
     const bytes = buildSyntheticUint16TiffBytes();
     const raster = await loadTiffAsRaster(bytes);
     expect(raster.width).toBe(SYNTHETIC_TIFF_WIDTH);
@@ -12,8 +12,10 @@ describe("loadTiffAsRaster", () => {
     expect(raster.bitsPerSample).toBe(16);
     expect(raster.sampleFormat).toBe("uint");
     expect(raster.bandCount).toBe(1);
-    expect(raster.pixels).toBeInstanceOf(Uint16Array);
-    expect(raster.pixels.length).toBe(SYNTHETIC_TIFF_WIDTH * SYNTHETIC_TIFF_HEIGHT);
+    expect(raster.bandPixels).toHaveLength(1);
+    const firstBand = raster.bandPixels[0]!;
+    expect(firstBand).toBeInstanceOf(Uint16Array);
+    expect(firstBand.length).toBe(SYNTHETIC_TIFF_WIDTH * SYNTHETIC_TIFF_HEIGHT);
   });
 
   it("rejects bytes that are not a TIFF", async () => {

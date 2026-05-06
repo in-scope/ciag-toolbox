@@ -15,7 +15,7 @@ import {
 } from "./texture";
 import {
   DEFAULT_RASTER_TILE_SIZE,
-  splitRasterIntoTiles,
+  splitRasterBandIntoTiles,
 } from "./raster-tile-splitter";
 import {
   createR16FTextureForRasterTile,
@@ -43,7 +43,11 @@ import {
   computeImageRgbChannelExtents,
   type RgbChannelExtents,
 } from "@/lib/image/compute-image-channel-extents";
-import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  clampBandIndexToRaster,
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+} from "@/lib/image/raster-image";
 
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const TEXCOORD_ATTRIBUTE_LOCATION = 1;
@@ -111,6 +115,7 @@ export class ViewportRenderer {
   private singleTexture: WebGLTexture | null = null;
   private rasterTileTextures: RasterTileTexture[] = [];
   private currentSource: ViewportImageSource | null = null;
+  private selectedRasterBandIndex = 0;
   private isSingleBandSource = false;
   private displaySize: ViewportSize = FALLBACK_SIZE;
   private imageSize: ViewportSize = FALLBACK_SIZE;
@@ -133,13 +138,24 @@ export class ViewportRenderer {
     this.initializeWebGl();
   }
 
-  setImageSource(source: ViewportImageSource): void {
+  setImageSource(source: ViewportImageSource, selectedBandIndex: number = 0): void {
     this.currentSource = source;
+    this.selectedRasterBandIndex = clampBandIndexForSource(source, selectedBandIndex);
     this.imageSize = getImageSourceDimensions(source);
-    this.isSingleBandSource = isSingleBandImageSource(source);
+    this.isSingleBandSource = isSingleBandSourceWithSelectedBand(source);
     this.cacheNormalizationExtentsForSource(source);
     this.resetViewState();
     this.uploadCurrentSourceIfReady();
+    this.draw();
+  }
+
+  setSelectedRasterBandIndex(bandIndex: number): void {
+    if (!this.currentSource || this.currentSource.kind !== "raster") return;
+    const clamped = clampBandIndexToRaster(this.currentSource.raster, bandIndex);
+    if (clamped === this.selectedRasterBandIndex) return;
+    this.selectedRasterBandIndex = clamped;
+    this.cacheNormalizationExtentsForSource(this.currentSource);
+    this.rebuildRasterTilesForSelectedBand();
     this.draw();
   }
 
@@ -152,7 +168,7 @@ export class ViewportRenderer {
   private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
     this.normalization = {
       enabled: this.normalization.enabled,
-      extents: computeImageRgbChannelExtents(source),
+      extents: computeImageRgbChannelExtents(source, this.selectedRasterBandIndex),
     };
   }
 
@@ -255,13 +271,24 @@ export class ViewportRenderer {
     if (!this.gl || !this.currentSource) return;
     this.releaseCurrentSourceTextures();
     if (this.currentSource.kind === "raster") {
-      this.rasterTileTextures = createRasterTileTexturesForRasterSource(
+      this.rasterTileTextures = createRasterTileTexturesForRasterBand(
         this.gl,
         this.currentSource.raster,
+        this.selectedRasterBandIndex,
       );
       return;
     }
     this.singleTexture = createTextureFromBrowserSource(this.gl, this.currentSource);
+  }
+
+  private rebuildRasterTilesForSelectedBand(): void {
+    if (!this.gl || !this.currentSource || this.currentSource.kind !== "raster") return;
+    deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
+    this.rasterTileTextures = createRasterTileTexturesForRasterBand(
+      this.gl,
+      this.currentSource.raster,
+      this.selectedRasterBandIndex,
+    );
   }
 
   private releaseCurrentSourceTextures(): void {
@@ -344,11 +371,25 @@ function reportHalfFloatExtensionMissingOnce(
   else console.warn(`[viewport] ${HALF_FLOAT_UNSUPPORTED_MESSAGE}`);
 }
 
-function createRasterTileTexturesForRasterSource(
+function clampBandIndexForSource(source: ViewportImageSource, bandIndex: number): number {
+  if (source.kind !== "raster") return 0;
+  return clampBandIndexToRaster(source.raster, bandIndex);
+}
+
+function isSingleBandSourceWithSelectedBand(source: ViewportImageSource): boolean {
+  return source.kind === "raster";
+}
+
+function createRasterTileTexturesForRasterBand(
   gl: WebGL2RenderingContext,
   raster: RasterImage,
+  bandIndex: number,
 ): RasterTileTexture[] {
-  const rasterTiles = splitRasterIntoTiles(raster, DEFAULT_RASTER_TILE_SIZE);
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const rasterTiles = splitRasterBandIntoTiles(
+    { pixels, width: raster.width, height: raster.height },
+    DEFAULT_RASTER_TILE_SIZE,
+  );
   return rasterTiles.map((tile) => createR16FTextureForRasterTile(gl, tile, raster));
 }
 
@@ -394,10 +435,6 @@ function applyBandModeUniforms(
 ): void {
   if (uniforms.isSingleBand === null) return;
   gl.uniform1i(uniforms.isSingleBand, isSingleBand ? 1 : 0);
-}
-
-function isSingleBandImageSource(source: ViewportImageSource): boolean {
-  return source.kind === "raster" && source.raster.bandCount === 1;
 }
 
 function applyQuadTransformUniforms(

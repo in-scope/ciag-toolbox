@@ -116,6 +116,7 @@ function renderViewportCellViewport(
       imageSource={props.content?.source ?? null}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
+      selectedBandIndex={settings.selectedBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
@@ -146,6 +147,7 @@ interface ViewportCellInteractionSettings {
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   handleClose: (() => void) | undefined;
   normalizationEnabled: boolean;
+  selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
 }
 
@@ -165,6 +167,7 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
     handleClick,
     handleClose,
     normalizationEnabled: renderingState.normalizationEnabled,
+    selectedBandIndex: renderingState.selectedBandIndex,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
   };
 }

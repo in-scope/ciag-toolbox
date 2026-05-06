@@ -28,7 +28,7 @@ describe("computeSingleBandRasterUnitExtents", () => {
 
   it("passes float pixel values through unchanged", () => {
     const raster: RasterImage = {
-      pixels: new Float32Array([0.1, 0.5, 0.9]),
+      bandPixels: [new Float32Array([0.1, 0.5, 0.9])],
       width: 3,
       height: 1,
       bitsPerSample: 32,
@@ -46,6 +46,14 @@ describe("computeSingleBandRasterUnitExtents", () => {
       IDENTITY_SINGLE_BAND_EXTENTS,
     );
   });
+
+  it("reads the requested band's pixels for multi-band rasters", () => {
+    const raster = buildTwoBandUint16Raster([10, 20], [50000, 60000]);
+    const firstBandExtents = computeSingleBandRasterUnitExtents(raster, 0);
+    const secondBandExtents = computeSingleBandRasterUnitExtents(raster, 1);
+    expect(firstBandExtents.max).toBeCloseTo(20 / UINT16_CONTAINER_MAX, 6);
+    expect(secondBandExtents.max).toBeCloseTo(60000 / UINT16_CONTAINER_MAX, 6);
+  });
 });
 
 describe("computeImageRgbChannelExtents (raster path)", () => {
@@ -61,6 +69,14 @@ describe("computeImageRgbChannelExtents (raster path)", () => {
     expect(extents.max[0]).toBeCloseTo(expectedMax, 6);
     expect(extents.max[1]).toBe(extents.max[0]);
     expect(extents.max[2]).toBe(extents.max[0]);
+  });
+
+  it("uses the requested band when given a multi-band raster source", () => {
+    const raster = buildTwoBandUint16Raster([0, 1000], [50000, 60000]);
+    const source: ViewportImageSource = { kind: "raster", raster };
+    const firstBandExtents = computeImageRgbChannelExtents(source, 0);
+    const secondBandExtents = computeImageRgbChannelExtents(source, 1);
+    expect(firstBandExtents.max[0]).toBeLessThan(secondBandExtents.max[0]);
   });
 });
 
@@ -100,11 +116,25 @@ describe("computeImageRgbChannelExtents (pixels path)", () => {
 
 function buildUint16RasterFromValues(values: ReadonlyArray<number>): RasterImage {
   return {
-    pixels: new Uint16Array(values),
+    bandPixels: [new Uint16Array(values)],
     width: values.length,
     height: 1,
     bitsPerSample: 16,
     sampleFormat: "uint",
     bandCount: 1,
+  };
+}
+
+function buildTwoBandUint16Raster(
+  bandZero: ReadonlyArray<number>,
+  bandOne: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [new Uint16Array(bandZero), new Uint16Array(bandOne)],
+    width: bandZero.length,
+    height: 1,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 2,
   };
 }

@@ -37,16 +37,35 @@ describe("applyActionToSelectedViewports", () => {
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledWith(1, {
       normalizationEnabled: true,
       lastAppliedOperationLabel: null,
+      selectedBandIndex: 0,
     });
   });
 });
 
 describe("NORMALIZE_ACTION", () => {
   it("enables normalization regardless of the previous state", () => {
-    expect(NORMALIZE_ACTION.apply({ normalizationEnabled: false, lastAppliedOperationLabel: null }))
-      .toEqual({ normalizationEnabled: true, lastAppliedOperationLabel: null });
-    expect(NORMALIZE_ACTION.apply({ normalizationEnabled: true, lastAppliedOperationLabel: null }))
-      .toEqual({ normalizationEnabled: true, lastAppliedOperationLabel: null });
+    expect(
+      NORMALIZE_ACTION.apply({
+        normalizationEnabled: false,
+        lastAppliedOperationLabel: null,
+        selectedBandIndex: 0,
+      }),
+    ).toEqual({
+      normalizationEnabled: true,
+      lastAppliedOperationLabel: null,
+      selectedBandIndex: 0,
+    });
+    expect(
+      NORMALIZE_ACTION.apply({
+        normalizationEnabled: true,
+        lastAppliedOperationLabel: null,
+        selectedBandIndex: 0,
+      }),
+    ).toEqual({
+      normalizationEnabled: true,
+      lastAppliedOperationLabel: null,
+      selectedBandIndex: 0,
+    });
   });
 });
 

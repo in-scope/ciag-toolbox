@@ -1,4 +1,8 @@
-import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+  type RasterTypedArray,
+} from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface RgbChannelExtents {
@@ -26,10 +30,11 @@ const BYTE_TO_UNIT_SCALE = 1 / 255;
 
 export function computeImageRgbChannelExtents(
   source: ViewportImageSource,
+  selectedBandIndex: number = 0,
 ): RgbChannelExtents {
   if (source.kind === "raster") {
     return broadcastSingleBandExtentsAcrossRgb(
-      computeSingleBandRasterUnitExtents(source.raster),
+      computeSingleBandRasterUnitExtents(source.raster, selectedBandIndex),
     );
   }
   const rgbaBytes = readRgbaBytesFromSource(source);
@@ -38,8 +43,10 @@ export function computeImageRgbChannelExtents(
 
 export function computeSingleBandRasterUnitExtents(
   raster: RasterImage,
+  bandIndex: number = 0,
 ): SingleBandScalarExtents {
-  const range = computeRasterValueRange(raster);
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const range = computeBandPixelValueRange(pixels);
   if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
   const containerScale = chooseUnitScaleForRaster(raster);
   return {
@@ -69,13 +76,13 @@ interface NumericRange {
   max: number;
 }
 
-function computeRasterValueRange(raster: RasterImage): NumericRange {
+function computeBandPixelValueRange(pixels: RasterTypedArray): NumericRange {
   const range: NumericRange = {
     min: Number.POSITIVE_INFINITY,
     max: Number.NEGATIVE_INFINITY,
   };
-  for (let i = 0; i < raster.pixels.length; i++) {
-    expandRangeWithValue(range, raster.pixels[i] ?? 0);
+  for (let i = 0; i < pixels.length; i++) {
+    expandRangeWithValue(range, pixels[i] ?? 0);
   }
   return range;
 }

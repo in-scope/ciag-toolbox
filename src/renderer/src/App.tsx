@@ -22,6 +22,10 @@ import {
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
 import { Toolbar } from "@/components/toolbar";
+import {
+  ViewportRightPanel,
+  type ViewportRightPanelActiveSource,
+} from "@/components/viewport-right-panel";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -154,6 +158,11 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
+  const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection(
+    singleSelectedSource,
+    imagesByIndex,
+    renderingApi,
+  );
   const handleApplyAction = (options: ToolOptionsApplyOptions) =>
     runApplyActionFromPanel(
       activeAction,
@@ -194,6 +203,7 @@ function ApplicationShell(): JSX.Element {
             onOpenImage={handleOpenImageRequested}
             activeAction={activeAction}
             sourceViewport={singleSelectedSource?.summary ?? null}
+            rightPanelActiveSource={rightPanelActiveSource}
             onCancelAction={handleCancelAction}
             onApplyAction={handleApplyAction}
           />
@@ -243,6 +253,7 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
+  rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
 }
@@ -261,14 +272,23 @@ function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Eleme
           onOpenImage={props.onOpenImage}
         />
       </div>
+      {renderActiveRightSidePanel(props)}
+    </main>
+  );
+}
+
+function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.Element | null {
+  if (props.activeAction) {
+    return (
       <ToolOptionsPanel
         action={props.activeAction}
         sourceViewport={props.sourceViewport}
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
       />
-    </main>
-  );
+    );
+  }
+  return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
 }
 
 function clearSelectionWhenClickIsOutsideAnyCell(
@@ -720,6 +740,35 @@ function deriveSingleSelectedSource(
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {
   for (const index of selection) return index;
   return null;
+}
+
+function deriveRightPanelActiveSourceFromSelection(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): ViewportRightPanelActiveSource | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return buildRightPanelActiveSource(singleSelectedSource.index, content.source.raster, renderingApi);
+}
+
+function buildRightPanelActiveSource(
+  viewportIndex: number,
+  raster: ViewportRightPanelActiveSource["raster"],
+  renderingApi: ViewportRenderingApi,
+): ViewportRightPanelActiveSource {
+  const renderingState = renderingApi.getRenderingState(viewportIndex);
+  return {
+    viewportNumber: getViewportNumberFromIndex(viewportIndex),
+    raster,
+    selectedBandIndex: renderingState.selectedBandIndex,
+    onSelectBandIndex: (bandIndex) =>
+      renderingApi.setRenderingState(viewportIndex, {
+        ...renderingState,
+        selectedBandIndex: bandIndex,
+      }),
+  };
 }
 
 function runApplyActionFromPanel(
