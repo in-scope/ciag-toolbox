@@ -40,6 +40,8 @@ import {
 } from "./view-transform";
 import {
   convertCanvasPixelToImagePixelOrNull,
+  convertImagePixelToCanvasPointOrNull,
+  type CanvasPixelPoint,
   type ImagePixelPoint,
 } from "./canvas-to-image-pixel";
 import {
@@ -129,6 +131,7 @@ export class ViewportRenderer {
     enabled: false,
     extents: IDENTITY_RGB_CHANNEL_EXTENTS,
   };
+  private readonly viewTransformChangeListeners = new Set<() => void>();
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
   private readonly handleContextRestored = (): void =>
@@ -223,6 +226,25 @@ export class ViewportRenderer {
       userZoom: this.userZoom,
       userPan: this.userPan,
     });
+  }
+
+  getCanvasPointForImagePixel(imageX: number, imageY: number): CanvasPixelPoint | null {
+    if (!this.currentSource) return null;
+    return convertImagePixelToCanvasPointOrNull({
+      imagePixelPoint: { x: imageX, y: imageY },
+      displaySize: this.displaySize,
+      imageSize: this.imageSize,
+      fitScale: computeFitToViewportScale(this.imageSize, this.displaySize),
+      userZoom: this.userZoom,
+      userPan: this.userPan,
+    });
+  }
+
+  subscribeToViewTransformChanges(listener: () => void): () => void {
+    this.viewTransformChangeListeners.add(listener);
+    return () => {
+      this.viewTransformChangeListeners.delete(listener);
+    };
   }
 
   dispose(): void {
@@ -328,11 +350,17 @@ export class ViewportRenderer {
     const renderState = this.snapshotCurrentRenderState();
     if (this.singleTexture) {
       drawSingleTextureWithTransform(gl, programResources, this.singleTexture, transform, renderState);
+      this.notifyViewTransformChangeListeners();
       return;
     }
     if (this.rasterTileTextures.length > 0) {
       this.drawRasterTilesWithPerTileTransforms(gl, programResources, transform, renderState);
     }
+    this.notifyViewTransformChangeListeners();
+  }
+
+  private notifyViewTransformChangeListeners(): void {
+    for (const listener of this.viewTransformChangeListeners) listener();
   }
 
   private snapshotCurrentRenderState(): RenderPassState {

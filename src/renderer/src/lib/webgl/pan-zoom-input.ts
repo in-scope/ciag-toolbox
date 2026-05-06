@@ -20,13 +20,17 @@ interface PanZoomEventHandlers {
 }
 
 type PanZoomTargetGetter = () => PanZoomTarget | null;
+type CanInitiatePanPredicate = () => boolean;
+
+const ALWAYS_ALLOW_PAN: CanInitiatePanPredicate = () => true;
 
 export function attachPanZoomEventHandlers(
   canvas: HTMLCanvasElement,
   getTarget: PanZoomTargetGetter,
+  getCanInitiatePan: CanInitiatePanPredicate = ALWAYS_ALLOW_PAN,
 ): () => void {
   const dragState = createInactiveDragState();
-  const handlers = createPanZoomEventHandlers(canvas, getTarget, dragState);
+  const handlers = createPanZoomEventHandlers(canvas, getTarget, dragState, getCanInitiatePan);
   registerPanZoomHandlersOnCanvas(canvas, handlers);
   return () => unregisterPanZoomHandlersFromCanvas(canvas, handlers);
 }
@@ -39,9 +43,10 @@ function createPanZoomEventHandlers(
   canvas: HTMLCanvasElement,
   getTarget: PanZoomTargetGetter,
   dragState: DragState,
+  getCanInitiatePan: CanInitiatePanPredicate,
 ): PanZoomEventHandlers {
   return {
-    pointerdown: (event) => beginPanIfPrimaryButton(event, canvas, dragState),
+    pointerdown: (event) => beginPanIfPrimaryButton(event, canvas, dragState, getCanInitiatePan),
     pointermove: (event) =>
       panTargetIfDragActive(event, dragState, getTarget()),
     pointerup: (event) => endPan(event, canvas, dragState),
@@ -55,8 +60,11 @@ function beginPanIfPrimaryButton(
   event: PointerEvent,
   canvas: HTMLCanvasElement,
   dragState: DragState,
+  getCanInitiatePan: CanInitiatePanPredicate,
 ): void {
   if (event.button !== 0) return;
+  if (!getCanInitiatePan()) return;
+  if (event.defaultPrevented) return;
   dragState.active = true;
   dragState.lastClientX = event.clientX;
   dragState.lastClientY = event.clientY;

@@ -1,17 +1,28 @@
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import { FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readPixelReadoutBandsAtImagePointOrNull } from "@/lib/image/compute-pixel-readout";
+import {
+  canonicalizeViewportRoiCorners,
+  clampViewportRoiToImageBounds,
+  isViewportRoiLargerThanMinimumSide,
+  type ViewportRoi,
+} from "@/lib/image/viewport-roi";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import {
   attachPointerReadoutEventHandlers,
   type CanvasCursorPositionPx,
 } from "@/lib/webgl/pointer-readout-input";
-import type { ViewportImageSource } from "@/lib/webgl/texture";
+import {
+  attachRoiDrawEventHandlers,
+  type RoiDrawCanvasRect,
+} from "@/lib/webgl/roi-draw-input";
+import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 import {
   usePixelReadoutPublisher,
@@ -27,6 +38,9 @@ interface ViewportProps {
   normalizationEnabled: boolean;
   selectedBandIndex: number;
   lastAppliedOperationLabel?: string | null;
+  isRegionToolActive: boolean;
+  roi: ViewportRoi | null;
+  onCommitRoi: (roi: ViewportRoi) => void;
   onOpenImage: () => void;
   onClose?: () => void;
 }
@@ -36,18 +50,28 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const imageSource = props.imageSource ?? null;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
+  const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
   useImageSourceUploadEffect(rendererRef, imageSource, props.selectedBandIndex);
   useSelectedBandIndexEffect(rendererRef, imageSource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
-  useViewportPanZoomInteractions(canvasRef, rendererRef);
+  useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
   useViewportPixelReadoutPublisher(canvasRef, rendererRef, {
     viewportNumber: props.viewportNumber ?? null,
     imageSource,
     selectedBandIndex: props.selectedBandIndex,
   });
+  useViewportRoiDrawAttachment(canvasRef, {
+    isRegionToolActive: props.isRegionToolActive,
+    imageSource,
+    rendererRef,
+    onCommitRoi: props.onCommitRoi,
+    setInProgressDragRect,
+  });
+  const transformVersion = useRendererViewTransformVersion(rendererRef);
+  const cursorClassName = props.isRegionToolActive ? "cursor-crosshair" : "";
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md border bg-card">
@@ -64,8 +88,14 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <div className="relative min-h-0 flex-1">
         <canvas
           ref={canvasRef}
-          className="block h-full w-full touch-none select-none"
+          className={`block h-full w-full touch-none select-none ${cursorClassName}`}
           aria-label={viewportAriaLabel}
+        />
+        <ViewportRoiOverlay
+          renderer={rendererRef.current}
+          committedRoi={props.roi}
+          inProgressDragRect={inProgressDragRect}
+          transformVersion={transformVersion}
         />
         {renderViewportEmptyOrUnresolved(imageSource, props)}
       </div>
@@ -300,12 +330,18 @@ function forwardResizeEntriesToRenderer(
 function useViewportPanZoomInteractions(
   canvasRef: RefObject<HTMLCanvasElement>,
   rendererRef: MutableRefObject<ViewportRenderer | null>,
+  isRegionToolActive: boolean,
 ): void {
+  const isRegionToolActiveRef = useLatestValueRef(isRegionToolActive);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    return attachPanZoomEventHandlers(canvas, () => rendererRef.current);
-    // canvasRef and rendererRef are stable refs; effect must run once.
+    return attachPanZoomEventHandlers(
+      canvas,
+      () => rendererRef.current,
+      () => !isRegionToolActiveRef.current,
+    );
+    // canvasRef and rendererRef are stable refs; latest-value ref holds the toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
@@ -373,4 +409,84 @@ function buildPixelReadoutSnapshotForCursorOrNull(
 function countSourceBandsForReadout(source: ViewportImageSource): number {
   if (source.kind === "raster") return source.raster.bandCount;
   return 0;
+}
+
+interface ViewportRoiDrawInputs {
+  readonly isRegionToolActive: boolean;
+  readonly imageSource: ViewportImageSource | null;
+  readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
+  readonly onCommitRoi: (roi: ViewportRoi) => void;
+  readonly setInProgressDragRect: (rect: RoiDrawCanvasRect | null) => void;
+}
+
+function useViewportRoiDrawAttachment(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  inputs: ViewportRoiDrawInputs,
+): void {
+  const inputsRef = useLatestValueRef(inputs);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return attachRoiDrawEventHandlers(canvas, {
+      isRoiDrawingEnabled: () => isRoiDrawingEnabledFromInputs(inputsRef.current),
+      onDragStateChange: (rect) => inputsRef.current.setInProgressDragRect(rect),
+      onDragCommit: (rect) => commitRoiFromCanvasRect(rect, inputsRef.current),
+    });
+    // canvasRef is stable; latest-value ref holds dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function isRoiDrawingEnabledFromInputs(inputs: ViewportRoiDrawInputs): boolean {
+  return inputs.isRegionToolActive && inputs.imageSource !== null;
+}
+
+const MINIMUM_DRAG_DISTANCE_FOR_COMMIT_PX = 3;
+
+function commitRoiFromCanvasRect(
+  rect: RoiDrawCanvasRect,
+  inputs: ViewportRoiDrawInputs,
+): void {
+  if (!isCanvasDragLargerThanClickThreshold(rect)) return;
+  const renderer = inputs.rendererRef.current;
+  const source = inputs.imageSource;
+  if (!renderer || !source) return;
+  const startImagePixel = renderer.getImagePixelAtCanvasPoint(rect.start.x, rect.start.y);
+  const endImagePixel = renderer.getImagePixelAtCanvasPoint(rect.current.x, rect.current.y);
+  if (!startImagePixel || !endImagePixel) return;
+  const candidate = clampViewportRoiToImageBounds(
+    {
+      imagePixelX0: startImagePixel.x,
+      imagePixelY0: startImagePixel.y,
+      imagePixelX1: endImagePixel.x,
+      imagePixelY1: endImagePixel.y,
+    },
+    getImageSourceDimensions(source),
+  );
+  const canonical = canonicalizeViewportRoiCorners(candidate);
+  if (!isViewportRoiLargerThanMinimumSide(canonical)) return;
+  inputs.onCommitRoi(canonical);
+}
+
+function isCanvasDragLargerThanClickThreshold(rect: RoiDrawCanvasRect): boolean {
+  const widthPx = Math.abs(rect.current.x - rect.start.x);
+  const heightPx = Math.abs(rect.current.y - rect.start.y);
+  return widthPx >= MINIMUM_DRAG_DISTANCE_FOR_COMMIT_PX
+    || heightPx >= MINIMUM_DRAG_DISTANCE_FOR_COMMIT_PX;
+}
+
+function useRendererViewTransformVersion(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    return renderer.subscribeToViewTransformChanges(() => {
+      setVersion((current) => current + 1);
+    });
+    // rendererRef is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return version;
 }

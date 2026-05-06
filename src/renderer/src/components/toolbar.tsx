@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FolderOpen, Grid2x2 } from "lucide-react";
+import { BoxSelect, FolderOpen, Grid2x2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
+import { cn } from "@/lib/utils";
 
 export type { GridLayout };
 
@@ -23,6 +24,8 @@ interface ToolbarProps {
   registeredActions: ReadonlyArray<RegisteredViewportAction>;
   onInvokeAction: (action: RegisteredViewportAction) => void;
   canInvokeActions: boolean;
+  isRegionToolActive: boolean;
+  onToggleRegionTool: () => void;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -35,6 +38,11 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           onGridLayoutChange={props.onGridLayoutChange}
         />
         <ToolbarSeparator />
+        <RegionToolToggleButton
+          isRegionToolActive={props.isRegionToolActive}
+          onToggleRegionTool={props.onToggleRegionTool}
+        />
+        <ToolbarSeparator />
         <RegisteredActionButtons
           registeredActions={props.registeredActions}
           onInvokeAction={props.onInvokeAction}
@@ -42,6 +50,37 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+interface RegionToolToggleButtonProps {
+  readonly isRegionToolActive: boolean;
+  readonly onToggleRegionTool: () => void;
+}
+
+function RegionToolToggleButton(props: RegionToolToggleButtonProps): JSX.Element {
+  const label = props.isRegionToolActive
+    ? "Select Region (active)"
+    : "Select Region";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          aria-pressed={props.isRegionToolActive}
+          className={cn(
+            props.isRegionToolActive &&
+              "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+          )}
+          onClick={props.onToggleRegionTool}
+        >
+          <BoxSelect className="size-5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

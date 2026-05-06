@@ -1,5 +1,6 @@
 import { useMemo, useId } from "react";
 
+import { Button } from "@/components/ui/button";
 import {
   formatOperationHistoryParameterValuesAsInlineText,
   formatOperationHistoryTimestampForDisplay,
@@ -12,6 +13,11 @@ import {
   getRasterBandLabelOrDefault,
   type RasterImage,
 } from "@/lib/image/raster-image";
+import {
+  formatViewportRoiCornerLabel,
+  formatViewportRoiSizeLabel,
+  type ViewportRoi,
+} from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 
 export interface ViewportRightPanelActiveSource {
@@ -21,6 +27,8 @@ export interface ViewportRightPanelActiveSource {
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
   readonly operationHistory: ViewportOperationHistory;
+  readonly roi: ViewportRoi | null;
+  readonly onClearRoi: () => void;
 }
 
 interface ViewportRightPanelProps {
@@ -43,10 +51,20 @@ function collectVisibleRightPanelSections(
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
   }
+  if (shouldShowRegionSection(activeSource)) {
+    sections.push(<RegionSection key="region" activeSource={activeSource!} />);
+  }
   if (shouldShowHistorySection(activeSource)) {
     sections.push(<HistorySection key="history" activeSource={activeSource!} />);
   }
   return sections;
+}
+
+function shouldShowRegionSection(
+  activeSource: ViewportRightPanelActiveSource | null,
+): boolean {
+  if (!activeSource) return false;
+  return activeSource.roi !== null;
 }
 
 function shouldShowBandsSection(
@@ -341,6 +359,74 @@ function MetadataKeyValueRow(props: MetadataDisplayRow): JSX.Element {
         className="truncate text-right font-mono text-foreground"
         title={props.value}
       >
+        {props.value}
+      </dd>
+    </div>
+  );
+}
+
+interface RegionSectionProps {
+  activeSource: ViewportRightPanelActiveSource;
+}
+
+function RegionSection(props: RegionSectionProps): JSX.Element | null {
+  const roi = props.activeSource.roi;
+  if (!roi) return null;
+  return (
+    <section aria-label="Region" className="flex flex-col gap-2">
+      <RegionSectionHeader
+        viewportNumber={props.activeSource.viewportNumber}
+        onClearRoi={props.activeSource.onClearRoi}
+      />
+      <RegionCoordinatesList roi={roi} />
+    </section>
+  );
+}
+
+interface RegionSectionHeaderProps {
+  viewportNumber: number;
+  onClearRoi: () => void;
+}
+
+function RegionSectionHeader(props: RegionSectionHeaderProps): JSX.Element {
+  return (
+    <header className="flex items-baseline justify-between">
+      <h2 className="text-sm font-medium text-foreground">Region</h2>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-mr-2 h-6 px-2 text-xs text-muted-foreground"
+        onClick={props.onClearRoi}
+      >
+        Clear
+      </Button>
+    </header>
+  );
+}
+
+interface RegionCoordinatesListProps {
+  roi: ViewportRoi;
+}
+
+function RegionCoordinatesList(props: RegionCoordinatesListProps): JSX.Element {
+  return (
+    <dl className="flex flex-col gap-1 text-xs">
+      <RegionKeyValueRow label="Corners" value={formatViewportRoiCornerLabel(props.roi)} />
+      <RegionKeyValueRow label="Size" value={formatViewportRoiSizeLabel(props.roi)} />
+    </dl>
+  );
+}
+
+interface RegionKeyValueRowProps {
+  readonly label: string;
+  readonly value: string;
+}
+
+function RegionKeyValueRow(props: RegionKeyValueRowProps): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-muted-foreground">{props.label}</dt>
+      <dd className="truncate text-right font-mono text-foreground" title={props.value}>
         {props.value}
       </dd>
     </div>
