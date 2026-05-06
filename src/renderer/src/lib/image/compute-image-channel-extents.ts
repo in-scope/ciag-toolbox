@@ -6,9 +6,19 @@ export interface RgbChannelExtents {
   readonly max: readonly [number, number, number];
 }
 
+export interface SingleBandScalarExtents {
+  readonly min: number;
+  readonly max: number;
+}
+
 export const IDENTITY_RGB_CHANNEL_EXTENTS: RgbChannelExtents = {
   min: [0, 0, 0],
   max: [1, 1, 1],
+};
+
+export const IDENTITY_SINGLE_BAND_EXTENTS: SingleBandScalarExtents = {
+  min: 0,
+  max: 1,
 };
 
 const BYTES_PER_PIXEL = 4;
@@ -17,9 +27,34 @@ const BYTE_TO_UNIT_SCALE = 1 / 255;
 export function computeImageRgbChannelExtents(
   source: ViewportImageSource,
 ): RgbChannelExtents {
-  if (source.kind === "raster") return computeRasterUnitChannelExtents(source.raster);
+  if (source.kind === "raster") {
+    return broadcastSingleBandExtentsAcrossRgb(
+      computeSingleBandRasterUnitExtents(source.raster),
+    );
+  }
   const rgbaBytes = readRgbaBytesFromSource(source);
   return computeRgbChannelExtentsFromBytes(rgbaBytes);
+}
+
+export function computeSingleBandRasterUnitExtents(
+  raster: RasterImage,
+): SingleBandScalarExtents {
+  const range = computeRasterValueRange(raster);
+  if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
+  const containerScale = chooseUnitScaleForRaster(raster);
+  return {
+    min: clampToUnit(range.min * containerScale),
+    max: clampToUnit(range.max * containerScale),
+  };
+}
+
+function broadcastSingleBandExtentsAcrossRgb(
+  scalar: SingleBandScalarExtents,
+): RgbChannelExtents {
+  return {
+    min: [scalar.min, scalar.min, scalar.min],
+    max: [scalar.max, scalar.max, scalar.max],
+  };
 }
 
 function readRgbaBytesFromSource(
@@ -27,15 +62,6 @@ function readRgbaBytesFromSource(
 ): Uint8ClampedArray | Uint8Array {
   if (source.kind === "pixels") return source.pixels;
   return readRgbaBytesByDrawingToOffscreenCanvas(source.image);
-}
-
-function computeRasterUnitChannelExtents(raster: RasterImage): RgbChannelExtents {
-  const range = computeRasterValueRange(raster);
-  if (!Number.isFinite(range.min)) return IDENTITY_RGB_CHANNEL_EXTENTS;
-  const containerScale = chooseUnitScaleForRaster(raster);
-  const minUnit = clampToUnit(range.min * containerScale);
-  const maxUnit = clampToUnit(range.max * containerScale);
-  return { min: [minUnit, minUnit, minUnit], max: [maxUnit, maxUnit, maxUnit] };
 }
 
 interface NumericRange {

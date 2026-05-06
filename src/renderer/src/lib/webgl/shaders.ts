@@ -15,13 +15,14 @@ export const VIEWPORT_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 in vec2 v_texCoord;
 uniform sampler2D u_texture;
+uniform bool u_isSingleBand;
 uniform bool u_normalizeEnabled;
 uniform vec3 u_normalizeMinColor;
 uniform vec3 u_normalizeMaxColor;
 out vec4 outColor;
 void main() {
   vec4 sampled = texture(u_texture, v_texCoord);
-  vec3 rgb = sampled.rgb;
+  vec3 rgb = u_isSingleBand ? vec3(sampled.r) : sampled.rgb;
   if (u_normalizeEnabled) {
     // Per-band stretch to [0, 1]. For flat bands (max == min) we substitute
     // a divisor of 1; the numerator is also 0 in that case, so the result is 0.
