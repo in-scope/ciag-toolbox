@@ -983,8 +983,19 @@ function deriveRightPanelActiveSourceFromSelection(
 ): ViewportRightPanelActiveSource | null {
   if (!singleSelectedSource) return null;
   const content = imagesByIndex.get(singleSelectedSource.index);
-  if (!content || content.source.kind !== "raster") return null;
-  return buildRightPanelActiveSource(singleSelectedSource.index, content.source.raster, renderingApi);
+  if (!content) return null;
+  return buildRightPanelActiveSource(
+    singleSelectedSource.index,
+    extractRasterFromContentOrNull(content),
+    renderingApi,
+  );
+}
+
+function extractRasterFromContentOrNull(
+  content: ViewportCellContent,
+): ViewportRightPanelActiveSource["raster"] {
+  if (content.source.kind !== "raster") return null;
+  return content.source.raster;
 }
 
 function buildRightPanelActiveSource(
@@ -1002,6 +1013,7 @@ function buildRightPanelActiveSource(
         ...renderingState,
         selectedBandIndex: bandIndex,
       }),
+    operationHistory: renderingState.operationHistory,
   };
 }
 
@@ -1181,6 +1193,13 @@ function buildSaveableViewportEntryOrNull(
       selectedBandIndex: renderingState.selectedBandIndex,
       lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
     },
+    operationHistory: renderingState.operationHistory.map((entry) => ({
+      actionId: entry.actionId,
+      actionLabel: entry.actionLabel,
+      appliedLabel: entry.appliedLabel,
+      parameterValues: { ...entry.parameterValues },
+      timestampMs: entry.timestampMs,
+    })),
   };
 }
 
@@ -1298,5 +1317,12 @@ function mapProjectRenderingStateToViewportRenderingState(
     normalizationEnabled: viewport.entry.renderingState.normalizationEnabled,
     selectedBandIndex: viewport.entry.renderingState.selectedBandIndex,
     lastAppliedOperationLabel: viewport.entry.renderingState.lastAppliedOperationLabel,
+    operationHistory: viewport.entry.operationHistory.map((entry) => ({
+      actionId: entry.actionId,
+      actionLabel: entry.actionLabel,
+      appliedLabel: entry.appliedLabel,
+      parameterValues: Object.freeze({ ...entry.parameterValues }),
+      timestampMs: entry.timestampMs,
+    })),
   };
 }

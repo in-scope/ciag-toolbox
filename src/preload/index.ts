@@ -54,10 +54,21 @@ export interface SaveProjectDraftViewportRenderingState {
   lastAppliedOperationLabel: string | null;
 }
 
+export type SaveProjectDraftOperationHistoryParameterValue = number | string | boolean;
+
+export interface SaveProjectDraftOperationHistoryEntry {
+  actionId: string;
+  actionLabel: string;
+  appliedLabel: string;
+  parameterValues: Readonly<Record<string, SaveProjectDraftOperationHistoryParameterValue>>;
+  timestampMs: number;
+}
+
 export interface SaveProjectDraftViewportEntry {
   index: number;
   source: SaveProjectDraftViewportSource;
   renderingState: SaveProjectDraftViewportRenderingState;
+  operationHistory: ReadonlyArray<SaveProjectDraftOperationHistoryEntry>;
 }
 
 export interface SaveProjectDraft {

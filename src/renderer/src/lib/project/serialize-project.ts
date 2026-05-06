@@ -3,6 +3,7 @@ import type { GridLayout } from "@/lib/grid/grid-layout";
 import {
   IDENTITY_PROJECT_VIEWPORT_VIEW_TRANSFORM,
   PROJECT_FILE_FORMAT_VERSION,
+  type ProjectOperationHistoryEntry,
   type ProjectViewportRenderingState,
 } from "./project-schema";
 
@@ -16,6 +17,7 @@ export interface DraftProjectViewportEntry {
   readonly index: number;
   readonly source: DraftProjectViewportSourceReference;
   readonly renderingState: ProjectViewportRenderingState;
+  readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
 }
 
 export interface DraftProjectFile {
@@ -31,6 +33,7 @@ export interface SaveableViewportSnapshot {
   readonly originalContentHash: string;
   readonly fileName: string;
   readonly renderingState: ProjectViewportRenderingState;
+  readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
 }
 
 export interface SaveableProjectSnapshot {
@@ -61,6 +64,7 @@ function buildDraftViewportEntry(
       fileName: viewport.fileName,
     },
     renderingState: viewport.renderingState,
+    operationHistory: viewport.operationHistory,
   };
 }
 

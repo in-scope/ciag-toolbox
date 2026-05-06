@@ -36,6 +36,30 @@ describe("buildDraftProjectFileFromSnapshot", () => {
     expect(first?.renderingState.selectedBandIndex).toBe(0);
     expect(first?.renderingState.lastAppliedOperationLabel).toBeNull();
   });
+
+  it("forwards each viewport's operationHistory entries unchanged", () => {
+    const snapshot: SaveableProjectSnapshot = {
+      ...buildSingleViewportSnapshot(),
+      viewports: [
+        {
+          ...buildSingleViewportSnapshot().viewports[0]!,
+          operationHistory: [
+            {
+              actionId: "bit-shift",
+              actionLabel: "Bit Shift",
+              appliedLabel: "Bit shift +4",
+              parameterValues: { shiftAmount: 4 },
+              timestampMs: 1_700_000_000_000,
+            },
+          ],
+        },
+      ],
+    };
+    const draft = buildDraftProjectFileFromSnapshot(snapshot);
+    expect(draft.viewports[0]?.operationHistory).toHaveLength(1);
+    expect(draft.viewports[0]?.operationHistory[0]?.actionId).toBe("bit-shift");
+    expect(draft.viewports[0]?.operationHistory[0]?.parameterValues).toEqual({ shiftAmount: 4 });
+  });
 });
 
 function buildSingleViewportSnapshot(): SaveableProjectSnapshot {
@@ -53,6 +77,7 @@ function buildSingleViewportSnapshot(): SaveableProjectSnapshot {
           selectedBandIndex: 0,
           lastAppliedOperationLabel: null,
         },
+        operationHistory: [],
       },
     ],
   };

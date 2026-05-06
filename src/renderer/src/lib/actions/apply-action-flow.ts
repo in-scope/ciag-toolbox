@@ -2,6 +2,7 @@ import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
+import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import type { ViewportRenderingState } from "@/lib/actions/viewport-action";
@@ -73,9 +74,17 @@ function applyActionAndTagOperationLabel(
   parameterValues: ParameterValuesById,
   previous: ViewportRenderingState,
 ): ViewportRenderingState {
+  const appliedLabel = resolveAppliedLabelForActionAndParameters(action, parameterValues);
+  const applied = action.apply(previous, parameterValues);
   return {
-    ...action.apply(previous, parameterValues),
-    lastAppliedOperationLabel: resolveAppliedLabelForActionAndParameters(action, parameterValues),
+    ...applied,
+    lastAppliedOperationLabel: appliedLabel,
+    operationHistory: appendOperationHistoryEntry(applied.operationHistory, {
+      actionId: action.id,
+      actionLabel: action.label,
+      appliedLabel,
+      parameterValues,
+    }),
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
+import { EMPTY_OPERATION_HISTORY, type ViewportOperationHistory } from "./operation-history";
 import {
   NO_PARAMETER_VALUES,
   type ParameterSchema,
@@ -10,12 +11,14 @@ export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
   readonly lastAppliedOperationLabel: string | null;
   readonly selectedBandIndex: number;
+  readonly operationHistory: ViewportOperationHistory;
 }
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
   lastAppliedOperationLabel: null,
   selectedBandIndex: 0,
+  operationHistory: EMPTY_OPERATION_HISTORY,
 };
 
 export type ViewportActionSourceTransform = (

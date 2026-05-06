@@ -24,10 +24,23 @@ export interface PackBundleDraftViewportRenderingState {
   readonly lastAppliedOperationLabel: string | null;
 }
 
+export type PackBundleDraftOperationHistoryParameterValue = number | string | boolean;
+
+export interface PackBundleDraftOperationHistoryEntry {
+  readonly actionId: string;
+  readonly actionLabel: string;
+  readonly appliedLabel: string;
+  readonly parameterValues: Readonly<
+    Record<string, PackBundleDraftOperationHistoryParameterValue>
+  >;
+  readonly timestampMs: number;
+}
+
 export interface PackBundleDraftViewportEntry {
   readonly index: number;
   readonly source: PackBundleDraftViewportSource;
   readonly renderingState: PackBundleDraftViewportRenderingState;
+  readonly operationHistory: ReadonlyArray<PackBundleDraftOperationHistoryEntry>;
 }
 
 export interface PackBundleDraft {
@@ -134,7 +147,7 @@ function buildBundleViewportEntryWithRewrittenPath(
     },
     renderingState: entry.renderingState,
     viewTransform: { zoom: 1, panX: 0, panY: 0 },
-    operationHistory: [],
+    operationHistory: entry.operationHistory,
     roi: null,
   };
 }

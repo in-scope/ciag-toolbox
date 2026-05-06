@@ -84,6 +84,7 @@ function buildDraftViewportEntryForFixture(
       selectedBandIndex: 0,
       lastAppliedOperationLabel: null,
     },
+    operationHistory: [],
   };
 }
 

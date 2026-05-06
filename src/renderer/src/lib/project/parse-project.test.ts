@@ -59,7 +59,82 @@ describe("parseProjectFileFromJsonString", () => {
       /source\.contentHash must be a non-empty string/,
     );
   });
+
+  it("parses a populated operationHistory array on a viewport entry", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonWithSingleHistoryEntry(),
+    );
+    const [first] = project.viewports;
+    expect(first?.operationHistory).toHaveLength(1);
+    const entry = first?.operationHistory[0];
+    expect(entry?.actionId).toBe("bit-shift");
+    expect(entry?.actionLabel).toBe("Bit Shift");
+    expect(entry?.appliedLabel).toBe("Bit shift +4");
+    expect(entry?.parameterValues).toEqual({ shiftAmount: 4 });
+    expect(entry?.timestampMs).toBe(1_700_000_000_000);
+  });
+
+  it("rejects an operationHistory entry that has a nested-object parameter value", () => {
+    const project = {
+      formatVersion: PROJECT_FILE_FORMAT_VERSION,
+      gridLayout: "1x1",
+      selectedViewportIndices: [],
+      viewports: [
+        {
+          index: 0,
+          source: { relativePath: "a.tif", contentHash: "h", fileName: "a.tif" },
+          renderingState: {
+            normalizationEnabled: false,
+            selectedBandIndex: 0,
+            lastAppliedOperationLabel: null,
+          },
+          operationHistory: [
+            {
+              actionId: "x",
+              actionLabel: "X",
+              appliedLabel: "X applied",
+              parameterValues: { nested: { bad: 1 } },
+              timestampMs: 1,
+            },
+          ],
+          roi: null,
+        },
+      ],
+    };
+    expect(() => parseProjectFileFromJsonString(JSON.stringify(project))).toThrow(
+      /operationHistory\.parameterValues\.nested/,
+    );
+  });
 });
+
+function buildProjectJsonWithSingleHistoryEntry(): string {
+  return JSON.stringify({
+    formatVersion: PROJECT_FILE_FORMAT_VERSION,
+    gridLayout: "1x1",
+    selectedViewportIndices: [],
+    viewports: [
+      {
+        index: 0,
+        source: { relativePath: "a.tif", contentHash: "h", fileName: "a.tif" },
+        renderingState: {
+          normalizationEnabled: false,
+          selectedBandIndex: 0,
+          lastAppliedOperationLabel: "Bit shift +4",
+        },
+        operationHistory: [
+          {
+            actionId: "bit-shift",
+            actionLabel: "Bit Shift",
+            appliedLabel: "Bit shift +4",
+            parameterValues: { shiftAmount: 4 },
+            timestampMs: 1_700_000_000_000,
+          },
+        ],
+        roi: null,
+      },
+    ],
+  });
+}
 
 function buildValidProjectJsonWithSingleViewport(): string {
   return JSON.stringify({

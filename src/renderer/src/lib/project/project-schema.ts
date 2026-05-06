@@ -21,12 +21,25 @@ export interface ProjectViewportViewTransform {
   readonly panY: number;
 }
 
+export type ProjectOperationHistoryParameterValue = number | string | boolean;
+export type ProjectOperationHistoryParameterValuesById = Readonly<
+  Record<string, ProjectOperationHistoryParameterValue>
+>;
+
+export interface ProjectOperationHistoryEntry {
+  readonly actionId: string;
+  readonly actionLabel: string;
+  readonly appliedLabel: string;
+  readonly parameterValues: ProjectOperationHistoryParameterValuesById;
+  readonly timestampMs: number;
+}
+
 export interface ProjectViewportEntry {
   readonly index: number;
   readonly source: ProjectViewportSourceReference;
   readonly renderingState: ProjectViewportRenderingState;
   readonly viewTransform: ProjectViewportViewTransform;
-  readonly operationHistory: ReadonlyArray<unknown>;
+  readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
   readonly roi: null;
 }
 

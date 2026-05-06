@@ -1,6 +1,12 @@
 import { useMemo, useId } from "react";
 
 import {
+  formatOperationHistoryParameterValuesAsInlineText,
+  formatOperationHistoryTimestampForDisplay,
+  type ViewportOperationHistory,
+  type ViewportOperationHistoryEntry,
+} from "@/lib/actions/operation-history";
+import {
   clampBandIndexToRaster,
   getRasterBandLabelOrDefault,
   type RasterImage,
@@ -9,9 +15,10 @@ import { cn } from "@/lib/utils";
 
 export interface ViewportRightPanelActiveSource {
   readonly viewportNumber: number;
-  readonly raster: RasterImage;
+  readonly raster: RasterImage | null;
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
+  readonly operationHistory: ViewportOperationHistory;
 }
 
 interface ViewportRightPanelProps {
@@ -31,14 +38,24 @@ function collectVisibleRightPanelSections(
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
   }
+  if (shouldShowHistorySection(activeSource)) {
+    sections.push(<HistorySection key="history" activeSource={activeSource!} />);
+  }
   return sections;
 }
 
 function shouldShowBandsSection(
   activeSource: ViewportRightPanelActiveSource | null,
 ): boolean {
-  if (!activeSource) return false;
+  if (!activeSource || !activeSource.raster) return false;
   return activeSource.raster.bandCount > 1;
+}
+
+function shouldShowHistorySection(
+  activeSource: ViewportRightPanelActiveSource | null,
+): boolean {
+  if (!activeSource) return false;
+  return activeSource.operationHistory.length > 0;
 }
 
 function RightPanelShell(props: { children: ReadonlyArray<JSX.Element> }): JSX.Element {
@@ -55,8 +72,9 @@ interface BandsSectionProps {
   activeSource: ViewportRightPanelActiveSource;
 }
 
-function BandsSection(props: BandsSectionProps): JSX.Element {
+function BandsSection(props: BandsSectionProps): JSX.Element | null {
   const radioGroupName = useId();
+  if (!props.activeSource.raster) return null;
   const displayedBandIndex = clampBandIndexToRaster(
     props.activeSource.raster,
     props.activeSource.selectedBandIndex,
@@ -153,5 +171,87 @@ function getBandRadioRowClassName(isSelected: boolean): string {
     "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent",
     isSelected && "bg-accent/60 text-foreground",
     !isSelected && "text-muted-foreground",
+  );
+}
+
+interface HistorySectionProps {
+  activeSource: ViewportRightPanelActiveSource;
+}
+
+function HistorySection(props: HistorySectionProps): JSX.Element {
+  return (
+    <section aria-label="History" className="flex flex-col gap-2">
+      <HistorySectionHeader
+        viewportNumber={props.activeSource.viewportNumber}
+        entryCount={props.activeSource.operationHistory.length}
+      />
+      <HistoryEntryList history={props.activeSource.operationHistory} />
+    </section>
+  );
+}
+
+interface HistorySectionHeaderProps {
+  viewportNumber: number;
+  entryCount: number;
+}
+
+function HistorySectionHeader(props: HistorySectionHeaderProps): JSX.Element {
+  return (
+    <header className="flex items-baseline justify-between">
+      <h2 className="text-sm font-medium text-foreground">History</h2>
+      <span className="text-xs text-muted-foreground">
+        {formatHistoryEntryCountLabel(props.entryCount, props.viewportNumber)}
+      </span>
+    </header>
+  );
+}
+
+function formatHistoryEntryCountLabel(entryCount: number, viewportNumber: number): string {
+  const noun = entryCount === 1 ? "operation" : "operations";
+  return `${entryCount} ${noun}, viewport ${viewportNumber}`;
+}
+
+interface HistoryEntryListProps {
+  history: ViewportOperationHistory;
+}
+
+function HistoryEntryList(props: HistoryEntryListProps): JSX.Element {
+  return (
+    <ol aria-label="Operation history" className="flex flex-col gap-1">
+      {props.history.map((entry, position) => (
+        <li key={`${entry.timestampMs}-${position}`}>
+          <HistoryEntryRow entry={entry} />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+interface HistoryEntryRowProps {
+  entry: ViewportOperationHistoryEntry;
+}
+
+function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
+  const inlineParameters = formatOperationHistoryParameterValuesAsInlineText(
+    props.entry.parameterValues,
+  );
+  const timestamp = formatOperationHistoryTimestampForDisplay(props.entry.timestampMs);
+  return (
+    <article className="flex flex-col gap-0.5 rounded-md border bg-background px-2 py-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-sm font-medium text-foreground" title={props.entry.actionLabel}>
+          {props.entry.actionLabel}
+        </span>
+        <span className="font-mono text-[11px] text-muted-foreground">{timestamp}</span>
+      </div>
+      {inlineParameters ? (
+        <span
+          className="font-mono text-[11px] text-muted-foreground"
+          title={inlineParameters}
+        >
+          {inlineParameters}
+        </span>
+      ) : null}
+    </article>
   );
 }
