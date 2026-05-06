@@ -1,3 +1,4 @@
+import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface RgbChannelExtents {
@@ -16,15 +17,62 @@ const BYTE_TO_UNIT_SCALE = 1 / 255;
 export function computeImageRgbChannelExtents(
   source: ViewportImageSource,
 ): RgbChannelExtents {
+  if (source.kind === "raster") return computeRasterUnitChannelExtents(source.raster);
   const rgbaBytes = readRgbaBytesFromSource(source);
   return computeRgbChannelExtentsFromBytes(rgbaBytes);
 }
 
 function readRgbaBytesFromSource(
-  source: ViewportImageSource,
+  source: Exclude<ViewportImageSource, { kind: "raster" }>,
 ): Uint8ClampedArray | Uint8Array {
   if (source.kind === "pixels") return source.pixels;
   return readRgbaBytesByDrawingToOffscreenCanvas(source.image);
+}
+
+function computeRasterUnitChannelExtents(raster: RasterImage): RgbChannelExtents {
+  const range = computeRasterValueRange(raster);
+  if (!Number.isFinite(range.min)) return IDENTITY_RGB_CHANNEL_EXTENTS;
+  const containerScale = chooseUnitScaleForRaster(raster);
+  const minUnit = clampToUnit(range.min * containerScale);
+  const maxUnit = clampToUnit(range.max * containerScale);
+  return { min: [minUnit, minUnit, minUnit], max: [maxUnit, maxUnit, maxUnit] };
+}
+
+interface NumericRange {
+  min: number;
+  max: number;
+}
+
+function computeRasterValueRange(raster: RasterImage): NumericRange {
+  const range: NumericRange = {
+    min: Number.POSITIVE_INFINITY,
+    max: Number.NEGATIVE_INFINITY,
+  };
+  for (let i = 0; i < raster.pixels.length; i++) {
+    expandRangeWithValue(range, raster.pixels[i] ?? 0);
+  }
+  return range;
+}
+
+function expandRangeWithValue(range: NumericRange, value: number): void {
+  if (value < range.min) range.min = value;
+  if (value > range.max) range.max = value;
+}
+
+function chooseUnitScaleForRaster(raster: RasterImage): number {
+  if (raster.sampleFormat === "float") return 1;
+  return 1 / containerMaxForBitsPerSample(raster.bitsPerSample);
+}
+
+function containerMaxForBitsPerSample(bitsPerSample: number): number {
+  if (bitsPerSample <= 0) return 1;
+  return Math.pow(2, bitsPerSample) - 1;
+}
+
+function clampToUnit(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }
 
 function readRgbaBytesByDrawingToOffscreenCanvas(

@@ -338,7 +338,7 @@ async function tryDecodeAndRouteImage(
   bindings: OpenImageBindings,
 ): Promise<void> {
   try {
-    const source = await decodeImageBytesToViewportSource(bytes);
+    const source = await decodeImageBytesToViewportSource(fileName, bytes);
     routeDecodedImageToTargetViewport({ fileName, source }, bindings);
   } catch (error) {
     toast.error(`Could not open ${fileName}: ${describeUnknownError(error)}`);
