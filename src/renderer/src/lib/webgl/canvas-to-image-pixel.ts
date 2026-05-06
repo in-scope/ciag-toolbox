@@ -68,3 +68,47 @@ function clampPixelIndexToImageBounds(value: number, length: number): number {
 function hasNonZeroArea(size: ViewportSize): boolean {
   return size.width > 0 && size.height > 0;
 }
+
+export interface ImagePixelToCanvasPointInputs {
+  readonly imagePixelPoint: ImagePixelPoint;
+  readonly displaySize: ViewportSize;
+  readonly imageSize: ViewportSize;
+  readonly fitScale: ClipPoint;
+  readonly userZoom: number;
+  readonly userPan: ClipPoint;
+}
+
+export function convertImagePixelToCanvasPointOrNull(
+  inputs: ImagePixelToCanvasPointInputs,
+): CanvasPixelPoint | null {
+  if (!hasNonZeroArea(inputs.displaySize)) return null;
+  if (!hasNonZeroArea(inputs.imageSize)) return null;
+  const unit = projectImagePixelToUntransformedQuadUnitPoint(inputs.imagePixelPoint, inputs.imageSize);
+  return projectUntransformedQuadUnitPointToCanvasPoint(unit, inputs);
+}
+
+function projectImagePixelToUntransformedQuadUnitPoint(
+  imagePixel: ImagePixelPoint,
+  imageSize: ViewportSize,
+): ClipPoint {
+  const textureS = imagePixel.x / imageSize.width;
+  const textureT = imagePixel.y / imageSize.height;
+  return {
+    x: textureS * 2 - 1,
+    y: 1 - textureT * 2,
+  };
+}
+
+function projectUntransformedQuadUnitPointToCanvasPoint(
+  unit: ClipPoint,
+  inputs: ImagePixelToCanvasPointInputs,
+): CanvasPixelPoint {
+  const finalScaleX = inputs.fitScale.x * inputs.userZoom;
+  const finalScaleY = inputs.fitScale.y * inputs.userZoom;
+  const clipX = finalScaleX * unit.x + inputs.userPan.x;
+  const clipY = finalScaleY * unit.y + inputs.userPan.y;
+  return {
+    x: ((clipX + 1) / 2) * inputs.displaySize.width,
+    y: ((1 - clipY) / 2) * inputs.displaySize.height,
+  };
+}

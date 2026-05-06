@@ -1,4 +1,4 @@
-import { type MouseEvent } from "react";
+import { useCallback, type MouseEvent } from "react";
 
 import {
   ContextMenu,
@@ -13,10 +13,12 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
+import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
+import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
   useViewportSelection,
@@ -120,6 +122,9 @@ function renderViewportCellViewport(
       normalizationEnabled={settings.normalizationEnabled}
       selectedBandIndex={settings.selectedBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
+      isRegionToolActive={settings.isRegionToolActive}
+      roi={settings.roi}
+      onCommitRoi={settings.handleCommitRoi}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
     />
@@ -151,11 +156,15 @@ interface ViewportCellInteractionSettings {
   normalizationEnabled: boolean;
   selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
+  isRegionToolActive: boolean;
+  roi: ViewportRoi | null;
+  handleCommitRoi: (roi: ViewportRoi) => void;
 }
 
 function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
-  const { getRenderingState } = useViewportRendering();
+  const { getRenderingState, setRenderingState } = useViewportRendering();
+  const { isRegionToolActive } = useRegionTool();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
@@ -164,6 +173,13 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
   const handleClose = closing.hasContent(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
+  const handleCommitRoi = useCallback(
+    (roi: ViewportRoi) => {
+      setRenderingState(cellIndex, { ...renderingState, roi });
+      selectViewportFromClick(cellIndex, { ctrlOrMeta: false, shift: false });
+    },
+    [cellIndex, renderingState, setRenderingState, selectViewportFromClick],
+  );
   return {
     isSelected,
     handleClick,
@@ -171,6 +187,9 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
     normalizationEnabled: renderingState.normalizationEnabled,
     selectedBandIndex: renderingState.selectedBandIndex,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
+    isRegionToolActive,
+    roi: renderingState.roi,
+    handleCommitRoi,
   };
 }
 

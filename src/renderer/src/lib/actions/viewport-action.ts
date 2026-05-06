@@ -1,3 +1,4 @@
+import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { EMPTY_OPERATION_HISTORY, type ViewportOperationHistory } from "./operation-history";
@@ -12,6 +13,7 @@ export interface ViewportRenderingState {
   readonly lastAppliedOperationLabel: string | null;
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
+  readonly roi: ViewportRoi | null;
 }
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
@@ -19,6 +21,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   lastAppliedOperationLabel: null,
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
+  roi: null,
 };
 
 export type ViewportActionSourceTransform = (

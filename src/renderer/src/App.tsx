@@ -84,6 +84,10 @@ import {
 } from "@/state/duplication-context";
 import { PixelReadoutProvider } from "@/state/pixel-readout-context";
 import {
+  RegionToolProvider,
+  useRegionTool,
+} from "@/state/region-tool-context";
+import {
   ViewportSelectionProvider,
   useViewportSelection,
   type ViewportSelectionState,
@@ -133,11 +137,13 @@ export function App(): JSX.Element {
     <TooltipProvider delayDuration={300}>
       <ViewportSelectionProvider>
         <ViewportRenderingProvider>
-          <PixelReadoutProvider>
-            <ApplicationShell />
-            <AboutDialog />
-            <Toaster />
-          </PixelReadoutProvider>
+          <RegionToolProvider>
+            <PixelReadoutProvider>
+              <ApplicationShell />
+              <AboutDialog />
+              <Toaster />
+            </PixelReadoutProvider>
+          </RegionToolProvider>
         </ViewportRenderingProvider>
       </ViewportSelectionProvider>
     </TooltipProvider>
@@ -171,6 +177,7 @@ function ApplicationShell(): JSX.Element {
     replaceSelection,
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
+  const regionTool = useRegionTool();
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
   const cellCountRef = useLatestRef(cellCount);
@@ -242,6 +249,10 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     currentProjectFilePath,
   );
+  useEscapeKeyClearsActiveViewportRoi({
+    selectedIndicesRef: useLatestRef(selectedIndices),
+    renderingApi,
+  });
   const handleApplyAction = (options: ToolOptionsApplyOptions) =>
     runApplyActionFromPanel(
       activeAction,
@@ -273,6 +284,8 @@ function ApplicationShell(): JSX.Element {
         registeredActions={REGISTERED_VIEWPORT_ACTIONS}
         onInvokeAction={handleInvokeAction}
         canInvokeActions={singleSelectedSource !== null}
+        isRegionToolActive={regionTool.isRegionToolActive}
+        onToggleRegionTool={regionTool.toggleRegionTool}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
@@ -1031,7 +1044,49 @@ function buildRightPanelActiveSource(
         selectedBandIndex: bandIndex,
       }),
     operationHistory: renderingState.operationHistory,
+    roi: renderingState.roi,
+    onClearRoi: () =>
+      renderingApi.setRenderingState(viewportIndex, { ...renderingState, roi: null }),
   };
+}
+
+interface EscapeKeyClearRoiBindings {
+  readonly selectedIndicesRef: MutableRefObject<ReadonlySet<number>>;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+function useEscapeKeyClearsActiveViewportRoi(bindings: EscapeKeyClearRoiBindings): void {
+  const { selectedIndicesRef, renderingApi } = bindings;
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void =>
+      handleEscapeKeyForRoiClearing(event, { selectedIndicesRef, renderingApi });
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIndicesRef, renderingApi]);
+}
+
+function handleEscapeKeyForRoiClearing(
+  event: KeyboardEvent,
+  bindings: EscapeKeyClearRoiBindings,
+): void {
+  if (event.key !== "Escape") return;
+  if (isFocusInsideEditableElement(event.target)) return;
+  clearRoiOnEverySelectedViewport(bindings);
+}
+
+function clearRoiOnEverySelectedViewport(bindings: EscapeKeyClearRoiBindings): void {
+  for (const index of bindings.selectedIndicesRef.current) {
+    const renderingState = bindings.renderingApi.getRenderingState(index);
+    if (!renderingState.roi) continue;
+    bindings.renderingApi.setRenderingState(index, { ...renderingState, roi: null });
+  }
+}
+
+function isFocusInsideEditableElement(eventTarget: EventTarget | null): boolean {
+  if (!(eventTarget instanceof HTMLElement)) return false;
+  const tagName = eventTarget.tagName;
+  if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") return true;
+  return eventTarget.isContentEditable;
 }
 
 function buildMetadataDisplayForActiveContentOrNull(

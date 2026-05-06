@@ -46,6 +46,7 @@ describe("applyActionToSelectedViewports", () => {
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
+      roi: null,
     });
   });
 
@@ -68,6 +69,7 @@ describe("NORMALIZE_ACTION", () => {
           lastAppliedOperationLabel: null,
           selectedBandIndex: 0,
           operationHistory: EMPTY_OPERATION_HISTORY,
+          roi: null,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -76,6 +78,7 @@ describe("NORMALIZE_ACTION", () => {
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
+      roi: null,
     });
     expect(
       NORMALIZE_ACTION.apply(
@@ -84,6 +87,7 @@ describe("NORMALIZE_ACTION", () => {
           lastAppliedOperationLabel: null,
           selectedBandIndex: 0,
           operationHistory: EMPTY_OPERATION_HISTORY,
+          roi: null,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -92,6 +96,7 @@ describe("NORMALIZE_ACTION", () => {
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
+      roi: null,
     });
   });
 });
