@@ -40,9 +40,12 @@ Download the latest installer for your computer from the [Releases page](../../r
 
    If you are not sure which you have, click the Apple menu in the top-left of your screen, choose **About This Mac**, and look at the **Chip** or **Processor** line.
 2. Open the `.dmg` and drag the **MSI Toolbox** icon into your **Applications** folder.
-3. **First launch only**: open Finder, go to your Applications folder, right-click (or Control-click) the **MSI Toolbox** icon, choose **Open**, and then click **Open** in the dialog that appears. Subsequent launches work with a normal double-click.
+3. **First launch only**: double-click **MSI Toolbox** in your Applications folder. macOS will block it with a dialog saying it cannot be opened. Click **Done** to dismiss the dialog.
+4. Click the Apple menu in the top-left of your screen and choose **System Settings**. In the sidebar, click **Privacy & Security**, then scroll down. Near the bottom you will see a message: *"MSI Toolbox was blocked to protect your Mac."* Click the **Open Anyway** button next to it.
+5. macOS will prompt you to authenticate with Touch ID or your password, then show one more dialog. Click **Open Anyway** in that dialog too.
+6. The app launches. From now on, double-clicking the icon works normally; this approval is one-time.
 
-   This extra step is needed because the application is not signed by Apple. macOS blocks unsigned applications when you double-click them; the right-click + Open path is the standard way to grant the one-time exception.
+   This step is needed because the application is not signed by a paid Apple Developer account. Approving it through Privacy & Security is the standard, GUI-only way to grant the one-time exception.
 
 ## Getting Started
 

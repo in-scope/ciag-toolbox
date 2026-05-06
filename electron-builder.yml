@@ -36,7 +36,9 @@ mac:
         - arm64
   icon: build/icon.icns
   category: public.app-category.graphics-design
-  identity: null
+  identity: '-'
+  hardenedRuntime: false
+  gatekeeperAssess: false
   artifactName: ${productName}-${version}-${arch}.${ext}
 dmg:
   writeUpdateInfo: false
