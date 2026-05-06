@@ -21,7 +21,22 @@ const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 
 const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   name: "Images",
-  extensions: ["png", "jpg", "jpeg", "tif", "tiff", "hdr"],
+  extensions: [
+    "png",
+    "jpg",
+    "jpeg",
+    "tif",
+    "tiff",
+    "hdr",
+    "dng",
+    "cr3",
+    "arw",
+    "nef",
+    "raf",
+    "orf",
+    "pef",
+    "rw2",
+  ],
 };
 
 const ENVI_HEADER_EXTENSION = ".hdr";
