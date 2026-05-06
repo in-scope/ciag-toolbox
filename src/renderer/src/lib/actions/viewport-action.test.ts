@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { EMPTY_OPERATION_HISTORY } from "./operation-history";
 import { NO_PARAMETER_VALUES } from "./parameter-schema";
 import { NORMALIZE_ACTION } from "./registered-actions";
 import {
@@ -44,6 +45,7 @@ describe("applyActionToSelectedViewports", () => {
       normalizationEnabled: true,
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
+      operationHistory: EMPTY_OPERATION_HISTORY,
     });
   });
 
@@ -65,6 +67,7 @@ describe("NORMALIZE_ACTION", () => {
           normalizationEnabled: false,
           lastAppliedOperationLabel: null,
           selectedBandIndex: 0,
+          operationHistory: EMPTY_OPERATION_HISTORY,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -72,6 +75,7 @@ describe("NORMALIZE_ACTION", () => {
       normalizationEnabled: true,
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
+      operationHistory: EMPTY_OPERATION_HISTORY,
     });
     expect(
       NORMALIZE_ACTION.apply(
@@ -79,6 +83,7 @@ describe("NORMALIZE_ACTION", () => {
           normalizationEnabled: true,
           lastAppliedOperationLabel: null,
           selectedBandIndex: 0,
+          operationHistory: EMPTY_OPERATION_HISTORY,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -86,6 +91,7 @@ describe("NORMALIZE_ACTION", () => {
       normalizationEnabled: true,
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
+      operationHistory: EMPTY_OPERATION_HISTORY,
     });
   });
 });

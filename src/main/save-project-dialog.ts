@@ -10,6 +10,18 @@ export interface DraftViewportSourceForSave {
   readonly fileName: string;
 }
 
+export type DraftOperationHistoryParameterValueForSave = number | string | boolean;
+
+export interface DraftOperationHistoryEntryForSave {
+  readonly actionId: string;
+  readonly actionLabel: string;
+  readonly appliedLabel: string;
+  readonly parameterValues: Readonly<
+    Record<string, DraftOperationHistoryParameterValueForSave>
+  >;
+  readonly timestampMs: number;
+}
+
 export interface DraftViewportEntryForSave {
   readonly index: number;
   readonly source: DraftViewportSourceForSave;
@@ -18,6 +30,7 @@ export interface DraftViewportEntryForSave {
     readonly selectedBandIndex: number;
     readonly lastAppliedOperationLabel: string | null;
   };
+  readonly operationHistory: ReadonlyArray<DraftOperationHistoryEntryForSave>;
 }
 
 export interface DraftProjectForSave {
@@ -88,7 +101,7 @@ function buildOnDiskViewportEntry(
     },
     renderingState: entry.renderingState,
     viewTransform: { zoom: 1, panX: 0, panY: 0 },
-    operationHistory: [],
+    operationHistory: entry.operationHistory,
     roi: null,
   };
 }

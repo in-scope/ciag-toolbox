@@ -4,6 +4,9 @@ import {
   IDENTITY_PROJECT_VIEWPORT_VIEW_TRANSFORM,
   PROJECT_FILE_FORMAT_VERSION,
   type ProjectFile,
+  type ProjectOperationHistoryEntry,
+  type ProjectOperationHistoryParameterValue,
+  type ProjectOperationHistoryParameterValuesById,
   type ProjectViewportEntry,
   type ProjectViewportRenderingState,
   type ProjectViewportSourceReference,
@@ -98,9 +101,48 @@ function parseViewTransformOrIdentity(value: unknown): ProjectViewportViewTransf
   };
 }
 
-function parseOperationHistoryOrEmpty(value: unknown): ReadonlyArray<unknown> {
+function parseOperationHistoryOrEmpty(
+  value: unknown,
+): ReadonlyArray<ProjectOperationHistoryEntry> {
   if (!Array.isArray(value)) return [];
-  return value.slice();
+  return value.map(parseOperationHistoryEntryOrThrow);
+}
+
+function parseOperationHistoryEntryOrThrow(value: unknown): ProjectOperationHistoryEntry {
+  const entry = expectRecordOrThrow(value, "operation history entry");
+  return {
+    actionId: expectNonEmptyStringOrThrow(entry["actionId"], "operationHistory.actionId"),
+    actionLabel: expectNonEmptyStringOrThrow(entry["actionLabel"], "operationHistory.actionLabel"),
+    appliedLabel: expectNonEmptyStringOrThrow(
+      entry["appliedLabel"],
+      "operationHistory.appliedLabel",
+    ),
+    parameterValues: parseOperationHistoryParameterValuesOrThrow(entry["parameterValues"]),
+    timestampMs: expectFiniteNonNegativeIntegerOrThrow(entry["timestampMs"]),
+  };
+}
+
+function parseOperationHistoryParameterValuesOrThrow(
+  value: unknown,
+): ProjectOperationHistoryParameterValuesById {
+  const record = expectRecordOrThrow(value, "operationHistory.parameterValues");
+  const values: Record<string, ProjectOperationHistoryParameterValue> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    values[key] = ensureOperationHistoryParameterValueOrThrow(entry, key);
+  }
+  return Object.freeze(values);
+}
+
+function ensureOperationHistoryParameterValueOrThrow(
+  value: unknown,
+  key: string,
+): ProjectOperationHistoryParameterValue {
+  if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  throw new Error(
+    `operationHistory.parameterValues.${key} must be a number, string, or boolean`,
+  );
 }
 
 function expectRecordOrThrow(value: unknown, label: string): Record<string, unknown> {

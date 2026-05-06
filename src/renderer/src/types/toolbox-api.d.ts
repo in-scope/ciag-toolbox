@@ -52,10 +52,23 @@ interface ToolboxSaveProjectDraftRenderingState {
   lastAppliedOperationLabel: string | null;
 }
 
+type ToolboxSaveProjectDraftOperationHistoryParameterValue = number | string | boolean;
+
+interface ToolboxSaveProjectDraftOperationHistoryEntry {
+  actionId: string;
+  actionLabel: string;
+  appliedLabel: string;
+  parameterValues: Readonly<
+    Record<string, ToolboxSaveProjectDraftOperationHistoryParameterValue>
+  >;
+  timestampMs: number;
+}
+
 interface ToolboxSaveProjectDraftViewportEntry {
   index: number;
   source: ToolboxSaveProjectDraftViewportSource;
   renderingState: ToolboxSaveProjectDraftRenderingState;
+  operationHistory: ReadonlyArray<ToolboxSaveProjectDraftOperationHistoryEntry>;
 }
 
 interface ToolboxSaveProjectDraft {
