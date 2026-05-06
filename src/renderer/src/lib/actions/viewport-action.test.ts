@@ -50,6 +50,7 @@ describe("applyActionToSelectedViewports", () => {
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      removedBandIndexes: [],
     });
   });
 
@@ -74,6 +75,7 @@ describe("NORMALIZE_ACTION", () => {
           operationHistory: EMPTY_OPERATION_HISTORY,
           roi: null,
           pinnedSpectra: EMPTY_PINNED_SPECTRA,
+          removedBandIndexes: [],
         },
         NO_PARAMETER_VALUES,
       ),
@@ -84,6 +86,7 @@ describe("NORMALIZE_ACTION", () => {
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      removedBandIndexes: [],
     });
     expect(
       NORMALIZE_ACTION.apply(
@@ -94,6 +97,7 @@ describe("NORMALIZE_ACTION", () => {
           operationHistory: EMPTY_OPERATION_HISTORY,
           roi: null,
           pinnedSpectra: EMPTY_PINNED_SPECTRA,
+          removedBandIndexes: [],
         },
         NO_PARAMETER_VALUES,
       ),
@@ -104,6 +108,7 @@ describe("NORMALIZE_ACTION", () => {
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      removedBandIndexes: [],
     });
   });
 });
