@@ -16,6 +16,7 @@ export async function placeClonedSourceContentAtIndex(
       source: independentSource,
       originalFilePath: sourceContent.originalFilePath,
       originalContentHash: sourceContent.originalContentHash,
+      fileSizeBytes: sourceContent.fileSizeBytes,
     }),
   );
 }

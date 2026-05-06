@@ -54,6 +54,7 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
@@ -232,9 +233,10 @@ function ApplicationShell(): JSX.Element {
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection(
-    singleSelectedSource,
+    selectedIndices,
     imagesByIndex,
     renderingApi,
+    currentProjectFilePath,
   );
   const handleApplyAction = (options: ToolOptionsApplyOptions) =>
     runApplyActionFromPanel(
@@ -556,6 +558,7 @@ async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void
       sidecarBytes: result.sidecar?.bytes,
       originalFilePath: result.filePath,
       originalContentHash: result.contentHash,
+      fileSizeBytes: result.bytes.length,
     },
     bindings,
   );
@@ -577,6 +580,7 @@ async function tryDecodeAndRouteImage(
     sidecarBytes?: Uint8Array;
     originalFilePath: string;
     originalContentHash: string;
+    fileSizeBytes: number;
   },
   bindings: OpenImageBindings,
 ): Promise<void> {
@@ -588,6 +592,7 @@ async function tryDecodeAndRouteImage(
         source,
         originalFilePath: bundle.originalFilePath,
         originalContentHash: bundle.originalContentHash,
+        fileSizeBytes: bundle.fileSizeBytes,
       },
       bindings,
     );
@@ -625,6 +630,7 @@ function applyLoadedImageAtIndex(
       source: pending.source,
       originalFilePath: pending.originalFilePath,
       originalContentHash: pending.originalContentHash,
+      fileSizeBytes: pending.fileSizeBytes,
     }),
   );
   bindings.selectViewportFromClick(index, { ctrlOrMeta: false, shift: false });
@@ -977,36 +983,42 @@ function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | 
 }
 
 function deriveRightPanelActiveSourceFromSelection(
-  singleSelectedSource: SingleSelectedSource | null,
+  selectedIndices: ReadonlySet<number>,
   imagesByIndex: ImagesByIndexMap,
   renderingApi: ViewportRenderingApi,
+  currentProjectFilePath: string | null,
 ): ViewportRightPanelActiveSource | null {
-  if (!singleSelectedSource) return null;
-  const content = imagesByIndex.get(singleSelectedSource.index);
-  if (!content) return null;
-  return buildRightPanelActiveSource(
-    singleSelectedSource.index,
-    extractRasterFromContentOrNull(content),
-    renderingApi,
-  );
+  const onlyIndex = readSingleSelectedIndexOrNull(selectedIndices);
+  if (onlyIndex === null) return null;
+  const content = imagesByIndex.get(onlyIndex) ?? null;
+  return buildRightPanelActiveSource(onlyIndex, content, renderingApi, currentProjectFilePath);
+}
+
+function readSingleSelectedIndexOrNull(
+  selectedIndices: ReadonlySet<number>,
+): number | null {
+  if (selectedIndices.size !== 1) return null;
+  return readSingleIndexFromSelection(selectedIndices);
 }
 
 function extractRasterFromContentOrNull(
-  content: ViewportCellContent,
+  content: ViewportCellContent | null,
 ): ViewportRightPanelActiveSource["raster"] {
-  if (content.source.kind !== "raster") return null;
+  if (!content || content.source.kind !== "raster") return null;
   return content.source.raster;
 }
 
 function buildRightPanelActiveSource(
   viewportIndex: number,
-  raster: ViewportRightPanelActiveSource["raster"],
+  content: ViewportCellContent | null,
   renderingApi: ViewportRenderingApi,
+  currentProjectFilePath: string | null,
 ): ViewportRightPanelActiveSource {
   const renderingState = renderingApi.getRenderingState(viewportIndex);
   return {
     viewportNumber: getViewportNumberFromIndex(viewportIndex),
-    raster,
+    metadata: buildMetadataDisplayForActiveContentOrNull(content, currentProjectFilePath),
+    raster: extractRasterFromContentOrNull(content),
     selectedBandIndex: renderingState.selectedBandIndex,
     onSelectBandIndex: (bandIndex) =>
       renderingApi.setRenderingState(viewportIndex, {
@@ -1015,6 +1027,20 @@ function buildRightPanelActiveSource(
       }),
     operationHistory: renderingState.operationHistory,
   };
+}
+
+function buildMetadataDisplayForActiveContentOrNull(
+  content: ViewportCellContent | null,
+  currentProjectFilePath: string | null,
+): ViewportRightPanelActiveSource["metadata"] {
+  if (!content) return null;
+  return buildViewportImageMetadataDisplay({
+    fileName: content.fileName,
+    source: content.source,
+    originalFilePath: content.originalFilePath,
+    fileSizeBytes: content.fileSizeBytes,
+    currentProjectFilePath,
+  });
 }
 
 function runApplyActionFromPanel(
@@ -1288,6 +1314,7 @@ function mapResolvedViewportSnapshotToCellContent(
     source: viewport.source,
     originalFilePath: viewport.originalFilePath,
     originalContentHash: viewport.originalContentHash,
+    fileSizeBytes: viewport.fileSizeBytes,
   };
 }
 

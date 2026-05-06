@@ -10,6 +10,7 @@ export interface OpenedProjectViewportSnapshot {
   readonly source: ViewportImageSource;
   readonly originalFilePath: string;
   readonly originalContentHash: string;
+  readonly fileSizeBytes: number;
   readonly entry: ProjectViewportEntry;
 }
 
@@ -173,6 +174,7 @@ async function placeResolvedSourceIntoAccumulator(
     source: decoded,
     originalFilePath: loaded.absolutePath,
     originalContentHash: loaded.contentHash,
+    fileSizeBytes: loaded.bytes.length,
     entry,
   });
 }

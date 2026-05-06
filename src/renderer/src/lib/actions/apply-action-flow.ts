@@ -200,6 +200,7 @@ async function cloneAndTransformSourceContent(
     source: transformedSource,
     originalFilePath: sourceContent.originalFilePath,
     originalContentHash: sourceContent.originalContentHash,
+    fileSizeBytes: sourceContent.fileSizeBytes,
   };
 }
 

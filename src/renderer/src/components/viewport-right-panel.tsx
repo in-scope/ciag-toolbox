@@ -6,6 +6,7 @@ import {
   type ViewportOperationHistory,
   type ViewportOperationHistoryEntry,
 } from "@/lib/actions/operation-history";
+import type { ViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import {
   clampBandIndexToRaster,
   getRasterBandLabelOrDefault,
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 export interface ViewportRightPanelActiveSource {
   readonly viewportNumber: number;
+  readonly metadata: ViewportImageMetadataDisplay | null;
   readonly raster: RasterImage | null;
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
@@ -35,6 +37,9 @@ function collectVisibleRightPanelSections(
   activeSource: ViewportRightPanelActiveSource | null,
 ): JSX.Element[] {
   const sections: JSX.Element[] = [];
+  if (activeSource) {
+    sections.push(<MetadataSection key="metadata" activeSource={activeSource} />);
+  }
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
   }
@@ -253,5 +258,91 @@ function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
         </span>
       ) : null}
     </article>
+  );
+}
+
+interface MetadataSectionProps {
+  activeSource: ViewportRightPanelActiveSource;
+}
+
+function MetadataSection(props: MetadataSectionProps): JSX.Element {
+  return (
+    <section aria-label="Metadata" className="flex flex-col gap-2">
+      <MetadataSectionHeader viewportNumber={props.activeSource.viewportNumber} />
+      <MetadataSectionBody metadata={props.activeSource.metadata} />
+    </section>
+  );
+}
+
+function MetadataSectionHeader({ viewportNumber }: { viewportNumber: number }): JSX.Element {
+  return (
+    <header className="flex items-baseline justify-between">
+      <h2 className="text-sm font-medium text-foreground">Metadata</h2>
+      <span className="text-xs text-muted-foreground">Viewport {viewportNumber}</span>
+    </header>
+  );
+}
+
+function MetadataSectionBody({
+  metadata,
+}: {
+  metadata: ViewportImageMetadataDisplay | null;
+}): JSX.Element {
+  if (!metadata) return <MetadataEmptyState />;
+  return <MetadataKeyValueList metadata={metadata} />;
+}
+
+function MetadataEmptyState(): JSX.Element {
+  return (
+    <p className="text-xs text-muted-foreground">No image loaded in this viewport.</p>
+  );
+}
+
+interface MetadataKeyValueListProps {
+  metadata: ViewportImageMetadataDisplay;
+}
+
+function MetadataKeyValueList(props: MetadataKeyValueListProps): JSX.Element {
+  const rows = buildMetadataRowsFromDisplay(props.metadata);
+  return (
+    <dl className="flex flex-col gap-1 text-xs">
+      {rows.map((row) => (
+        <MetadataKeyValueRow key={row.label} label={row.label} value={row.value} />
+      ))}
+    </dl>
+  );
+}
+
+interface MetadataDisplayRow {
+  readonly label: string;
+  readonly value: string;
+}
+
+function buildMetadataRowsFromDisplay(
+  metadata: ViewportImageMetadataDisplay,
+): ReadonlyArray<MetadataDisplayRow> {
+  return [
+    { label: "File path", value: metadata.filePath },
+    { label: "Format", value: metadata.format },
+    { label: "Width", value: metadata.width },
+    { label: "Height", value: metadata.height },
+    { label: "Bits per sample", value: metadata.bitsPerSample },
+    { label: "Sample format", value: metadata.sampleFormat },
+    { label: "Bands", value: metadata.bandCount },
+    { label: "File size", value: metadata.fileSize },
+  ];
+}
+
+function MetadataKeyValueRow(props: MetadataDisplayRow): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-muted-foreground">{props.label}</dt>
+      <dd
+        className="truncate text-right font-mono text-foreground"
+        title={props.value}
+      >
+        {props.value}
+      </dd>
+    </div>
   );
 }
