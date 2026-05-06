@@ -54,7 +54,7 @@ async function readSingleTiffPageIntoBands(
 ): Promise<void> {
   const page = await tiff.getImage(pageIndex);
   const header = readTiffPageHeader(page);
-  rejectInconsistentTiffPage(header, firstHeader, pageIndex);
+  if (pageIsEmbeddedThumbnail(header, firstHeader)) return;
   bandPixels.push(await readFirstBandPixels(page));
   bandLabels.push(header.description ?? "");
 }
@@ -90,21 +90,14 @@ function readTiffPageHeader(image: GeoTiffImage): TiffPageHeader {
   };
 }
 
-function rejectInconsistentTiffPage(
+function pageIsEmbeddedThumbnail(
   page: TiffPageHeader,
   firstPage: TiffPageHeader,
-  pageIndex: number,
-): void {
-  if (page.width !== firstPage.width || page.height !== firstPage.height) {
-    throw new Error(
-      `Multi-page TIFF has mismatched dimensions on page ${pageIndex}; all pages must share width and height`,
-    );
-  }
-  if (page.bitsPerSample !== firstPage.bitsPerSample || page.sampleFormat !== firstPage.sampleFormat) {
-    throw new Error(
-      `Multi-page TIFF has mismatched sample types on page ${pageIndex}; all pages must share bit depth and sample format`,
-    );
-  }
+): boolean {
+  return page.width !== firstPage.width
+    || page.height !== firstPage.height
+    || page.bitsPerSample !== firstPage.bitsPerSample
+    || page.sampleFormat !== firstPage.sampleFormat;
 }
 
 function readBitsPerSampleOrThrow(image: GeoTiffImage): number {
