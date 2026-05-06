@@ -1,3 +1,7 @@
+import {
+  EMPTY_PINNED_SPECTRA,
+  type PinnedSpectraList,
+} from "@/lib/image/spectrum-entry";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -14,6 +18,7 @@ export interface ViewportRenderingState {
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
+  readonly pinnedSpectra: PinnedSpectraList;
 }
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
@@ -22,6 +27,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
+  pinnedSpectra: EMPTY_PINNED_SPECTRA,
 };
 
 export type ViewportActionSourceTransform = (

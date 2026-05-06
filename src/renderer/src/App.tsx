@@ -56,6 +56,8 @@ import {
 } from "@/lib/grid/grid-layout";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
+import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
+import { removePinnedSpectrumById } from "@/lib/image/spectrum-entry";
 import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
@@ -1033,10 +1035,11 @@ function buildRightPanelActiveSource(
   currentProjectFilePath: string | null,
 ): ViewportRightPanelActiveSource {
   const renderingState = renderingApi.getRenderingState(viewportIndex);
+  const raster = extractRasterFromContentOrNull(content);
   return {
     viewportNumber: getViewportNumberFromIndex(viewportIndex),
     metadata: buildMetadataDisplayForActiveContentOrNull(content, currentProjectFilePath),
-    raster: extractRasterFromContentOrNull(content),
+    raster,
     selectedBandIndex: renderingState.selectedBandIndex,
     onSelectBandIndex: (bandIndex) =>
       renderingApi.setRenderingState(viewportIndex, {
@@ -1047,6 +1050,27 @@ function buildRightPanelActiveSource(
     roi: renderingState.roi,
     onClearRoi: () =>
       renderingApi.setRenderingState(viewportIndex, { ...renderingState, roi: null }),
+    pinnedSpectra: renderingState.pinnedSpectra,
+    roiMeanSpectrum: buildRoiMeanSpectrumForDisplayOrNull(raster, renderingState.roi),
+    onRemovePinnedSpectrum: (spectrumId) =>
+      renderingApi.setRenderingState(viewportIndex, {
+        ...renderingState,
+        pinnedSpectra: removePinnedSpectrumById(renderingState.pinnedSpectra, spectrumId),
+      }),
+  };
+}
+
+function buildRoiMeanSpectrumForDisplayOrNull(
+  raster: ViewportRightPanelActiveSource["raster"],
+  roi: ViewportRightPanelActiveSource["roi"],
+): ViewportRightPanelActiveSource["roiMeanSpectrum"] {
+  if (!raster || !roi) return null;
+  const spectrum = computeRoiMeanSpectrumOrNull(raster, roi);
+  if (!spectrum) return null;
+  return {
+    bandMeans: spectrum.bandMeans,
+    bandStandardDeviations: spectrum.bandStandardDeviations,
+    samplePixelCount: spectrum.samplePixelCount,
   };
 }
 

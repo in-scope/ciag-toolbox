@@ -13,6 +13,12 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
+import { computePixelSpectrumOrNull } from "@/lib/image/compute-spectrum";
+import {
+  appendPinnedSpectrumWithCapLimit,
+  buildPinnedSpectrumIdFromTimestamp,
+  type PinnedSpectrum,
+} from "@/lib/image/spectrum-entry";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -79,7 +85,7 @@ interface ViewportCellProps {
 }
 
 function ViewportCell(props: ViewportCellProps): JSX.Element {
-  const settings = useViewportCellInteractionSettings(props.cellIndex);
+  const settings = useViewportCellInteractionSettings(props.cellIndex, props.content);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -125,6 +131,7 @@ function renderViewportCellViewport(
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
       onCommitRoi={settings.handleCommitRoi}
+      onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
     />
@@ -159,9 +166,13 @@ interface ViewportCellInteractionSettings {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   handleCommitRoi: (roi: ViewportRoi) => void;
+  handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
 }
 
-function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInteractionSettings {
+function useViewportCellInteractionSettings(
+  cellIndex: number,
+  content: ViewportCellContent | null,
+): ViewportCellInteractionSettings {
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
@@ -180,6 +191,18 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
     },
     [cellIndex, renderingState, setRenderingState, selectViewportFromClick],
   );
+  const handlePinPixelSpectrum = useCallback(
+    (imageX: number, imageY: number) => {
+      const next = buildPinnedPixelSpectrumFromImagePoint(content, imageX, imageY);
+      if (!next) return;
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        pinnedSpectra: appendPinnedSpectrumWithCapLimit(renderingState.pinnedSpectra, next),
+      });
+      selectViewportFromClick(cellIndex, { ctrlOrMeta: false, shift: false });
+    },
+    [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
+  );
   return {
     isSelected,
     handleClick,
@@ -190,6 +213,24 @@ function useViewportCellInteractionSettings(cellIndex: number): ViewportCellInte
     isRegionToolActive,
     roi: renderingState.roi,
     handleCommitRoi,
+    handlePinPixelSpectrum,
+  };
+}
+
+function buildPinnedPixelSpectrumFromImagePoint(
+  content: ViewportCellContent | null,
+  imageX: number,
+  imageY: number,
+): PinnedSpectrum | null {
+  if (!content || content.source.kind !== "raster") return null;
+  const spectrum = computePixelSpectrumOrNull(content.source.raster, imageX, imageY);
+  if (!spectrum) return null;
+  return {
+    kind: "pixel",
+    id: buildPinnedSpectrumIdFromTimestamp(Date.now(), Math.random()),
+    imagePixelX: imageX,
+    imagePixelY: imageY,
+    bandValues: spectrum.bandValues,
   };
 }
 

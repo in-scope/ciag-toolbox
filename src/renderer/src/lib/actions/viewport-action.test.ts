@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+
 import { EMPTY_OPERATION_HISTORY } from "./operation-history";
 import { NO_PARAMETER_VALUES } from "./parameter-schema";
 import { NORMALIZE_ACTION } from "./registered-actions";
@@ -47,6 +49,7 @@ describe("applyActionToSelectedViewports", () => {
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
+      pinnedSpectra: EMPTY_PINNED_SPECTRA,
     });
   });
 
@@ -70,6 +73,7 @@ describe("NORMALIZE_ACTION", () => {
           selectedBandIndex: 0,
           operationHistory: EMPTY_OPERATION_HISTORY,
           roi: null,
+          pinnedSpectra: EMPTY_PINNED_SPECTRA,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -79,6 +83,7 @@ describe("NORMALIZE_ACTION", () => {
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
+      pinnedSpectra: EMPTY_PINNED_SPECTRA,
     });
     expect(
       NORMALIZE_ACTION.apply(
@@ -88,6 +93,7 @@ describe("NORMALIZE_ACTION", () => {
           selectedBandIndex: 0,
           operationHistory: EMPTY_OPERATION_HISTORY,
           roi: null,
+          pinnedSpectra: EMPTY_PINNED_SPECTRA,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -97,6 +103,7 @@ describe("NORMALIZE_ACTION", () => {
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
+      pinnedSpectra: EMPTY_PINNED_SPECTRA,
     });
   });
 });

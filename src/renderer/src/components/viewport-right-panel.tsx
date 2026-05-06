@@ -1,5 +1,9 @@
 import { useMemo, useId } from "react";
 
+import {
+  SpectrumPlot,
+  type SpectrumLinePlotInput,
+} from "@/components/spectrum-plot";
 import { Button } from "@/components/ui/button";
 import {
   formatOperationHistoryParameterValuesAsInlineText,
@@ -12,7 +16,17 @@ import {
   clampBandIndexToRaster,
   getRasterBandLabelOrDefault,
   type RasterImage,
+  type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import {
+  buildSpectrumXAxisFromRaster,
+  describeSpectrumYAxisLabel,
+} from "@/lib/image/spectrum-axis";
+import {
+  MAX_PINNED_SPECTRA_PER_VIEWPORT,
+  type PinnedSpectrum,
+  type PinnedSpectraList,
+} from "@/lib/image/spectrum-entry";
 import {
   formatViewportRoiCornerLabel,
   formatViewportRoiSizeLabel,
@@ -29,6 +43,15 @@ export interface ViewportRightPanelActiveSource {
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
+  readonly pinnedSpectra: PinnedSpectraList;
+  readonly roiMeanSpectrum: RoiMeanSpectrumForDisplay | null;
+  readonly onRemovePinnedSpectrum: (spectrumId: string) => void;
+}
+
+export interface RoiMeanSpectrumForDisplay {
+  readonly bandMeans: ReadonlyArray<number>;
+  readonly bandStandardDeviations: ReadonlyArray<number>;
+  readonly samplePixelCount: number;
 }
 
 interface ViewportRightPanelProps {
@@ -51,6 +74,9 @@ function collectVisibleRightPanelSections(
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
   }
+  if (shouldShowSpectraSection(activeSource)) {
+    sections.push(<SpectraSection key="spectra" activeSource={activeSource!} />);
+  }
   if (shouldShowRegionSection(activeSource)) {
     sections.push(<RegionSection key="region" activeSource={activeSource!} />);
   }
@@ -58,6 +84,13 @@ function collectVisibleRightPanelSections(
     sections.push(<HistorySection key="history" activeSource={activeSource!} />);
   }
   return sections;
+}
+
+function shouldShowSpectraSection(
+  activeSource: ViewportRightPanelActiveSource | null,
+): boolean {
+  if (!activeSource || !activeSource.raster) return false;
+  return activeSource.raster.bandCount > 1;
 }
 
 function shouldShowRegionSection(
@@ -431,4 +464,236 @@ function RegionKeyValueRow(props: RegionKeyValueRowProps): JSX.Element {
       </dd>
     </div>
   );
+}
+
+const SPECTRUM_LINE_COLOR_CLASSES: ReadonlyArray<string> = [
+  "text-sky-400",
+  "text-amber-400",
+  "text-emerald-400",
+  "text-rose-400",
+  "text-violet-400",
+];
+
+const ROI_MEAN_SPECTRUM_COLOR_CLASS = "text-primary";
+
+interface SpectraSectionProps {
+  activeSource: ViewportRightPanelActiveSource;
+}
+
+function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
+  const raster = props.activeSource.raster;
+  const xAxis = useMemo(
+    () => (raster ? buildSpectrumXAxisFromRaster(raster) : null),
+    [raster],
+  );
+  if (!raster || !xAxis) return null;
+  const yAxisLabel = describeSpectrumYAxisLabel(raster.sampleFormat);
+  const lines = buildSpectrumPlotLinesFromActiveSource(props.activeSource);
+  return (
+    <section aria-label="Spectra" className="flex flex-col gap-2">
+      <SpectraSectionHeader
+        viewportNumber={props.activeSource.viewportNumber}
+        pinnedCount={props.activeSource.pinnedSpectra.length}
+      />
+      {hasAnyPlottableLines(lines) ? (
+        <SpectraSectionBody
+          activeSource={props.activeSource}
+          sampleFormat={raster.sampleFormat}
+          lines={lines}
+          xAxisLabel={xAxis.label}
+          yAxisLabel={yAxisLabel}
+          bandPositions={xAxis.bandPositions}
+          tickPositions={xAxis.tickPositions}
+          tickLabels={xAxis.tickLabels}
+        />
+      ) : (
+        <SpectraSectionEmptyState />
+      )}
+    </section>
+  );
+}
+
+interface SpectraSectionHeaderProps {
+  viewportNumber: number;
+  pinnedCount: number;
+}
+
+function SpectraSectionHeader(props: SpectraSectionHeaderProps): JSX.Element {
+  return (
+    <header className="flex items-baseline justify-between">
+      <h2 className="text-sm font-medium text-foreground">Spectra</h2>
+      <span className="text-xs text-muted-foreground">
+        {formatPinnedSpectraCountLabel(props.pinnedCount)}
+      </span>
+    </header>
+  );
+}
+
+function formatPinnedSpectraCountLabel(pinnedCount: number): string {
+  return `${pinnedCount} / ${MAX_PINNED_SPECTRA_PER_VIEWPORT} pinned`;
+}
+
+function hasAnyPlottableLines(lines: ReadonlyArray<SpectrumLinePlotInput>): boolean {
+  return lines.some((line) => line.values.length > 0);
+}
+
+function SpectraSectionEmptyState(): JSX.Element {
+  return (
+    <p className="text-xs text-muted-foreground">
+      Click a pixel to pin a spectrum, or draw a region to see its mean spectrum.
+    </p>
+  );
+}
+
+interface SpectraSectionBodyProps {
+  activeSource: ViewportRightPanelActiveSource;
+  sampleFormat: RasterSampleFormat;
+  lines: ReadonlyArray<SpectrumLinePlotInput>;
+  xAxisLabel: string;
+  yAxisLabel: string;
+  bandPositions: ReadonlyArray<number>;
+  tickPositions: ReadonlyArray<number>;
+  tickLabels: ReadonlyArray<string>;
+}
+
+function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-background p-2">
+      <SpectrumPlot
+        bandPositions={props.bandPositions}
+        tickPositions={props.tickPositions}
+        tickLabels={props.tickLabels}
+        xAxisLabel={props.xAxisLabel}
+        yAxisLabel={props.yAxisLabel}
+        lines={props.lines}
+      />
+      <SpectraLegend
+        activeSource={props.activeSource}
+        sampleFormat={props.sampleFormat}
+      />
+    </div>
+  );
+}
+
+interface SpectraLegendProps {
+  activeSource: ViewportRightPanelActiveSource;
+  sampleFormat: RasterSampleFormat;
+}
+
+function SpectraLegend(props: SpectraLegendProps): JSX.Element {
+  return (
+    <ul className="flex flex-col gap-1 text-[11px]">
+      {props.activeSource.roiMeanSpectrum ? (
+        <SpectraLegendRoiMeanRow
+          spectrum={props.activeSource.roiMeanSpectrum}
+        />
+      ) : null}
+      {props.activeSource.pinnedSpectra.map((spectrum, index) => (
+        <SpectraLegendPinnedRow
+          key={spectrum.id}
+          spectrum={spectrum}
+          colorClass={pickPinnedSpectrumColorClassForIndex(index)}
+          onRemove={() => props.activeSource.onRemovePinnedSpectrum(spectrum.id)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function pickPinnedSpectrumColorClassForIndex(index: number): string {
+  return SPECTRUM_LINE_COLOR_CLASSES[index % SPECTRUM_LINE_COLOR_CLASSES.length] ?? "text-foreground";
+}
+
+interface SpectraLegendPinnedRowProps {
+  spectrum: PinnedSpectrum;
+  colorClass: string;
+  onRemove: () => void;
+}
+
+function SpectraLegendPinnedRow(props: SpectraLegendPinnedRowProps): JSX.Element {
+  return (
+    <li className="flex items-center justify-between gap-2">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <SpectrumColorSwatch colorClass={props.colorClass} />
+        <span className="truncate font-mono">{describePinnedSpectrumForLegend(props.spectrum)}</span>
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-5 px-1.5 text-[11px] text-muted-foreground"
+        onClick={props.onRemove}
+        aria-label={`Remove pinned spectrum ${describePinnedSpectrumForLegend(props.spectrum)}`}
+      >
+        Remove
+      </Button>
+    </li>
+  );
+}
+
+interface SpectraLegendRoiMeanRowProps {
+  spectrum: RoiMeanSpectrumForDisplay;
+}
+
+function SpectraLegendRoiMeanRow(props: SpectraLegendRoiMeanRowProps): JSX.Element {
+  return (
+    <li className="flex items-center justify-between gap-2">
+      <span className="flex items-center gap-1.5">
+        <SpectrumColorSwatch colorClass={ROI_MEAN_SPECTRUM_COLOR_CLASS} />
+        <span className="font-mono">
+          ROI mean (n={props.spectrum.samplePixelCount}px) +/- 1 sigma
+        </span>
+      </span>
+    </li>
+  );
+}
+
+function SpectrumColorSwatch(props: { colorClass: string }): JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("inline-block h-2.5 w-2.5 rounded-full bg-current", props.colorClass)}
+    />
+  );
+}
+
+function describePinnedSpectrumForLegend(spectrum: PinnedSpectrum): string {
+  if (spectrum.kind === "pixel") {
+    return `Pixel (${spectrum.imagePixelX}, ${spectrum.imagePixelY})`;
+  }
+  return `ROI mean (n=${spectrum.samplePixelCount}px)`;
+}
+
+function buildSpectrumPlotLinesFromActiveSource(
+  activeSource: ViewportRightPanelActiveSource,
+): ReadonlyArray<SpectrumLinePlotInput> {
+  const lines: SpectrumLinePlotInput[] = [];
+  if (activeSource.roiMeanSpectrum) {
+    lines.push(buildRoiMeanSpectrumPlotLine(activeSource.roiMeanSpectrum));
+  }
+  activeSource.pinnedSpectra.forEach((spectrum, index) => {
+    lines.push(buildPinnedSpectrumPlotLine(spectrum, index));
+  });
+  return lines;
+}
+
+function buildRoiMeanSpectrumPlotLine(
+  spectrum: RoiMeanSpectrumForDisplay,
+): SpectrumLinePlotInput {
+  return {
+    id: "roi-mean",
+    colorClass: ROI_MEAN_SPECTRUM_COLOR_CLASS,
+    values: spectrum.bandMeans,
+    bandStandardDeviations: spectrum.bandStandardDeviations,
+  };
+}
+
+function buildPinnedSpectrumPlotLine(
+  spectrum: PinnedSpectrum,
+  index: number,
+): SpectrumLinePlotInput {
+  return {
+    id: spectrum.id,
+    colorClass: pickPinnedSpectrumColorClassForIndex(index),
+    values: spectrum.kind === "pixel" ? spectrum.bandValues : spectrum.bandMeans,
+  };
 }
