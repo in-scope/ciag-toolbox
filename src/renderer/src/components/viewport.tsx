@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import { FolderOpen, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -174,7 +175,9 @@ function useViewportRendererLifecycle(
 ): void {
   useEffect(() => {
     if (!canvasRef.current) return;
-    rendererRef.current = new ViewportRenderer(canvasRef.current);
+    rendererRef.current = new ViewportRenderer(canvasRef.current, {
+      onError: showRendererErrorToast,
+    });
     return () => {
       rendererRef.current?.dispose();
       rendererRef.current = null;
@@ -182,6 +185,10 @@ function useViewportRendererLifecycle(
     // canvasRef and rendererRef are stable refs; effect must run once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+}
+
+function showRendererErrorToast(message: string): void {
+  toast.error(message);
 }
 
 function useImageSourceUploadEffect(
