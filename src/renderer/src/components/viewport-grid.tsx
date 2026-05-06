@@ -28,6 +28,7 @@ export interface ViewportCellContent {
   source: ViewportImageSource;
   originalFilePath?: string;
   originalContentHash?: string;
+  fileSizeBytes?: number;
 }
 
 interface ViewportGridProps {

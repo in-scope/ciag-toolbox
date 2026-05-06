@@ -22,6 +22,7 @@ export interface PendingOpenImageReplace {
   readonly source: ViewportImageSource;
   readonly originalFilePath?: string;
   readonly originalContentHash?: string;
+  readonly fileSizeBytes?: number;
 }
 
 interface OpenImageReplacePickerProps {
