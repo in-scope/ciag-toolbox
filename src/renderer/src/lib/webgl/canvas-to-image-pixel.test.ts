@@ -1,0 +1,81 @@
+import { describe, expect, it } from "vitest";
+
+import { convertCanvasPixelToImagePixelOrNull } from "./canvas-to-image-pixel";
+
+const IDENTITY_FIT_SCALE = { x: 1, y: 1 };
+const IDENTITY_PAN = { x: 0, y: 0 };
+const IDENTITY_ZOOM = 1;
+
+describe("convertCanvasPixelToImagePixelOrNull", () => {
+  it("maps the canvas top-left to the image top-left under identity transform", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 0, y: 0 },
+      displaySize: { width: 100, height: 100 },
+      imageSize: { width: 200, height: 100 },
+      fitScale: IDENTITY_FIT_SCALE,
+      userZoom: IDENTITY_ZOOM,
+      userPan: IDENTITY_PAN,
+    });
+    expect(result).toEqual({ x: 0, y: 0 });
+  });
+
+  it("maps the canvas centre to the image centre under identity transform", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 50, y: 50 },
+      displaySize: { width: 100, height: 100 },
+      imageSize: { width: 200, height: 100 },
+      fitScale: IDENTITY_FIT_SCALE,
+      userZoom: IDENTITY_ZOOM,
+      userPan: IDENTITY_PAN,
+    });
+    expect(result).toEqual({ x: 100, y: 50 });
+  });
+
+  it("clamps the canvas bottom-right corner to the last image pixel", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 100, y: 100 },
+      displaySize: { width: 100, height: 100 },
+      imageSize: { width: 200, height: 100 },
+      fitScale: IDENTITY_FIT_SCALE,
+      userZoom: IDENTITY_ZOOM,
+      userPan: IDENTITY_PAN,
+    });
+    expect(result).toEqual({ x: 199, y: 99 });
+  });
+
+  it("returns null when the cursor is on the letterbox above a fitted landscape image", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 50, y: 5 },
+      displaySize: { width: 100, height: 100 },
+      imageSize: { width: 200, height: 100 },
+      fitScale: { x: 1, y: 0.5 },
+      userZoom: IDENTITY_ZOOM,
+      userPan: IDENTITY_PAN,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("respects user zoom and pan when projecting back to image space", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 50, y: 50 },
+      displaySize: { width: 100, height: 100 },
+      imageSize: { width: 100, height: 100 },
+      fitScale: IDENTITY_FIT_SCALE,
+      userZoom: 2,
+      userPan: { x: 0.5, y: 0.5 },
+    });
+    expect(result).toEqual({ x: 37, y: 62 });
+  });
+
+  it("returns null when the display has zero area", () => {
+    const result = convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: 0, y: 0 },
+      displaySize: { width: 0, height: 0 },
+      imageSize: { width: 100, height: 100 },
+      fitScale: IDENTITY_FIT_SCALE,
+      userZoom: IDENTITY_ZOOM,
+      userPan: IDENTITY_PAN,
+    });
+    expect(result).toBeNull();
+  });
+});
