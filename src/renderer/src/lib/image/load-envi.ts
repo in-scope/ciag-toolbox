@@ -33,6 +33,7 @@ function buildRasterImageFromEnviHeaderAndBandPixels(
     bandCount: header.bands,
     bandLabels: pickBandLabelsForHeader(header),
     bandWavelengths: header.wavelengths,
+    sourceInterleave: header.interleave,
   };
 }
 

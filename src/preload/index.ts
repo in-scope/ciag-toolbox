@@ -25,10 +25,16 @@ export interface SaveImageDialogFilter {
   extensions: ReadonlyArray<string>;
 }
 
+export interface SaveImageDialogSidecar {
+  extension: string;
+  bytes: Uint8Array;
+}
+
 export interface SaveImageDialogRequest {
   suggestedFileName: string;
   bytes: Uint8Array;
   fileFilter: SaveImageDialogFilter;
+  sidecar?: SaveImageDialogSidecar;
 }
 
 export type SaveImageDialogResult =

@@ -1,10 +1,17 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
+import { extname } from "node:path";
+
+export interface SaveImageDialogSidecar {
+  readonly extension: string;
+  readonly bytes: Uint8Array;
+}
 
 export interface SaveImageDialogRequest {
   readonly suggestedFileName: string;
   readonly bytes: Uint8Array;
   readonly fileFilter: { readonly name: string; readonly extensions: ReadonlyArray<string> };
+  readonly sidecar?: SaveImageDialogSidecar;
 }
 
 export type SaveImageDialogResult =
@@ -31,6 +38,53 @@ async function writeImageBytesToChosenPath(
   await writeFile(filePath, bytes);
 }
 
+async function writeSidecarFileNextToPrimary(
+  primaryFilePath: string,
+  sidecar: SaveImageDialogSidecar,
+): Promise<string> {
+  const sidecarPath = buildSidecarPathFromPrimary(primaryFilePath, sidecar.extension);
+  await writeFile(sidecarPath, sidecar.bytes);
+  return sidecarPath;
+}
+
+function buildSidecarPathFromPrimary(
+  primaryFilePath: string,
+  sidecarExtension: string,
+): string {
+  const existingExtension = extname(primaryFilePath);
+  const stem = primaryFilePath.slice(0, primaryFilePath.length - existingExtension.length);
+  return `${stem}.${sidecarExtension}`;
+}
+
+async function writePrimaryAndSidecarAtomically(
+  primaryFilePath: string,
+  request: SaveImageDialogRequest,
+): Promise<void> {
+  await writeImageBytesToChosenPath(primaryFilePath, request.bytes);
+  if (!request.sidecar) return;
+  await writeSidecarOrRollbackPrimary(primaryFilePath, request.sidecar);
+}
+
+async function writeSidecarOrRollbackPrimary(
+  primaryFilePath: string,
+  sidecar: SaveImageDialogSidecar,
+): Promise<void> {
+  try {
+    await writeSidecarFileNextToPrimary(primaryFilePath, sidecar);
+  } catch (error) {
+    await tryRemoveFileIgnoringErrors(primaryFilePath);
+    throw error;
+  }
+}
+
+async function tryRemoveFileIgnoringErrors(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath);
+  } catch {
+    // best-effort rollback; primary may already be gone
+  }
+}
+
 async function chooseAndWriteImageToDisk(
   window: BrowserWindow,
   request: SaveImageDialogRequest,
@@ -39,7 +93,7 @@ async function chooseAndWriteImageToDisk(
   if (dialogResult.canceled || !dialogResult.filePath) {
     return { canceled: true };
   }
-  await writeImageBytesToChosenPath(dialogResult.filePath, request.bytes);
+  await writePrimaryAndSidecarAtomically(dialogResult.filePath, request);
   return { canceled: false, filePath: dialogResult.filePath };
 }
 

@@ -1,4 +1,7 @@
-import { encodeViewportSourceForSaving } from "@/lib/image/encode-saved-image";
+import {
+  encodeViewportSourceForSaving,
+  type EncodedSavedImage,
+} from "@/lib/image/encode-saved-image";
 import {
   findSaveImageFormatOptionOrThrow,
   type SaveImageFormatId,
@@ -19,7 +22,7 @@ export type SaveImageFlowResult =
 export async function runSaveImageFlowThroughMainProcess(
   input: SaveImageFlowInput,
 ): Promise<SaveImageFlowResult> {
-  const bytes = await encodeViewportSourceForSaving({
+  const encoded = await encodeViewportSourceForSaving({
     source: input.source,
     selectedBandIndex: input.selectedBandIndex,
     formatId: input.formatId,
@@ -28,9 +31,17 @@ export async function runSaveImageFlowThroughMainProcess(
   const suggestedFileName = buildSuggestedSavedFileName(input.originalFileName, formatOption.extension);
   return window.toolboxApi.saveImageDialog({
     suggestedFileName,
-    bytes,
+    bytes: encoded.bytes,
     fileFilter: formatOption.fileFilter,
+    sidecar: pickSaveImageSidecarFromEncoded(encoded),
   });
+}
+
+function pickSaveImageSidecarFromEncoded(
+  encoded: EncodedSavedImage,
+): { extension: string; bytes: Uint8Array } | undefined {
+  if (!encoded.sidecar) return undefined;
+  return { extension: encoded.sidecar.extension, bytes: encoded.sidecar.bytes };
 }
 
 function buildSuggestedSavedFileName(

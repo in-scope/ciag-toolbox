@@ -1,5 +1,7 @@
 export type RasterSampleFormat = "uint" | "int" | "float";
 
+export type RasterSourceInterleave = "bsq" | "bil" | "bip";
+
 export type RasterTypedArray =
   | Uint8Array
   | Uint16Array
@@ -19,6 +21,7 @@ export interface RasterImage {
   readonly bandCount: number;
   readonly bandLabels?: ReadonlyArray<string>;
   readonly bandWavelengths?: ReadonlyArray<number>;
+  readonly sourceInterleave?: RasterSourceInterleave;
 }
 
 export function cloneRasterImage(raster: RasterImage): RasterImage {
