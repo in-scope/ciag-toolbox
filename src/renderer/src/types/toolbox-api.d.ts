@@ -15,6 +15,7 @@ type ToolboxOpenImageDialogResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      contentHash: string;
       sidecar?: ToolboxOpenImageDialogSidecar;
     };
 
@@ -38,6 +39,82 @@ interface ToolboxSaveImageDialogRequest {
 type ToolboxSaveImageDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
+
+interface ToolboxSaveProjectDraftViewportSource {
+  absolutePath: string;
+  contentHash: string;
+  fileName: string;
+}
+
+interface ToolboxSaveProjectDraftRenderingState {
+  normalizationEnabled: boolean;
+  selectedBandIndex: number;
+  lastAppliedOperationLabel: string | null;
+}
+
+interface ToolboxSaveProjectDraftViewportEntry {
+  index: number;
+  source: ToolboxSaveProjectDraftViewportSource;
+  renderingState: ToolboxSaveProjectDraftRenderingState;
+}
+
+interface ToolboxSaveProjectDraft {
+  formatVersion: number;
+  gridLayout: string;
+  selectedViewportIndices: ReadonlyArray<number>;
+  viewports: ReadonlyArray<ToolboxSaveProjectDraftViewportEntry>;
+}
+
+interface ToolboxSaveProjectDialogRequest {
+  draft: ToolboxSaveProjectDraft;
+  currentProjectFilePath: string | null;
+  saveAs: boolean;
+}
+
+type ToolboxSaveProjectDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
+type ToolboxOpenProjectDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string; bytes: Uint8Array };
+
+interface ToolboxResolveProjectSourceRequest {
+  projectFilePath: string;
+  relativePath: string;
+}
+
+interface ToolboxResolveProjectSourceSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+type ToolboxResolveProjectSourceResult =
+  | { kind: "missing" }
+  | {
+      kind: "found";
+      absolutePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+      contentHash: string;
+      sidecar?: ToolboxResolveProjectSourceSidecar;
+    };
+
+interface ToolboxLocateMissingProjectSourceRequest {
+  originalFileName: string;
+  defaultDir: string | null;
+}
+
+type ToolboxLocateMissingProjectSourceResult =
+  | { kind: "canceled" }
+  | {
+      kind: "picked";
+      absolutePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+      contentHash: string;
+      sidecar?: ToolboxResolveProjectSourceSidecar;
+    };
 
 type ToolboxThemeMode = "system" | "light" | "dark";
 
@@ -76,10 +153,29 @@ interface ToolboxApi {
   saveImageDialog: (
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;
+  openProjectDialog: () => Promise<ToolboxOpenProjectDialogResult>;
+  saveProjectDialog: (
+    request: ToolboxSaveProjectDialogRequest,
+  ) => Promise<ToolboxSaveProjectDialogResult>;
+  resolveProjectSource: (
+    request: ToolboxResolveProjectSourceRequest,
+  ) => Promise<ToolboxResolveProjectSourceResult>;
+  locateMissingProjectSource: (
+    request: ToolboxLocateMissingProjectSourceRequest,
+  ) => Promise<ToolboxLocateMissingProjectSourceResult>;
   onMenuOpenImage: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuSaveImage: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuOpenProject: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuSaveProject: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuSaveProjectAs: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuAbout: (

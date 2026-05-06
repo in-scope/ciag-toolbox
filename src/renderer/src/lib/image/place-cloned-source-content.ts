@@ -14,6 +14,8 @@ export async function placeClonedSourceContentAtIndex(
     writeViewportContentAtIndex(previous, targetIndex, {
       fileName: sourceContent.fileName,
       source: independentSource,
+      originalFilePath: sourceContent.originalFilePath,
+      originalContentHash: sourceContent.originalContentHash,
     }),
   );
 }

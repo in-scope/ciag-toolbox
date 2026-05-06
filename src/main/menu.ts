@@ -58,12 +58,45 @@ function buildSaveImageMenuItem(
   };
 }
 
+function buildOpenProjectMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Open Project...",
+    accelerator: "CmdOrCtrl+Shift+O",
+    click: () => sendMenuChannelToRenderer(window, "menu:open-project"),
+  };
+}
+
+function buildSaveProjectMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Project",
+    accelerator: "CmdOrCtrl+Shift+S",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-project"),
+  };
+}
+
+function buildSaveProjectAsMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Project As...",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-project-as"),
+  };
+}
+
 function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
     submenu: [
       buildOpenImageMenuItem(window),
       buildSaveImageMenuItem(window),
+      { type: "separator" },
+      buildOpenProjectMenuItem(window),
+      buildSaveProjectMenuItem(window),
+      buildSaveProjectAsMenuItem(window),
       { type: "separator" },
       isRunningOnMac ? { role: "close" } : { role: "quit" },
     ],

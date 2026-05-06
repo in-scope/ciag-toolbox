@@ -186,7 +186,12 @@ async function cloneAndTransformSourceContent(
 ): Promise<ViewportCellContent> {
   const clonedSource = await cloneViewportImageSource(sourceContent.source);
   const transformedSource = transform(clonedSource, parameterValues);
-  return { fileName: sourceContent.fileName, source: transformedSource };
+  return {
+    fileName: sourceContent.fileName,
+    source: transformedSource,
+    originalFilePath: sourceContent.originalFilePath,
+    originalContentHash: sourceContent.originalContentHash,
+  };
 }
 
 function writeViewportContentAtIndex(

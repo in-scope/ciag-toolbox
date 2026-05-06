@@ -2,6 +2,8 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 import { readFile, readdir } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
+import { computeSha256HexFromBytes } from "./content-hash";
+
 export interface OpenImageSidecar {
   fileName: string;
   bytes: Uint8Array;
@@ -14,6 +16,7 @@ export type OpenImageResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      contentHash: string;
       sidecar?: OpenImageSidecar;
     };
 
@@ -67,12 +70,14 @@ async function buildOpenImageResultFromPath(
   filePath: string,
 ): Promise<OpenImageResult> {
   const bytes = await readImageFileAsBytes(filePath);
+  const contentHash = computeSha256HexFromBytes(bytes);
   const sidecar = await findSidecarForOpenedImageFile(filePath);
   return {
     canceled: false,
     filePath,
     fileName: basename(filePath),
     bytes,
+    contentHash,
     ...(sidecar ? { sidecar } : {}),
   };
 }
