@@ -77,6 +77,15 @@ export type SaveProjectDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
+export interface PackProjectBundleRequest {
+  draft: SaveProjectDraft;
+  currentProjectFilePath: string | null;
+}
+
+export type PackProjectBundleResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
 export type OpenProjectDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string; bytes: Uint8Array };
@@ -135,6 +144,7 @@ const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_PROJECT_DIALOG_CHANNEL = "project:open-dialog";
 const SAVE_PROJECT_DIALOG_CHANNEL = "project:save-dialog";
+const PACK_PROJECT_BUNDLE_CHANNEL = "project:pack-bundle";
 const RESOLVE_PROJECT_SOURCE_CHANNEL = "project:resolve-source";
 const LOCATE_MISSING_PROJECT_SOURCE_CHANNEL = "project:locate-missing-source";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
@@ -142,6 +152,7 @@ const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
+const MENU_PACK_PROJECT_BUNDLE_CHANNEL = "menu:pack-project-bundle";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -178,6 +189,15 @@ function showSaveProjectDialogThroughMainProcess(
     SAVE_PROJECT_DIALOG_CHANNEL,
     request,
   ) as Promise<SaveProjectDialogResult>;
+}
+
+function packProjectBundleThroughMainProcess(
+  request: PackProjectBundleRequest,
+): Promise<PackProjectBundleResult> {
+  return ipcRenderer.invoke(
+    PACK_PROJECT_BUNDLE_CHANNEL,
+    request,
+  ) as Promise<PackProjectBundleResult>;
 }
 
 function resolveProjectSourceThroughMainProcess(
@@ -237,6 +257,12 @@ function subscribeToSaveProjectAsMenuEvent(
   return subscribeToMenuChannel(MENU_SAVE_PROJECT_AS_CHANNEL, listener);
 }
 
+function subscribeToPackProjectBundleMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_PACK_PROJECT_BUNDLE_CHANNEL, listener);
+}
+
 function subscribeToAboutMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
@@ -270,6 +296,7 @@ const apiBridge = {
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectDialog: showOpenProjectDialogThroughMainProcess,
   saveProjectDialog: showSaveProjectDialogThroughMainProcess,
+  packProjectBundle: packProjectBundleThroughMainProcess,
   resolveProjectSource: resolveProjectSourceThroughMainProcess,
   locateMissingProjectSource: locateMissingProjectSourceThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
@@ -277,6 +304,7 @@ const apiBridge = {
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
+  onMenuPackProjectBundle: subscribeToPackProjectBundleMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,

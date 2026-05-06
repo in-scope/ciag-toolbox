@@ -3,12 +3,15 @@ import { readFile, readdir } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
+import { extractProjectBundleToFreshTempDirectory } from "./extract-project-bundle";
 
 const OPEN_PROJECT_DIALOG_CHANNEL = "project:open-dialog";
 const RESOLVE_PROJECT_SOURCE_CHANNEL = "project:resolve-source";
 const LOCATE_MISSING_PROJECT_SOURCE_CHANNEL = "project:locate-missing-source";
 
 const ENVI_HEADER_EXTENSION = ".hdr";
+const PROJECT_BUNDLE_EXTENSION = ".ctbundle";
+const BUNDLE_PROJECT_JSON_FILE_NAME = "project.json";
 const ENVI_BINARY_EXTENSION_CANDIDATES: ReadonlyArray<string> = [
   ".bin",
   ".dat",
@@ -64,12 +67,34 @@ async function showOpenProjectDialog(
   const result = await dialog.showOpenDialog(window, {
     title: "Open Project",
     properties: ["openFile"],
-    filters: [{ name: "Toolbox Project", extensions: ["ctproj"] }],
+    filters: [{ name: "Toolbox Project", extensions: ["ctproj", "ctbundle"] }],
   });
   const [firstPath] = result.filePaths;
   if (result.canceled || firstPath === undefined) return { canceled: true };
-  const bytes = await readFileAsBytes(firstPath);
-  return { canceled: false, filePath: firstPath, bytes };
+  return readPickedProjectFileAsOpenResult(firstPath);
+}
+
+async function readPickedProjectFileAsOpenResult(
+  pickedFilePath: string,
+): Promise<OpenProjectDialogResult> {
+  if (isProjectBundlePath(pickedFilePath)) {
+    return openProjectFromBundleAtPath(pickedFilePath);
+  }
+  const bytes = await readFileAsBytes(pickedFilePath);
+  return { canceled: false, filePath: pickedFilePath, bytes };
+}
+
+function isProjectBundlePath(filePath: string): boolean {
+  return extname(filePath).toLowerCase() === PROJECT_BUNDLE_EXTENSION;
+}
+
+async function openProjectFromBundleAtPath(
+  bundleFilePath: string,
+): Promise<OpenProjectDialogResult> {
+  const tempDir = await extractProjectBundleToFreshTempDirectory(bundleFilePath);
+  const projectJsonPath = join(tempDir, BUNDLE_PROJECT_JSON_FILE_NAME);
+  const bytes = await readFileAsBytes(projectJsonPath);
+  return { canceled: false, filePath: projectJsonPath, bytes };
 }
 
 async function readFileAsBytes(filePath: string): Promise<Uint8Array> {

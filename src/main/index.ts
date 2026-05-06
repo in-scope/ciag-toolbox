@@ -10,6 +10,7 @@ import {
 import { registerAppInfoIpcHandler } from "./app-info";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerOpenProjectDialogIpcHandlers } from "./open-project-dialog";
+import { registerPackProjectBundleIpcHandler } from "./pack-project-bundle";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { registerSaveProjectDialogIpcHandler } from "./save-project-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
@@ -105,6 +106,7 @@ app.whenReady().then(() => {
   registerSaveImageDialogIpcHandler();
   registerOpenProjectDialogIpcHandlers();
   registerSaveProjectDialogIpcHandler();
+  registerPackProjectBundleIpcHandler();
   createMainWindow();
   app.on("activate", reopenWindowOnMacActivate);
 });

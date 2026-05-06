@@ -67,6 +67,7 @@ import {
   type OpenedProjectDivergedSource,
   type OpenedProjectViewportSnapshot,
 } from "@/lib/project/run-open-project-flow";
+import { runPackProjectBundleFlowThroughMainProcess } from "@/lib/project/run-pack-bundle-flow";
 import { runSaveProjectFlowThroughMainProcess } from "@/lib/project/run-save-project-flow";
 import type { SaveableProjectSnapshot } from "@/lib/project/serialize-project";
 import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
@@ -202,6 +203,14 @@ function ApplicationShell(): JSX.Element {
   });
   useMenuSaveProjectTriggersHandler(handleSaveProjectRequested.saveOrPromptForPath);
   useMenuSaveProjectAsTriggersHandler(handleSaveProjectRequested.alwaysPromptForPath);
+  const handlePackProjectBundleRequested = usePackProjectBundleRequestHandler({
+    gridLayoutRef: useLatestRef(gridLayout),
+    imagesByIndexRef,
+    selectedIndicesRef: useLatestRef(selectedIndices),
+    renderingApi,
+    currentProjectFilePathRef: useLatestRef(currentProjectFilePath),
+  });
+  useMenuPackProjectBundleTriggersHandler(handlePackProjectBundleRequested);
   const handleOpenProjectRequested = useOpenProjectRequestHandler({
     setGridLayout,
     setImagesByIndex,
@@ -415,6 +424,10 @@ function useMenuSaveProjectTriggersHandler(handler: () => void): void {
 
 function useMenuSaveProjectAsTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuSaveProjectAs(handler), [handler]);
+}
+
+function useMenuPackProjectBundleTriggersHandler(handler: () => void): void {
+  useEffect(() => window.toolboxApi.onMenuPackProjectBundle(handler), [handler]);
 }
 
 interface SaveImageRequestBindings {
@@ -1075,7 +1088,7 @@ function handleSaveProjectFlowOutcome(
 }
 
 function buildSaveableProjectSnapshotFromCurrentState(
-  bindings: SaveProjectRequestBindings,
+  bindings: PackOrSaveProjectSnapshotInputs,
 ): SaveableProjectSnapshot {
   const imagesByIndex = bindings.imagesByIndexRef.current;
   const renderingApi = bindings.renderingApi;
@@ -1084,6 +1097,59 @@ function buildSaveableProjectSnapshotFromCurrentState(
     selectedViewportIndices: Array.from(bindings.selectedIndicesRef.current),
     viewports: collectSaveableViewportsFromImagesMap(imagesByIndex, renderingApi),
   };
+}
+
+interface PackOrSaveProjectSnapshotInputs {
+  readonly gridLayoutRef: MutableRefObject<GridLayout>;
+  readonly imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
+  readonly selectedIndicesRef: MutableRefObject<ReadonlySet<number>>;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+interface PackProjectBundleRequestBindings extends PackOrSaveProjectSnapshotInputs {
+  readonly currentProjectFilePathRef: MutableRefObject<string | null>;
+}
+
+function usePackProjectBundleRequestHandler(
+  bindings: PackProjectBundleRequestBindings,
+): () => void {
+  return useCallback(
+    () => void runPackProjectBundleFlowAndShowToast(bindings),
+    [bindings],
+  );
+}
+
+async function runPackProjectBundleFlowAndShowToast(
+  bindings: PackProjectBundleRequestBindings,
+): Promise<void> {
+  const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
+  if (snapshot.viewports.length === 0) {
+    toast.info("No viewports with loaded files to pack");
+    return;
+  }
+  await invokePackProjectBundleFlowWithToastFeedback(snapshot, bindings);
+}
+
+async function invokePackProjectBundleFlowWithToastFeedback(
+  snapshot: SaveableProjectSnapshot,
+  bindings: PackProjectBundleRequestBindings,
+): Promise<void> {
+  try {
+    const result = await runPackProjectBundleFlowThroughMainProcess({
+      snapshot,
+      currentProjectFilePath: bindings.currentProjectFilePathRef.current,
+    });
+    handlePackProjectBundleFlowOutcome(result);
+  } catch (error) {
+    toast.error(`Could not pack project bundle: ${describeUnknownError(error)}`);
+  }
+}
+
+function handlePackProjectBundleFlowOutcome(
+  result: { canceled: boolean; filePath?: string },
+): void {
+  if (result.canceled || !result.filePath) return;
+  toast.success(`Packed bundle to ${result.filePath}`);
 }
 
 function collectSaveableViewportsFromImagesMap(

@@ -75,6 +75,15 @@ type ToolboxSaveProjectDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
+interface ToolboxPackProjectBundleRequest {
+  draft: ToolboxSaveProjectDraft;
+  currentProjectFilePath: string | null;
+}
+
+type ToolboxPackProjectBundleResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
 type ToolboxOpenProjectDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string; bytes: Uint8Array };
@@ -157,6 +166,9 @@ interface ToolboxApi {
   saveProjectDialog: (
     request: ToolboxSaveProjectDialogRequest,
   ) => Promise<ToolboxSaveProjectDialogResult>;
+  packProjectBundle: (
+    request: ToolboxPackProjectBundleRequest,
+  ) => Promise<ToolboxPackProjectBundleResult>;
   resolveProjectSource: (
     request: ToolboxResolveProjectSourceRequest,
   ) => Promise<ToolboxResolveProjectSourceResult>;
@@ -176,6 +188,9 @@ interface ToolboxApi {
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuSaveProjectAs: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuPackProjectBundle: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuAbout: (
