@@ -198,7 +198,7 @@ export class ViewportRenderer {
 
   zoomAtCanvasPoint(xPx: number, yPx: number, wheelDeltaY: number): void {
     const factor = computeWheelZoomFactor(wheelDeltaY);
-    const newZoom = clampUserZoom(this.userZoom * factor);
+    const newZoom = clampUserZoom(this.userZoom * factor, this.imageSize, this.displaySize);
     if (newZoom === this.userZoom) return;
     const cursorClip = convertCanvasPointToClipSpace(xPx, yPx, this.displaySize);
     this.userPan = computePanForZoomAtCursor(

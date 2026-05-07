@@ -1,5 +1,6 @@
-export const MIN_USER_ZOOM = 1;
-export const MAX_USER_ZOOM = 32;
+export const MIN_USER_ZOOM = 0.75;
+export const DEFAULT_MAX_USER_ZOOM = 32;
+const TARGET_CANVAS_PX_PER_IMAGE_PX_AT_MAX_ZOOM = 32;
 const WHEEL_ZOOM_SENSITIVITY = 0.001;
 
 export interface ClipPoint {
@@ -53,8 +54,21 @@ export function convertPixelDeltaToClipDelta(
   };
 }
 
-export function clampUserZoom(zoom: number): number {
-  return Math.max(MIN_USER_ZOOM, Math.min(MAX_USER_ZOOM, zoom));
+export function clampUserZoom(
+  zoom: number,
+  image: ViewportSize,
+  display: ViewportSize,
+): number {
+  const max = computeMaxUserZoom(image, display);
+  return Math.max(MIN_USER_ZOOM, Math.min(max, zoom));
+}
+
+export function computeMaxUserZoom(image: ViewportSize, display: ViewportSize): number {
+  if (!hasNonZeroArea(image) || !hasNonZeroArea(display)) return DEFAULT_MAX_USER_ZOOM;
+  const fitRatio = Math.min(display.width / image.width, display.height / image.height);
+  const zoomToReachTargetSamplingDensity =
+    TARGET_CANVAS_PX_PER_IMAGE_PX_AT_MAX_ZOOM / fitRatio;
+  return Math.max(DEFAULT_MAX_USER_ZOOM, zoomToReachTargetSamplingDensity);
 }
 
 export function computeWheelZoomFactor(wheelDeltaY: number): number {
