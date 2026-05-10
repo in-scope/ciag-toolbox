@@ -83,15 +83,12 @@ interface ViewportCellProps {
 
 function ViewportCell(props: ViewportCellProps): JSX.Element {
   const settings = useViewportCellInteractionSettings(props.cellIndex, props.content);
+  const cellElement = renderViewportCellGridcellElement(props, settings);
+  if (!props.content) return cellElement;
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        {renderViewportCellGridcellElement(props, settings)}
-      </ContextMenuTrigger>
-      <ViewportCellContextMenuContent
-        sourceIndex={props.cellIndex}
-        sourceHasContent={props.content !== null}
-      />
+      <ContextMenuTrigger asChild>{cellElement}</ContextMenuTrigger>
+      <ViewportCellContextMenuContent sourceIndex={props.cellIndex} />
     </ContextMenu>
   );
 }
@@ -134,24 +131,12 @@ function renderViewportCellViewport(
   );
 }
 
-function ViewportCellContextMenuContent(props: {
-  sourceIndex: number;
-  sourceHasContent: boolean;
-}): JSX.Element {
+function ViewportCellContextMenuContent(props: { sourceIndex: number }): JSX.Element {
   return (
     <ContextMenuContent>
-      <DuplicateContextMenuItem
-        sourceIndex={props.sourceIndex}
-        sourceHasContent={props.sourceHasContent}
-      />
-      <ReimportSourceContextMenuItem
-        sourceIndex={props.sourceIndex}
-        sourceHasContent={props.sourceHasContent}
-      />
-      <CloseContextMenuItem
-        sourceIndex={props.sourceIndex}
-        sourceHasContent={props.sourceHasContent}
-      />
+      <DuplicateContextMenuItem sourceIndex={props.sourceIndex} />
+      <ReimportSourceContextMenuItem sourceIndex={props.sourceIndex} />
+      <CloseContextMenuItem sourceIndex={props.sourceIndex} />
     </ContextMenuContent>
   );
 }
@@ -248,16 +233,8 @@ function extractClickModifiers(event: MouseEvent<HTMLDivElement>): ViewportSelec
   };
 }
 
-interface DuplicateContextMenuItemProps {
-  sourceIndex: number;
-  sourceHasContent: boolean;
-}
-
-function DuplicateContextMenuItem(props: DuplicateContextMenuItemProps): JSX.Element {
+function DuplicateContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const duplication = useViewportDuplication();
-  if (!props.sourceHasContent) {
-    return <ContextMenuItem disabled>Duplicate</ContextMenuItem>;
-  }
   return (
     <ContextMenuItem onSelect={() => duplication.requestDuplicate(props.sourceIndex)}>
       Duplicate
@@ -265,16 +242,8 @@ function DuplicateContextMenuItem(props: DuplicateContextMenuItemProps): JSX.Ele
   );
 }
 
-interface CloseContextMenuItemProps {
-  sourceIndex: number;
-  sourceHasContent: boolean;
-}
-
-function CloseContextMenuItem(props: CloseContextMenuItemProps): JSX.Element {
+function CloseContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const closing = useViewportClosing();
-  if (!props.sourceHasContent) {
-    return <ContextMenuItem disabled>Close</ContextMenuItem>;
-  }
   return (
     <ContextMenuItem onSelect={() => closing.closeViewport(props.sourceIndex)}>
       Close
@@ -282,18 +251,8 @@ function CloseContextMenuItem(props: CloseContextMenuItemProps): JSX.Element {
   );
 }
 
-interface ReimportSourceContextMenuItemProps {
-  sourceIndex: number;
-  sourceHasContent: boolean;
-}
-
-function ReimportSourceContextMenuItem(
-  props: ReimportSourceContextMenuItemProps,
-): JSX.Element {
+function ReimportSourceContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const reimport = useViewportReimport();
-  if (!props.sourceHasContent) {
-    return <ContextMenuItem disabled>Re-import source from disk</ContextMenuItem>;
-  }
   return (
     <ContextMenuItem onSelect={() => reimport.requestReimport(props.sourceIndex)}>
       Re-import source from disk
