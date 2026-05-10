@@ -23,11 +23,26 @@ export type OpenProjectFlowResult =
   | { canceled: true }
   | { canceled: false; opened: OpenedProject };
 
-export async function runOpenProjectFlowThroughMainProcess(): Promise<OpenProjectFlowResult> {
+export interface OpenProjectFlowProgressEvent {
+  readonly readAssetCount: number;
+  readonly totalAssetCount: number;
+}
+
+export interface OpenProjectFlowOptions {
+  readonly onProgress?: (event: OpenProjectFlowProgressEvent) => void;
+}
+
+export async function runOpenProjectFlowThroughMainProcess(
+  options: OpenProjectFlowOptions = {},
+): Promise<OpenProjectFlowResult> {
   const dialogResult = await window.toolboxApi.openProjectBundleDialog();
   if (dialogResult.canceled) return { canceled: true };
   const project = parseProjectBytesAsProjectFileOrThrow(dialogResult.bytes);
-  const opened = await readAllViewportAssetsForProject(dialogResult.projectFilePath, project);
+  const opened = await readAllViewportAssetsForProject(
+    dialogResult.projectFilePath,
+    project,
+    options.onProgress,
+  );
   return { canceled: false, opened };
 }
 
@@ -39,10 +54,15 @@ function parseProjectBytesAsProjectFileOrThrow(bytes: Uint8Array): ProjectFile {
 async function readAllViewportAssetsForProject(
   projectFilePath: string,
   project: ProjectFile,
+  onProgress: OpenProjectFlowOptions["onProgress"],
 ): Promise<OpenedProject> {
+  const totalAssetCount = project.viewports.length;
+  onProgress?.({ readAssetCount: 0, totalAssetCount });
   const resolved: OpenedProjectViewportSnapshot[] = [];
-  for (const entry of project.viewports) {
+  for (let viewportPosition = 0; viewportPosition < totalAssetCount; viewportPosition++) {
+    const entry = project.viewports[viewportPosition]!;
     resolved.push(await readSingleViewportAssetOrThrow(projectFilePath, entry));
+    onProgress?.({ readAssetCount: viewportPosition + 1, totalAssetCount });
   }
   return { projectFilePath, project, resolvedViewports: resolved };
 }

@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
+import { AppBusyModal } from "@/components/busy-indicators";
 import { StatusBar } from "@/components/status-bar";
 import {
   OpenImageReplaceTargetPicker,
@@ -92,6 +93,12 @@ import {
   ViewportDuplicationProvider,
   type ViewportDuplicationApi,
 } from "@/state/duplication-context";
+import {
+  BusyStateProvider,
+  useBusyEntryRegistrar,
+  type BusyEntryHandle,
+  type BusyEntryRegistrar,
+} from "@/state/busy-state-context";
 import { PixelReadoutProvider } from "@/state/pixel-readout-context";
 import {
   RegionToolProvider,
@@ -148,9 +155,12 @@ export function App(): JSX.Element {
         <ViewportRenderingProvider>
           <RegionToolProvider>
             <PixelReadoutProvider>
-              <ApplicationShell />
-              <AboutDialog />
-              <Toaster />
+              <BusyStateProvider>
+                <ApplicationShell />
+                <AboutDialog />
+                <AppBusyModal />
+                <Toaster />
+              </BusyStateProvider>
             </PixelReadoutProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
@@ -165,6 +175,7 @@ function useThemeClassSyncedWithMainProcess(): void {
 }
 
 function ApplicationShell(): JSX.Element {
+  const busyRegistrar = useBusyEntryRegistrar();
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
@@ -201,6 +212,7 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
+    busyRegistrar,
   });
   const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
   const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
@@ -218,6 +230,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     currentProjectFilePathRef: useLatestRef(currentProjectFilePath),
     setCurrentProjectFilePath,
+    busyRegistrar,
   });
   useMenuSaveProjectTriggersHandler(handleSaveProjectRequested.saveOrPromptForPath);
   useMenuSaveProjectAsTriggersHandler(handleSaveProjectRequested.alwaysPromptForPath);
@@ -227,6 +240,7 @@ function ApplicationShell(): JSX.Element {
     setCurrentProjectFilePath,
     replaceAllRenderingStates: renderingApi.replaceAllRenderingStates,
     replaceSelection,
+    busyRegistrar,
   });
   useMenuOpenProjectTriggersHandler(handleOpenProjectRequested);
   const applyActionFlowBindings = buildApplyActionFlowBindings({
@@ -237,6 +251,7 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     setPendingDuplicate,
     renderingApi,
+    busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
@@ -283,6 +298,7 @@ function ApplicationShell(): JSX.Element {
   const reimportApi = useViewportReimportApi({
     setImagesByIndex,
     setRenderingState: renderingApi.setRenderingState,
+    busyRegistrar,
   });
   return (
     <div className="flex h-full flex-col">
@@ -334,6 +350,7 @@ function ApplicationShell(): JSX.Element {
             imagesByIndex,
             renderingApi,
             setPendingSaveImage,
+            busyRegistrar,
           })
         }
       />
@@ -443,6 +460,13 @@ interface SaveImageRequestBindings {
   setPendingSaveImage: SetPendingSaveImage;
 }
 
+interface ConfirmSaveImageBindings {
+  imagesByIndex: ImagesByIndexMap;
+  renderingApi: ViewportRenderingApi;
+  setPendingSaveImage: SetPendingSaveImage;
+  busyRegistrar: BusyEntryRegistrar;
+}
+
 function useSaveImageRequestHandler(
   bindings: SaveImageRequestBindings,
 ): () => void {
@@ -477,12 +501,6 @@ function pickSingleSelectedSourceWithContent(
   return { index: onlyIndex, fileName: content.fileName };
 }
 
-interface ConfirmSaveImageBindings {
-  imagesByIndex: ImagesByIndexMap;
-  renderingApi: ViewportRenderingApi;
-  setPendingSaveImage: SetPendingSaveImage;
-}
-
 function confirmSaveImageFormatChoice(
   formatId: SaveImageFormatId,
   pending: PendingSaveImageRequest | null,
@@ -493,12 +511,15 @@ function confirmSaveImageFormatChoice(
   const content = bindings.imagesByIndex.get(pending.viewportIndex);
   if (!content) return;
   const renderingState = bindings.renderingApi.getRenderingState(pending.viewportIndex);
-  void runSaveImageFlowAndShowToast({
-    source: content.source,
-    selectedBandIndex: renderingState.selectedBandIndex,
-    originalFileName: content.fileName,
-    formatId,
-  });
+  void runSaveImageFlowAndShowToast(
+    {
+      source: content.source,
+      selectedBandIndex: renderingState.selectedBandIndex,
+      originalFileName: content.fileName,
+      formatId,
+    },
+    bindings.busyRegistrar,
+  );
 }
 
 interface SaveImageFlowToastInput {
@@ -510,13 +531,19 @@ interface SaveImageFlowToastInput {
 
 async function runSaveImageFlowAndShowToast(
   input: SaveImageFlowToastInput,
+  busyRegistrar: BusyEntryRegistrar,
 ): Promise<void> {
+  const handle = busyRegistrar.registerAppBusyEntry({
+    label: `Saving ${input.originalFileName}...`,
+  });
   try {
     const result = await runSaveImageFlowThroughMainProcess(input);
     if (result.canceled) return;
     toast.success(`Saved to ${result.filePath}`);
   } catch (error) {
     toast.error(`Could not save ${input.originalFileName}: ${describeUnknownError(error)}`);
+  } finally {
+    handle.clear();
   }
 }
 
@@ -527,6 +554,7 @@ interface OpenImageBindings {
   setImagesByIndex: SetImagesByIndex;
   setPendingOpenImageReplace: SetPendingOpenImageReplace;
   selectViewportFromClick: SelectViewportFromClick;
+  busyRegistrar: BusyEntryRegistrar;
 }
 
 function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Promise<void> {
@@ -537,6 +565,7 @@ function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Pr
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
+    busyRegistrar,
   } = bindings;
   return useCallback(async () => {
     await runOpenImageDialogFlow({
@@ -546,6 +575,7 @@ function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Pr
       setImagesByIndex,
       setPendingOpenImageReplace,
       selectViewportFromClick,
+      busyRegistrar,
     });
   }, [
     imagesByIndexRef,
@@ -554,22 +584,50 @@ function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Pr
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
+    busyRegistrar,
   ]);
 }
 
 async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void> {
   const result = await invokeOpenImageDialogSafely();
   if (!result || result.canceled) return;
-  await tryDecodeAndRouteImage(
-    {
-      fileName: result.fileName,
-      bytes: result.bytes,
-      sidecarBytes: result.sidecar?.bytes,
-      originalFilePath: result.filePath,
-      fileSizeBytes: result.bytes.length,
-    },
-    bindings,
-  );
+  const handle = registerOpenImageBusyEntry(result.fileName, bindings);
+  try {
+    await tryDecodeAndRouteImage(
+      {
+        fileName: result.fileName,
+        bytes: result.bytes,
+        sidecarBytes: result.sidecar?.bytes,
+        originalFilePath: result.filePath,
+        fileSizeBytes: result.bytes.length,
+      },
+      bindings,
+    );
+  } finally {
+    handle.clear();
+  }
+}
+
+function registerOpenImageBusyEntry(
+  fileName: string,
+  bindings: OpenImageBindings,
+): BusyEntryHandle {
+  const plan = planOpenImagePlacement({
+    currentLayout: bindings.gridLayoutRef.current,
+    imagesByIndex: bindings.imagesByIndexRef.current,
+  });
+  const targetIndex = pickPlannedTargetIndexFromOpenImagePlan(plan);
+  const label = `Loading ${fileName}...`;
+  if (targetIndex !== null) {
+    return bindings.busyRegistrar.registerViewportBusyEntry({ viewportIndex: targetIndex, label });
+  }
+  return bindings.busyRegistrar.registerAppBusyEntry({ label });
+}
+
+function pickPlannedTargetIndexFromOpenImagePlan(plan: OpenImagePlacementPlan): number | null {
+  if (plan.kind === "placeInExistingEmptyCell") return plan.targetIndex;
+  if (plan.kind === "growGridAndPlace") return plan.targetIndex;
+  return null;
 }
 
 async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResult | null> {
@@ -978,15 +1036,16 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
 interface ViewportReimportApiBindings {
   setImagesByIndex: SetImagesByIndex;
   setRenderingState: ViewportRenderingApi["setRenderingState"];
+  busyRegistrar: BusyEntryRegistrar;
 }
 
 function useViewportReimportApi(
   bindings: ViewportReimportApiBindings,
 ): ViewportReimportApi {
-  const { setImagesByIndex, setRenderingState } = bindings;
+  const { setImagesByIndex, setRenderingState, busyRegistrar } = bindings;
   return useMemo(
-    () => buildViewportReimportApi({ setImagesByIndex, setRenderingState }),
-    [setImagesByIndex, setRenderingState],
+    () => buildViewportReimportApi({ setImagesByIndex, setRenderingState, busyRegistrar }),
+    [setImagesByIndex, setRenderingState, busyRegistrar],
   );
 }
 
@@ -1013,6 +1072,10 @@ async function replaceViewportSourceWithReimportedFile(
   result: Extract<ToolboxOpenImageDialogResult, { canceled: false }>,
   bindings: ViewportReimportApiBindings,
 ): Promise<void> {
+  const handle = bindings.busyRegistrar.registerViewportBusyEntry({
+    viewportIndex,
+    label: `Re-importing ${result.fileName}...`,
+  });
   try {
     const source = await decodeImageBytesToViewportSource({
       fileName: result.fileName,
@@ -1031,6 +1094,8 @@ async function replaceViewportSourceWithReimportedFile(
     toast.success(`Re-imported ${result.fileName}`);
   } catch (error) {
     toast.error(`Could not re-import ${result.fileName}: ${describeUnknownError(error)}`);
+  } finally {
+    handle.clear();
   }
 }
 
@@ -1119,6 +1184,7 @@ interface ApplyActionFlowBindingsInputs {
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
   renderingApi: ViewportRenderingApi;
+  busyRegistrar: BusyEntryRegistrar;
 }
 
 function buildApplyActionFlowBindings(
@@ -1133,6 +1199,7 @@ function buildApplyActionFlowBindings(
     setPendingDuplicate: inputs.setPendingDuplicate,
     getRenderingState: inputs.renderingApi.getRenderingState,
     setRenderingState: inputs.renderingApi.setRenderingState,
+    busyRegistrar: inputs.busyRegistrar,
   };
 }
 
@@ -1428,6 +1495,7 @@ interface SaveProjectRequestBindings {
   readonly renderingApi: ViewportRenderingApi;
   readonly currentProjectFilePathRef: MutableRefObject<string | null>;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
+  readonly busyRegistrar: BusyEntryRegistrar;
 }
 
 interface SaveProjectRequestHandlers {
@@ -1466,16 +1534,34 @@ async function invokeSaveProjectFlowWithToastFeedback(
   saveAs: boolean,
   bindings: SaveProjectRequestBindings,
 ): Promise<void> {
+  const handle = bindings.busyRegistrar.registerAppBusyEntry({
+    label: "Saving project...",
+    progress: 0,
+  });
   try {
     const result = await runSaveProjectBundleFlowThroughMainProcess({
       snapshot,
       currentProjectFilePath: bindings.currentProjectFilePathRef.current,
       saveAs,
+      onProgress: (event) => updateSaveBundleProgressOnHandle(handle, event),
     });
     handleSaveProjectFlowOutcome(result, bindings.setCurrentProjectFilePath);
   } catch (error) {
     toast.error(`Could not save project: ${describeUnknownError(error)}`);
+  } finally {
+    handle.clear();
   }
+}
+
+function updateSaveBundleProgressOnHandle(
+  handle: BusyEntryHandle,
+  event: { bakedAssetCount: number; totalAssetCount: number },
+): void {
+  const fraction = event.totalAssetCount === 0 ? 1 : event.bakedAssetCount / event.totalAssetCount;
+  handle.update({
+    label: `Saving project... asset ${event.bakedAssetCount} of ${event.totalAssetCount}`,
+    progress: fraction,
+  });
 }
 
 function handleSaveProjectFlowOutcome(
@@ -1549,6 +1635,7 @@ interface OpenProjectRequestBindings {
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
   readonly replaceAllRenderingStates: ViewportRenderingApi["replaceAllRenderingStates"];
   readonly replaceSelection: ViewportSelectionState["replaceSelection"];
+  readonly busyRegistrar: BusyEntryRegistrar;
 }
 
 function useOpenProjectRequestHandler(
@@ -1563,12 +1650,31 @@ function useOpenProjectRequestHandler(
 async function runOpenProjectFlowAndShowToast(
   bindings: OpenProjectRequestBindings,
 ): Promise<void> {
+  const handle = bindings.busyRegistrar.registerAppBusyEntry({
+    label: "Opening project...",
+    progress: 0,
+  });
   try {
-    const result = await runOpenProjectFlowThroughMainProcess();
+    const result = await runOpenProjectFlowThroughMainProcess({
+      onProgress: (event) => updateOpenBundleProgressOnHandle(handle, event),
+    });
     handleOpenProjectFlowOutcome(result, bindings);
   } catch (error) {
     toast.error(`Could not open project: ${describeUnknownError(error)}`);
+  } finally {
+    handle.clear();
   }
+}
+
+function updateOpenBundleProgressOnHandle(
+  handle: BusyEntryHandle,
+  event: { readAssetCount: number; totalAssetCount: number },
+): void {
+  const fraction = event.totalAssetCount === 0 ? 1 : event.readAssetCount / event.totalAssetCount;
+  handle.update({
+    label: `Opening project... asset ${event.readAssetCount} of ${event.totalAssetCount}`,
+    progress: fraction,
+  });
 }
 
 function handleOpenProjectFlowOutcome(

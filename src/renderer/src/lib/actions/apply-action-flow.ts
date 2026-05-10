@@ -14,6 +14,7 @@ import {
   type ViewportContentMap,
   type ViewportContentMapUpdater,
 } from "@/lib/image/place-cloned-source-content";
+import type { BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
   gridLayout: GridLayout;
@@ -24,9 +25,23 @@ export interface ApplyActionFlowBindings {
   setPendingDuplicate: (pending: PendingDuplicateReplace | null) => void;
   getRenderingState: (index: number) => ViewportRenderingState;
   setRenderingState: (index: number, next: ViewportRenderingState) => void;
+  busyRegistrar: BusyEntryRegistrar;
 }
 
 export function applyActionInPlaceAtSourceIndex(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (action.transformSource) {
+    void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceWithoutBusyIndicator(action, parameterValues, sourceIndex, bindings);
+}
+
+function applyActionInPlaceWithoutBusyIndicator(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceIndex: number,
@@ -45,6 +60,38 @@ export function applyActionInPlaceAtSourceIndex(
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
   }
+}
+
+async function runApplyActionInPlaceWithBusyIndicator(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+): Promise<void> {
+  const handle = bindings.busyRegistrar.registerViewportBusyEntry({
+    viewportIndex: sourceIndex,
+    label: `Applying ${action.label}...`,
+  });
+  try {
+    await yieldOnceSoBusyOverlayCanPaint();
+    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      sourceIndex,
+      bindings,
+    );
+    toast.success(action.successMessage);
+  } catch (error) {
+    toast.error(formatActionErrorMessage(action.label, error));
+  } finally {
+    handle.clear();
+  }
+}
+
+function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function replaceSourceAtIndexWhenActionTransformsSource(
@@ -163,7 +210,14 @@ export async function runDuplicateAndApplyAtTargetIndex(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
+  const handle = action.transformSource
+    ? bindings.busyRegistrar.registerViewportBusyEntry({
+        viewportIndex: targetIndex,
+        label: `Applying ${action.label}...`,
+      })
+    : null;
   try {
+    if (handle) await yieldOnceSoBusyOverlayCanPaint();
     if (action.transformSource) {
       await placeTransformedDuplicateAtTargetIndex(
         action,
@@ -186,6 +240,8 @@ export async function runDuplicateAndApplyAtTargetIndex(
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
+  } finally {
+    handle?.clear();
   }
 }
 

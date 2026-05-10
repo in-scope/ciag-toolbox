@@ -1,5 +1,6 @@
 import { useCallback, type MouseEvent } from "react";
 
+import { ViewportBusyOverlay } from "@/components/busy-indicators";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -105,6 +106,7 @@ function renderViewportCellGridcellElement(
       className={getViewportCellClassName(settings.isSelected)}
     >
       {renderViewportCellViewport(props, settings)}
+      <ViewportBusyOverlay viewportIndex={props.cellIndex} />
     </div>
   );
 }

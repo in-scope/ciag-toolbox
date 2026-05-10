@@ -162,6 +162,15 @@ function buildBindingsBackedByMaps(
     getRenderingState: (index) =>
       renderingByIndex.get(index) ?? DEFAULT_VIEWPORT_RENDERING_STATE,
     setRenderingState,
+    busyRegistrar: buildNoopBusyEntryRegistrarForTests(),
+  };
+}
+
+function buildNoopBusyEntryRegistrarForTests(): ApplyActionFlowBindings["busyRegistrar"] {
+  const noopHandle = { id: "test", update: () => undefined, clear: () => undefined };
+  return {
+    registerAppBusyEntry: () => noopHandle,
+    registerViewportBusyEntry: () => noopHandle,
   };
 }
 

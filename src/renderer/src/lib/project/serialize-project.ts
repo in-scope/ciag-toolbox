@@ -68,7 +68,7 @@ export function buildDraftBundleFromSnapshot(
   };
 }
 
-function buildDraftBundleViewportEntryOrThrow(
+export function buildDraftBundleViewportEntryOrThrow(
   viewport: SaveableViewportSnapshot,
 ): DraftBundleViewportEntry {
   return {
