@@ -59,6 +59,7 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
+import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
@@ -263,10 +264,16 @@ function ApplicationShell(): JSX.Element {
     setRenderingState: renderingApi.setRenderingState,
   });
   const closingApi = useViewportClosingApi({
+    gridLayout,
+    selectedIndices,
     imagesByIndex,
+    setGridLayout,
     setImagesByIndex,
+    pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
     compactRenderingStateAfterRemovingIndex: renderingApi.compactRenderingStateAfterRemovingIndex,
+    pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    replaceSelection,
   });
   const reimportApi = useViewportReimportApi({
     setImagesByIndex,
@@ -890,32 +897,56 @@ function describeUnknownError(error: unknown): string {
 }
 
 interface ViewportClosingApiBindings {
+  gridLayout: GridLayout;
+  selectedIndices: ReadonlySet<number>;
   imagesByIndex: ImagesByIndexMap;
+  setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
+  pruneRenderingStateToCellCount: (cellCount: number) => void;
   compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
+  pruneSelectionToCellCount: (cellCount: number) => void;
   compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
+  replaceSelection: (indices: ReadonlySet<number>) => void;
 }
 
 function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
   const {
+    gridLayout,
+    selectedIndices,
     imagesByIndex,
+    setGridLayout,
     setImagesByIndex,
+    pruneRenderingStateToCellCount,
     compactRenderingStateAfterRemovingIndex,
+    pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    replaceSelection,
   } = bindings;
   return useMemo(
     () =>
       buildViewportClosingApi({
+        gridLayout,
+        selectedIndices,
         imagesByIndex,
+        setGridLayout,
         setImagesByIndex,
+        pruneRenderingStateToCellCount,
         compactRenderingStateAfterRemovingIndex,
+        pruneSelectionToCellCount,
         compactSelectionAfterRemovingIndex,
+        replaceSelection,
       }),
     [
+      gridLayout,
+      selectedIndices,
       imagesByIndex,
+      setGridLayout,
       setImagesByIndex,
+      pruneRenderingStateToCellCount,
       compactRenderingStateAfterRemovingIndex,
+      pruneSelectionToCellCount,
       compactSelectionAfterRemovingIndex,
+      replaceSelection,
     ],
   );
 }
@@ -992,10 +1023,54 @@ function closeViewportAndCompactRemainingIndices(
 ): void {
   const content = bindings.imagesByIndex.get(index);
   if (!content) return;
+  const closeContext = captureCloseContextBeforeMutation(index, bindings);
   bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
   bindings.compactRenderingStateAfterRemovingIndex(index);
   bindings.compactSelectionAfterRemovingIndex(index);
+  collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
   toast.info(formatClosedSingleViewportMessage(index, content.fileName));
+}
+
+interface CloseContextBeforeMutation {
+  readonly currentLayout: GridLayout;
+  readonly closedIndex: number;
+  readonly closedIndexWasOnlySelection: boolean;
+}
+
+function captureCloseContextBeforeMutation(
+  closedIndex: number,
+  bindings: ViewportClosingApiBindings,
+): CloseContextBeforeMutation {
+  return {
+    currentLayout: bindings.gridLayout,
+    closedIndex,
+    closedIndexWasOnlySelection: isClosedIndexTheOnlySelectedViewport(
+      bindings.selectedIndices,
+      closedIndex,
+    ),
+  };
+}
+
+function isClosedIndexTheOnlySelectedViewport(
+  selectedIndices: ReadonlySet<number>,
+  closedIndex: number,
+): boolean {
+  return selectedIndices.size === 1 && selectedIndices.has(closedIndex);
+}
+
+function collapseGridLayoutAndRestoreSelectionAfterClose(
+  context: CloseContextBeforeMutation,
+  bindings: ViewportClosingApiBindings,
+): void {
+  const plan = planCloseViewport(context);
+  if (plan.collapsedLayout === null) return;
+  const newCellCount = getGridLayoutCellCount(plan.collapsedLayout);
+  bindings.setGridLayout(plan.collapsedLayout);
+  bindings.pruneRenderingStateToCellCount(newCellCount);
+  bindings.pruneSelectionToCellCount(newCellCount);
+  if (plan.fallbackSelectionIndex !== null) {
+    bindings.replaceSelection(new Set([plan.fallbackSelectionIndex]));
+  }
 }
 
 function formatClosedSingleViewportMessage(index: number, fileName: string): string {

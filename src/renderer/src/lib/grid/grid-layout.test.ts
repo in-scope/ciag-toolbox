@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SELECTABLE_GRID_LAYOUTS,
+  getCollapsedGridLayoutAfterClose,
   getGridLayoutCellCount,
   getGridLayoutTailwindTrackClasses,
   getNextLargerGridLayout,
@@ -66,5 +67,39 @@ describe("getNextLargerGridLayout", () => {
   it("returns null at the maximum 2x3 and 3x2 layouts", () => {
     expect(getNextLargerGridLayout("2x3")).toBeNull();
     expect(getNextLargerGridLayout("3x2")).toBeNull();
+  });
+});
+
+describe("getCollapsedGridLayoutAfterClose", () => {
+  it("collapses 2x1 to 1x1", () => {
+    expect(getCollapsedGridLayoutAfterClose("2x1")).toBe("1x1");
+  });
+
+  it("collapses 1x2 to 1x1", () => {
+    expect(getCollapsedGridLayoutAfterClose("1x2")).toBe("1x1");
+  });
+
+  it("collapses 2x2 to 1x3", () => {
+    expect(getCollapsedGridLayoutAfterClose("2x2")).toBe("1x3");
+  });
+
+  it("collapses 1x3 to 1x2", () => {
+    expect(getCollapsedGridLayoutAfterClose("1x3")).toBe("1x2");
+  });
+
+  it("collapses 3x1 to 2x1", () => {
+    expect(getCollapsedGridLayoutAfterClose("3x1")).toBe("2x1");
+  });
+
+  it("returns null for 1x1 (no further collapse)", () => {
+    expect(getCollapsedGridLayoutAfterClose("1x1")).toBeNull();
+  });
+
+  it("returns null for 2x3 (layout stays)", () => {
+    expect(getCollapsedGridLayoutAfterClose("2x3")).toBeNull();
+  });
+
+  it("returns null for 3x2 (layout stays)", () => {
+    expect(getCollapsedGridLayoutAfterClose("3x2")).toBeNull();
   });
 });

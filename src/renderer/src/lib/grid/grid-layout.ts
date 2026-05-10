@@ -71,3 +71,17 @@ const NEXT_LARGER_GRID_LAYOUT: Partial<Record<GridLayout, GridLayout>> = {
 export function getNextLargerGridLayout(layout: GridLayout): GridLayout | null {
   return NEXT_LARGER_GRID_LAYOUT[layout] ?? null;
 }
+
+const COLLAPSED_GRID_LAYOUT_AFTER_CLOSE: Partial<Record<GridLayout, GridLayout>> = {
+  "2x1": "1x1",
+  "1x2": "1x1",
+  "2x2": "1x3",
+  "1x3": "1x2",
+  "3x1": "2x1",
+};
+
+export function getCollapsedGridLayoutAfterClose(
+  layout: GridLayout,
+): GridLayout | null {
+  return COLLAPSED_GRID_LAYOUT_AFTER_CLOSE[layout] ?? null;
+}
