@@ -60,6 +60,10 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
+import {
+  planOpenImagePlacement,
+  type OpenImagePlacementPlan,
+} from "@/lib/grid/plan-open-image";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
@@ -181,7 +185,6 @@ function ApplicationShell(): JSX.Element {
   const regionTool = useRegionTool();
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
-  const cellCountRef = useLatestRef(cellCount);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
@@ -190,9 +193,11 @@ function ApplicationShell(): JSX.Element {
     pruneSelectionToCellCount,
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
   });
+  const gridLayoutRef = useLatestRef(gridLayout);
   const handleOpenImageRequested = useOpenImageThroughDialogHandler({
     imagesByIndexRef,
-    cellCountRef,
+    gridLayoutRef,
+    setGridLayout,
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
@@ -517,7 +522,8 @@ async function runSaveImageFlowAndShowToast(
 
 interface OpenImageBindings {
   imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
-  cellCountRef: MutableRefObject<number>;
+  gridLayoutRef: MutableRefObject<GridLayout>;
+  setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
   setPendingOpenImageReplace: SetPendingOpenImageReplace;
   selectViewportFromClick: SelectViewportFromClick;
@@ -526,7 +532,8 @@ interface OpenImageBindings {
 function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Promise<void> {
   const {
     imagesByIndexRef,
-    cellCountRef,
+    gridLayoutRef,
+    setGridLayout,
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
@@ -534,14 +541,16 @@ function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Pr
   return useCallback(async () => {
     await runOpenImageDialogFlow({
       imagesByIndexRef,
-      cellCountRef,
+      gridLayoutRef,
+      setGridLayout,
       setImagesByIndex,
       setPendingOpenImageReplace,
       selectViewportFromClick,
     });
   }, [
     imagesByIndexRef,
-    cellCountRef,
+    gridLayoutRef,
+    setGridLayout,
     setImagesByIndex,
     setPendingOpenImageReplace,
     selectViewportFromClick,
@@ -602,10 +611,25 @@ function routeDecodedImageToTargetViewport(
   pending: PendingOpenImageReplace,
   bindings: OpenImageBindings,
 ): void {
-  const cellCount = bindings.cellCountRef.current;
-  const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndexRef.current, cellCount);
-  if (emptyIndex !== null) {
-    applyLoadedImageAtIndex(emptyIndex, pending, bindings);
+  const plan = planOpenImagePlacement({
+    currentLayout: bindings.gridLayoutRef.current,
+    imagesByIndex: bindings.imagesByIndexRef.current,
+  });
+  applyOpenImagePlacementPlan(plan, pending, bindings);
+}
+
+function applyOpenImagePlacementPlan(
+  plan: OpenImagePlacementPlan,
+  pending: PendingOpenImageReplace,
+  bindings: OpenImageBindings,
+): void {
+  if (plan.kind === "placeInExistingEmptyCell") {
+    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
+    return;
+  }
+  if (plan.kind === "growGridAndPlace") {
+    bindings.setGridLayout(plan.expandedLayout);
+    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
     return;
   }
   bindings.setPendingOpenImageReplace(pending);
