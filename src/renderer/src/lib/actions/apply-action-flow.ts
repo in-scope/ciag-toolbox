@@ -182,10 +182,26 @@ export async function runDuplicateAndApplyAtTargetIndex(
       targetIndex,
       bindings,
     );
+    clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
   }
+}
+
+function clearConsumedSourceStateAfterDuplicateApply(
+  action: RegisteredViewportAction,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!action.clearConsumedSourceStateAfterApply) return;
+  if (sourceIndex === targetIndex) return;
+  const current = bindings.getRenderingState(sourceIndex);
+  bindings.setRenderingState(
+    sourceIndex,
+    action.clearConsumedSourceStateAfterApply(current),
+  );
 }
 
 async function placeTransformedDuplicateAtTargetIndex(

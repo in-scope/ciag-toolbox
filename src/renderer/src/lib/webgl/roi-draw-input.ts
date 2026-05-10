@@ -11,6 +11,11 @@ export interface RoiDrawCallbacks {
   readonly onDragCommit: (rect: RoiDrawCanvasRect) => void;
 }
 
+export interface RoiDrawAttachment {
+  readonly detach: () => void;
+  readonly cancelInProgressDrag: () => void;
+}
+
 interface RoiDragState {
   active: boolean;
   pointerId: number;
@@ -20,11 +25,26 @@ interface RoiDragState {
 export function attachRoiDrawEventHandlers(
   canvas: HTMLCanvasElement,
   callbacks: RoiDrawCallbacks,
-): () => void {
+): RoiDrawAttachment {
   const dragState = createInactiveRoiDragState();
   const handlers = buildRoiDrawEventHandlers(canvas, dragState, callbacks);
   registerRoiDrawHandlersOnCanvas(canvas, handlers);
-  return () => unregisterRoiDrawHandlersFromCanvas(canvas, handlers);
+  return {
+    detach: () => unregisterRoiDrawHandlersFromCanvas(canvas, handlers),
+    cancelInProgressDrag: () =>
+      discardActiveRoiDragWithoutCommitting(canvas, dragState, callbacks),
+  };
+}
+
+function discardActiveRoiDragWithoutCommitting(
+  canvas: HTMLCanvasElement,
+  dragState: RoiDragState,
+  callbacks: RoiDrawCallbacks,
+): void {
+  if (!dragState.active) return;
+  releasePointerCaptureIfHeld(canvas, dragState.pointerId);
+  resetRoiDragState(dragState);
+  callbacks.onDragStateChange(null);
 }
 
 function createInactiveRoiDragState(): RoiDragState {

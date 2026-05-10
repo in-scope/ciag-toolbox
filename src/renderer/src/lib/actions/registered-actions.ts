@@ -25,6 +25,9 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly isAvailableForActiveViewport?: (
     sourceRenderingState: ViewportRenderingState,
   ) => boolean;
+  readonly clearConsumedSourceStateAfterApply?: (
+    sourceRenderingState: ViewportRenderingState,
+  ) => ViewportRenderingState;
 }
 
 export const NORMALIZE_ACTION: RegisteredViewportAction = {
@@ -96,6 +99,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareCropParameterValuesFromActiveRoi,
   isAvailableForActiveViewport: (state) => state.roi !== null,
   apply: clearRoiAfterCropApply,
+  clearConsumedSourceStateAfterApply: clearRoiAfterCropApply,
   transformSource: createCropToRegionSourceTransform(),
 };
 

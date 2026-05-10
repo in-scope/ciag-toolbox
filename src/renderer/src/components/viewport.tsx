@@ -21,6 +21,7 @@ import {
 } from "@/lib/webgl/pointer-readout-input";
 import {
   attachRoiDrawEventHandlers,
+  type RoiDrawAttachment,
   type RoiDrawCanvasRect,
 } from "@/lib/webgl/roi-draw-input";
 import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
@@ -49,6 +50,7 @@ interface ViewportProps {
 export function Viewport(props: ViewportProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
+  const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
   const imageSource = props.imageSource ?? null;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
@@ -64,13 +66,17 @@ export function Viewport(props: ViewportProps): JSX.Element {
     imageSource,
     selectedBandIndex: props.selectedBandIndex,
   });
-  useViewportRoiDrawAttachment(canvasRef, {
+  useViewportRoiDrawAttachment(canvasRef, roiDrawAttachmentRef, {
     isRegionToolActive: props.isRegionToolActive,
     imageSource,
     rendererRef,
     onCommitRoi: props.onCommitRoi,
     setInProgressDragRect,
   });
+  useDiscardInProgressDragWhenRegionToolDeactivates(
+    roiDrawAttachmentRef,
+    props.isRegionToolActive,
+  );
   useViewportPixelClickPinAttachment(canvasRef, {
     isRegionToolActive: props.isRegionToolActive,
     imageSource,
@@ -397,20 +403,36 @@ interface ViewportRoiDrawInputs {
 
 function useViewportRoiDrawAttachment(
   canvasRef: RefObject<HTMLCanvasElement>,
+  attachmentRef: MutableRefObject<RoiDrawAttachment | null>,
   inputs: ViewportRoiDrawInputs,
 ): void {
   const inputsRef = useLatestValueRef(inputs);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    return attachRoiDrawEventHandlers(canvas, {
+    const attachment = attachRoiDrawEventHandlers(canvas, {
       isRoiDrawingEnabled: () => isRoiDrawingEnabledFromInputs(inputsRef.current),
       onDragStateChange: (rect) => inputsRef.current.setInProgressDragRect(rect),
       onDragCommit: (rect) => commitRoiFromCanvasRect(rect, inputsRef.current),
     });
+    attachmentRef.current = attachment;
+    return () => {
+      attachmentRef.current = null;
+      attachment.detach();
+    };
     // canvasRef is stable; latest-value ref holds dynamic inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+}
+
+function useDiscardInProgressDragWhenRegionToolDeactivates(
+  attachmentRef: MutableRefObject<RoiDrawAttachment | null>,
+  isRegionToolActive: boolean,
+): void {
+  useEffect(() => {
+    if (isRegionToolActive) return;
+    attachmentRef.current?.cancelInProgressDrag();
+  }, [attachmentRef, isRegionToolActive]);
 }
 
 function isRoiDrawingEnabledFromInputs(inputs: ViewportRoiDrawInputs): boolean {
