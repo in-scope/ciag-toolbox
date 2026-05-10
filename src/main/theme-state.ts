@@ -5,7 +5,7 @@ import { join } from "node:path";
 export type ThemeMode = "system" | "light" | "dark";
 
 const THEME_STATE_FILE_NAME = "theme-state.json";
-const DEFAULT_THEME_MODE: ThemeMode = "system";
+const DEFAULT_THEME_MODE: ThemeMode = "dark";
 
 function getThemeStateFilePath(): string {
   return join(app.getPath("userData"), THEME_STATE_FILE_NAME);
