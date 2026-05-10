@@ -128,6 +128,9 @@ function RightPanelShell(props: { children: ReadonlyArray<JSX.Element> }): JSX.E
 
 const RIGHT_PANEL_CLASSES = "flex w-[300px] shrink-0 flex-col border-l bg-card";
 
+const RIGHT_PANEL_SECTION_CLASSES =
+  "flex flex-col gap-2 light:rounded-md light:border light:border-border light:p-3";
+
 interface BandsSectionProps {
   activeSource: ViewportRightPanelActiveSource;
 }
@@ -156,7 +159,7 @@ function BandsSectionBody(props: BandsSectionBodyProps): JSX.Element {
     props.activeSource.selectedBandIndex,
   );
   return (
-    <section aria-label="Bands" className="flex flex-col gap-2">
+    <section aria-label="Bands" className={RIGHT_PANEL_SECTION_CLASSES}>
       <BandsSectionHeader viewportNumber={props.activeSource.viewportNumber} />
       <BandsRowList
         items={items}
@@ -340,7 +343,7 @@ interface HistorySectionProps {
 
 function HistorySection(props: HistorySectionProps): JSX.Element {
   return (
-    <section aria-label="History" className="flex flex-col gap-2">
+    <section aria-label="History" className={RIGHT_PANEL_SECTION_CLASSES}>
       <HistorySectionHeader
         viewportNumber={props.activeSource.viewportNumber}
         entryCount={props.activeSource.operationHistory.length}
@@ -422,7 +425,7 @@ interface MetadataSectionProps {
 
 function MetadataSection(props: MetadataSectionProps): JSX.Element {
   return (
-    <section aria-label="Metadata" className="flex flex-col gap-2">
+    <section aria-label="Metadata" className={RIGHT_PANEL_SECTION_CLASSES}>
       <MetadataSectionHeader viewportNumber={props.activeSource.viewportNumber} />
       <MetadataSectionBody metadata={props.activeSource.metadata} />
     </section>
@@ -510,7 +513,7 @@ function RegionSection(props: RegionSectionProps): JSX.Element | null {
   const roi = props.activeSource.roi;
   if (!roi) return null;
   return (
-    <section aria-label="Region" className="flex flex-col gap-2">
+    <section aria-label="Region" className={RIGHT_PANEL_SECTION_CLASSES}>
       <RegionSectionHeader
         viewportNumber={props.activeSource.viewportNumber}
         onClearRoi={props.activeSource.onClearRoi}
@@ -594,7 +597,7 @@ function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
   const yAxisLabel = describeSpectrumYAxisLabel(raster.sampleFormat);
   const lines = buildSpectrumPlotLinesFromActiveSource(props.activeSource);
   return (
-    <section aria-label="Spectra" className="flex flex-col gap-2">
+    <section aria-label="Spectra" className={RIGHT_PANEL_SECTION_CLASSES}>
       <SpectraSectionHeader
         viewportNumber={props.activeSource.viewportNumber}
         pinnedCount={props.activeSource.pinnedSpectra.length}
