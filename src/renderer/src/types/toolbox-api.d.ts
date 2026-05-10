@@ -40,102 +40,93 @@ type ToolboxSaveImageDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-interface ToolboxSaveProjectDraftViewportSource {
-  absolutePath: string;
-  contentHash: string;
-  fileName: string;
-}
-
-interface ToolboxSaveProjectDraftRenderingState {
+interface ToolboxSaveBundleDraftRenderingState {
   normalizationEnabled: boolean;
   selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
 }
 
-type ToolboxSaveProjectDraftOperationHistoryParameterValue = number | string | boolean;
+type ToolboxSaveBundleDraftOperationHistoryParameterValue = number | string | boolean;
 
-interface ToolboxSaveProjectDraftOperationHistoryEntry {
+interface ToolboxSaveBundleDraftOperationHistoryEntry {
   actionId: string;
   actionLabel: string;
   appliedLabel: string;
   parameterValues: Readonly<
-    Record<string, ToolboxSaveProjectDraftOperationHistoryParameterValue>
+    Record<string, ToolboxSaveBundleDraftOperationHistoryParameterValue>
   >;
   timestampMs: number;
 }
 
-interface ToolboxSaveProjectDraftViewportEntry {
-  index: number;
-  source: ToolboxSaveProjectDraftViewportSource;
-  renderingState: ToolboxSaveProjectDraftRenderingState;
-  operationHistory: ReadonlyArray<ToolboxSaveProjectDraftOperationHistoryEntry>;
+interface ToolboxSaveBundleDraftBakedAssetSidecar {
+  extension: string;
+  bytes: Uint8Array;
 }
 
-interface ToolboxSaveProjectDraft {
+interface ToolboxSaveBundleDraftBakedAsset {
+  kind: "baked";
+  bytes: Uint8Array;
+  extension: string;
+  sidecar?: ToolboxSaveBundleDraftBakedAssetSidecar;
+}
+
+interface ToolboxSaveBundleDraftExternalAsset {
+  kind: "external";
+  absolutePath: string;
+  extension: string;
+}
+
+type ToolboxSaveBundleDraftAsset =
+  | ToolboxSaveBundleDraftBakedAsset
+  | ToolboxSaveBundleDraftExternalAsset;
+
+interface ToolboxSaveBundleDraftViewportEntry {
+  index: number;
+  fileName: string;
+  asset: ToolboxSaveBundleDraftAsset;
+  renderingState: ToolboxSaveBundleDraftRenderingState;
+  operationHistory: ReadonlyArray<ToolboxSaveBundleDraftOperationHistoryEntry>;
+}
+
+interface ToolboxSaveBundleDraft {
   formatVersion: number;
   gridLayout: string;
   selectedViewportIndices: ReadonlyArray<number>;
-  viewports: ReadonlyArray<ToolboxSaveProjectDraftViewportEntry>;
+  viewports: ReadonlyArray<ToolboxSaveBundleDraftViewportEntry>;
 }
 
-interface ToolboxSaveProjectDialogRequest {
-  draft: ToolboxSaveProjectDraft;
+interface ToolboxSaveBundleDialogRequest {
+  draft: ToolboxSaveBundleDraft;
   currentProjectFilePath: string | null;
   saveAs: boolean;
 }
 
-type ToolboxSaveProjectDialogResult =
+type ToolboxSaveBundleDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-interface ToolboxPackProjectBundleRequest {
-  draft: ToolboxSaveProjectDraft;
-  currentProjectFilePath: string | null;
-}
-
-type ToolboxPackProjectBundleResult =
+type ToolboxOpenBundleDialogResult =
   | { canceled: true }
-  | { canceled: false; filePath: string };
+  | { canceled: false; projectFilePath: string; bytes: Uint8Array };
 
-type ToolboxOpenProjectDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string; bytes: Uint8Array };
-
-interface ToolboxResolveProjectSourceRequest {
+interface ToolboxReadBundleAssetRequest {
   projectFilePath: string;
   relativePath: string;
 }
 
-interface ToolboxResolveProjectSourceSidecar {
+interface ToolboxReadBundleAssetSidecar {
   fileName: string;
   bytes: Uint8Array;
 }
 
-type ToolboxResolveProjectSourceResult =
-  | { kind: "missing" }
+type ToolboxReadBundleAssetResult =
+  | { kind: "missing"; relativePath: string }
   | {
       kind: "found";
       absolutePath: string;
       fileName: string;
       bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: ToolboxResolveProjectSourceSidecar;
-    };
-
-interface ToolboxLocateMissingProjectSourceRequest {
-  originalFileName: string;
-  defaultDir: string | null;
-}
-
-type ToolboxLocateMissingProjectSourceResult =
-  | { kind: "canceled" }
-  | {
-      kind: "picked";
-      absolutePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: ToolboxResolveProjectSourceSidecar;
+      sidecar?: ToolboxReadBundleAssetSidecar;
     };
 
 type ToolboxThemeMode = "system" | "light" | "dark";
@@ -175,19 +166,13 @@ interface ToolboxApi {
   saveImageDialog: (
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;
-  openProjectDialog: () => Promise<ToolboxOpenProjectDialogResult>;
-  saveProjectDialog: (
-    request: ToolboxSaveProjectDialogRequest,
-  ) => Promise<ToolboxSaveProjectDialogResult>;
-  packProjectBundle: (
-    request: ToolboxPackProjectBundleRequest,
-  ) => Promise<ToolboxPackProjectBundleResult>;
-  resolveProjectSource: (
-    request: ToolboxResolveProjectSourceRequest,
-  ) => Promise<ToolboxResolveProjectSourceResult>;
-  locateMissingProjectSource: (
-    request: ToolboxLocateMissingProjectSourceRequest,
-  ) => Promise<ToolboxLocateMissingProjectSourceResult>;
+  openProjectBundleDialog: () => Promise<ToolboxOpenBundleDialogResult>;
+  readProjectBundleAsset: (
+    request: ToolboxReadBundleAssetRequest,
+  ) => Promise<ToolboxReadBundleAssetResult>;
+  saveProjectBundleDialog: (
+    request: ToolboxSaveBundleDialogRequest,
+  ) => Promise<ToolboxSaveBundleDialogResult>;
   onMenuOpenImage: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
@@ -201,9 +186,6 @@ interface ToolboxApi {
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuSaveProjectAs: (
-    listener: ToolboxMenuEventListener,
-  ) => ToolboxUnsubscribeMenuListener;
-  onMenuPackProjectBundle: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuAbout: (

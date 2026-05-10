@@ -4,43 +4,60 @@ import { extname } from "node:path";
 
 import {
   writeProjectBundleAtPath,
-  type PackBundleDraft,
+  type BundleDraft,
 } from "./bundle-writer";
 
-const PACK_PROJECT_BUNDLE_CHANNEL = "project:pack-bundle";
+const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
+const PROJECT_BUNDLE_EXTENSION = "ctbundle";
 
-export interface PackProjectBundleRequest {
-  readonly draft: PackBundleDraft;
+export interface SaveBundleDialogRequest {
+  readonly draft: BundleDraft;
   readonly currentProjectFilePath: string | null;
+  readonly saveAs: boolean;
 }
 
-export type PackProjectBundleResult =
+export type SaveBundleDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-async function chooseBundleSavePath(
+async function resolveBundleSavePath(
+  window: BrowserWindow,
+  request: SaveBundleDialogRequest,
+): Promise<string | null> {
+  if (!request.saveAs && hasUsableCurrentBundlePath(request.currentProjectFilePath)) {
+    return request.currentProjectFilePath;
+  }
+  return showBundleSaveAsDialog(window, request.currentProjectFilePath);
+}
+
+function hasUsableCurrentBundlePath(currentProjectFilePath: string | null): boolean {
+  if (!currentProjectFilePath) return false;
+  return extname(currentProjectFilePath).toLowerCase() === `.${PROJECT_BUNDLE_EXTENSION}`;
+}
+
+async function showBundleSaveAsDialog(
   window: BrowserWindow,
   currentProjectFilePath: string | null,
 ): Promise<string | null> {
   const result = await dialog.showSaveDialog(window, {
-    title: "Pack Project As Bundle",
+    title: "Save Project As",
     defaultPath: deriveDefaultBundleSavePath(currentProjectFilePath),
-    filters: [{ name: "Toolbox Project Bundle", extensions: ["ctbundle"] }],
+    filters: [{ name: "Toolbox Project Bundle", extensions: [PROJECT_BUNDLE_EXTENSION] }],
   });
   if (result.canceled || !result.filePath) return null;
   return result.filePath;
 }
 
 function deriveDefaultBundleSavePath(currentProjectFilePath: string | null): string {
-  if (!currentProjectFilePath) return "untitled.ctbundle";
+  if (!currentProjectFilePath) return `untitled.${PROJECT_BUNDLE_EXTENSION}`;
   const ext = extname(currentProjectFilePath);
   const stem = currentProjectFilePath.slice(0, currentProjectFilePath.length - ext.length);
-  return `${stem}.ctbundle`;
+  return `${stem}.${PROJECT_BUNDLE_EXTENSION}`;
 }
 
 async function writeBundleAtPathOrCleanUpOnFailure(
   outputPath: string,
-  draft: PackBundleDraft,
+  draft: BundleDraft,
 ): Promise<void> {
   try {
     await writeProjectBundleAtPath(outputPath, draft);
@@ -58,11 +75,11 @@ async function tryRemoveFileIgnoringErrors(filePath: string): Promise<void> {
   }
 }
 
-async function performPackProjectBundleFlow(
+async function performSaveBundleFlow(
   window: BrowserWindow,
-  request: PackProjectBundleRequest,
-): Promise<PackProjectBundleResult> {
-  const filePath = await chooseBundleSavePath(window, request.currentProjectFilePath);
+  request: SaveBundleDialogRequest,
+): Promise<SaveBundleDialogResult> {
+  const filePath = await resolveBundleSavePath(window, request);
   if (filePath === null) return { canceled: true };
   await writeBundleAtPathOrCleanUpOnFailure(filePath, request.draft);
   return { canceled: false, filePath };
@@ -74,15 +91,15 @@ function findWindowForIpcEvent(
   return BrowserWindow.fromWebContents(event.sender);
 }
 
-async function handlePackProjectBundleIpc(
+async function handleSaveBundleDialogIpc(
   event: Electron.IpcMainInvokeEvent,
-  request: PackProjectBundleRequest,
-): Promise<PackProjectBundleResult> {
+  request: SaveBundleDialogRequest,
+): Promise<SaveBundleDialogResult> {
   const window = findWindowForIpcEvent(event);
   if (!window) return { canceled: true };
-  return performPackProjectBundleFlow(window, request);
+  return performSaveBundleFlow(window, request);
 }
 
-export function registerPackProjectBundleIpcHandler(): void {
-  ipcMain.handle(PACK_PROJECT_BUNDLE_CHANNEL, handlePackProjectBundleIpc);
+export function registerSaveBundleDialogIpcHandler(): void {
+  ipcMain.handle(SAVE_BUNDLE_DIALOG_CHANNEL, handleSaveBundleDialogIpc);
 }

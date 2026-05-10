@@ -1,11 +1,10 @@
 import type { GridLayout } from "@/lib/grid/grid-layout";
 
-export const PROJECT_FILE_FORMAT_VERSION = 1;
-export const PROJECT_FILE_EXTENSION = "ctproj";
+export const PROJECT_FILE_FORMAT_VERSION = 2;
+export const PROJECT_BUNDLE_EXTENSION = "ctbundle";
 
 export interface ProjectViewportSourceReference {
   readonly relativePath: string;
-  readonly contentHash: string;
   readonly fileName: string;
 }
 

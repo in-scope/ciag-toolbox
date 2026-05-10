@@ -1,23 +1,23 @@
 import {
-  buildDraftProjectFileFromSnapshot,
+  buildDraftBundleFromSnapshot,
   type SaveableProjectSnapshot,
 } from "./serialize-project";
 
-export interface SaveProjectFlowInput {
+export interface SaveBundleFlowInput {
   readonly snapshot: SaveableProjectSnapshot;
   readonly currentProjectFilePath: string | null;
   readonly saveAs: boolean;
 }
 
-export type SaveProjectFlowResult =
+export type SaveBundleFlowResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-export async function runSaveProjectFlowThroughMainProcess(
-  input: SaveProjectFlowInput,
-): Promise<SaveProjectFlowResult> {
-  const draft = buildDraftProjectFileFromSnapshot(input.snapshot);
-  return window.toolboxApi.saveProjectDialog({
+export async function runSaveProjectBundleFlowThroughMainProcess(
+  input: SaveBundleFlowInput,
+): Promise<SaveBundleFlowResult> {
+  const draft = buildDraftBundleFromSnapshot(input.snapshot);
+  return window.toolboxApi.saveProjectBundleDialog({
     draft,
     currentProjectFilePath: input.currentProjectFilePath,
     saveAs: input.saveAs,

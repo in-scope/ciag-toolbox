@@ -12,7 +12,6 @@ import {
 import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
-import { DivergedSourceWarningDialog } from "@/components/diverged-source-warning-dialog";
 import { StatusBar } from "@/components/status-bar";
 import {
   OpenImageReplaceTargetPicker,
@@ -74,11 +73,9 @@ import { placeClonedSourceContentAtIndex } from "@/lib/image/place-cloned-source
 import {
   runOpenProjectFlowThroughMainProcess,
   type OpenedProject,
-  type OpenedProjectDivergedSource,
   type OpenedProjectViewportSnapshot,
 } from "@/lib/project/run-open-project-flow";
-import { runPackProjectBundleFlowThroughMainProcess } from "@/lib/project/run-pack-bundle-flow";
-import { runSaveProjectFlowThroughMainProcess } from "@/lib/project/run-save-project-flow";
+import { runSaveProjectBundleFlowThroughMainProcess } from "@/lib/project/run-save-bundle-flow";
 import type { SaveableProjectSnapshot } from "@/lib/project/serialize-project";
 import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
 import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
@@ -95,6 +92,10 @@ import {
   RegionToolProvider,
   useRegionTool,
 } from "@/state/region-tool-context";
+import {
+  ViewportReimportProvider,
+  type ViewportReimportApi,
+} from "@/state/reimport-context";
 import {
   ViewportSelectionProvider,
   useViewportSelection,
@@ -122,16 +123,7 @@ type SetActiveAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>
 type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
 type SetPendingSaveImage = Dispatch<SetStateAction<PendingSaveImageRequest | null>>;
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
-type UnresolvedFileNamesByIndex = ReadonlyMap<number, string>;
-type SetUnresolvedFileNamesByIndex = Dispatch<SetStateAction<UnresolvedFileNamesByIndex>>;
 type SetCurrentProjectFilePath = Dispatch<SetStateAction<string | null>>;
-
-interface PendingDivergenceWithResolver {
-  readonly diverged: ReadonlyArray<OpenedProjectDivergedSource>;
-  readonly resolve: (continueLoad: boolean) => void;
-}
-
-type SetPendingDivergence = Dispatch<SetStateAction<PendingDivergenceWithResolver | null>>;
 
 interface SingleSelectedSource {
   readonly index: number;
@@ -176,11 +168,7 @@ function ApplicationShell(): JSX.Element {
     useState<PendingOpenImageReplace | null>(null);
   const [pendingSaveImage, setPendingSaveImage] =
     useState<PendingSaveImageRequest | null>(null);
-  const [unresolvedFileNamesByIndex, setUnresolvedFileNamesByIndex] =
-    useState<UnresolvedFileNamesByIndex>(createEmptyUnresolvedMap);
   const [currentProjectFilePath, setCurrentProjectFilePath] = useState<string | null>(null);
-  const [pendingDivergence, setPendingDivergence] =
-    useState<PendingDivergenceWithResolver | null>(null);
   const {
     selectedIndices,
     pruneSelectionToCellCount,
@@ -227,22 +215,12 @@ function ApplicationShell(): JSX.Element {
   });
   useMenuSaveProjectTriggersHandler(handleSaveProjectRequested.saveOrPromptForPath);
   useMenuSaveProjectAsTriggersHandler(handleSaveProjectRequested.alwaysPromptForPath);
-  const handlePackProjectBundleRequested = usePackProjectBundleRequestHandler({
-    gridLayoutRef: useLatestRef(gridLayout),
-    imagesByIndexRef,
-    selectedIndicesRef: useLatestRef(selectedIndices),
-    renderingApi,
-    currentProjectFilePathRef: useLatestRef(currentProjectFilePath),
-  });
-  useMenuPackProjectBundleTriggersHandler(handlePackProjectBundleRequested);
   const handleOpenProjectRequested = useOpenProjectRequestHandler({
     setGridLayout,
     setImagesByIndex,
-    setUnresolvedFileNamesByIndex,
     setCurrentProjectFilePath,
     replaceAllRenderingStates: renderingApi.replaceAllRenderingStates,
     replaceSelection,
-    setPendingDivergence,
   });
   useMenuOpenProjectTriggersHandler(handleOpenProjectRequested);
   const applyActionFlowBindings = buildApplyActionFlowBindings({
@@ -290,6 +268,10 @@ function ApplicationShell(): JSX.Element {
     compactRenderingStateAfterRemovingIndex: renderingApi.compactRenderingStateAfterRemovingIndex,
     compactSelectionAfterRemovingIndex,
   });
+  const reimportApi = useViewportReimportApi({
+    setImagesByIndex,
+    setRenderingState: renderingApi.setRenderingState,
+  });
   return (
     <div className="flex h-full flex-col">
       <Toolbar
@@ -306,17 +288,18 @@ function ApplicationShell(): JSX.Element {
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
-          <ApplicationStageContent
-            gridLayout={gridLayout}
-            imagesByIndex={imagesByIndex}
-            unresolvedFileNamesByIndex={unresolvedFileNamesByIndex}
-            onOpenImage={handleOpenImageRequested}
-            activeAction={activeAction}
-            sourceViewport={singleSelectedSource?.summary ?? null}
-            rightPanelActiveSource={rightPanelActiveSource}
-            onCancelAction={handleCancelAction}
-            onApplyAction={handleApplyAction}
-          />
+          <ViewportReimportProvider value={reimportApi}>
+            <ApplicationStageContent
+              gridLayout={gridLayout}
+              imagesByIndex={imagesByIndex}
+              onOpenImage={handleOpenImageRequested}
+              activeAction={activeAction}
+              sourceViewport={singleSelectedSource?.summary ?? null}
+              rightPanelActiveSource={rightPanelActiveSource}
+              onCancelAction={handleCancelAction}
+              onApplyAction={handleApplyAction}
+            />
+          </ViewportReimportProvider>
         </ViewportClosingProvider>
       </ViewportDuplicationProvider>
       <DuplicateReplaceTargetPicker
@@ -354,28 +337,9 @@ function ApplicationShell(): JSX.Element {
           })
         }
       />
-      <DivergedSourceWarningDialog
-        pending={pendingDivergence}
-        onContinue={() => resolvePendingDivergence(pendingDivergence, true, setPendingDivergence)}
-        onCancel={() => resolvePendingDivergence(pendingDivergence, false, setPendingDivergence)}
-      />
       <StatusBar />
     </div>
   );
-}
-
-function createEmptyUnresolvedMap(): UnresolvedFileNamesByIndex {
-  return new Map();
-}
-
-function resolvePendingDivergence(
-  pending: PendingDivergenceWithResolver | null,
-  continueLoad: boolean,
-  setPendingDivergence: SetPendingDivergence,
-): void {
-  if (!pending) return;
-  setPendingDivergence(null);
-  pending.resolve(continueLoad);
 }
 
 function useLatestRef<T>(value: T): MutableRefObject<T> {
@@ -391,7 +355,6 @@ function createEmptyImagesMap(): ImagesByIndexMap {
 interface ApplicationStageContentProps {
   gridLayout: GridLayout;
   imagesByIndex: ImagesByIndexMap;
-  unresolvedFileNamesByIndex: UnresolvedFileNamesByIndex;
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
@@ -411,7 +374,6 @@ function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Eleme
         <ViewportGrid
           layout={props.gridLayout}
           cellsByIndex={props.imagesByIndex}
-          unresolvedFileNamesByIndex={props.unresolvedFileNamesByIndex}
           onOpenImage={props.onOpenImage}
         />
       </div>
@@ -461,10 +423,6 @@ function useMenuSaveProjectTriggersHandler(handler: () => void): void {
 
 function useMenuSaveProjectAsTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuSaveProjectAs(handler), [handler]);
-}
-
-function useMenuPackProjectBundleTriggersHandler(handler: () => void): void {
-  useEffect(() => window.toolboxApi.onMenuPackProjectBundle(handler), [handler]);
 }
 
 interface SaveImageRequestBindings {
@@ -592,7 +550,6 @@ async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void
       bytes: result.bytes,
       sidecarBytes: result.sidecar?.bytes,
       originalFilePath: result.filePath,
-      originalContentHash: result.contentHash,
       fileSizeBytes: result.bytes.length,
     },
     bindings,
@@ -614,7 +571,6 @@ async function tryDecodeAndRouteImage(
     bytes: Uint8Array;
     sidecarBytes?: Uint8Array;
     originalFilePath: string;
-    originalContentHash: string;
     fileSizeBytes: number;
   },
   bindings: OpenImageBindings,
@@ -626,7 +582,6 @@ async function tryDecodeAndRouteImage(
         fileName: bundle.fileName,
         source,
         originalFilePath: bundle.originalFilePath,
-        originalContentHash: bundle.originalContentHash,
         fileSizeBytes: bundle.fileSizeBytes,
       },
       bindings,
@@ -664,7 +619,6 @@ function applyLoadedImageAtIndex(
       fileName: pending.fileName,
       source: pending.source,
       originalFilePath: pending.originalFilePath,
-      originalContentHash: pending.originalContentHash,
       fileSizeBytes: pending.fileSizeBytes,
     }),
   );
@@ -964,6 +918,65 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
       compactSelectionAfterRemovingIndex,
     ],
   );
+}
+
+interface ViewportReimportApiBindings {
+  setImagesByIndex: SetImagesByIndex;
+  setRenderingState: ViewportRenderingApi["setRenderingState"];
+}
+
+function useViewportReimportApi(
+  bindings: ViewportReimportApiBindings,
+): ViewportReimportApi {
+  const { setImagesByIndex, setRenderingState } = bindings;
+  return useMemo(
+    () => buildViewportReimportApi({ setImagesByIndex, setRenderingState }),
+    [setImagesByIndex, setRenderingState],
+  );
+}
+
+function buildViewportReimportApi(
+  bindings: ViewportReimportApiBindings,
+): ViewportReimportApi {
+  return {
+    requestReimport: (viewportIndex) =>
+      void runReimportSourceFromDiskFlow(viewportIndex, bindings),
+  };
+}
+
+async function runReimportSourceFromDiskFlow(
+  viewportIndex: number,
+  bindings: ViewportReimportApiBindings,
+): Promise<void> {
+  const result = await invokeOpenImageDialogSafely();
+  if (!result || result.canceled) return;
+  await replaceViewportSourceWithReimportedFile(viewportIndex, result, bindings);
+}
+
+async function replaceViewportSourceWithReimportedFile(
+  viewportIndex: number,
+  result: Extract<ToolboxOpenImageDialogResult, { canceled: false }>,
+  bindings: ViewportReimportApiBindings,
+): Promise<void> {
+  try {
+    const source = await decodeImageBytesToViewportSource({
+      fileName: result.fileName,
+      bytes: result.bytes,
+      sidecarBytes: result.sidecar?.bytes,
+    });
+    bindings.setImagesByIndex((previous) =>
+      assignViewportContentAtIndex(previous, viewportIndex, {
+        fileName: result.fileName,
+        source,
+        originalFilePath: result.filePath,
+        fileSizeBytes: result.bytes.length,
+      }),
+    );
+    bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
+    toast.success(`Re-imported ${result.fileName}`);
+  } catch (error) {
+    toast.error(`Could not re-import ${result.fileName}: ${describeUnknownError(error)}`);
+  }
 }
 
 function buildViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
@@ -1355,7 +1368,7 @@ async function invokeSaveProjectFlowWithToastFeedback(
   bindings: SaveProjectRequestBindings,
 ): Promise<void> {
   try {
-    const result = await runSaveProjectFlowThroughMainProcess({
+    const result = await runSaveProjectBundleFlowThroughMainProcess({
       snapshot,
       currentProjectFilePath: bindings.currentProjectFilePathRef.current,
       saveAs,
@@ -1394,76 +1407,28 @@ interface PackOrSaveProjectSnapshotInputs {
   readonly renderingApi: ViewportRenderingApi;
 }
 
-interface PackProjectBundleRequestBindings extends PackOrSaveProjectSnapshotInputs {
-  readonly currentProjectFilePathRef: MutableRefObject<string | null>;
-}
-
-function usePackProjectBundleRequestHandler(
-  bindings: PackProjectBundleRequestBindings,
-): () => void {
-  return useCallback(
-    () => void runPackProjectBundleFlowAndShowToast(bindings),
-    [bindings],
-  );
-}
-
-async function runPackProjectBundleFlowAndShowToast(
-  bindings: PackProjectBundleRequestBindings,
-): Promise<void> {
-  const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
-  if (snapshot.viewports.length === 0) {
-    toast.info("No viewports with loaded files to pack");
-    return;
-  }
-  await invokePackProjectBundleFlowWithToastFeedback(snapshot, bindings);
-}
-
-async function invokePackProjectBundleFlowWithToastFeedback(
-  snapshot: SaveableProjectSnapshot,
-  bindings: PackProjectBundleRequestBindings,
-): Promise<void> {
-  try {
-    const result = await runPackProjectBundleFlowThroughMainProcess({
-      snapshot,
-      currentProjectFilePath: bindings.currentProjectFilePathRef.current,
-    });
-    handlePackProjectBundleFlowOutcome(result);
-  } catch (error) {
-    toast.error(`Could not pack project bundle: ${describeUnknownError(error)}`);
-  }
-}
-
-function handlePackProjectBundleFlowOutcome(
-  result: { canceled: boolean; filePath?: string },
-): void {
-  if (result.canceled || !result.filePath) return;
-  toast.success(`Packed bundle to ${result.filePath}`);
-}
-
 function collectSaveableViewportsFromImagesMap(
   imagesByIndex: ImagesByIndexMap,
   renderingApi: ViewportRenderingApi,
 ): SaveableProjectSnapshot["viewports"] {
   const collected: SaveableProjectSnapshot["viewports"][number][] = [];
   for (const [index, content] of imagesByIndex) {
-    const entry = buildSaveableViewportEntryOrNull(index, content, renderingApi);
-    if (entry) collected.push(entry);
+    collected.push(buildSaveableViewportEntry(index, content, renderingApi));
   }
   return collected.sort((a, b) => a.index - b.index);
 }
 
-function buildSaveableViewportEntryOrNull(
+function buildSaveableViewportEntry(
   index: number,
   content: ViewportCellContent,
   renderingApi: ViewportRenderingApi,
-): SaveableProjectSnapshot["viewports"][number] | null {
-  if (!content.originalFilePath || !content.originalContentHash) return null;
+): SaveableProjectSnapshot["viewports"][number] {
   const renderingState = renderingApi.getRenderingState(index);
   return {
     index,
-    originalFilePath: content.originalFilePath,
-    originalContentHash: content.originalContentHash,
     fileName: content.fileName,
+    source: content.source,
+    originalFilePath: content.originalFilePath ?? null,
     renderingState: {
       normalizationEnabled: renderingState.normalizationEnabled,
       selectedBandIndex: renderingState.selectedBandIndex,
@@ -1482,11 +1447,9 @@ function buildSaveableViewportEntryOrNull(
 interface OpenProjectRequestBindings {
   readonly setGridLayout: SetGridLayout;
   readonly setImagesByIndex: SetImagesByIndex;
-  readonly setUnresolvedFileNamesByIndex: SetUnresolvedFileNamesByIndex;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
   readonly replaceAllRenderingStates: ViewportRenderingApi["replaceAllRenderingStates"];
   readonly replaceSelection: ViewportSelectionState["replaceSelection"];
-  readonly setPendingDivergence: SetPendingDivergence;
 }
 
 function useOpenProjectRequestHandler(
@@ -1502,22 +1465,11 @@ async function runOpenProjectFlowAndShowToast(
   bindings: OpenProjectRequestBindings,
 ): Promise<void> {
   try {
-    const result = await runOpenProjectFlowThroughMainProcess(
-      buildAsyncDivergenceConfirmationCallback(bindings.setPendingDivergence),
-    );
+    const result = await runOpenProjectFlowThroughMainProcess();
     handleOpenProjectFlowOutcome(result, bindings);
   } catch (error) {
     toast.error(`Could not open project: ${describeUnknownError(error)}`);
   }
-}
-
-function buildAsyncDivergenceConfirmationCallback(
-  setPendingDivergence: SetPendingDivergence,
-): (diverged: ReadonlyArray<OpenedProjectDivergedSource>) => Promise<boolean> {
-  return (diverged) =>
-    new Promise<boolean>((resolve) => {
-      setPendingDivergence({ diverged, resolve });
-    });
 }
 
 function handleOpenProjectFlowOutcome(
@@ -1530,10 +1482,7 @@ function handleOpenProjectFlowOutcome(
 }
 
 function formatOpenedProjectToastMessage(opened: OpenedProject): string {
-  const resolvedCount = opened.resolvedViewports.length;
-  const unresolvedCount = opened.unresolvedViewports.length;
-  if (unresolvedCount === 0) return `Opened project (${resolvedCount} viewports)`;
-  return `Opened project (${resolvedCount} resolved, ${unresolvedCount} unresolved)`;
+  return `Opened project (${opened.resolvedViewports.length} viewports)`;
 }
 
 function applyOpenedProjectToApplicationState(
@@ -1542,7 +1491,6 @@ function applyOpenedProjectToApplicationState(
 ): void {
   bindings.setGridLayout(opened.project.gridLayout);
   bindings.setImagesByIndex(buildImagesByIndexMapFromOpenedProject(opened));
-  bindings.setUnresolvedFileNamesByIndex(buildUnresolvedFileNamesMapFromOpenedProject(opened));
   bindings.replaceAllRenderingStates(buildRenderingByIndexMapFromOpenedProject(opened));
   bindings.replaceSelection(new Set(opened.project.selectedViewportIndices));
   bindings.setCurrentProjectFilePath(opened.projectFilePath);
@@ -1563,17 +1511,8 @@ function mapResolvedViewportSnapshotToCellContent(
     fileName: viewport.fileName,
     source: viewport.source,
     originalFilePath: viewport.originalFilePath,
-    originalContentHash: viewport.originalContentHash,
     fileSizeBytes: viewport.fileSizeBytes,
   };
-}
-
-function buildUnresolvedFileNamesMapFromOpenedProject(
-  opened: OpenedProject,
-): UnresolvedFileNamesByIndex {
-  const next = new Map<number, string>();
-  for (const entry of opened.unresolvedViewports) next.set(entry.index, entry.fileName);
-  return next;
 }
 
 function buildRenderingByIndexMapFromOpenedProject(

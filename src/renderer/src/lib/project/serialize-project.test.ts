@@ -1,23 +1,38 @@
 import { describe, expect, it } from "vitest";
 
+import type { RasterImage } from "@/lib/image/raster-image";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
+
 import { PROJECT_FILE_FORMAT_VERSION } from "./project-schema";
 import {
-  buildDraftProjectFileFromSnapshot,
+  buildDraftBundleFromSnapshot,
   type SaveableProjectSnapshot,
 } from "./serialize-project";
 
-describe("buildDraftProjectFileFromSnapshot", () => {
+describe("buildDraftBundleFromSnapshot", () => {
   it("emits the supported format version constant", () => {
-    const draft = buildDraftProjectFileFromSnapshot(buildSingleViewportSnapshot());
+    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
     expect(draft.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
   });
 
-  it("preserves the absolute path on each viewport entry", () => {
-    const draft = buildDraftProjectFileFromSnapshot(buildSingleViewportSnapshot());
+  it("bakes a raster source as a single-band TIFF asset", () => {
+    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
     const [first] = draft.viewports;
-    expect(first?.source.absolutePath).toBe("/abs/path/to/sample.tif");
-    expect(first?.source.contentHash).toBe("hash123");
-    expect(first?.source.fileName).toBe("sample.tif");
+    expect(first?.asset.kind).toBe("baked");
+    if (first?.asset.kind !== "baked") return;
+    expect(first.asset.extension).toBe("tif");
+    expect(first.asset.sidecar).toBeUndefined();
+    expect(first.asset.bytes.byteLength).toBeGreaterThan(0);
+  });
+
+  it("bakes a multi-band raster source as an ENVI asset with a .bin sidecar", () => {
+    const draft = buildDraftBundleFromSnapshot(buildMultiBandRasterSnapshot());
+    const [first] = draft.viewports;
+    expect(first?.asset.kind).toBe("baked");
+    if (first?.asset.kind !== "baked") return;
+    expect(first.asset.extension).toBe("hdr");
+    expect(first.asset.sidecar?.extension).toBe("bin");
+    expect(first.asset.sidecar?.bytes.byteLength).toBeGreaterThan(0);
   });
 
   it("sorts the selected viewport indices ascending", () => {
@@ -25,12 +40,12 @@ describe("buildDraftProjectFileFromSnapshot", () => {
       ...buildSingleViewportSnapshot(),
       selectedViewportIndices: [3, 1, 2],
     };
-    const draft = buildDraftProjectFileFromSnapshot(snapshot);
+    const draft = buildDraftBundleFromSnapshot(snapshot);
     expect(draft.selectedViewportIndices).toEqual([1, 2, 3]);
   });
 
   it("forwards rendering state values onto each viewport entry", () => {
-    const draft = buildDraftProjectFileFromSnapshot(buildSingleViewportSnapshot());
+    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
     const [first] = draft.viewports;
     expect(first?.renderingState.normalizationEnabled).toBe(true);
     expect(first?.renderingState.selectedBandIndex).toBe(0);
@@ -55,7 +70,7 @@ describe("buildDraftProjectFileFromSnapshot", () => {
         },
       ],
     };
-    const draft = buildDraftProjectFileFromSnapshot(snapshot);
+    const draft = buildDraftBundleFromSnapshot(snapshot);
     expect(draft.viewports[0]?.operationHistory).toHaveLength(1);
     expect(draft.viewports[0]?.operationHistory[0]?.actionId).toBe("bit-shift");
     expect(draft.viewports[0]?.operationHistory[0]?.parameterValues).toEqual({ shiftAmount: 4 });
@@ -69,9 +84,9 @@ function buildSingleViewportSnapshot(): SaveableProjectSnapshot {
     viewports: [
       {
         index: 0,
-        originalFilePath: "/abs/path/to/sample.tif",
-        originalContentHash: "hash123",
         fileName: "sample.tif",
+        source: buildSingleBandRasterSource(),
+        originalFilePath: "/abs/path/to/sample.tif",
         renderingState: {
           normalizationEnabled: true,
           selectedBandIndex: 0,
@@ -81,4 +96,54 @@ function buildSingleViewportSnapshot(): SaveableProjectSnapshot {
       },
     ],
   };
+}
+
+function buildMultiBandRasterSnapshot(): SaveableProjectSnapshot {
+  return {
+    gridLayout: "1x1",
+    selectedViewportIndices: [0],
+    viewports: [
+      {
+        index: 0,
+        fileName: "cube.hdr",
+        source: buildMultiBandRasterSource(),
+        originalFilePath: "/abs/path/to/cube.hdr",
+        renderingState: {
+          normalizationEnabled: false,
+          selectedBandIndex: 0,
+          lastAppliedOperationLabel: null,
+        },
+        operationHistory: [],
+      },
+    ],
+  };
+}
+
+function buildSingleBandRasterSource(): ViewportImageSource {
+  const raster: RasterImage = {
+    bandPixels: [new Uint16Array([0, 1, 2, 3])],
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 1,
+  };
+  return { kind: "raster", raster };
+}
+
+function buildMultiBandRasterSource(): ViewportImageSource {
+  const raster: RasterImage = {
+    bandPixels: [
+      new Uint16Array([0, 1, 2, 3]),
+      new Uint16Array([4, 5, 6, 7]),
+      new Uint16Array([8, 9, 10, 11]),
+    ],
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 3,
+    sourceInterleave: "bil",
+  };
+  return { kind: "raster", raster };
 }

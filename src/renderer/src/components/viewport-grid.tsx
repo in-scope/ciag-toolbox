@@ -25,6 +25,7 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useRegionTool } from "@/state/region-tool-context";
+import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
   useViewportSelection,
@@ -35,14 +36,12 @@ export interface ViewportCellContent {
   fileName: string;
   source: ViewportImageSource;
   originalFilePath?: string;
-  originalContentHash?: string;
   fileSizeBytes?: number;
 }
 
 interface ViewportGridProps {
   layout: GridLayout;
   cellsByIndex: ReadonlyMap<number, ViewportCellContent>;
-  unresolvedFileNamesByIndex?: ReadonlyMap<number, string>;
   onOpenImage: () => void;
 }
 
@@ -70,7 +69,6 @@ function renderViewportCells(
       cellIndex={cellIndex}
       viewportNumber={getViewportNumberFromIndex(cellIndex)}
       content={props.cellsByIndex.get(cellIndex) ?? null}
-      unresolvedFileName={props.unresolvedFileNamesByIndex?.get(cellIndex) ?? null}
       onOpenImage={props.onOpenImage}
     />
   ));
@@ -80,7 +78,6 @@ interface ViewportCellProps {
   cellIndex: number;
   viewportNumber: number;
   content: ViewportCellContent | null;
-  unresolvedFileName: string | null;
   onOpenImage: () => void;
 }
 
@@ -123,8 +120,7 @@ function renderViewportCellViewport(
     <Viewport
       viewportNumber={props.viewportNumber}
       imageSource={props.content?.source ?? null}
-      fileName={props.content?.fileName ?? props.unresolvedFileName ?? null}
-      unresolvedFileName={props.unresolvedFileName}
+      fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       selectedBandIndex={settings.selectedBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
@@ -145,6 +141,10 @@ function ViewportCellContextMenuContent(props: {
   return (
     <ContextMenuContent>
       <DuplicateContextMenuItem
+        sourceIndex={props.sourceIndex}
+        sourceHasContent={props.sourceHasContent}
+      />
+      <ReimportSourceContextMenuItem
         sourceIndex={props.sourceIndex}
         sourceHasContent={props.sourceHasContent}
       />
@@ -278,6 +278,25 @@ function CloseContextMenuItem(props: CloseContextMenuItemProps): JSX.Element {
   return (
     <ContextMenuItem onSelect={() => closing.closeViewport(props.sourceIndex)}>
       Close
+    </ContextMenuItem>
+  );
+}
+
+interface ReimportSourceContextMenuItemProps {
+  sourceIndex: number;
+  sourceHasContent: boolean;
+}
+
+function ReimportSourceContextMenuItem(
+  props: ReimportSourceContextMenuItemProps,
+): JSX.Element {
+  const reimport = useViewportReimport();
+  if (!props.sourceHasContent) {
+    return <ContextMenuItem disabled>Re-import source from disk</ContextMenuItem>;
+  }
+  return (
+    <ContextMenuItem onSelect={() => reimport.requestReimport(props.sourceIndex)}>
+      Re-import source from disk
     </ContextMenuItem>
   );
 }

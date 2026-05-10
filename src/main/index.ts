@@ -8,11 +8,10 @@ import {
   type WindowBounds,
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
+import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
-import { registerOpenProjectDialogIpcHandlers } from "./open-project-dialog";
-import { registerPackProjectBundleIpcHandler } from "./pack-project-bundle";
+import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
-import { registerSaveProjectDialogIpcHandler } from "./save-project-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -104,9 +103,8 @@ app.whenReady().then(() => {
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerSaveImageDialogIpcHandler();
-  registerOpenProjectDialogIpcHandlers();
-  registerSaveProjectDialogIpcHandler();
-  registerPackProjectBundleIpcHandler();
+  registerOpenBundleDialogIpcHandlers();
+  registerSaveBundleDialogIpcHandler();
   createMainWindow();
   app.on("activate", reopenWindowOnMacActivate);
 });

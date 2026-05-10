@@ -87,15 +87,6 @@ function buildSaveProjectAsMenuItem(
   };
 }
 
-function buildPackProjectBundleMenuItem(
-  window: BrowserWindow,
-): MenuItemConstructorOptions {
-  return {
-    label: "Pack Project As Bundle...",
-    click: () => sendMenuChannelToRenderer(window, "menu:pack-project-bundle"),
-  };
-}
-
 function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
@@ -106,7 +97,6 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
       buildOpenProjectMenuItem(window),
       buildSaveProjectMenuItem(window),
       buildSaveProjectAsMenuItem(window),
-      buildPackProjectBundleMenuItem(window),
       { type: "separator" },
       isRunningOnMac ? { role: "close" } : { role: "quit" },
     ],

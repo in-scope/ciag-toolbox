@@ -78,7 +78,6 @@ function parseSourceReferenceOrThrow(value: unknown): ProjectViewportSourceRefer
   const ref = expectRecordOrThrow(value, "viewport source reference");
   return {
     relativePath: expectNonEmptyStringOrThrow(ref["relativePath"], "source.relativePath"),
-    contentHash: expectNonEmptyStringOrThrow(ref["contentHash"], "source.contentHash"),
     fileName: expectNonEmptyStringOrThrow(ref["fileName"], "source.fileName"),
   };
 }

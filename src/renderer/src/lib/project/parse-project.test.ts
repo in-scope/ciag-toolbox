@@ -11,8 +11,7 @@ describe("parseProjectFileFromJsonString", () => {
     expect(project.gridLayout).toBe("1x1");
     expect(project.viewports).toHaveLength(1);
     const [first] = project.viewports;
-    expect(first?.source.relativePath).toBe("./images/sample.tif");
-    expect(first?.source.contentHash).toBe("abc123");
+    expect(first?.source.relativePath).toBe("assets/sample.tif");
     expect(first?.source.fileName).toBe("sample.tif");
     expect(first?.renderingState.normalizationEnabled).toBe(true);
     expect(first?.renderingState.selectedBandIndex).toBe(2);
@@ -38,6 +37,13 @@ describe("parseProjectFileFromJsonString", () => {
     );
   });
 
+  it("rejects the legacy v1 ctproj format with a clear error", () => {
+    const json = JSON.stringify({ formatVersion: 1, gridLayout: "1x1", selectedViewportIndices: [], viewports: [] });
+    expect(() => parseProjectFileFromJsonString(json)).toThrow(
+      /Unsupported project file format version/,
+    );
+  });
+
   it("rejects an unknown grid layout", () => {
     const json = JSON.stringify({
       formatVersion: PROJECT_FILE_FORMAT_VERSION,
@@ -53,10 +59,10 @@ describe("parseProjectFileFromJsonString", () => {
     expect(() => parseProjectFileFromJsonString("\"hello\"")).toThrow();
   });
 
-  it("rejects a viewport entry missing the source.contentHash field", () => {
-    const json = buildProjectJsonWithoutContentHash();
+  it("rejects a viewport entry missing the source.fileName field", () => {
+    const json = buildProjectJsonWithoutFileName();
     expect(() => parseProjectFileFromJsonString(json)).toThrow(
-      /source\.contentHash must be a non-empty string/,
+      /source\.fileName must be a non-empty string/,
     );
   });
 
@@ -82,7 +88,7 @@ describe("parseProjectFileFromJsonString", () => {
       viewports: [
         {
           index: 0,
-          source: { relativePath: "a.tif", contentHash: "h", fileName: "a.tif" },
+          source: { relativePath: "assets/a.tif", fileName: "a.tif" },
           renderingState: {
             normalizationEnabled: false,
             selectedBandIndex: 0,
@@ -115,7 +121,7 @@ function buildProjectJsonWithSingleHistoryEntry(): string {
     viewports: [
       {
         index: 0,
-        source: { relativePath: "a.tif", contentHash: "h", fileName: "a.tif" },
+        source: { relativePath: "assets/a.tif", fileName: "a.tif" },
         renderingState: {
           normalizationEnabled: false,
           selectedBandIndex: 0,
@@ -144,7 +150,7 @@ function buildValidProjectJsonWithSingleViewport(): string {
     viewports: [
       {
         index: 0,
-        source: { relativePath: "./images/sample.tif", contentHash: "abc123", fileName: "sample.tif" },
+        source: { relativePath: "assets/sample.tif", fileName: "sample.tif" },
         renderingState: {
           normalizationEnabled: true,
           selectedBandIndex: 2,
@@ -166,7 +172,7 @@ function buildProjectJsonWithoutViewTransform(): string {
     viewports: [
       {
         index: 0,
-        source: { relativePath: "a.tif", contentHash: "h", fileName: "a.tif" },
+        source: { relativePath: "assets/a.tif", fileName: "a.tif" },
         renderingState: {
           normalizationEnabled: false,
           selectedBandIndex: 0,
@@ -179,7 +185,7 @@ function buildProjectJsonWithoutViewTransform(): string {
   });
 }
 
-function buildProjectJsonWithoutContentHash(): string {
+function buildProjectJsonWithoutFileName(): string {
   return JSON.stringify({
     formatVersion: PROJECT_FILE_FORMAT_VERSION,
     gridLayout: "1x1",
@@ -187,7 +193,7 @@ function buildProjectJsonWithoutContentHash(): string {
     viewports: [
       {
         index: 0,
-        source: { relativePath: "a.tif", fileName: "a.tif" },
+        source: { relativePath: "assets/a.tif" },
         renderingState: {
           normalizationEnabled: false,
           selectedBandIndex: 0,

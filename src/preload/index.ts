@@ -42,100 +42,91 @@ export type SaveImageDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-export interface SaveProjectDraftViewportSource {
-  absolutePath: string;
-  contentHash: string;
-  fileName: string;
-}
-
-export interface SaveProjectDraftViewportRenderingState {
+export interface SaveBundleDraftRenderingState {
   normalizationEnabled: boolean;
   selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
 }
 
-export type SaveProjectDraftOperationHistoryParameterValue = number | string | boolean;
+export type SaveBundleDraftOperationHistoryParameterValue = number | string | boolean;
 
-export interface SaveProjectDraftOperationHistoryEntry {
+export interface SaveBundleDraftOperationHistoryEntry {
   actionId: string;
   actionLabel: string;
   appliedLabel: string;
-  parameterValues: Readonly<Record<string, SaveProjectDraftOperationHistoryParameterValue>>;
+  parameterValues: Readonly<Record<string, SaveBundleDraftOperationHistoryParameterValue>>;
   timestampMs: number;
 }
 
-export interface SaveProjectDraftViewportEntry {
-  index: number;
-  source: SaveProjectDraftViewportSource;
-  renderingState: SaveProjectDraftViewportRenderingState;
-  operationHistory: ReadonlyArray<SaveProjectDraftOperationHistoryEntry>;
+export interface SaveBundleDraftBakedAssetSidecar {
+  extension: string;
+  bytes: Uint8Array;
 }
 
-export interface SaveProjectDraft {
+export interface SaveBundleDraftBakedAsset {
+  kind: "baked";
+  bytes: Uint8Array;
+  extension: string;
+  sidecar?: SaveBundleDraftBakedAssetSidecar;
+}
+
+export interface SaveBundleDraftExternalAsset {
+  kind: "external";
+  absolutePath: string;
+  extension: string;
+}
+
+export type SaveBundleDraftAsset =
+  | SaveBundleDraftBakedAsset
+  | SaveBundleDraftExternalAsset;
+
+export interface SaveBundleDraftViewportEntry {
+  index: number;
+  fileName: string;
+  asset: SaveBundleDraftAsset;
+  renderingState: SaveBundleDraftRenderingState;
+  operationHistory: ReadonlyArray<SaveBundleDraftOperationHistoryEntry>;
+}
+
+export interface SaveBundleDraft {
   formatVersion: number;
   gridLayout: string;
   selectedViewportIndices: ReadonlyArray<number>;
-  viewports: ReadonlyArray<SaveProjectDraftViewportEntry>;
+  viewports: ReadonlyArray<SaveBundleDraftViewportEntry>;
 }
 
-export interface SaveProjectDialogRequest {
-  draft: SaveProjectDraft;
+export interface SaveBundleDialogRequest {
+  draft: SaveBundleDraft;
   currentProjectFilePath: string | null;
   saveAs: boolean;
 }
 
-export type SaveProjectDialogResult =
+export type SaveBundleDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-export interface PackProjectBundleRequest {
-  draft: SaveProjectDraft;
-  currentProjectFilePath: string | null;
-}
-
-export type PackProjectBundleResult =
+export type OpenBundleDialogResult =
   | { canceled: true }
-  | { canceled: false; filePath: string };
+  | { canceled: false; projectFilePath: string; bytes: Uint8Array };
 
-export type OpenProjectDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string; bytes: Uint8Array };
-
-export interface ResolveProjectSourceRequest {
+export interface ReadBundleAssetRequest {
   projectFilePath: string;
   relativePath: string;
 }
 
-export interface ResolveProjectSourceSidecar {
+export interface ReadBundleAssetSidecar {
   fileName: string;
   bytes: Uint8Array;
 }
 
-export type ResolveProjectSourceResult =
-  | { kind: "missing" }
+export type ReadBundleAssetResult =
+  | { kind: "missing"; relativePath: string }
   | {
       kind: "found";
       absolutePath: string;
       fileName: string;
       bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: ResolveProjectSourceSidecar;
-    };
-
-export interface LocateMissingProjectSourceRequest {
-  originalFileName: string;
-  defaultDir: string | null;
-}
-
-export type LocateMissingProjectSourceResult =
-  | { kind: "canceled" }
-  | {
-      kind: "picked";
-      absolutePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: ResolveProjectSourceSidecar;
+      sidecar?: ReadBundleAssetSidecar;
     };
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -153,17 +144,14 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
-const OPEN_PROJECT_DIALOG_CHANNEL = "project:open-dialog";
-const SAVE_PROJECT_DIALOG_CHANNEL = "project:save-dialog";
-const PACK_PROJECT_BUNDLE_CHANNEL = "project:pack-bundle";
-const RESOLVE_PROJECT_SOURCE_CHANNEL = "project:resolve-source";
-const LOCATE_MISSING_PROJECT_SOURCE_CHANNEL = "project:locate-missing-source";
+const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
+const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
+const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
-const MENU_PACK_PROJECT_BUNDLE_CHANNEL = "menu:pack-project-bundle";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -187,46 +175,28 @@ function showSaveImageDialogThroughMainProcess(
   ) as Promise<SaveImageDialogResult>;
 }
 
-function showOpenProjectDialogThroughMainProcess(): Promise<OpenProjectDialogResult> {
+function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
   return ipcRenderer.invoke(
-    OPEN_PROJECT_DIALOG_CHANNEL,
-  ) as Promise<OpenProjectDialogResult>;
+    OPEN_BUNDLE_DIALOG_CHANNEL,
+  ) as Promise<OpenBundleDialogResult>;
 }
 
-function showSaveProjectDialogThroughMainProcess(
-  request: SaveProjectDialogRequest,
-): Promise<SaveProjectDialogResult> {
+function readBundleAssetThroughMainProcess(
+  request: ReadBundleAssetRequest,
+): Promise<ReadBundleAssetResult> {
   return ipcRenderer.invoke(
-    SAVE_PROJECT_DIALOG_CHANNEL,
+    READ_BUNDLE_ASSET_CHANNEL,
     request,
-  ) as Promise<SaveProjectDialogResult>;
+  ) as Promise<ReadBundleAssetResult>;
 }
 
-function packProjectBundleThroughMainProcess(
-  request: PackProjectBundleRequest,
-): Promise<PackProjectBundleResult> {
+function showSaveBundleDialogThroughMainProcess(
+  request: SaveBundleDialogRequest,
+): Promise<SaveBundleDialogResult> {
   return ipcRenderer.invoke(
-    PACK_PROJECT_BUNDLE_CHANNEL,
+    SAVE_BUNDLE_DIALOG_CHANNEL,
     request,
-  ) as Promise<PackProjectBundleResult>;
-}
-
-function resolveProjectSourceThroughMainProcess(
-  request: ResolveProjectSourceRequest,
-): Promise<ResolveProjectSourceResult> {
-  return ipcRenderer.invoke(
-    RESOLVE_PROJECT_SOURCE_CHANNEL,
-    request,
-  ) as Promise<ResolveProjectSourceResult>;
-}
-
-function locateMissingProjectSourceThroughMainProcess(
-  request: LocateMissingProjectSourceRequest,
-): Promise<LocateMissingProjectSourceResult> {
-  return ipcRenderer.invoke(
-    LOCATE_MISSING_PROJECT_SOURCE_CHANNEL,
-    request,
-  ) as Promise<LocateMissingProjectSourceResult>;
+  ) as Promise<SaveBundleDialogResult>;
 }
 
 function subscribeToMenuChannel(
@@ -268,12 +238,6 @@ function subscribeToSaveProjectAsMenuEvent(
   return subscribeToMenuChannel(MENU_SAVE_PROJECT_AS_CHANNEL, listener);
 }
 
-function subscribeToPackProjectBundleMenuEvent(
-  listener: MenuEventListener,
-): UnsubscribeMenuListener {
-  return subscribeToMenuChannel(MENU_PACK_PROJECT_BUNDLE_CHANNEL, listener);
-}
-
 function subscribeToAboutMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
@@ -305,17 +269,14 @@ const apiBridge = {
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
-  openProjectDialog: showOpenProjectDialogThroughMainProcess,
-  saveProjectDialog: showSaveProjectDialogThroughMainProcess,
-  packProjectBundle: packProjectBundleThroughMainProcess,
-  resolveProjectSource: resolveProjectSourceThroughMainProcess,
-  locateMissingProjectSource: locateMissingProjectSourceThroughMainProcess,
+  openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
+  readProjectBundleAsset: readBundleAssetThroughMainProcess,
+  saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
-  onMenuPackProjectBundle: subscribeToPackProjectBundleMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,

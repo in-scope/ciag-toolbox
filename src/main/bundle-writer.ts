@@ -1,82 +1,106 @@
 import { createWriteStream } from "node:fs";
-import { readdir } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
 import { ZipFile } from "yazl";
 
-const ENVI_HEADER_EXTENSION = ".hdr";
-const ENVI_BINARY_EXTENSION_CANDIDATES: ReadonlyArray<string> = [
-  ".bin",
-  ".dat",
-  ".img",
-  ".raw",
-  "",
-];
+const BUNDLE_FORMAT_VERSION = 2;
 
-export interface PackBundleDraftViewportSource {
-  readonly absolutePath: string;
-  readonly contentHash: string;
-  readonly fileName: string;
+export type BundleDraftOperationHistoryParameterValue = number | string | boolean;
+
+export interface BundleDraftOperationHistoryEntry {
+  readonly actionId: string;
+  readonly actionLabel: string;
+  readonly appliedLabel: string;
+  readonly parameterValues: Readonly<
+    Record<string, BundleDraftOperationHistoryParameterValue>
+  >;
+  readonly timestampMs: number;
 }
 
-export interface PackBundleDraftViewportRenderingState {
+export interface BundleDraftViewportRenderingState {
   readonly normalizationEnabled: boolean;
   readonly selectedBandIndex: number;
   readonly lastAppliedOperationLabel: string | null;
 }
 
-export type PackBundleDraftOperationHistoryParameterValue = number | string | boolean;
-
-export interface PackBundleDraftOperationHistoryEntry {
-  readonly actionId: string;
-  readonly actionLabel: string;
-  readonly appliedLabel: string;
-  readonly parameterValues: Readonly<
-    Record<string, PackBundleDraftOperationHistoryParameterValue>
-  >;
-  readonly timestampMs: number;
+export interface BundleDraftBakedAssetSidecar {
+  readonly extension: string;
+  readonly bytes: Uint8Array;
 }
 
-export interface PackBundleDraftViewportEntry {
+export interface BundleDraftBakedAsset {
+  readonly kind: "baked";
+  readonly bytes: Uint8Array;
+  readonly extension: string;
+  readonly sidecar?: BundleDraftBakedAssetSidecar;
+}
+
+export interface BundleDraftExternalAsset {
+  readonly kind: "external";
+  readonly absolutePath: string;
+  readonly extension: string;
+}
+
+export type BundleDraftAsset = BundleDraftBakedAsset | BundleDraftExternalAsset;
+
+export interface BundleDraftViewportEntry {
   readonly index: number;
-  readonly source: PackBundleDraftViewportSource;
-  readonly renderingState: PackBundleDraftViewportRenderingState;
-  readonly operationHistory: ReadonlyArray<PackBundleDraftOperationHistoryEntry>;
+  readonly fileName: string;
+  readonly asset: BundleDraftAsset;
+  readonly renderingState: BundleDraftViewportRenderingState;
+  readonly operationHistory: ReadonlyArray<BundleDraftOperationHistoryEntry>;
 }
 
-export interface PackBundleDraft {
+export interface BundleDraft {
   readonly formatVersion: number;
   readonly gridLayout: string;
   readonly selectedViewportIndices: ReadonlyArray<number>;
-  readonly viewports: ReadonlyArray<PackBundleDraftViewportEntry>;
+  readonly viewports: ReadonlyArray<BundleDraftViewportEntry>;
 }
 
-export interface BundleEnviSiblingPlan {
-  readonly sourceAbsolutePath: string;
-  readonly metadataPath: string;
-}
-
-export interface BundleAssetPlan {
-  readonly assetPathByAbsoluteSourcePath: ReadonlyMap<string, string>;
-  readonly enviSiblings: ReadonlyArray<BundleEnviSiblingPlan>;
+interface ResolvedBundleAssetPaths {
+  readonly viewportIndex: number;
+  readonly primaryRelativePath: string;
+  readonly sidecarRelativePath: string | null;
 }
 
 export async function writeProjectBundleAtPath(
   outputPath: string,
-  draft: PackBundleDraft,
+  draft: BundleDraft,
 ): Promise<void> {
-  const plan = await buildBundleAssetPlanForViewports(draft.viewports);
-  await streamBundleZipFileToOutputPath(outputPath, draft, plan);
+  const assetPaths = planBundleAssetRelativePathsForViewports(draft.viewports);
+  await streamBundleZipFileToOutputPath(outputPath, draft, assetPaths);
+}
+
+export function planBundleAssetRelativePathsForViewports(
+  viewports: ReadonlyArray<BundleDraftViewportEntry>,
+): ReadonlyArray<ResolvedBundleAssetPaths> {
+  return viewports.map(buildAssetPathsForViewport);
+}
+
+function buildAssetPathsForViewport(
+  viewport: BundleDraftViewportEntry,
+): ResolvedBundleAssetPaths {
+  const stem = `viewport-${viewport.index}`;
+  return {
+    viewportIndex: viewport.index,
+    primaryRelativePath: `assets/${stem}.${viewport.asset.extension}`,
+    sidecarRelativePath: pickSidecarRelativePathOrNull(stem, viewport.asset),
+  };
+}
+
+function pickSidecarRelativePathOrNull(stem: string, asset: BundleDraftAsset): string | null {
+  if (asset.kind !== "baked" || !asset.sidecar) return null;
+  return `assets/${stem}.${asset.sidecar.extension}`;
 }
 
 async function streamBundleZipFileToOutputPath(
   outputPath: string,
-  draft: PackBundleDraft,
-  plan: BundleAssetPlan,
+  draft: BundleDraft,
+  assetPaths: ReadonlyArray<ResolvedBundleAssetPaths>,
 ): Promise<void> {
   const zip = new ZipFile();
   const completion = pipeZipOutputStreamToFile(zip, outputPath);
-  appendProjectJsonEntryToZip(zip, draft, plan);
-  appendSourceAssetEntriesToZip(zip, plan);
+  appendProjectJsonEntryToZip(zip, draft, assetPaths);
+  appendAllAssetEntriesToZip(zip, draft, assetPaths);
   zip.end();
   await completion;
 }
@@ -99,211 +123,73 @@ function pipeZipOutputStreamToFile(zip: ZipFile, outputPath: string): Promise<vo
 
 function appendProjectJsonEntryToZip(
   zip: ZipFile,
-  draft: PackBundleDraft,
-  plan: BundleAssetPlan,
+  draft: BundleDraft,
+  assetPaths: ReadonlyArray<ResolvedBundleAssetPaths>,
 ): void {
-  const buffer = buildBundleProjectJsonBuffer(draft, plan);
+  const buffer = buildBundleProjectJsonBuffer(draft, assetPaths);
   zip.addBuffer(buffer, "project.json");
 }
 
-function appendSourceAssetEntriesToZip(zip: ZipFile, plan: BundleAssetPlan): void {
-  for (const [absolutePath, metadataPath] of plan.assetPathByAbsoluteSourcePath) {
-    zip.addFile(absolutePath, metadataPath);
-  }
-  for (const sibling of plan.enviSiblings) {
-    zip.addFile(sibling.sourceAbsolutePath, sibling.metadataPath);
+function appendAllAssetEntriesToZip(
+  zip: ZipFile,
+  draft: BundleDraft,
+  assetPaths: ReadonlyArray<ResolvedBundleAssetPaths>,
+): void {
+  for (let i = 0; i < draft.viewports.length; i += 1) {
+    appendAssetEntriesForViewport(zip, draft.viewports[i]!, assetPaths[i]!);
   }
 }
 
+function appendAssetEntriesForViewport(
+  zip: ZipFile,
+  viewport: BundleDraftViewportEntry,
+  paths: ResolvedBundleAssetPaths,
+): void {
+  if (viewport.asset.kind === "baked") {
+    appendBakedAssetEntriesToZip(zip, viewport.asset, paths);
+    return;
+  }
+  zip.addFile(viewport.asset.absolutePath, paths.primaryRelativePath);
+}
+
+function appendBakedAssetEntriesToZip(
+  zip: ZipFile,
+  asset: BundleDraftBakedAsset,
+  paths: ResolvedBundleAssetPaths,
+): void {
+  zip.addBuffer(Buffer.from(asset.bytes), paths.primaryRelativePath);
+  if (!asset.sidecar || !paths.sidecarRelativePath) return;
+  zip.addBuffer(Buffer.from(asset.sidecar.bytes), paths.sidecarRelativePath);
+}
+
 function buildBundleProjectJsonBuffer(
-  draft: PackBundleDraft,
-  plan: BundleAssetPlan,
+  draft: BundleDraft,
+  assetPaths: ReadonlyArray<ResolvedBundleAssetPaths>,
 ): Buffer {
   const data = {
-    formatVersion: draft.formatVersion,
+    formatVersion: BUNDLE_FORMAT_VERSION,
     gridLayout: draft.gridLayout,
     selectedViewportIndices: draft.selectedViewportIndices,
-    viewports: draft.viewports.map((entry) =>
-      buildBundleViewportEntryWithRewrittenPath(entry, plan),
+    viewports: draft.viewports.map((viewport, index) =>
+      buildBundleViewportEntryWithRewrittenPath(viewport, assetPaths[index]!),
     ),
   };
   return Buffer.from(JSON.stringify(data, null, 2), "utf-8");
 }
 
 function buildBundleViewportEntryWithRewrittenPath(
-  entry: PackBundleDraftViewportEntry,
-  plan: BundleAssetPlan,
+  viewport: BundleDraftViewportEntry,
+  paths: ResolvedBundleAssetPaths,
 ): unknown {
-  const rewrittenRelativePath = lookupRewrittenAssetPathOrThrow(
-    entry.source.absolutePath,
-    plan,
-  );
   return {
-    index: entry.index,
+    index: viewport.index,
     source: {
-      relativePath: rewrittenRelativePath,
-      contentHash: entry.source.contentHash,
-      fileName: entry.source.fileName,
+      relativePath: paths.primaryRelativePath,
+      fileName: viewport.fileName,
     },
-    renderingState: entry.renderingState,
+    renderingState: viewport.renderingState,
     viewTransform: { zoom: 1, panX: 0, panY: 0 },
-    operationHistory: entry.operationHistory,
+    operationHistory: viewport.operationHistory,
     roi: null,
   };
-}
-
-function lookupRewrittenAssetPathOrThrow(
-  absolutePath: string,
-  plan: BundleAssetPlan,
-): string {
-  const rewritten = plan.assetPathByAbsoluteSourcePath.get(absolutePath);
-  if (!rewritten) {
-    throw new Error(`Bundle plan missing asset path for ${absolutePath}`);
-  }
-  return rewritten;
-}
-
-export async function buildBundleAssetPlanForViewports(
-  viewports: ReadonlyArray<PackBundleDraftViewportEntry>,
-): Promise<BundleAssetPlan> {
-  const accumulator: MutableAssetPlanAccumulator = {
-    assetPathByAbsoluteSourcePath: new Map<string, string>(),
-    enviSiblings: [],
-    usedAssetFileNames: new Set<string>(),
-  };
-  for (const viewport of viewports) {
-    await collectAssetMappingsForViewport(viewport, accumulator);
-  }
-  return {
-    assetPathByAbsoluteSourcePath: accumulator.assetPathByAbsoluteSourcePath,
-    enviSiblings: accumulator.enviSiblings,
-  };
-}
-
-interface MutableAssetPlanAccumulator {
-  readonly assetPathByAbsoluteSourcePath: Map<string, string>;
-  readonly enviSiblings: BundleEnviSiblingPlan[];
-  readonly usedAssetFileNames: Set<string>;
-}
-
-async function collectAssetMappingsForViewport(
-  viewport: PackBundleDraftViewportEntry,
-  accumulator: MutableAssetPlanAccumulator,
-): Promise<void> {
-  if (accumulator.assetPathByAbsoluteSourcePath.has(viewport.source.absolutePath)) return;
-  const chosenAssetFileName = pickUniqueAssetFileName(
-    viewport.source.fileName,
-    accumulator.usedAssetFileNames,
-  );
-  accumulator.usedAssetFileNames.add(chosenAssetFileName);
-  accumulator.assetPathByAbsoluteSourcePath.set(
-    viewport.source.absolutePath,
-    `assets/${chosenAssetFileName}`,
-  );
-  await appendEnviSiblingPlanIfApplicable(
-    viewport.source.absolutePath,
-    chosenAssetFileName,
-    accumulator,
-  );
-}
-
-async function appendEnviSiblingPlanIfApplicable(
-  hdrAbsolutePath: string,
-  hdrAssetFileName: string,
-  accumulator: MutableAssetPlanAccumulator,
-): Promise<void> {
-  const sibling = await findEnviSiblingPlanOrUndefined(
-    hdrAbsolutePath,
-    hdrAssetFileName,
-    accumulator.usedAssetFileNames,
-  );
-  if (!sibling) return;
-  accumulator.enviSiblings.push(sibling);
-  accumulator.usedAssetFileNames.add(basename(sibling.metadataPath));
-}
-
-async function findEnviSiblingPlanOrUndefined(
-  hdrAbsolutePath: string,
-  hdrAssetFileName: string,
-  usedAssetFileNames: ReadonlySet<string>,
-): Promise<BundleEnviSiblingPlan | undefined> {
-  if (extname(hdrAbsolutePath).toLowerCase() !== ENVI_HEADER_EXTENSION) return undefined;
-  const sourceSiblingPath = await findEnviBinarySiblingAbsolutePathOrUndefined(hdrAbsolutePath);
-  if (!sourceSiblingPath) return undefined;
-  const siblingFileName = pickUniqueSiblingFileName(
-    hdrAssetFileName,
-    sourceSiblingPath,
-    usedAssetFileNames,
-  );
-  return { sourceAbsolutePath: sourceSiblingPath, metadataPath: `assets/${siblingFileName}` };
-}
-
-function pickUniqueSiblingFileName(
-  hdrAssetFileName: string,
-  sourceSiblingPath: string,
-  usedAssetFileNames: ReadonlySet<string>,
-): string {
-  const stem = basename(hdrAssetFileName, extname(hdrAssetFileName));
-  const sourceSiblingExt = extname(sourceSiblingPath);
-  const candidate = `${stem}${sourceSiblingExt}`;
-  if (!usedAssetFileNames.has(candidate)) return candidate;
-  return pickUniqueAssetFileName(candidate, usedAssetFileNames);
-}
-
-export function pickUniqueAssetFileName(
-  fileName: string,
-  used: ReadonlySet<string>,
-): string {
-  if (!used.has(fileName)) return fileName;
-  const dotIndex = fileName.lastIndexOf(".");
-  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
-  const ext = dotIndex > 0 ? fileName.slice(dotIndex) : "";
-  for (let counter = 1; counter < 10000; counter++) {
-    const candidate = `${stem}-${counter}${ext}`;
-    if (!used.has(candidate)) return candidate;
-  }
-  throw new Error(`Could not find a unique asset filename for ${fileName}`);
-}
-
-async function findEnviBinarySiblingAbsolutePathOrUndefined(
-  hdrPath: string,
-): Promise<string | undefined> {
-  const directoryEntries = await readDirectoryEntriesIgnoringErrors(dirname(hdrPath));
-  const matching = pickEnviBinarySiblingFromEntries(hdrPath, directoryEntries);
-  if (!matching) return undefined;
-  return join(dirname(hdrPath), matching);
-}
-
-async function readDirectoryEntriesIgnoringErrors(
-  dir: string,
-): Promise<ReadonlyArray<string>> {
-  try {
-    return await readdir(dir);
-  } catch {
-    return [];
-  }
-}
-
-function pickEnviBinarySiblingFromEntries(
-  hdrPath: string,
-  entries: ReadonlyArray<string>,
-): string | undefined {
-  const baseLower = basename(hdrPath, extname(hdrPath)).toLowerCase();
-  for (const candidate of ENVI_BINARY_EXTENSION_CANDIDATES) {
-    const match = entries.find((entry) =>
-      entryMatchesEnviSiblingCandidate(entry, baseLower, candidate),
-    );
-    if (match) return match;
-  }
-  return undefined;
-}
-
-function entryMatchesEnviSiblingCandidate(
-  entry: string,
-  baseLower: string,
-  expectedExtensionLower: string,
-): boolean {
-  const entryLower = entry.toLowerCase();
-  if (expectedExtensionLower === "") return entryLower === baseLower;
-  return entryLower === baseLower + expectedExtensionLower;
 }
