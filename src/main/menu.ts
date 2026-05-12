@@ -48,6 +48,15 @@ function buildOpenImageMenuItem(
   };
 }
 
+function buildOpenImageStackMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Open Image Stack...",
+    click: () => sendMenuChannelToRenderer(window, "menu:open-image-stack"),
+  };
+}
+
 function buildSaveImageMenuItem(
   window: BrowserWindow,
 ): MenuItemConstructorOptions {
@@ -92,6 +101,7 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
     label: "File",
     submenu: [
       buildOpenImageMenuItem(window),
+      buildOpenImageStackMenuItem(window),
       buildSaveImageMenuItem(window),
       { type: "separator" },
       buildOpenProjectMenuItem(window),

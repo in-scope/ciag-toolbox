@@ -19,6 +19,30 @@ type ToolboxOpenImageDialogResult =
       sidecar?: ToolboxOpenImageDialogSidecar;
     };
 
+interface ToolboxOpenImageStackDialogFileEntry {
+  fileName: string;
+  filePath: string;
+  bytes: Uint8Array;
+  contentHash: string;
+  fileSizeBytes: number;
+  mtimeMs: number;
+}
+
+type ToolboxOpenImageStackDialogResult =
+  | { canceled: true }
+  | { canceled: false; files: ReadonlyArray<ToolboxOpenImageStackDialogFileEntry> };
+
+interface ToolboxOpenImageStackProgressEvent {
+  fileIndex: number;
+  totalCount: number;
+  fileName: string;
+}
+
+type ToolboxOpenImageStackProgressListener = (
+  event: ToolboxOpenImageStackProgressEvent,
+) => void;
+type ToolboxUnsubscribeOpenImageStackProgressListener = () => void;
+
 interface ToolboxSaveImageDialogFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -163,6 +187,10 @@ interface ToolboxApi {
   };
   getAppInfo: () => Promise<ToolboxAppInfo>;
   openImageDialog: () => Promise<ToolboxOpenImageDialogResult>;
+  openImageStackDialog: () => Promise<ToolboxOpenImageStackDialogResult>;
+  onOpenImageStackProgress: (
+    listener: ToolboxOpenImageStackProgressListener,
+  ) => ToolboxUnsubscribeOpenImageStackProgressListener;
   saveImageDialog: (
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;
@@ -174,6 +202,9 @@ interface ToolboxApi {
     request: ToolboxSaveBundleDialogRequest,
   ) => Promise<ToolboxSaveBundleDialogResult>;
   onMenuOpenImage: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuOpenImageStack: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
   onMenuSaveImage: (

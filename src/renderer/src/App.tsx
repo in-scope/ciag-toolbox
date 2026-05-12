@@ -66,6 +66,13 @@ import {
   type OpenImagePlacementPlan,
 } from "@/lib/grid/plan-open-image";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { runOpenImageStackDialogPhase } from "@/lib/image/run-open-stack-flow";
+import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
+import type {
+  DecodedStackEntry,
+  PendingOpenImageStack,
+} from "@/lib/image/open-image-stack-types";
+import { StackConfirmationModal } from "@/components/stack-confirmation-modal";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
 import { removePinnedSpectrumById } from "@/lib/image/spectrum-entry";
@@ -182,6 +189,8 @@ function ApplicationShell(): JSX.Element {
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [pendingOpenImageReplace, setPendingOpenImageReplace] =
     useState<PendingOpenImageReplace | null>(null);
+  const [pendingOpenImageStack, setPendingOpenImageStack] =
+    useState<PendingOpenImageStack | null>(null);
   const [pendingSaveImage, setPendingSaveImage] =
     useState<PendingSaveImageRequest | null>(null);
   const [currentProjectFilePath, setCurrentProjectFilePath] = useState<string | null>(null);
@@ -217,6 +226,11 @@ function ApplicationShell(): JSX.Element {
   const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
   const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
   useMenuOpenImageTriggersHandler(handleOpenImageRequested);
+  const handleOpenImageStackRequested = useOpenImageStackThroughDialogHandler({
+    setPendingOpenImageStack,
+    busyRegistrar,
+  });
+  useMenuOpenImageStackTriggersHandler(handleOpenImageStackRequested);
   const handleSaveImageRequested = useSaveImageRequestHandler({
     imagesByIndexRef,
     selectedIndicesRef: useLatestRef(selectedIndices),
@@ -366,6 +380,22 @@ function ApplicationShell(): JSX.Element {
           })
         }
       />
+      <StackConfirmationModal
+        pending={pendingOpenImageStack}
+        onCancel={() => setPendingOpenImageStack(null)}
+        onConfirm={(orderedIncluded) =>
+          void confirmStackBuildFromOrderedEntries(orderedIncluded, {
+            imagesByIndexRef,
+            gridLayoutRef,
+            setGridLayout,
+            setImagesByIndex,
+            setPendingOpenImageReplace,
+            setPendingOpenImageStack,
+            selectViewportFromClick,
+            busyRegistrar,
+          })
+        }
+      />
       <StatusBar />
     </div>
   );
@@ -436,6 +466,10 @@ function clearSelectionWhenClickIsOutsideAnyCell(
 
 function useMenuOpenImageTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuOpenImage(handler), [handler]);
+}
+
+function useMenuOpenImageStackTriggersHandler(handler: () => void): void {
+  useEffect(() => window.toolboxApi.onMenuOpenImageStack(handler), [handler]);
 }
 
 function useMenuSaveImageTriggersHandler(handler: () => void): void {
@@ -555,6 +589,97 @@ interface OpenImageBindings {
   setPendingOpenImageReplace: SetPendingOpenImageReplace;
   selectViewportFromClick: SelectViewportFromClick;
   busyRegistrar: BusyEntryRegistrar;
+}
+
+function useOpenImageStackThroughDialogHandler(
+  bindings: OpenImageStackBindings,
+): () => Promise<void> {
+  const {
+    busyRegistrar,
+    setPendingOpenImageStack,
+  } = bindings;
+  return useCallback(async () => {
+    await runOpenImageStackDialogFlow({
+      busyRegistrar,
+      setPendingOpenImageStack,
+    });
+  }, [busyRegistrar, setPendingOpenImageStack]);
+}
+
+interface OpenImageStackBindings {
+  setPendingOpenImageStack: Dispatch<SetStateAction<PendingOpenImageStack | null>>;
+  busyRegistrar: BusyEntryRegistrar;
+}
+
+async function runOpenImageStackDialogFlow(
+  bindings: OpenImageStackBindings,
+): Promise<void> {
+  const handle = bindings.busyRegistrar.registerAppBusyEntry({
+    label: "Reading file 0 of ?...",
+    progress: 0,
+  });
+  try {
+    await openImageStackDialogAndPresentResultOrToast(bindings, handle);
+  } finally {
+    handle.clear();
+  }
+}
+
+async function openImageStackDialogAndPresentResultOrToast(
+  bindings: OpenImageStackBindings,
+  handle: BusyEntryHandle,
+): Promise<void> {
+  const result = await runOpenImageStackDialogPhase({
+    readPhaseBusyHandle: handle,
+    subscribeReadProgress: (listener) => window.toolboxApi.onOpenImageStackProgress(listener),
+  });
+  if (result.kind === "canceled") return;
+  if (result.kind === "too-few-files") {
+    toast.info("Open Image Stack needs 2 or more TIFFs; use Open Image for a single file");
+    return;
+  }
+  bindings.setPendingOpenImageStack(result.pending);
+}
+
+interface ConfirmStackBindings extends OpenImageBindings {
+  setPendingOpenImageStack: Dispatch<SetStateAction<PendingOpenImageStack | null>>;
+}
+
+async function confirmStackBuildFromOrderedEntries(
+  orderedIncludedEntries: ReadonlyArray<DecodedStackEntry>,
+  bindings: ConfirmStackBindings,
+): Promise<void> {
+  bindings.setPendingOpenImageStack(null);
+  const handle = bindings.busyRegistrar.registerAppBusyEntry({
+    label: `Stacking band 1 of ${orderedIncludedEntries.length}...`,
+    progress: 0,
+  });
+  try {
+    await buildAndRouteStackedImage(orderedIncludedEntries, handle, bindings);
+  } catch (error) {
+    toast.error(`Could not stack TIFFs: ${describeUnknownError(error)}`);
+  } finally {
+    handle.clear();
+  }
+}
+
+async function buildAndRouteStackedImage(
+  orderedIncludedEntries: ReadonlyArray<DecodedStackEntry>,
+  handle: BusyEntryHandle,
+  bindings: OpenImageBindings,
+): Promise<void> {
+  const built = await buildConfirmedStackFromOrderedEntriesWithProgress(
+    orderedIncludedEntries,
+    handle,
+  );
+  routeDecodedImageToTargetViewport(
+    {
+      fileName: built.suggestedFileName,
+      source: { kind: "raster", raster: built.raster },
+      fileSizeBytes: orderedIncludedEntries.reduce((sum, entry) => sum + entry.fileSizeBytes, 0),
+    },
+    bindings,
+  );
 }
 
 function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Promise<void> {

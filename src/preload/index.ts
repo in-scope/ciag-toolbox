@@ -21,6 +21,30 @@ export type OpenImageDialogResult =
       sidecar?: OpenImageDialogSidecar;
     };
 
+export interface OpenImageStackDialogFileEntry {
+  fileName: string;
+  filePath: string;
+  bytes: Uint8Array;
+  contentHash: string;
+  fileSizeBytes: number;
+  mtimeMs: number;
+}
+
+export type OpenImageStackDialogResult =
+  | { canceled: true }
+  | { canceled: false; files: ReadonlyArray<OpenImageStackDialogFileEntry> };
+
+export interface OpenImageStackProgressEvent {
+  fileIndex: number;
+  totalCount: number;
+  fileName: string;
+}
+
+export type OpenImageStackProgressListener = (
+  event: OpenImageStackProgressEvent,
+) => void;
+export type UnsubscribeOpenImageStackProgressListener = () => void;
+
 export interface SaveImageDialogFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -143,11 +167,14 @@ export type UnsubscribeThemeListener = () => void;
 
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
+const OPEN_IMAGE_STACK_DIALOG_CHANNEL = "image:open-stack-dialog";
+const OPEN_IMAGE_STACK_PROGRESS_CHANNEL = "image:open-stack-progress";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
 const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
+const MENU_OPEN_IMAGE_STACK_CHANNEL = "menu:open-image-stack";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
@@ -164,6 +191,21 @@ function showOpenImageDialogThroughMainProcess(): Promise<OpenImageDialogResult>
   return ipcRenderer.invoke(
     OPEN_IMAGE_DIALOG_CHANNEL,
   ) as Promise<OpenImageDialogResult>;
+}
+
+function showOpenImageStackDialogThroughMainProcess(): Promise<OpenImageStackDialogResult> {
+  return ipcRenderer.invoke(
+    OPEN_IMAGE_STACK_DIALOG_CHANNEL,
+  ) as Promise<OpenImageStackDialogResult>;
+}
+
+function subscribeToOpenImageStackProgressEvents(
+  listener: OpenImageStackProgressListener,
+): UnsubscribeOpenImageStackProgressListener {
+  const handler = (_event: IpcRendererEvent, payload: OpenImageStackProgressEvent): void =>
+    listener(payload);
+  ipcRenderer.on(OPEN_IMAGE_STACK_PROGRESS_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(OPEN_IMAGE_STACK_PROGRESS_CHANNEL, handler);
 }
 
 function showSaveImageDialogThroughMainProcess(
@@ -212,6 +254,12 @@ function subscribeToOpenImageMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
   return subscribeToMenuChannel(MENU_OPEN_IMAGE_CHANNEL, listener);
+}
+
+function subscribeToOpenImageStackMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_OPEN_IMAGE_STACK_CHANNEL, listener);
 }
 
 function subscribeToSaveImageMenuEvent(
@@ -268,11 +316,14 @@ const apiBridge = {
   },
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
+  openImageStackDialog: showOpenImageStackDialogThroughMainProcess,
+  onOpenImageStackProgress: subscribeToOpenImageStackProgressEvents,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   readProjectBundleAsset: readBundleAssetThroughMainProcess,
   saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
+  onMenuOpenImageStack: subscribeToOpenImageStackMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
