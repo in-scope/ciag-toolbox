@@ -2,34 +2,24 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 
-import { computeSha256HexFromBytes } from "./content-hash";
-
 const OPEN_IMAGE_STACK_DIALOG_CHANNEL = "image:open-stack-dialog";
-const OPEN_IMAGE_STACK_PROGRESS_CHANNEL = "image:open-stack-progress";
+const OPEN_IMAGE_STACK_READ_FILE_CHANNEL = "image:open-stack-read-file";
 
 const TIFF_STACK_FILE_FILTER: Electron.FileFilter = {
   name: "TIFF images",
   extensions: ["tif", "tiff"],
 };
 
-export interface OpenImageStackFileEntry {
+export interface OpenImageStackFileMetadata {
   fileName: string;
   filePath: string;
-  bytes: Uint8Array;
-  contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
 }
 
-export interface OpenImageStackProgressEvent {
-  fileIndex: number;
-  totalCount: number;
-  fileName: string;
-}
-
 export type OpenImageStackDialogResult =
   | { canceled: true }
-  | { canceled: false; files: ReadonlyArray<OpenImageStackFileEntry> };
+  | { canceled: false; files: ReadonlyArray<OpenImageStackFileMetadata> };
 
 async function showImageStackOpenDialog(
   window: BrowserWindow,
@@ -41,67 +31,32 @@ async function showImageStackOpenDialog(
   });
 }
 
-async function readSingleStackEntryFromPath(
+async function readFileMetadataFromPath(
   filePath: string,
-): Promise<OpenImageStackFileEntry> {
-  const [buffer, stats] = await Promise.all([readFile(filePath), stat(filePath)]);
-  const bytes = new Uint8Array(buffer);
+): Promise<OpenImageStackFileMetadata> {
+  const stats = await stat(filePath);
   return {
     fileName: basename(filePath),
     filePath,
-    bytes,
-    contentHash: computeSha256HexFromBytes(bytes),
-    fileSizeBytes: bytes.length,
+    fileSizeBytes: stats.size,
     mtimeMs: stats.mtimeMs,
   };
 }
 
-function sendStackProgressToRenderer(
-  window: BrowserWindow,
-  event: OpenImageStackProgressEvent,
-): void {
-  if (window.isDestroyed()) return;
-  window.webContents.send(OPEN_IMAGE_STACK_PROGRESS_CHANNEL, event);
-}
-
-async function readAllStackEntriesWithProgress(
-  window: BrowserWindow,
+async function collectMetadataForSelectedPaths(
   filePaths: ReadonlyArray<string>,
-): Promise<ReadonlyArray<OpenImageStackFileEntry>> {
-  const entries: OpenImageStackFileEntry[] = [];
-  for (let index = 0; index < filePaths.length; index++) {
-    const entry = await readNextStackEntryAndReportProgress(window, filePaths, index);
-    entries.push(entry);
-  }
-  return entries;
+): Promise<ReadonlyArray<OpenImageStackFileMetadata>> {
+  return Promise.all(filePaths.map(readFileMetadataFromPath));
 }
 
-async function readNextStackEntryAndReportProgress(
-  window: BrowserWindow,
-  filePaths: ReadonlyArray<string>,
-  index: number,
-): Promise<OpenImageStackFileEntry> {
-  const filePath = filePaths[index];
-  if (filePath === undefined) {
-    throw new Error("Internal error: missing file path during stack read");
-  }
-  const entry = await readSingleStackEntryFromPath(filePath);
-  sendStackProgressToRenderer(window, {
-    fileIndex: index + 1,
-    totalCount: filePaths.length,
-    fileName: entry.fileName,
-  });
-  return entry;
-}
-
-async function chooseAndReadStackFromDialog(
+async function chooseStackPathsAndReturnMetadata(
   window: BrowserWindow,
 ): Promise<OpenImageStackDialogResult> {
   const dialogResult = await showImageStackOpenDialog(window);
   if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
     return { canceled: true };
   }
-  const files = await readAllStackEntriesWithProgress(window, dialogResult.filePaths);
+  const files = await collectMetadataForSelectedPaths(dialogResult.filePaths);
   return { canceled: false, files };
 }
 
@@ -116,9 +71,18 @@ async function handleOpenImageStackDialogIpc(
 ): Promise<OpenImageStackDialogResult> {
   const window = findWindowForIpcEvent(event);
   if (!window) return { canceled: true };
-  return chooseAndReadStackFromDialog(window);
+  return chooseStackPathsAndReturnMetadata(window);
+}
+
+async function handleReadImageStackFileIpc(
+  _event: Electron.IpcMainInvokeEvent,
+  filePath: string,
+): Promise<Uint8Array> {
+  const buffer = await readFile(filePath);
+  return new Uint8Array(buffer);
 }
 
 export function registerOpenImageStackDialogIpcHandler(): void {
   ipcMain.handle(OPEN_IMAGE_STACK_DIALOG_CHANNEL, handleOpenImageStackDialogIpc);
+  ipcMain.handle(OPEN_IMAGE_STACK_READ_FILE_CHANNEL, handleReadImageStackFileIpc);
 }

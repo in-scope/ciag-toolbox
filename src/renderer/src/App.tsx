@@ -631,7 +631,6 @@ async function openImageStackDialogAndPresentResultOrToast(
 ): Promise<void> {
   const result = await runOpenImageStackDialogPhase({
     readPhaseBusyHandle: handle,
-    subscribeReadProgress: (listener) => window.toolboxApi.onOpenImageStackProgress(listener),
   });
   if (result.kind === "canceled") return;
   if (result.kind === "too-few-files") {

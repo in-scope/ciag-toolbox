@@ -7,10 +7,9 @@ import type {
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { BusyEntryHandle } from "@/state/busy-state-context";
 
-interface DialogFileEntry {
+interface StackFileMetadata {
   readonly fileName: string;
   readonly filePath: string;
-  readonly bytes: Uint8Array;
   readonly fileSizeBytes: number;
   readonly mtimeMs: number;
 }
@@ -22,34 +21,12 @@ export type RunOpenImageStackDialogResult =
 
 interface RunOpenImageStackOptions {
   readonly readPhaseBusyHandle: BusyEntryHandle;
-  readonly subscribeReadProgress: SubscribeToStackReadProgress;
 }
-
-type SubscribeToStackReadProgress = (
-  listener: (event: ToolboxOpenImageStackProgressEvent) => void,
-) => () => void;
 
 export async function runOpenImageStackDialogPhase(
   options: RunOpenImageStackOptions,
 ): Promise<RunOpenImageStackDialogResult> {
-  const unsubscribe = options.subscribeReadProgress((event) =>
-    updateReadProgressOnBusyHandle(event, options.readPhaseBusyHandle),
-  );
-  try {
-    return await invokeStackDialogAndBuildPendingResult(options.readPhaseBusyHandle);
-  } finally {
-    unsubscribe();
-  }
-}
-
-function updateReadProgressOnBusyHandle(
-  event: ToolboxOpenImageStackProgressEvent,
-  handle: BusyEntryHandle,
-): void {
-  handle.update({
-    label: `Reading file ${event.fileIndex} of ${event.totalCount}...`,
-    progress: event.fileIndex / Math.max(1, event.totalCount),
-  });
+  return invokeStackDialogAndBuildPendingResult(options.readPhaseBusyHandle);
 }
 
 async function invokeStackDialogAndBuildPendingResult(
@@ -58,37 +35,41 @@ async function invokeStackDialogAndBuildPendingResult(
   const dialogResult = await window.toolboxApi.openImageStackDialog();
   if (dialogResult.canceled) return { kind: "canceled" };
   if (dialogResult.files.length < 2) return { kind: "too-few-files" };
-  const decoded = await decodeAllStackFilesWithProgress(dialogResult.files, handle);
+  const decoded = await readAndDecodeAllStackFilesSequentially(dialogResult.files, handle);
   return { kind: "ready", pending: buildPendingOpenImageStackFromDecoded(decoded) };
 }
 
-async function decodeAllStackFilesWithProgress(
-  files: ReadonlyArray<DialogFileEntry>,
+async function readAndDecodeAllStackFilesSequentially(
+  files: ReadonlyArray<StackFileMetadata>,
   handle: BusyEntryHandle,
 ): Promise<ReadonlyArray<DecodedStackEntry>> {
   const decoded: DecodedStackEntry[] = [];
   for (let index = 0; index < files.length; index++) {
-    updateDecodeProgressOnBusyHandle(index, files.length, handle);
     const file = files[index];
     if (file === undefined) continue;
-    decoded.push(await decodeSingleStackFile(file));
+    updateProgressForFileBeingProcessed(index, files.length, handle);
+    decoded.push(await readAndDecodeSingleStackFileReleasingBytes(file));
   }
   return decoded;
 }
 
-function updateDecodeProgressOnBusyHandle(
+function updateProgressForFileBeingProcessed(
   zeroBasedIndex: number,
   totalCount: number,
   handle: BusyEntryHandle,
 ): void {
   handle.update({
-    label: `Decoding TIFF ${zeroBasedIndex + 1} of ${totalCount}...`,
+    label: `Reading TIFF ${zeroBasedIndex + 1} of ${totalCount}...`,
     progress: zeroBasedIndex / Math.max(1, totalCount),
   });
 }
 
-async function decodeSingleStackFile(file: DialogFileEntry): Promise<DecodedStackEntry> {
-  const decoded = await tryLoadRasterFromBytes(file.bytes);
+async function readAndDecodeSingleStackFileReleasingBytes(
+  file: StackFileMetadata,
+): Promise<DecodedStackEntry> {
+  let bytes: Uint8Array | null = await window.toolboxApi.readImageStackFile(file.filePath);
+  const decoded = await tryLoadRasterFromBytes(bytes);
+  bytes = null;
   return {
     fileName: file.fileName,
     filePath: file.filePath,

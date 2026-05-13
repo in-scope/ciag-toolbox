@@ -24,8 +24,6 @@ export type OpenImageDialogResult =
 export interface OpenImageStackDialogFileEntry {
   fileName: string;
   filePath: string;
-  bytes: Uint8Array;
-  contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
 }
@@ -33,17 +31,6 @@ export interface OpenImageStackDialogFileEntry {
 export type OpenImageStackDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenImageStackDialogFileEntry> };
-
-export interface OpenImageStackProgressEvent {
-  fileIndex: number;
-  totalCount: number;
-  fileName: string;
-}
-
-export type OpenImageStackProgressListener = (
-  event: OpenImageStackProgressEvent,
-) => void;
-export type UnsubscribeOpenImageStackProgressListener = () => void;
 
 export interface SaveImageDialogFilter {
   name: string;
@@ -168,7 +155,7 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGE_STACK_DIALOG_CHANNEL = "image:open-stack-dialog";
-const OPEN_IMAGE_STACK_PROGRESS_CHANNEL = "image:open-stack-progress";
+const OPEN_IMAGE_STACK_READ_FILE_CHANNEL = "image:open-stack-read-file";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
@@ -199,13 +186,13 @@ function showOpenImageStackDialogThroughMainProcess(): Promise<OpenImageStackDia
   ) as Promise<OpenImageStackDialogResult>;
 }
 
-function subscribeToOpenImageStackProgressEvents(
-  listener: OpenImageStackProgressListener,
-): UnsubscribeOpenImageStackProgressListener {
-  const handler = (_event: IpcRendererEvent, payload: OpenImageStackProgressEvent): void =>
-    listener(payload);
-  ipcRenderer.on(OPEN_IMAGE_STACK_PROGRESS_CHANNEL, handler);
-  return () => ipcRenderer.removeListener(OPEN_IMAGE_STACK_PROGRESS_CHANNEL, handler);
+function readSingleImageStackFileThroughMainProcess(
+  filePath: string,
+): Promise<Uint8Array> {
+  return ipcRenderer.invoke(
+    OPEN_IMAGE_STACK_READ_FILE_CHANNEL,
+    filePath,
+  ) as Promise<Uint8Array>;
 }
 
 function showSaveImageDialogThroughMainProcess(
@@ -317,7 +304,7 @@ const apiBridge = {
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
   openImageStackDialog: showOpenImageStackDialogThroughMainProcess,
-  onOpenImageStackProgress: subscribeToOpenImageStackProgressEvents,
+  readImageStackFile: readSingleImageStackFileThroughMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   readProjectBundleAsset: readBundleAssetThroughMainProcess,

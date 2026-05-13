@@ -24,7 +24,7 @@ interface TiffPageHeader {
 }
 
 export async function loadTiffAsRaster(bytes: Uint8Array): Promise<RasterImage> {
-  const arrayBuffer = copyBytesToOwnArrayBuffer(bytes);
+  const arrayBuffer = extractArrayBufferWithoutCopyingWhenPossible(bytes);
   const tiff = await fromArrayBuffer(arrayBuffer);
   const pageCount = await tiff.getImageCount();
   const firstPage = await tiff.getImage(0);
@@ -171,8 +171,10 @@ async function readFirstBandPixels(image: GeoTiffImage): Promise<RasterTypedArra
   return firstBand;
 }
 
-function copyBytesToOwnArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
+function extractArrayBufferWithoutCopyingWhenPossible(bytes: Uint8Array): ArrayBuffer {
+  const buffer = bytes.buffer as ArrayBuffer;
+  if (bytes.byteOffset === 0 && bytes.byteLength === buffer.byteLength) {
+    return buffer;
+  }
+  return buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }

@@ -22,8 +22,6 @@ type ToolboxOpenImageDialogResult =
 interface ToolboxOpenImageStackDialogFileEntry {
   fileName: string;
   filePath: string;
-  bytes: Uint8Array;
-  contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
 }
@@ -31,17 +29,6 @@ interface ToolboxOpenImageStackDialogFileEntry {
 type ToolboxOpenImageStackDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<ToolboxOpenImageStackDialogFileEntry> };
-
-interface ToolboxOpenImageStackProgressEvent {
-  fileIndex: number;
-  totalCount: number;
-  fileName: string;
-}
-
-type ToolboxOpenImageStackProgressListener = (
-  event: ToolboxOpenImageStackProgressEvent,
-) => void;
-type ToolboxUnsubscribeOpenImageStackProgressListener = () => void;
 
 interface ToolboxSaveImageDialogFilter {
   name: string;
@@ -188,9 +175,7 @@ interface ToolboxApi {
   getAppInfo: () => Promise<ToolboxAppInfo>;
   openImageDialog: () => Promise<ToolboxOpenImageDialogResult>;
   openImageStackDialog: () => Promise<ToolboxOpenImageStackDialogResult>;
-  onOpenImageStackProgress: (
-    listener: ToolboxOpenImageStackProgressListener,
-  ) => ToolboxUnsubscribeOpenImageStackProgressListener;
+  readImageStackFile: (filePath: string) => Promise<Uint8Array>;
   saveImageDialog: (
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;
