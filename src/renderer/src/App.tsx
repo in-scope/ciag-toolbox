@@ -1431,6 +1431,7 @@ function buildRightPanelActiveSource(
   const renderingState = renderingApi.getRenderingState(viewportIndex);
   const raster = extractRasterFromContentOrNull(content);
   return {
+    viewportIndex,
     viewportNumber: getViewportNumberFromIndex(viewportIndex),
     metadata: buildMetadataDisplayForActiveContentOrNull(content, currentProjectFilePath),
     raster,

@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { BandThumbnail } from "@/components/band-thumbnail";
+import {
+  HistogramSection,
+  shouldShowHistogramSection,
+} from "@/components/histogram-section";
 import { KeepBandsModal } from "@/components/keep-bands-modal";
 import {
   PixelInspectorSection,
@@ -47,6 +51,7 @@ import { cn } from "@/lib/utils";
 export type ViewportRightPanelImageSourceKind = "raster" | "browser-source";
 
 export interface ViewportRightPanelActiveSource {
+  readonly viewportIndex: number;
   readonly viewportNumber: number;
   readonly metadata: ViewportImageMetadataDisplay | null;
   readonly raster: RasterImage | null;
@@ -88,6 +93,9 @@ function collectVisibleRightPanelSections(
   }
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
+  }
+  if (activeSource && shouldShowHistogramSection(activeSource)) {
+    sections.push(<HistogramSection key="histogram" activeSource={activeSource} />);
   }
   if (activeSource && shouldShowPixelInspectorSection(activeSource)) {
     sections.push(
