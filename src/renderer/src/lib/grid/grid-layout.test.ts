@@ -95,11 +95,11 @@ describe("getCollapsedGridLayoutAfterClose", () => {
     expect(getCollapsedGridLayoutAfterClose("1x1")).toBeNull();
   });
 
-  it("returns null for 2x3 (layout stays)", () => {
-    expect(getCollapsedGridLayoutAfterClose("2x3")).toBeNull();
+  it("collapses 2x3 to 2x2", () => {
+    expect(getCollapsedGridLayoutAfterClose("2x3")).toBe("2x2");
   });
 
-  it("returns null for 3x2 (layout stays)", () => {
-    expect(getCollapsedGridLayoutAfterClose("3x2")).toBeNull();
+  it("collapses 3x2 to 3x1", () => {
+    expect(getCollapsedGridLayoutAfterClose("3x2")).toBe("3x1");
   });
 });

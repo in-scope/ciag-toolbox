@@ -158,7 +158,7 @@ export function useMostRecentViewportBusyEntry(viewportIndex: number): BusyEntry
   );
 }
 
-const BUSY_INDICATOR_PAINT_DELAY_MS = 150;
+const BUSY_INDICATOR_PAINT_DELAY_MS = 50;
 
 export function useShouldRenderBusyEntryAfterDelay(entry: BusyEntry | null): boolean {
   const [hasPassedThreshold, setHasPassedThreshold] = useState(false);

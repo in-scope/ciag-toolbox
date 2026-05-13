@@ -78,6 +78,8 @@ const COLLAPSED_GRID_LAYOUT_AFTER_CLOSE: Partial<Record<GridLayout, GridLayout>>
   "2x2": "1x3",
   "1x3": "1x2",
   "3x1": "2x1",
+  "2x3": "2x2",
+  "3x2": "3x1",
 };
 
 export function getCollapsedGridLayoutAfterClose(

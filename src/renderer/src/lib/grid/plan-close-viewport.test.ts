@@ -8,6 +8,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x2",
       closedIndex: 1,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 4,
     });
     expect(result.collapsedLayout).toBe("1x3");
     expect(result.fallbackSelectionIndex).toBeNull();
@@ -18,6 +19,7 @@ describe("planCloseViewport", () => {
       currentLayout: "1x3",
       closedIndex: 2,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 3,
     });
     expect(result.collapsedLayout).toBe("1x2");
   });
@@ -27,6 +29,7 @@ describe("planCloseViewport", () => {
       currentLayout: "3x1",
       closedIndex: 0,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 3,
     });
     expect(result.collapsedLayout).toBe("2x1");
   });
@@ -36,6 +39,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x1",
       closedIndex: 0,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 2,
     });
     expect(result.collapsedLayout).toBe("1x1");
   });
@@ -45,6 +49,7 @@ describe("planCloseViewport", () => {
       currentLayout: "1x2",
       closedIndex: 1,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 2,
     });
     expect(result.collapsedLayout).toBe("1x1");
   });
@@ -54,26 +59,49 @@ describe("planCloseViewport", () => {
       currentLayout: "1x1",
       closedIndex: 0,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 1,
     });
     expect(result.collapsedLayout).toBeNull();
     expect(result.fallbackSelectionIndex).toBeNull();
   });
 
-  it("returns no collapse for 2x3 since it stays at 2x3", () => {
+  it("collapses 2x3 down to 2x2 when at most five cells are populated", () => {
+    const result = planCloseViewport({
+      currentLayout: "2x3",
+      closedIndex: 4,
+      closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 5,
+    });
+    expect(result.collapsedLayout).toBe("2x2");
+  });
+
+  it("keeps 2x3 when all six cells are populated since collapsing would drop an image", () => {
     const result = planCloseViewport({
       currentLayout: "2x3",
       closedIndex: 4,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 6,
     });
     expect(result.collapsedLayout).toBeNull();
     expect(result.fallbackSelectionIndex).toBeNull();
   });
 
-  it("returns no collapse for 3x2 since it stays at 3x2", () => {
+  it("collapses 3x2 down to 3x1 when at most four cells are populated", () => {
+    const result = planCloseViewport({
+      currentLayout: "3x2",
+      closedIndex: 3,
+      closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 4,
+    });
+    expect(result.collapsedLayout).toBe("3x1");
+  });
+
+  it("keeps 3x2 when five or six cells are populated since collapsing would drop an image", () => {
     const result = planCloseViewport({
       currentLayout: "3x2",
       closedIndex: 5,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 5,
     });
     expect(result.collapsedLayout).toBeNull();
     expect(result.fallbackSelectionIndex).toBeNull();
@@ -84,6 +112,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x2",
       closedIndex: 1,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 4,
     });
     expect(result.collapsedLayout).toBe("1x3");
     expect(result.fallbackSelectionIndex).toBe(1);
@@ -94,6 +123,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x2",
       closedIndex: 3,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 4,
     });
     expect(result.collapsedLayout).toBe("1x3");
     expect(result.fallbackSelectionIndex).toBe(2);
@@ -104,6 +134,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x1",
       closedIndex: 1,
       closedIndexWasOnlySelection: true,
+      populatedCellCountBeforeClose: 2,
     });
     expect(result.collapsedLayout).toBe("1x1");
     expect(result.fallbackSelectionIndex).toBe(0);
@@ -114,6 +145,7 @@ describe("planCloseViewport", () => {
       currentLayout: "2x2",
       closedIndex: 1,
       closedIndexWasOnlySelection: false,
+      populatedCellCountBeforeClose: 4,
     });
     expect(result.collapsedLayout).toBe("1x3");
     expect(result.fallbackSelectionIndex).toBeNull();

@@ -1249,6 +1249,7 @@ interface CloseContextBeforeMutation {
   readonly currentLayout: GridLayout;
   readonly closedIndex: number;
   readonly closedIndexWasOnlySelection: boolean;
+  readonly populatedCellCountBeforeClose: number;
 }
 
 function captureCloseContextBeforeMutation(
@@ -1262,6 +1263,7 @@ function captureCloseContextBeforeMutation(
       bindings.selectedIndices,
       closedIndex,
     ),
+    populatedCellCountBeforeClose: bindings.imagesByIndex.size,
   };
 }
 

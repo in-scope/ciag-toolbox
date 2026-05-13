@@ -8,6 +8,7 @@ export interface PlanCloseViewportInput {
   readonly currentLayout: GridLayout;
   readonly closedIndex: number;
   readonly closedIndexWasOnlySelection: boolean;
+  readonly populatedCellCountBeforeClose: number;
 }
 
 export interface PlanCloseViewportResult {
@@ -18,7 +19,7 @@ export interface PlanCloseViewportResult {
 export function planCloseViewport(
   input: PlanCloseViewportInput,
 ): PlanCloseViewportResult {
-  const collapsedLayout = getCollapsedGridLayoutAfterClose(input.currentLayout);
+  const collapsedLayout = pickCollapsedLayoutThatPreservesAllRemainingImages(input);
   if (collapsedLayout === null) {
     return { collapsedLayout: null, fallbackSelectionIndex: null };
   }
@@ -26,6 +27,16 @@ export function planCloseViewport(
     collapsedLayout,
     fallbackSelectionIndex: pickFallbackSelectionIndexOrNull(input, collapsedLayout),
   };
+}
+
+function pickCollapsedLayoutThatPreservesAllRemainingImages(
+  input: PlanCloseViewportInput,
+): GridLayout | null {
+  const candidate = getCollapsedGridLayoutAfterClose(input.currentLayout);
+  if (candidate === null) return null;
+  const remainingImagesAfterClose = input.populatedCellCountBeforeClose - 1;
+  if (remainingImagesAfterClose > getGridLayoutCellCount(candidate)) return null;
+  return candidate;
 }
 
 function pickFallbackSelectionIndexOrNull(
