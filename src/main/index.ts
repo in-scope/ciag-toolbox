@@ -10,7 +10,7 @@ import {
 import { registerAppInfoIpcHandler } from "./app-info";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
-import { registerOpenImageStackDialogIpcHandler } from "./open-image-stack-dialog";
+import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
 import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
@@ -103,7 +103,7 @@ app.whenReady().then(() => {
   initializeThemeControllerFromDisk();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
-  registerOpenImageStackDialogIpcHandler();
+  registerOpenImagesDialogIpcHandlers();
   registerSaveImageDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandler();

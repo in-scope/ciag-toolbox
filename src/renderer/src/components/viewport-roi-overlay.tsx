@@ -109,7 +109,7 @@ function RoiOverlayDashedBorder(props: RoiOverlaySvgRectangleProps): JSX.Element
       width={widthPx}
       height={heightPx}
       fill="none"
-      stroke="hsl(var(--primary))"
+      stroke="var(--primary)"
       strokeWidth={ROI_RECT_STROKE_WIDTH_PX}
       strokeDasharray={ROI_DASH_PATTERN}
     />
@@ -156,9 +156,9 @@ function RoiOverlayCornerHandleSquare(props: RoiOverlayCornerHandleSquareProps):
       y={props.centerY - half}
       width={ROI_HANDLE_SIDE_PX}
       height={ROI_HANDLE_SIDE_PX}
-      fill="hsl(var(--primary))"
-      stroke="hsl(var(--background))"
-      strokeWidth={1}
+      fill="var(--primary)"
+      stroke="var(--foreground)"
+      strokeWidth={1.5}
     />
   );
 }

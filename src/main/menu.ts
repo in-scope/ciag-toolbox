@@ -38,22 +38,13 @@ function sendMenuChannelToRenderer(
   window.webContents.send(channel);
 }
 
-function buildOpenImageMenuItem(
+function buildOpenImagesMenuItem(
   window: BrowserWindow,
 ): MenuItemConstructorOptions {
   return {
-    label: "Open Image...",
+    label: "Open Images...",
     accelerator: "CmdOrCtrl+O",
     click: () => sendMenuChannelToRenderer(window, "menu:open-image"),
-  };
-}
-
-function buildOpenImageStackMenuItem(
-  window: BrowserWindow,
-): MenuItemConstructorOptions {
-  return {
-    label: "Open Image Stack...",
-    click: () => sendMenuChannelToRenderer(window, "menu:open-image-stack"),
   };
 }
 
@@ -100,8 +91,7 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
     submenu: [
-      buildOpenImageMenuItem(window),
-      buildOpenImageStackMenuItem(window),
+      buildOpenImagesMenuItem(window),
       buildSaveImageMenuItem(window),
       { type: "separator" },
       buildOpenProjectMenuItem(window),

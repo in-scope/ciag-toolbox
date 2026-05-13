@@ -11,11 +11,6 @@ export interface DecodedStackEntry {
   readonly differentiatingSubstring: string;
 }
 
-export interface PendingOpenImageStack {
-  readonly entries: ReadonlyArray<DecodedStackEntry>;
-  readonly hadConfidentWavelengthParse: boolean;
-}
-
 export type StackEntryValidationState =
   | { readonly kind: "valid" }
   | { readonly kind: "decode-failed"; readonly message: string }

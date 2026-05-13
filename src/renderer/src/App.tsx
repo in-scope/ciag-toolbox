@@ -16,8 +16,11 @@ import { AppBusyModal } from "@/components/busy-indicators";
 import { StatusBar } from "@/components/status-bar";
 import {
   OpenImageReplaceTargetPicker,
-  type PendingOpenImageReplace,
+  type ConfirmedOpenImagesReplacePlan,
+  type PendingOpenImageReplaceItem,
+  type PendingOpenImagesReplace,
 } from "@/components/open-image-replace-target-picker";
+import { OpenImagesReviewModal } from "@/components/open-images-review-modal";
 import { SaveImageFormatPicker } from "@/components/save-image-format-picker";
 import {
   ToolOptionsPanel,
@@ -65,14 +68,20 @@ import {
   planOpenImagePlacement,
   type OpenImagePlacementPlan,
 } from "@/lib/grid/plan-open-image";
+import {
+  planOpenImagesPlacement,
+  type OpenImagesPlacementPlan,
+} from "@/lib/grid/plan-open-images";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
-import { runOpenImageStackDialogPhase } from "@/lib/image/run-open-stack-flow";
+import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
+import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
 import type {
-  DecodedStackEntry,
-  PendingOpenImageStack,
-} from "@/lib/image/open-image-stack-types";
-import { StackConfirmationModal } from "@/components/stack-confirmation-modal";
+  GroupedOpenedFileRow,
+  OpenedFileForGrouping,
+  OpenedFilesGroup,
+  OpenedFilesGroupingProposal,
+} from "@/lib/image/group-opened-files";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
 import { removePinnedSpectrumById } from "@/lib/image/spectrum-entry";
@@ -140,7 +149,8 @@ type SetImagesByIndex = Dispatch<SetStateAction<ImagesByIndexMap>>;
 type SetGridLayout = Dispatch<SetStateAction<GridLayout>>;
 type SetPendingDuplicate = Dispatch<SetStateAction<PendingDuplicateReplace | null>>;
 type SetActiveAction = Dispatch<SetStateAction<RegisteredViewportAction | null>>;
-type SetPendingOpenImageReplace = Dispatch<SetStateAction<PendingOpenImageReplace | null>>;
+type SetPendingOpenImagesReplace = Dispatch<SetStateAction<PendingOpenImagesReplace | null>>;
+type SetPendingOpenImagesReview = Dispatch<SetStateAction<OpenedFilesGroupingProposal | null>>;
 type SetPendingSaveImage = Dispatch<SetStateAction<PendingSaveImageRequest | null>>;
 type SelectViewportFromClick = ViewportSelectionState["selectViewportFromClick"];
 type SetCurrentProjectFilePath = Dispatch<SetStateAction<string | null>>;
@@ -188,10 +198,10 @@ function ApplicationShell(): JSX.Element {
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
-  const [pendingOpenImageReplace, setPendingOpenImageReplace] =
-    useState<PendingOpenImageReplace | null>(null);
-  const [pendingOpenImageStack, setPendingOpenImageStack] =
-    useState<PendingOpenImageStack | null>(null);
+  const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
+    useState<PendingOpenImagesReplace | null>(null);
+  const [pendingOpenImagesReview, setPendingOpenImagesReview] =
+    useState<OpenedFilesGroupingProposal | null>(null);
   const [pendingSaveImage, setPendingSaveImage] =
     useState<PendingSaveImageRequest | null>(null);
   const [currentProjectFilePath, setCurrentProjectFilePath] = useState<string | null>(null);
@@ -215,23 +225,19 @@ function ApplicationShell(): JSX.Element {
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
   });
   const gridLayoutRef = useLatestRef(gridLayout);
-  const handleOpenImageRequested = useOpenImageThroughDialogHandler({
+  const handleOpenImagesRequested = useOpenImagesThroughDialogHandler({
     imagesByIndexRef,
     gridLayoutRef,
     setGridLayout,
     setImagesByIndex,
-    setPendingOpenImageReplace,
+    setPendingOpenImagesReplace,
+    setPendingOpenImagesReview,
     selectViewportFromClick,
     busyRegistrar,
   });
   const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
   const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
-  useMenuOpenImageTriggersHandler(handleOpenImageRequested);
-  const handleOpenImageStackRequested = useOpenImageStackThroughDialogHandler({
-    setPendingOpenImageStack,
-    busyRegistrar,
-  });
-  useMenuOpenImageStackTriggersHandler(handleOpenImageStackRequested);
+  useMenuOpenImageTriggersHandler(handleOpenImagesRequested);
   const handleSaveImageRequested = useSaveImageRequestHandler({
     imagesByIndexRef,
     selectedIndicesRef: useLatestRef(selectedIndices),
@@ -318,7 +324,7 @@ function ApplicationShell(): JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <Toolbar
-        onOpenImage={handleOpenImageRequested}
+        onOpenImage={handleOpenImagesRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
         registeredActions={REGISTERED_VIEWPORT_ACTIONS}
@@ -335,7 +341,7 @@ function ApplicationShell(): JSX.Element {
             <ApplicationStageContent
               gridLayout={gridLayout}
               imagesByIndex={imagesByIndex}
-              onOpenImage={handleOpenImageRequested}
+              onOpenImage={handleOpenImagesRequested}
               activeAction={activeAction}
               sourceViewport={singleSelectedSource?.summary ?? null}
               rightPanelActiveSource={rightPanelActiveSource}
@@ -370,28 +376,28 @@ function ApplicationShell(): JSX.Element {
         }
       />
       <OpenImageReplaceTargetPicker
-        pending={pendingOpenImageReplace}
+        pending={pendingOpenImagesReplace}
         viewports={listOccupiedViewportEntries(imagesByIndex, cellCount, (content) => content.fileName)}
-        onCancel={() => setPendingOpenImageReplace(null)}
-        onConfirm={(targetIndex) =>
-          confirmOpenImageReplaceAtTargetIndex(targetIndex, pendingOpenImageReplace, {
+        onCancel={() => setPendingOpenImagesReplace(null)}
+        onConfirm={(plan) =>
+          confirmOpenImagesReplaceWithAssignments(plan, pendingOpenImagesReplace, {
             setImagesByIndex,
-            setPendingOpenImageReplace,
+            setPendingOpenImagesReplace,
             selectViewportFromClick,
           })
         }
       />
-      <StackConfirmationModal
-        pending={pendingOpenImageStack}
-        onCancel={() => setPendingOpenImageStack(null)}
-        onConfirm={(orderedIncluded) =>
-          void confirmStackBuildFromOrderedEntries(orderedIncluded, {
+      <OpenImagesReviewModal
+        proposal={pendingOpenImagesReview}
+        onCancel={() => setPendingOpenImagesReview(null)}
+        onConfirm={(groups) =>
+          void confirmOpenImagesReviewGroups(groups, {
             imagesByIndexRef,
             gridLayoutRef,
             setGridLayout,
             setImagesByIndex,
-            setPendingOpenImageReplace,
-            setPendingOpenImageStack,
+            setPendingOpenImagesReplace,
+            setPendingOpenImagesReview,
             selectViewportFromClick,
             busyRegistrar,
           })
@@ -467,10 +473,6 @@ function clearSelectionWhenClickIsOutsideAnyCell(
 
 function useMenuOpenImageTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuOpenImage(handler), [handler]);
-}
-
-function useMenuOpenImageStackTriggersHandler(handler: () => void): void {
-  useEffect(() => window.toolboxApi.onMenuOpenImageStack(handler), [handler]);
 }
 
 function useMenuSaveImageTriggersHandler(handler: () => void): void {
@@ -582,217 +584,104 @@ async function runSaveImageFlowAndShowToast(
   }
 }
 
-interface OpenImageBindings {
+interface OpenImagesBindings {
   imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
   gridLayoutRef: MutableRefObject<GridLayout>;
   setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
-  setPendingOpenImageReplace: SetPendingOpenImageReplace;
+  setPendingOpenImagesReplace: SetPendingOpenImagesReplace;
+  setPendingOpenImagesReview: SetPendingOpenImagesReview;
   selectViewportFromClick: SelectViewportFromClick;
   busyRegistrar: BusyEntryRegistrar;
 }
 
-function useOpenImageStackThroughDialogHandler(
-  bindings: OpenImageStackBindings,
+function useOpenImagesThroughDialogHandler(
+  bindings: OpenImagesBindings,
 ): () => Promise<void> {
   const {
+    imagesByIndexRef,
+    gridLayoutRef,
+    setGridLayout,
+    setImagesByIndex,
+    setPendingOpenImagesReplace,
+    setPendingOpenImagesReview,
+    selectViewportFromClick,
     busyRegistrar,
-    setPendingOpenImageStack,
   } = bindings;
-  return useCallback(async () => {
-    await runOpenImageStackDialogFlow({
+  return useCallback(
+    () =>
+      runOpenImagesDialogFlow({
+        imagesByIndexRef,
+        gridLayoutRef,
+        setGridLayout,
+        setImagesByIndex,
+        setPendingOpenImagesReplace,
+        setPendingOpenImagesReview,
+        selectViewportFromClick,
+        busyRegistrar,
+      }),
+    [
+      imagesByIndexRef,
+      gridLayoutRef,
+      setGridLayout,
+      setImagesByIndex,
+      setPendingOpenImagesReplace,
+      setPendingOpenImagesReview,
+      selectViewportFromClick,
       busyRegistrar,
-      setPendingOpenImageStack,
-    });
-  }, [busyRegistrar, setPendingOpenImageStack]);
+    ],
+  );
 }
 
-interface OpenImageStackBindings {
-  setPendingOpenImageStack: Dispatch<SetStateAction<PendingOpenImageStack | null>>;
-  busyRegistrar: BusyEntryRegistrar;
-}
-
-async function runOpenImageStackDialogFlow(
-  bindings: OpenImageStackBindings,
-): Promise<void> {
+async function runOpenImagesDialogFlow(bindings: OpenImagesBindings): Promise<void> {
   const handle = bindings.busyRegistrar.registerAppBusyEntry({
-    label: "Reading file 0 of ?...",
+    label: "Reading files...",
     progress: 0,
   });
   try {
-    await openImageStackDialogAndPresentResultOrToast(bindings, handle);
+    await runOpenImagesDialogPhaseAndDispatchOutcome(bindings, handle);
+  } catch (error) {
+    toast.error(`Could not open images: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
 }
 
-async function openImageStackDialogAndPresentResultOrToast(
-  bindings: OpenImageStackBindings,
+async function runOpenImagesDialogPhaseAndDispatchOutcome(
+  bindings: OpenImagesBindings,
   handle: BusyEntryHandle,
 ): Promise<void> {
-  const result = await runOpenImageStackDialogPhase({
-    readPhaseBusyHandle: handle,
-  });
+  const result = await runOpenImagesDialogPhase({ readPhaseBusyHandle: handle });
   if (result.kind === "canceled") return;
-  if (result.kind === "too-few-files") {
-    toast.info("Open Image Stack needs 2 or more TIFFs; use Open Image for a single file");
+  if (result.kind === "single-file") {
+    await routeSingleFileFastPathThroughOpenImages(result.file, bindings);
     return;
   }
-  bindings.setPendingOpenImageStack(result.pending);
+  bindings.setPendingOpenImagesReview(result.proposal);
 }
 
-interface ConfirmStackBindings extends OpenImageBindings {
-  setPendingOpenImageStack: Dispatch<SetStateAction<PendingOpenImageStack | null>>;
-}
-
-async function confirmStackBuildFromOrderedEntries(
-  orderedIncludedEntries: ReadonlyArray<DecodedStackEntry>,
-  bindings: ConfirmStackBindings,
+async function routeSingleFileFastPathThroughOpenImages(
+  file: OpenedFileForGrouping,
+  bindings: OpenImagesBindings,
 ): Promise<void> {
-  bindings.setPendingOpenImageStack(null);
-  const handle = bindings.busyRegistrar.registerAppBusyEntry({
-    label: `Stacking band 1 of ${orderedIncludedEntries.length}...`,
-    progress: 0,
-  });
-  try {
-    await buildAndRouteStackedImage(orderedIncludedEntries, handle, bindings);
-  } catch (error) {
-    toast.error(`Could not stack TIFFs: ${describeUnknownError(error)}`);
-  } finally {
-    handle.clear();
+  if (file.decodeError !== null || file.source === null) {
+    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
+    return;
   }
-}
-
-async function buildAndRouteStackedImage(
-  orderedIncludedEntries: ReadonlyArray<DecodedStackEntry>,
-  handle: BusyEntryHandle,
-  bindings: OpenImageBindings,
-): Promise<void> {
-  const built = await buildConfirmedStackFromOrderedEntriesWithProgress(
-    orderedIncludedEntries,
-    handle,
-  );
-  routeDecodedImageToTargetViewport(
+  routeSingleSourceToViewportPlacement(
     {
-      fileName: built.suggestedFileName,
-      source: { kind: "raster", raster: built.raster },
-      fileSizeBytes: orderedIncludedEntries.reduce((sum, entry) => sum + entry.fileSizeBytes, 0),
+      fileName: file.fileName,
+      source: file.source,
+      originalFilePath: file.filePath,
+      fileSizeBytes: file.fileSizeBytes,
     },
     bindings,
   );
 }
 
-function useOpenImageThroughDialogHandler(bindings: OpenImageBindings): () => Promise<void> {
-  const {
-    imagesByIndexRef,
-    gridLayoutRef,
-    setGridLayout,
-    setImagesByIndex,
-    setPendingOpenImageReplace,
-    selectViewportFromClick,
-    busyRegistrar,
-  } = bindings;
-  return useCallback(async () => {
-    await runOpenImageDialogFlow({
-      imagesByIndexRef,
-      gridLayoutRef,
-      setGridLayout,
-      setImagesByIndex,
-      setPendingOpenImageReplace,
-      selectViewportFromClick,
-      busyRegistrar,
-    });
-  }, [
-    imagesByIndexRef,
-    gridLayoutRef,
-    setGridLayout,
-    setImagesByIndex,
-    setPendingOpenImageReplace,
-    selectViewportFromClick,
-    busyRegistrar,
-  ]);
-}
-
-async function runOpenImageDialogFlow(bindings: OpenImageBindings): Promise<void> {
-  const result = await invokeOpenImageDialogSafely();
-  if (!result || result.canceled) return;
-  const handle = registerOpenImageBusyEntry(result.fileName, bindings);
-  try {
-    await tryDecodeAndRouteImage(
-      {
-        fileName: result.fileName,
-        bytes: result.bytes,
-        sidecarBytes: result.sidecar?.bytes,
-        originalFilePath: result.filePath,
-        fileSizeBytes: result.bytes.length,
-      },
-      bindings,
-    );
-  } finally {
-    handle.clear();
-  }
-}
-
-function registerOpenImageBusyEntry(
-  fileName: string,
-  bindings: OpenImageBindings,
-): BusyEntryHandle {
-  const plan = planOpenImagePlacement({
-    currentLayout: bindings.gridLayoutRef.current,
-    imagesByIndex: bindings.imagesByIndexRef.current,
-  });
-  const targetIndex = pickPlannedTargetIndexFromOpenImagePlan(plan);
-  const label = `Loading ${fileName}...`;
-  if (targetIndex !== null) {
-    return bindings.busyRegistrar.registerViewportBusyEntry({ viewportIndex: targetIndex, label });
-  }
-  return bindings.busyRegistrar.registerAppBusyEntry({ label });
-}
-
-function pickPlannedTargetIndexFromOpenImagePlan(plan: OpenImagePlacementPlan): number | null {
-  if (plan.kind === "placeInExistingEmptyCell") return plan.targetIndex;
-  if (plan.kind === "growGridAndPlace") return plan.targetIndex;
-  return null;
-}
-
-async function invokeOpenImageDialogSafely(): Promise<ToolboxOpenImageDialogResult | null> {
-  try {
-    return await window.toolboxApi.openImageDialog();
-  } catch (error) {
-    toast.error(`Could not open the file dialog: ${describeUnknownError(error)}`);
-    return null;
-  }
-}
-
-async function tryDecodeAndRouteImage(
-  bundle: {
-    fileName: string;
-    bytes: Uint8Array;
-    sidecarBytes?: Uint8Array;
-    originalFilePath: string;
-    fileSizeBytes: number;
-  },
-  bindings: OpenImageBindings,
-): Promise<void> {
-  try {
-    const source = await decodeImageBytesToViewportSource(bundle);
-    routeDecodedImageToTargetViewport(
-      {
-        fileName: bundle.fileName,
-        source,
-        originalFilePath: bundle.originalFilePath,
-        fileSizeBytes: bundle.fileSizeBytes,
-      },
-      bindings,
-    );
-  } catch (error) {
-    toast.error(`Could not open ${bundle.fileName}: ${describeUnknownError(error)}`);
-  }
-}
-
-function routeDecodedImageToTargetViewport(
-  pending: PendingOpenImageReplace,
-  bindings: OpenImageBindings,
+function routeSingleSourceToViewportPlacement(
+  pending: PendingOpenImageReplaceItem,
+  bindings: OpenImagesBindings,
 ): void {
   const plan = planOpenImagePlacement({
     currentLayout: bindings.gridLayoutRef.current,
@@ -803,8 +692,8 @@ function routeDecodedImageToTargetViewport(
 
 function applyOpenImagePlacementPlan(
   plan: OpenImagePlacementPlan,
-  pending: PendingOpenImageReplace,
-  bindings: OpenImageBindings,
+  pending: PendingOpenImageReplaceItem,
+  bindings: OpenImagesBindings,
 ): void {
   if (plan.kind === "placeInExistingEmptyCell") {
     applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
@@ -815,7 +704,7 @@ function applyOpenImagePlacementPlan(
     applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
     return;
   }
-  bindings.setPendingOpenImageReplace(pending);
+  bindings.setPendingOpenImagesReplace({ items: [pending] });
 }
 
 interface ApplyLoadedImageBindings {
@@ -825,7 +714,7 @@ interface ApplyLoadedImageBindings {
 
 function applyLoadedImageAtIndex(
   index: number,
-  pending: PendingOpenImageReplace,
+  pending: PendingOpenImageReplaceItem,
   bindings: ApplyLoadedImageBindings,
 ): void {
   bindings.setImagesByIndex((previous) =>
@@ -841,17 +730,132 @@ function applyLoadedImageAtIndex(
 }
 
 interface ConfirmReplaceBindings extends ApplyLoadedImageBindings {
-  setPendingOpenImageReplace: SetPendingOpenImageReplace;
+  setPendingOpenImagesReplace: SetPendingOpenImagesReplace;
 }
 
-function confirmOpenImageReplaceAtTargetIndex(
-  targetIndex: number,
-  pending: PendingOpenImageReplace | null,
+function confirmOpenImagesReplaceWithAssignments(
+  plan: ConfirmedOpenImagesReplacePlan,
+  pending: PendingOpenImagesReplace | null,
   bindings: ConfirmReplaceBindings,
 ): void {
-  bindings.setPendingOpenImageReplace(null);
+  bindings.setPendingOpenImagesReplace(null);
   if (!pending) return;
-  applyLoadedImageAtIndex(targetIndex, pending, bindings);
+  for (const { itemIndex, targetIndex } of plan.assignments) {
+    const item = pending.items[itemIndex];
+    if (!item) continue;
+    applyLoadedImageAtIndex(targetIndex, item, bindings);
+  }
+}
+
+interface ConfirmReviewBindings extends OpenImagesBindings {
+  setPendingOpenImagesReview: SetPendingOpenImagesReview;
+}
+
+async function confirmOpenImagesReviewGroups(
+  groups: ReadonlyArray<OpenedFilesGroup>,
+  bindings: ConfirmReviewBindings,
+): Promise<void> {
+  bindings.setPendingOpenImagesReview(null);
+  try {
+    const pendingItems = await buildPendingItemsFromConfirmedGroups(groups, bindings);
+    if (pendingItems.length === 0) return;
+    placePendingItemsAcrossViewports(pendingItems, bindings);
+  } catch (error) {
+    toast.error(`Could not place images: ${describeUnknownError(error)}`);
+  }
+}
+
+async function buildPendingItemsFromConfirmedGroups(
+  groups: ReadonlyArray<OpenedFilesGroup>,
+  bindings: ConfirmReviewBindings,
+): Promise<ReadonlyArray<PendingOpenImageReplaceItem>> {
+  const items: PendingOpenImageReplaceItem[] = [];
+  for (const group of groups) {
+    if (group.mode === "stack" && group.rows.length >= 2) {
+      items.push(await buildStackedItemFromGroup(group, bindings));
+    } else {
+      for (const row of group.rows) items.push(buildSingleImageItemFromRow(row));
+    }
+  }
+  return items;
+}
+
+async function buildStackedItemFromGroup(
+  group: OpenedFilesGroup,
+  bindings: ConfirmReviewBindings,
+): Promise<PendingOpenImageReplaceItem> {
+  const handle = bindings.busyRegistrar.registerAppBusyEntry({
+    label: `Stacking ${group.rows.length} rows...`,
+    progress: 0,
+  });
+  try {
+    const entries = group.rows.map(convertGroupRowToDecodedStackEntry);
+    const built = await buildConfirmedStackFromOrderedEntriesWithProgress(entries, handle);
+    const fileSizeBytes = group.rows.reduce((sum, row) => sum + row.fileSizeBytes, 0);
+    return {
+      fileName: built.suggestedFileName,
+      source: { kind: "raster", raster: built.raster },
+      fileSizeBytes,
+    };
+  } finally {
+    handle.clear();
+  }
+}
+
+function convertGroupRowToDecodedStackEntry(row: GroupedOpenedFileRow): DecodedStackEntry {
+  return {
+    fileName: row.fileName,
+    filePath: row.filePath,
+    fileSizeBytes: row.fileSizeBytes,
+    mtimeMs: row.mtimeMs,
+    raster: row.source && row.source.kind === "raster" ? row.source.raster : null,
+    decodeError: row.decodeError,
+    wavelength: row.wavelength,
+    differentiatingSubstring: row.differentiatingSubstring,
+  };
+}
+
+function buildSingleImageItemFromRow(row: GroupedOpenedFileRow): PendingOpenImageReplaceItem {
+  if (row.source === null) {
+    throw new Error(`Cannot open ${row.fileName}: ${row.decodeError ?? "unknown decode error"}`);
+  }
+  return {
+    fileName: row.fileName,
+    source: row.source,
+    originalFilePath: row.filePath,
+    fileSizeBytes: row.fileSizeBytes,
+  };
+}
+
+function placePendingItemsAcrossViewports(
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ConfirmReviewBindings,
+): void {
+  const plan = planOpenImagesPlacement({
+    currentLayout: bindings.gridLayoutRef.current,
+    imagesByIndex: bindings.imagesByIndexRef.current,
+    newItemCount: items.length,
+  });
+  applyOpenImagesPlacementPlan(plan, items, bindings);
+}
+
+function applyOpenImagesPlacementPlan(
+  plan: OpenImagesPlacementPlan,
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ConfirmReviewBindings,
+): void {
+  if (plan.kind === "promptReplace") {
+    bindings.setPendingOpenImagesReplace({ items });
+    return;
+  }
+  if (plan.expandedLayout !== undefined) {
+    bindings.setGridLayout(plan.expandedLayout);
+  }
+  for (let i = 0; i < plan.targetIndices.length && i < items.length; i++) {
+    const item = items[i]!;
+    const targetIndex = plan.targetIndices[i]!;
+    applyLoadedImageAtIndex(targetIndex, item, bindings);
+  }
 }
 
 function assignViewportContentAtIndex(
@@ -1187,9 +1191,18 @@ async function runReimportSourceFromDiskFlow(
   viewportIndex: number,
   bindings: ViewportReimportApiBindings,
 ): Promise<void> {
-  const result = await invokeOpenImageDialogSafely();
+  const result = await invokeOpenImageDialogForReimportSafely();
   if (!result || result.canceled) return;
   await replaceViewportSourceWithReimportedFile(viewportIndex, result, bindings);
+}
+
+async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImageDialogResult | null> {
+  try {
+    return await window.toolboxApi.openImageDialog();
+  } catch (error) {
+    toast.error(`Could not open the file dialog: ${describeUnknownError(error)}`);
+    return null;
+  }
 }
 
 async function replaceViewportSourceWithReimportedFile(

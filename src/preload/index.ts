@@ -21,16 +21,31 @@ export type OpenImageDialogResult =
       sidecar?: OpenImageDialogSidecar;
     };
 
-export interface OpenImageStackDialogFileEntry {
+export interface OpenImagesDialogFileMetadataEntry {
   fileName: string;
   filePath: string;
   fileSizeBytes: number;
   mtimeMs: number;
 }
 
-export type OpenImageStackDialogResult =
+export type OpenImagesDialogResult =
   | { canceled: true }
-  | { canceled: false; files: ReadonlyArray<OpenImageStackDialogFileEntry> };
+  | { canceled: false; files: ReadonlyArray<OpenImagesDialogFileMetadataEntry> };
+
+export interface OpenedImagesFileSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export interface OpenedImagesFileEntry {
+  fileName: string;
+  filePath: string;
+  bytes: Uint8Array;
+  contentHash: string;
+  fileSizeBytes: number;
+  mtimeMs: number;
+  sidecar?: OpenedImagesFileSidecar;
+}
 
 export interface SaveImageDialogFilter {
   name: string;
@@ -154,14 +169,13 @@ export type UnsubscribeThemeListener = () => void;
 
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
-const OPEN_IMAGE_STACK_DIALOG_CHANNEL = "image:open-stack-dialog";
-const OPEN_IMAGE_STACK_READ_FILE_CHANNEL = "image:open-stack-read-file";
+const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
+const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
 const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
-const MENU_OPEN_IMAGE_STACK_CHANNEL = "menu:open-image-stack";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
@@ -180,19 +194,19 @@ function showOpenImageDialogThroughMainProcess(): Promise<OpenImageDialogResult>
   ) as Promise<OpenImageDialogResult>;
 }
 
-function showOpenImageStackDialogThroughMainProcess(): Promise<OpenImageStackDialogResult> {
+function showOpenImagesDialogThroughMainProcess(): Promise<OpenImagesDialogResult> {
   return ipcRenderer.invoke(
-    OPEN_IMAGE_STACK_DIALOG_CHANNEL,
-  ) as Promise<OpenImageStackDialogResult>;
+    OPEN_IMAGES_DIALOG_CHANNEL,
+  ) as Promise<OpenImagesDialogResult>;
 }
 
-function readSingleImageStackFileThroughMainProcess(
-  filePath: string,
-): Promise<Uint8Array> {
+function readSingleOpenedImageFileThroughMainProcess(
+  metadata: OpenImagesDialogFileMetadataEntry,
+): Promise<OpenedImagesFileEntry> {
   return ipcRenderer.invoke(
-    OPEN_IMAGE_STACK_READ_FILE_CHANNEL,
-    filePath,
-  ) as Promise<Uint8Array>;
+    OPEN_IMAGES_READ_FILE_CHANNEL,
+    metadata,
+  ) as Promise<OpenedImagesFileEntry>;
 }
 
 function showSaveImageDialogThroughMainProcess(
@@ -241,12 +255,6 @@ function subscribeToOpenImageMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
   return subscribeToMenuChannel(MENU_OPEN_IMAGE_CHANNEL, listener);
-}
-
-function subscribeToOpenImageStackMenuEvent(
-  listener: MenuEventListener,
-): UnsubscribeMenuListener {
-  return subscribeToMenuChannel(MENU_OPEN_IMAGE_STACK_CHANNEL, listener);
 }
 
 function subscribeToSaveImageMenuEvent(
@@ -303,14 +311,13 @@ const apiBridge = {
   },
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
-  openImageStackDialog: showOpenImageStackDialogThroughMainProcess,
-  readImageStackFile: readSingleImageStackFileThroughMainProcess,
+  openImagesDialog: showOpenImagesDialogThroughMainProcess,
+  readOpenedImageFile: readSingleOpenedImageFileThroughMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   readProjectBundleAsset: readBundleAssetThroughMainProcess,
   saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
-  onMenuOpenImageStack: subscribeToOpenImageStackMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,

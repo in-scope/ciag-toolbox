@@ -2,17 +2,16 @@ import { useEffect, useRef } from "react";
 
 import { ImageOff } from "lucide-react";
 
-import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
 interface StackThumbnailPreviewProps {
-  readonly entry: DecodedStackEntry;
+  readonly raster: RasterImage | null;
   readonly sizePx: number;
 }
 
 export function StackThumbnailPreview(props: StackThumbnailPreviewProps): JSX.Element {
-  if (!props.entry.raster) return renderEmptyThumbnailPlaceholder(props.sizePx);
-  return <StackRasterThumbnailCanvas raster={props.entry.raster} sizePx={props.sizePx} />;
+  if (!props.raster) return renderEmptyThumbnailPlaceholder(props.sizePx);
+  return <StackRasterThumbnailCanvas raster={props.raster} sizePx={props.sizePx} />;
 }
 
 function renderEmptyThumbnailPlaceholder(sizePx: number): JSX.Element {
