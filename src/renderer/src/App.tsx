@@ -1430,19 +1430,11 @@ function buildRightPanelActiveSource(
         selectedBandIndex: bandIndex,
       }),
     removedBandIndexes: renderingState.removedBandIndexes,
-    onToggleRemovedBandIndex: (bandIndex) =>
-      renderingApi.setRenderingState(viewportIndex, {
-        ...renderingState,
-        removedBandIndexes: toggleBandIndexInRemovedList(
-          renderingState.removedBandIndexes,
-          bandIndex,
-        ),
-      }),
-    onApplyBandSelection: () =>
+    onApplyBandSelection: (removedBandIndexes) =>
       runApplyBandSelectionForViewport({
         viewportIndex,
         raster,
-        renderingState,
+        removedBandIndexes,
         applyActionFlowBindings: inputs.applyActionFlowBindings,
       }),
     operationHistory: renderingState.operationHistory,
@@ -1459,32 +1451,22 @@ function buildRightPanelActiveSource(
   };
 }
 
-function toggleBandIndexInRemovedList(
-  removedBandIndexes: ReadonlyArray<number>,
-  bandIndex: number,
-): ReadonlyArray<number> {
-  if (removedBandIndexes.includes(bandIndex)) {
-    return removedBandIndexes.filter((existing) => existing !== bandIndex);
-  }
-  return [...removedBandIndexes, bandIndex].sort((a, b) => a - b);
-}
-
 interface ApplyBandSelectionInputs {
   readonly viewportIndex: number;
   readonly raster: ViewportRightPanelActiveSource["raster"];
-  readonly renderingState: ViewportRenderingState;
+  readonly removedBandIndexes: ReadonlyArray<number>;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
 }
 
 function runApplyBandSelectionForViewport(inputs: ApplyBandSelectionInputs): void {
-  const { raster, renderingState } = inputs;
+  const { raster, removedBandIndexes } = inputs;
   if (!raster) {
     toast.error("Keep Bands requires a raster source.");
     return;
   }
   const keptBandIndexes = listKeptBandIndexesFromRemoved(
     raster.bandCount,
-    renderingState.removedBandIndexes,
+    removedBandIndexes,
   );
   if (keptBandIndexes.length === 0) {
     toast.error("Keep at least one band before applying.");

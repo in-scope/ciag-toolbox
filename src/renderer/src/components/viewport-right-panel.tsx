@@ -1,17 +1,22 @@
-import { useMemo, useId } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
+import { BandThumbnail } from "@/components/band-thumbnail";
+import { KeepBandsModal } from "@/components/keep-bands-modal";
 import {
   SpectrumPlot,
   type SpectrumLinePlotInput,
 } from "@/components/spectrum-plot";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   formatOperationHistoryParameterValuesAsInlineText,
   formatOperationHistoryTimestampForDisplay,
   type ViewportOperationHistory,
   type ViewportOperationHistoryEntry,
 } from "@/lib/actions/operation-history";
+import {
+  isBandsRowKeyboardKey,
+  pickNextActiveBandIndexForKey,
+} from "@/lib/image/bands-row-keyboard";
 import type { ViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import {
   clampBandIndexToRaster,
@@ -42,8 +47,7 @@ export interface ViewportRightPanelActiveSource {
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
   readonly removedBandIndexes: ReadonlyArray<number>;
-  readonly onToggleRemovedBandIndex: (bandIndex: number) => void;
-  readonly onApplyBandSelection: () => void;
+  readonly onApplyBandSelection: (removedBandIndexes: ReadonlyArray<number>) => void;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
@@ -148,34 +152,47 @@ interface BandsSectionBodyProps {
 }
 
 function BandsSectionBody(props: BandsSectionBodyProps): JSX.Element {
-  const radioGroupName = useId();
   const items = useMemo(() => buildBandRowItemsForRaster(props.raster), [props.raster]);
-  const removedBandIndexSet = useMemo(
-    () => new Set(props.activeSource.removedBandIndexes),
-    [props.activeSource.removedBandIndexes],
-  );
   const displayedBandIndex = clampBandIndexToRaster(
     props.raster,
     props.activeSource.selectedBandIndex,
   );
+  const [isModalOpen, setIsModalOpen] = useState(false);
   return (
     <section aria-label="Bands" className={RIGHT_PANEL_SECTION_CLASSES}>
       <BandsSectionHeader viewportNumber={props.activeSource.viewportNumber} />
       <BandsRowList
+        raster={props.raster}
         items={items}
         selectedBandIndex={displayedBandIndex}
-        removedBandIndexSet={removedBandIndexSet}
-        radioGroupName={radioGroupName}
         onSelectBandIndex={props.activeSource.onSelectBandIndex}
-        onToggleRemovedBandIndex={props.activeSource.onToggleRemovedBandIndex}
       />
-      <ApplyBandSelectionButton
-        bandCount={props.raster.bandCount}
-        removedBandCount={removedBandIndexSet.size}
-        onApply={props.activeSource.onApplyBandSelection}
+      <KeepBandsTriggerButton onOpenKeepBandsModal={() => setIsModalOpen(true)} />
+      <KeepBandsModal
+        isOpen={isModalOpen}
+        raster={props.raster}
+        initialRemovedBandIndexes={props.activeSource.removedBandIndexes}
+        activeBandIndex={displayedBandIndex}
+        onCancel={() => setIsModalOpen(false)}
+        onConfirm={(removedBandIndexes) =>
+          confirmKeepBandsApply(
+            removedBandIndexes,
+            setIsModalOpen,
+            props.activeSource.onApplyBandSelection,
+          )
+        }
       />
     </section>
   );
+}
+
+function confirmKeepBandsApply(
+  removedBandIndexes: ReadonlyArray<number>,
+  setIsModalOpen: (open: boolean) => void,
+  onApplyBandSelection: (removedBandIndexes: ReadonlyArray<number>) => void,
+): void {
+  setIsModalOpen(false);
+  onApplyBandSelection(removedBandIndexes);
 }
 
 function BandsSectionHeader({ viewportNumber }: { viewportNumber: number }): JSX.Element {
@@ -188,30 +205,78 @@ function BandsSectionHeader({ viewportNumber }: { viewportNumber: number }): JSX
 }
 
 interface BandsRowListProps {
+  raster: RasterImage;
   items: ReadonlyArray<BandRowItem>;
   selectedBandIndex: number;
-  removedBandIndexSet: ReadonlySet<number>;
-  radioGroupName: string;
   onSelectBandIndex: (bandIndex: number) => void;
-  onToggleRemovedBandIndex: (bandIndex: number) => void;
 }
 
-function BandsRowList(props: BandsRowListProps): JSX.Element {
+export function BandsRowList(props: BandsRowListProps): JSX.Element {
+  const rowRefs = useBandRowFocusRefs(props.items.length);
+  const handleKeyDown = useBandRowKeyboardHandler(
+    props.selectedBandIndex,
+    props.items.length,
+    rowRefs,
+    props.onSelectBandIndex,
+  );
   return (
-    <ul aria-label="Bands" className="flex flex-col gap-1">
-      {props.items.map((item) => (
+    <ul
+      role="radiogroup"
+      aria-label="Bands"
+      className="flex flex-col gap-1"
+      onKeyDown={handleKeyDown}
+    >
+      {props.items.map((item, position) => (
         <li key={item.bandIndex}>
           <BandRow
+            setRowElement={(element) =>
+              attachBandRowElementToRefList(rowRefs, position, element)
+            }
+            raster={props.raster}
             item={item}
             isSelected={item.bandIndex === props.selectedBandIndex}
-            isKept={!props.removedBandIndexSet.has(item.bandIndex)}
-            radioGroupName={props.radioGroupName}
             onSelect={() => props.onSelectBandIndex(item.bandIndex)}
-            onToggleKept={() => props.onToggleRemovedBandIndex(item.bandIndex)}
           />
         </li>
       ))}
     </ul>
+  );
+}
+
+function useBandRowFocusRefs(rowCount: number) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  if (refs.current.length !== rowCount) refs.current = new Array(rowCount).fill(null);
+  return refs;
+}
+
+function attachBandRowElementToRefList(
+  refs: { current: Array<HTMLButtonElement | null> },
+  position: number,
+  element: HTMLButtonElement | null,
+): void {
+  refs.current[position] = element;
+}
+
+function useBandRowKeyboardHandler(
+  selectedBandIndex: number,
+  bandCount: number,
+  rowRefs: { current: Array<HTMLButtonElement | null> },
+  onSelectBandIndex: (bandIndex: number) => void,
+) {
+  return useCallback(
+    (event: KeyboardEvent<HTMLUListElement>) => {
+      if (!isBandsRowKeyboardKey(event.key)) return;
+      const nextBandIndex = pickNextActiveBandIndexForKey(
+        event.key,
+        selectedBandIndex,
+        bandCount,
+      );
+      if (nextBandIndex === null) return;
+      event.preventDefault();
+      onSelectBandIndex(nextBandIndex);
+      rowRefs.current[nextBandIndex]?.focus();
+    },
+    [bandCount, onSelectBandIndex, rowRefs, selectedBandIndex],
   );
 }
 
@@ -229,112 +294,69 @@ function buildBandRowItemsForRaster(raster: RasterImage): ReadonlyArray<BandRowI
 }
 
 interface BandRowProps {
+  setRowElement?: (element: HTMLButtonElement | null) => void;
+  raster: RasterImage;
   item: BandRowItem;
   isSelected: boolean;
-  isKept: boolean;
-  radioGroupName: string;
   onSelect: () => void;
-  onToggleKept: () => void;
 }
 
 function BandRow(props: BandRowProps): JSX.Element {
   return (
-    <div className={getBandRowClassName(props.isSelected)}>
-      <BandKeepCheckbox
-        bandLabel={props.item.label}
-        isKept={props.isKept}
-        onToggleKept={props.onToggleKept}
-      />
-      <BandDisplayRadio
-        bandLabel={props.item.label}
-        isSelected={props.isSelected}
-        radioGroupName={props.radioGroupName}
-        onSelect={props.onSelect}
-      />
-      <span className="flex-1 truncate text-sm" title={props.item.label}>
+    <button
+      ref={props.setRowElement}
+      type="button"
+      role="radio"
+      aria-checked={props.isSelected}
+      tabIndex={props.isSelected ? 0 : -1}
+      aria-label={`Display ${props.item.label}`}
+      onClick={props.onSelect}
+      className={getBandRowClassName(props.isSelected)}
+    >
+      <BandThumbnail raster={props.raster} bandIndex={props.item.bandIndex} />
+      <span className="flex-1 truncate text-left text-sm" title={props.item.label}>
         {props.item.label}
       </span>
-    </div>
+      {props.isSelected ? <BandRowSelectedBar /> : null}
+    </button>
   );
 }
 
-interface BandKeepCheckboxProps {
-  bandLabel: string;
-  isKept: boolean;
-  onToggleKept: () => void;
-}
-
-function BandKeepCheckbox(props: BandKeepCheckboxProps): JSX.Element {
+function BandRowSelectedBar(): JSX.Element {
   return (
-    <Checkbox
-      checked={props.isKept}
-      aria-label={`Keep ${props.bandLabel} on apply`}
-      onCheckedChange={props.onToggleKept}
-    />
-  );
-}
-
-interface BandDisplayRadioProps {
-  bandLabel: string;
-  isSelected: boolean;
-  radioGroupName: string;
-  onSelect: () => void;
-}
-
-function BandDisplayRadio(props: BandDisplayRadioProps): JSX.Element {
-  return (
-    <input
-      type="radio"
-      className="size-4 cursor-pointer accent-primary"
-      name={props.radioGroupName}
-      checked={props.isSelected}
-      onChange={props.onSelect}
-      aria-label={`Display ${props.bandLabel}`}
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-r-full bg-primary"
     />
   );
 }
 
 function getBandRowClassName(isSelected: boolean): string {
   return cn(
-    "flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent",
-    isSelected && "bg-accent/60 text-foreground",
-    !isSelected && "text-muted-foreground",
+    "relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+    isSelected
+      ? "bg-accent text-foreground"
+      : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
   );
 }
 
-interface ApplyBandSelectionButtonProps {
-  bandCount: number;
-  removedBandCount: number;
-  onApply: () => void;
+interface KeepBandsTriggerButtonProps {
+  onOpenKeepBandsModal: () => void;
 }
 
-function ApplyBandSelectionButton(props: ApplyBandSelectionButtonProps): JSX.Element {
-  const disabledReason = describeBandSelectionDisabledReason(
-    props.bandCount,
-    props.removedBandCount,
-  );
+function KeepBandsTriggerButton(props: KeepBandsTriggerButtonProps): JSX.Element {
   return (
     <Button
       type="button"
       size="sm"
       variant="secondary"
       className="self-start"
-      disabled={disabledReason !== null}
-      title={disabledReason ?? undefined}
-      onClick={props.onApply}
+      onClick={props.onOpenKeepBandsModal}
     >
-      Apply Band Selection
+      Keep Bands...
     </Button>
   );
-}
-
-function describeBandSelectionDisabledReason(
-  bandCount: number,
-  removedBandCount: number,
-): string | null {
-  if (removedBandCount === 0) return "Uncheck a band to remove it on apply";
-  if (removedBandCount >= bandCount) return "Keep at least one band";
-  return null;
 }
 
 interface HistorySectionProps {
