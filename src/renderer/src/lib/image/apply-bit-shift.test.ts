@@ -79,6 +79,39 @@ describe("applyBitShiftToRasterImage", () => {
     const raster = createSingleBandRasterImageFromValues(new Uint16Array([1]));
     expect(() => applyBitShiftToRasterImage(raster, MAX_BIT_SHIFT_AMOUNT + 1)).toThrow(/between/i);
   });
+
+  it("shifts only pixels inside the region when a region is provided", () => {
+    const raster = createTwoByThreeUint16RasterImage([
+      [10, 20, 30],
+      [40, 50, 60],
+    ]);
+    const result = applyBitShiftToRasterImage(raster, 2, {
+      region: { imagePixelX0: 1, imagePixelY0: 0, imagePixelX1: 2, imagePixelY1: 0 },
+    });
+    expect(Array.from(result.bandPixels[0]!)).toEqual([10, 80, 120, 40, 50, 60]);
+  });
+
+  it("clamps overflow inside the region without affecting outside pixels", () => {
+    const raster = createTwoByThreeUint16RasterImage([
+      [0xfff, 0x8000, 0],
+      [1, 2, 3],
+    ]);
+    const result = applyBitShiftToRasterImage(raster, 4, {
+      region: { imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 2, imagePixelY1: 0 },
+    });
+    expect(Array.from(result.bandPixels[0]!)).toEqual([0xfff0, 0xffff, 0, 1, 2, 3]);
+  });
+
+  it("clamps a region that extends past the raster bounds", () => {
+    const raster = createTwoByThreeUint16RasterImage([
+      [10, 20, 30],
+      [40, 50, 60],
+    ]);
+    const result = applyBitShiftToRasterImage(raster, 1, {
+      region: { imagePixelX0: 1, imagePixelY0: 1, imagePixelX1: 99, imagePixelY1: 99 },
+    });
+    expect(Array.from(result.bandPixels[0]!)).toEqual([10, 20, 30, 40, 100, 120]);
+  });
 });
 
 function createSingleBandRasterImageFromValues(
@@ -91,6 +124,19 @@ function createSingleBandRasterImageFromValues(
     height: 1,
     bitsPerSample: band.BYTES_PER_ELEMENT * 8,
     sampleFormat,
+    bandCount: 1,
+  };
+}
+
+function createTwoByThreeUint16RasterImage(
+  rows: ReadonlyArray<ReadonlyArray<number>>,
+): RasterImage {
+  return {
+    bandPixels: [new Uint16Array(rows.flat())],
+    width: rows[0]!.length,
+    height: rows.length,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
     bandCount: 1,
   };
 }

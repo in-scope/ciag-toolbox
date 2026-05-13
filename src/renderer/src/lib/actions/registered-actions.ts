@@ -5,10 +5,17 @@ import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import { applyBandKeepToRasterImage } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
-import { canonicalizeViewportRoiCorners } from "@/lib/image/viewport-roi";
+import {
+  canonicalizeViewportRoiCorners,
+  type ViewportRoi,
+} from "@/lib/image/viewport-roi";
 import type { IntegerParameterSchema } from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
-import type { ViewportAction, ViewportActionSourceTransform } from "./viewport-action";
+import type {
+  ApplyScope,
+  ViewportAction,
+  ViewportActionSourceTransform,
+} from "./viewport-action";
 import { EMPTY_REMOVED_BAND_INDEXES, type ViewportRenderingState } from "./viewport-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -17,10 +24,12 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly icon: RegisteredActionIcon;
   readonly successMessage: string;
   readonly appliedLabel: string;
+  readonly supportsRoiScope?: boolean;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
     rawParameterValues: ParameterValuesById,
     sourceRenderingState: ViewportRenderingState,
+    applyScope: ApplyScope,
   ) => ParameterValuesById;
   readonly isAvailableForActiveViewport?: (
     sourceRenderingState: ViewportRenderingState,
@@ -40,6 +49,10 @@ export const NORMALIZE_ACTION: RegisteredViewportAction = {
 };
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
+const BIT_SHIFT_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
+const BIT_SHIFT_REGION_PARAMETER_ID_Y0 = "regionImagePixelY0";
+const BIT_SHIFT_REGION_PARAMETER_ID_X1 = "regionImagePixelX1";
+const BIT_SHIFT_REGION_PARAMETER_ID_Y1 = "regionImagePixelY1";
 
 const BIT_SHIFT_PARAMETER_SCHEMA: IntegerParameterSchema = {
   kind: "integer",
@@ -56,13 +69,33 @@ export const BIT_SHIFT_ACTION: RegisteredViewportAction = {
   label: "Bit Shift",
   icon: ChevronsLeft,
   parameters: [BIT_SHIFT_PARAMETER_SCHEMA],
+  supportsRoiScope: true,
   successMessage: "Bit shift applied",
   appliedLabel: "Bit shift",
-  formatAppliedLabel: (parameterValues) =>
-    `Bit shift +${readBitShiftAmountFromParameterValues(parameterValues)}`,
+  formatAppliedLabel: formatBitShiftAppliedLabel,
+  prepareParameterValuesForApply: prepareBitShiftParameterValuesForScope,
   apply: (state) => state,
   transformSource: createBitShiftSourceTransform(),
 };
+
+function prepareBitShiftParameterValuesForScope(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+  applyScope: ApplyScope,
+): ParameterValuesById {
+  if (applyScope !== "roi") return rawParameterValues;
+  const roi = sourceRenderingState.roi;
+  if (!roi) {
+    throw new Error("Bit Shift to region requires an active region. Draw a region first.");
+  }
+  return Object.freeze({
+    ...rawParameterValues,
+    [BIT_SHIFT_REGION_PARAMETER_ID_X0]: roi.imagePixelX0,
+    [BIT_SHIFT_REGION_PARAMETER_ID_Y0]: roi.imagePixelY0,
+    [BIT_SHIFT_REGION_PARAMETER_ID_X1]: roi.imagePixelX1,
+    [BIT_SHIFT_REGION_PARAMETER_ID_Y1]: roi.imagePixelY1,
+  });
+}
 
 function createBitShiftSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
@@ -72,7 +105,11 @@ function createBitShiftSourceTransform(): ViewportActionSourceTransform {
       );
     }
     const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
-    return { kind: "raster", raster: applyBitShiftToRasterImage(source.raster, shiftAmount) };
+    const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
+    return {
+      kind: "raster",
+      raster: applyBitShiftToRasterImage(source.raster, shiftAmount, region ? { region } : {}),
+    };
   };
 }
 
@@ -82,6 +119,44 @@ function readBitShiftAmountFromParameterValues(parameterValues: ParameterValuesB
     return BIT_SHIFT_PARAMETER_SCHEMA.defaultValue;
   }
   return Math.round(raw);
+}
+
+function readBitShiftRegionFromParameterValuesIfPresent(
+  parameterValues: ParameterValuesById,
+): ViewportRoi | null {
+  const x0 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_X0];
+  const y0 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_Y0];
+  const x1 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_X1];
+  const y1 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_Y1];
+  if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
+  return {
+    imagePixelX0: Math.round(x0 as number),
+    imagePixelY0: Math.round(y0 as number),
+    imagePixelX1: Math.round(x1 as number),
+    imagePixelY1: Math.round(y1 as number),
+  };
+}
+
+function areAllRegionCornersFiniteNumbers(
+  x0: unknown,
+  y0: unknown,
+  x1: unknown,
+  y1: unknown,
+): boolean {
+  return (
+    typeof x0 === "number" && Number.isFinite(x0) &&
+    typeof y0 === "number" && Number.isFinite(y0) &&
+    typeof x1 === "number" && Number.isFinite(x1) &&
+    typeof y1 === "number" && Number.isFinite(y1)
+  );
+}
+
+function formatBitShiftAppliedLabel(parameterValues: ParameterValuesById): string {
+  const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
+  const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
+  if (!region) return `Bit shift +${shiftAmount}`;
+  const canonical = canonicalizeViewportRoiCorners(region);
+  return `Bit shift +${shiftAmount} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
 }
 
 const CROP_PARAMETER_ID_X0 = "imagePixelX0";

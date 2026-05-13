@@ -39,6 +39,10 @@ export type ViewportActionSourceTransform = (
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
 
+export type ApplyScope = "whole-image" | "roi";
+
+export const DEFAULT_APPLY_SCOPE: ApplyScope = "whole-image";
+
 export interface ViewportAction {
   readonly id: string;
   readonly label: string;

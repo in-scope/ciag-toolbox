@@ -128,6 +128,7 @@ import {
 } from "@/state/viewport-rendering-context";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
+  type ApplyScope,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
@@ -267,7 +268,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     busyRegistrar,
   });
-  const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex);
+  const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
     selectedIndices,
     imagesByIndex,
@@ -1332,6 +1333,7 @@ function buildApplyActionFlowBindings(
 function deriveSingleSelectedSource(
   selectedIndices: ReadonlySet<number>,
   imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
 ): SingleSelectedSource | null {
   if (selectedIndices.size !== 1) return null;
   const onlyIndex = readSingleIndexFromSelection(selectedIndices);
@@ -1343,6 +1345,7 @@ function deriveSingleSelectedSource(
     summary: {
       viewportNumber: getViewportNumberFromIndex(onlyIndex),
       fileName: content.fileName,
+      hasRoi: renderingApi.getRenderingState(onlyIndex).roi !== null,
     },
   };
 }
@@ -1565,6 +1568,7 @@ function runApplyActionFromPanel(
     action,
     options.parameterValues,
     bindings.getRenderingState(source.index),
+    options.applyScope,
   );
   if (merged === null) return;
   if (options.openInNewViewport) {
@@ -1599,10 +1603,11 @@ function mergeParameterValuesWithSourceRenderingState(
   action: RegisteredViewportAction,
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
+  applyScope: ApplyScope,
 ): ParameterValuesById | null {
   if (!action.prepareParameterValuesForApply) return rawParameterValues;
   try {
-    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState);
+    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope);
   } catch (error) {
     toast.error(formatActionPreparationErrorMessage(action.label, error));
     return null;
