@@ -25,6 +25,16 @@ export const IDENTITY_SINGLE_BAND_EXTENTS: SingleBandScalarExtents = {
   max: 1,
 };
 
+const IDENTITY_RAW_VALUE_EXTENTS: SingleBandScalarExtents = {
+  min: 0,
+  max: 1,
+};
+
+const rasterBandRawValueExtentsCache: WeakMap<
+  RasterImage,
+  Map<number, SingleBandScalarExtents>
+> = new WeakMap();
+
 const BYTES_PER_PIXEL = 4;
 const BYTE_TO_UNIT_SCALE = 1 / 255;
 
@@ -39,6 +49,59 @@ export function computeImageRgbChannelExtents(
   }
   const rgbaBytes = readRgbaBytesFromSource(source);
   return computeRgbChannelExtentsFromBytes(rgbaBytes);
+}
+
+export function computeRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents {
+  const cached = readCachedRasterBandRawValueExtents(raster, bandIndex);
+  if (cached) return cached;
+  const computed = computeRasterBandRawValueExtentsWithoutMemoization(raster, bandIndex);
+  storeRasterBandRawValueExtents(raster, bandIndex, computed);
+  return computed;
+}
+
+function readCachedRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents | undefined {
+  const innerMap = rasterBandRawValueExtentsCache.get(raster);
+  if (!innerMap) return undefined;
+  return innerMap.get(bandIndex);
+}
+
+function storeRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+  extents: SingleBandScalarExtents,
+): void {
+  let innerMap = rasterBandRawValueExtentsCache.get(raster);
+  if (!innerMap) {
+    innerMap = new Map();
+    rasterBandRawValueExtentsCache.set(raster, innerMap);
+  }
+  innerMap.set(bandIndex, extents);
+}
+
+function computeRasterBandRawValueExtentsWithoutMemoization(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents {
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const range = computeBandPixelValueRange(pixels);
+  if (!Number.isFinite(range.min)) return IDENTITY_RAW_VALUE_EXTENTS;
+  return { min: range.min, max: range.max };
+}
+
+export function computePerBandRawValueExtentsForRaster(
+  raster: RasterImage,
+): ReadonlyArray<SingleBandScalarExtents> {
+  const extents: SingleBandScalarExtents[] = [];
+  for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
+    extents.push(computeRasterBandRawValueExtents(raster, bandIndex));
+  }
+  return extents;
 }
 
 export function computeSingleBandRasterUnitExtents(

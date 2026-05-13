@@ -116,6 +116,7 @@ import {
   type BusyEntryRegistrar,
 } from "@/state/busy-state-context";
 import { PixelReadoutProvider } from "@/state/pixel-readout-context";
+import { RightPanelCollapsedStateProvider } from "@/state/right-panel-collapsed-state";
 import {
   RegionToolProvider,
   useRegionTool,
@@ -174,10 +175,12 @@ export function App(): JSX.Element {
           <RegionToolProvider>
             <PixelReadoutProvider>
               <BusyStateProvider>
-                <ApplicationShell />
-                <AboutDialog />
-                <AppBusyModal />
-                <Toaster />
+                <RightPanelCollapsedStateProvider>
+                  <ApplicationShell />
+                  <AboutDialog />
+                  <AppBusyModal />
+                  <Toaster />
+                </RightPanelCollapsedStateProvider>
               </BusyStateProvider>
             </PixelReadoutProvider>
           </RegionToolProvider>
@@ -1405,6 +1408,14 @@ function extractRasterFromContentOrNull(
   return content.source.raster;
 }
 
+function extractImageSourceKindFromContentOrNull(
+  content: ViewportCellContent | null,
+): ViewportRightPanelActiveSource["imageSourceKind"] {
+  if (!content) return null;
+  if (content.source.kind === "raster") return "raster";
+  return "browser-source";
+}
+
 interface BuildRightPanelActiveSourceInputs {
   readonly viewportIndex: number;
   readonly content: ViewportCellContent | null;
@@ -1423,6 +1434,7 @@ function buildRightPanelActiveSource(
     viewportNumber: getViewportNumberFromIndex(viewportIndex),
     metadata: buildMetadataDisplayForActiveContentOrNull(content, currentProjectFilePath),
     raster,
+    imageSourceKind: extractImageSourceKindFromContentOrNull(content),
     selectedBandIndex: renderingState.selectedBandIndex,
     onSelectBandIndex: (bandIndex) =>
       renderingApi.setRenderingState(viewportIndex, {

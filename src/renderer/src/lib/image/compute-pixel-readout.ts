@@ -1,3 +1,4 @@
+import type { SingleBandScalarExtents } from "@/lib/image/compute-image-channel-extents";
 import {
   getRasterBandLabelOrDefault,
   type RasterImage,
@@ -7,6 +8,7 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 const SIGNIFICANT_FIGURES_FOR_FLOAT_VALUES = 4;
 const RGBA_BAND_LABELS: ReadonlyArray<string> = ["Red", "Green", "Blue", "Alpha"];
+const FINITE_DEGENERATE_NORMALIZED_FRACTION = 0;
 
 export interface ViewportPixelReadoutBands {
   readonly values: ReadonlyArray<number>;
@@ -65,7 +67,7 @@ function readNumberOrZero(typedArray: ArrayLike<number>, index: number): number 
   return typedArray[index] ?? 0;
 }
 
-export function formatPixelReadoutValueForDisplay(
+export function formatSinglePixelReadoutValue(
   value: number,
   sampleFormat: RasterSampleFormat,
 ): string {
@@ -73,6 +75,8 @@ export function formatPixelReadoutValueForDisplay(
   if (sampleFormat === "float") return formatFloatToFourSignificantFigures(value);
   return value.toString();
 }
+
+export const formatPixelReadoutValueForDisplay = formatSinglePixelReadoutValue;
 
 function formatFloatToFourSignificantFigures(value: number): string {
   if (value === 0) return "0";
@@ -83,5 +87,31 @@ export function formatPixelReadoutValuesAsCommaSeparatedList(
   values: ReadonlyArray<number>,
   sampleFormat: RasterSampleFormat,
 ): string {
-  return values.map((value) => formatPixelReadoutValueForDisplay(value, sampleFormat)).join(", ");
+  return values.map((value) => formatSinglePixelReadoutValue(value, sampleFormat)).join(", ");
+}
+
+export function computePerBandNormalizedFractionsForReadout(
+  values: ReadonlyArray<number> | null,
+  perBandUnitExtents: ReadonlyArray<SingleBandScalarExtents>,
+): ReadonlyArray<number | null> {
+  if (!values) return perBandUnitExtents.map(() => null);
+  return perBandUnitExtents.map((extents, bandIndex) =>
+    computeSingleBandNormalizedFractionOrNull(values[bandIndex], extents),
+  );
+}
+
+function computeSingleBandNormalizedFractionOrNull(
+  rawValue: number | undefined,
+  extents: SingleBandScalarExtents,
+): number | null {
+  if (rawValue === undefined || !Number.isFinite(rawValue)) return null;
+  const span = extents.max - extents.min;
+  if (span <= 0) return FINITE_DEGENERATE_NORMALIZED_FRACTION;
+  return clampToUnit((rawValue - extents.min) / span);
+}
+
+function clampToUnit(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }

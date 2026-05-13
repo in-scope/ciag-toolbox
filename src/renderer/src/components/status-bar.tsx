@@ -1,8 +1,8 @@
-import { formatPixelReadoutValuesAsCommaSeparatedList } from "@/lib/image/compute-pixel-readout";
 import {
-  useCurrentPixelReadoutSnapshot,
-  type ViewportPixelReadoutSnapshot,
-} from "@/state/pixel-readout-context";
+  buildStatusBarReadoutFieldsFromSnapshot,
+  type StatusBarReadoutFields,
+} from "@/lib/image/status-bar-readout-fields";
+import { useCurrentPixelReadoutSnapshot } from "@/state/pixel-readout-context";
 
 export function StatusBar(): JSX.Element {
   const snapshot = useCurrentPixelReadoutSnapshot();
@@ -12,26 +12,23 @@ export function StatusBar(): JSX.Element {
       aria-label="Pixel readout"
       className="flex h-6 shrink-0 items-center gap-4 border-t bg-card px-3 text-[11px] text-muted-foreground"
     >
-      {snapshot ? <StatusBarReadoutRow snapshot={snapshot} /> : null}
+      {snapshot ? (
+        <StatusBarReadoutRow fields={buildStatusBarReadoutFieldsFromSnapshot(snapshot)} />
+      ) : null}
     </div>
   );
 }
 
-function StatusBarReadoutRow({
-  snapshot,
-}: {
-  snapshot: ViewportPixelReadoutSnapshot;
-}): JSX.Element {
+function StatusBarReadoutRow({ fields }: { fields: StatusBarReadoutFields }): JSX.Element {
   return (
     <>
-      <StatusBarLabelValue label="Viewport" value={String(snapshot.viewportNumber)} />
-      <StatusBarLabelValue label="X" value={String(snapshot.imagePixelX)} />
-      <StatusBarLabelValue label="Y" value={String(snapshot.imagePixelY)} />
-      <StatusBarSelectedBandLabel
-        selectedBandIndex={snapshot.selectedBandIndex}
-        bandCount={snapshot.bandCount}
-      />
-      <StatusBarValuesLabel snapshot={snapshot} />
+      <StatusBarLabelValue label="Viewport" value={fields.viewportNumber} />
+      <StatusBarLabelValue label="X" value={fields.imagePixelX} />
+      <StatusBarLabelValue label="Y" value={fields.imagePixelY} />
+      {fields.activeBandLabel ? (
+        <StatusBarLabelValue label="Band" value={fields.activeBandLabel} />
+      ) : null}
+      <StatusBarLabelValue label="Value" value={fields.activeBandValue} />
     </>
   );
 }
@@ -43,31 +40,4 @@ function StatusBarLabelValue({ label, value }: { label: string; value: string })
       <span className="font-mono text-foreground">{value}</span>
     </span>
   );
-}
-
-function StatusBarSelectedBandLabel({
-  selectedBandIndex,
-  bandCount,
-}: {
-  selectedBandIndex: number;
-  bandCount: number;
-}): JSX.Element | null {
-  if (bandCount <= 0) return null;
-  const value = `${selectedBandIndex + 1} of ${bandCount}`;
-  return <StatusBarLabelValue label="Band" value={value} />;
-}
-
-function StatusBarValuesLabel({
-  snapshot,
-}: {
-  snapshot: ViewportPixelReadoutSnapshot;
-}): JSX.Element {
-  if (!snapshot.bands) {
-    return <StatusBarLabelValue label="Values" value="-" />;
-  }
-  const formatted = formatPixelReadoutValuesAsCommaSeparatedList(
-    snapshot.bands.values,
-    snapshot.bands.sampleFormat,
-  );
-  return <StatusBarLabelValue label="Values" value={formatted} />;
 }

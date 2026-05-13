@@ -3,6 +3,10 @@ import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "reac
 import { BandThumbnail } from "@/components/band-thumbnail";
 import { KeepBandsModal } from "@/components/keep-bands-modal";
 import {
+  PixelInspectorSection,
+  shouldShowPixelInspectorSection,
+} from "@/components/pixel-inspector-section";
+import {
   SpectrumPlot,
   type SpectrumLinePlotInput,
 } from "@/components/spectrum-plot";
@@ -40,10 +44,13 @@ import {
 } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 
+export type ViewportRightPanelImageSourceKind = "raster" | "browser-source";
+
 export interface ViewportRightPanelActiveSource {
   readonly viewportNumber: number;
   readonly metadata: ViewportImageMetadataDisplay | null;
   readonly raster: RasterImage | null;
+  readonly imageSourceKind: ViewportRightPanelImageSourceKind | null;
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -81,6 +88,11 @@ function collectVisibleRightPanelSections(
   }
   if (shouldShowBandsSection(activeSource)) {
     sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
+  }
+  if (activeSource && shouldShowPixelInspectorSection(activeSource)) {
+    sections.push(
+      <PixelInspectorSection key="pixel-inspector" activeSource={activeSource} />,
+    );
   }
   if (shouldShowSpectraSection(activeSource)) {
     sections.push(<SpectraSection key="spectra" activeSource={activeSource!} />);
