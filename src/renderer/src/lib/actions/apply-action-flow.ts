@@ -2,15 +2,19 @@ import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
+import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
+import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import type { ViewportRenderingState } from "@/lib/actions/viewport-action";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
+import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
 import {
   placeClonedSourceContentAtIndex,
   type ViewportContentMap,
   type ViewportContentMapUpdater,
 } from "@/lib/image/place-cloned-source-content";
+import type { BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
   gridLayout: GridLayout;
@@ -21,82 +25,281 @@ export interface ApplyActionFlowBindings {
   setPendingDuplicate: (pending: PendingDuplicateReplace | null) => void;
   getRenderingState: (index: number) => ViewportRenderingState;
   setRenderingState: (index: number, next: ViewportRenderingState) => void;
+  busyRegistrar: BusyEntryRegistrar;
 }
 
 export function applyActionInPlaceAtSourceIndex(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (action.transformSource) {
+    void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceWithoutBusyIndicator(action, parameterValues, sourceIndex, bindings);
+}
+
+function applyActionInPlaceWithoutBusyIndicator(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
   try {
-    const previous = bindings.getRenderingState(sourceIndex);
-    bindings.setRenderingState(sourceIndex, applyActionAndTagOperationLabel(action, previous));
+    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      sourceIndex,
+      bindings,
+    );
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
   }
 }
 
+async function runApplyActionInPlaceWithBusyIndicator(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+): Promise<void> {
+  const handle = bindings.busyRegistrar.registerViewportBusyEntry({
+    viewportIndex: sourceIndex,
+    label: `Applying ${action.label}...`,
+  });
+  try {
+    await yieldOnceSoBusyOverlayCanPaint();
+    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      sourceIndex,
+      bindings,
+    );
+    toast.success(action.successMessage);
+  } catch (error) {
+    toast.error(formatActionErrorMessage(action.label, error));
+  } finally {
+    handle.clear();
+  }
+}
+
+function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function replaceSourceAtIndexWhenActionTransformsSource(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!action.transformSource) return;
+  const content = bindings.imagesByIndex.get(sourceIndex);
+  if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
+  const nextSource = action.transformSource(content.source, parameterValues);
+  bindings.setImagesByIndex((previous) =>
+    writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
+  );
+}
+
+function writeAppliedRenderingStateInheritingFromSource(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const inherited = bindings.getRenderingState(sourceIndex);
+  bindings.setRenderingState(
+    targetIndex,
+    applyActionAndTagOperationLabel(action, parameterValues, inherited),
+  );
+}
+
 function applyActionAndTagOperationLabel(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   previous: ViewportRenderingState,
 ): ViewportRenderingState {
+  const appliedLabel = resolveAppliedLabelForActionAndParameters(action, parameterValues);
+  const applied = action.apply(previous, parameterValues);
   return {
-    ...action.apply(previous),
-    lastAppliedOperationLabel: action.appliedLabel,
+    ...applied,
+    lastAppliedOperationLabel: appliedLabel,
+    operationHistory: appendOperationHistoryEntry(applied.operationHistory, {
+      actionId: action.id,
+      actionLabel: action.label,
+      appliedLabel,
+      parameterValues,
+    }),
   };
+}
+
+function resolveAppliedLabelForActionAndParameters(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+): string {
+  if (action.formatAppliedLabel) return action.formatAppliedLabel(parameterValues);
+  return action.appliedLabel;
 }
 
 export function applyActionToDuplicateOfSource(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
-  if (tryDuplicateAndApplyInEmptyViewport(action, sourceContent, bindings)) return;
-  if (tryDuplicateAndApplyByExpandingGrid(action, sourceContent, bindings)) return;
-  bindings.setPendingDuplicate({ sourceIndex, sourceContent, postDuplicateAction: action });
+  if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
+  if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
+  bindings.setPendingDuplicate({
+    sourceIndex,
+    sourceContent,
+    postDuplicateAction: { action, parameterValues },
+  });
 }
 
 function tryDuplicateAndApplyInEmptyViewport(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
   const empty = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
   if (empty === null) return false;
-  void runDuplicateAndApplyAtTargetIndex(action, sourceContent, empty, bindings);
+  void runDuplicateAndApplyAtTargetIndex(action, parameterValues, sourceContent, sourceIndex, empty, bindings);
   return true;
 }
 
 function tryDuplicateAndApplyByExpandingGrid(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
   const expanded = getNextLargerGridLayout(bindings.gridLayout);
   if (expanded === null) return false;
   const newIndex = bindings.cellCount;
   bindings.setGridLayout(expanded);
-  void runDuplicateAndApplyAtTargetIndex(action, sourceContent, newIndex, bindings);
+  void runDuplicateAndApplyAtTargetIndex(
+    action,
+    parameterValues,
+    sourceContent,
+    sourceIndex,
+    newIndex,
+    bindings,
+  );
   return true;
 }
 
 export async function runDuplicateAndApplyAtTargetIndex(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): Promise<void> {
+  const handle = action.transformSource
+    ? bindings.busyRegistrar.registerViewportBusyEntry({
+        viewportIndex: targetIndex,
+        label: `Applying ${action.label}...`,
+      })
+    : null;
+  try {
+    if (handle) await yieldOnceSoBusyOverlayCanPaint();
+    if (action.transformSource) {
+      await placeTransformedDuplicateAtTargetIndex(
+        action,
+        parameterValues,
+        sourceContent,
+        targetIndex,
+        bindings,
+      );
+    } else {
+      await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
+    }
+    writeAppliedRenderingStateInheritingFromSource(
+      action,
+      parameterValues,
+      sourceIndex,
+      targetIndex,
+      bindings,
+    );
+    clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
+    toast.success(action.successMessage);
+  } catch (error) {
+    toast.error(formatActionErrorMessage(action.label, error));
+  } finally {
+    handle?.clear();
+  }
+}
+
+function clearConsumedSourceStateAfterDuplicateApply(
+  action: RegisteredViewportAction,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!action.clearConsumedSourceStateAfterApply) return;
+  if (sourceIndex === targetIndex) return;
+  const current = bindings.getRenderingState(sourceIndex);
+  bindings.setRenderingState(
+    sourceIndex,
+    action.clearConsumedSourceStateAfterApply(current),
+  );
+}
+
+async function placeTransformedDuplicateAtTargetIndex(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
-  try {
-    await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
-    const previous = bindings.getRenderingState(targetIndex);
-    bindings.setRenderingState(targetIndex, applyActionAndTagOperationLabel(action, previous));
-    toast.success(action.successMessage);
-  } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
-  }
+  const transformedContent = await cloneAndTransformSourceContent(
+    sourceContent,
+    action.transformSource!,
+    parameterValues,
+  );
+  bindings.setImagesByIndex((previous) =>
+    writeViewportContentAtIndex(previous, targetIndex, transformedContent),
+  );
+}
+
+async function cloneAndTransformSourceContent(
+  sourceContent: ViewportCellContent,
+  transform: NonNullable<RegisteredViewportAction["transformSource"]>,
+  parameterValues: ParameterValuesById,
+): Promise<ViewportCellContent> {
+  const clonedSource = await cloneViewportImageSource(sourceContent.source);
+  const transformedSource = transform(clonedSource, parameterValues);
+  return {
+    fileName: sourceContent.fileName,
+    source: transformedSource,
+    originalFilePath: sourceContent.originalFilePath,
+    fileSizeBytes: sourceContent.fileSizeBytes,
+  };
+}
+
+function writeViewportContentAtIndex(
+  previous: ViewportContentMap,
+  index: number,
+  next: ViewportCellContent,
+): ViewportContentMap {
+  const updated = new Map(previous);
+  updated.set(index, next);
+  return updated;
 }
 
 function formatActionErrorMessage(actionLabel: string, error: unknown): string {

@@ -1,3 +1,8 @@
+import {
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+  type RasterTypedArray,
+} from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface RgbChannelExtents {
@@ -5,26 +10,165 @@ export interface RgbChannelExtents {
   readonly max: readonly [number, number, number];
 }
 
+export interface SingleBandScalarExtents {
+  readonly min: number;
+  readonly max: number;
+}
+
 export const IDENTITY_RGB_CHANNEL_EXTENTS: RgbChannelExtents = {
   min: [0, 0, 0],
   max: [1, 1, 1],
 };
+
+export const IDENTITY_SINGLE_BAND_EXTENTS: SingleBandScalarExtents = {
+  min: 0,
+  max: 1,
+};
+
+const IDENTITY_RAW_VALUE_EXTENTS: SingleBandScalarExtents = {
+  min: 0,
+  max: 1,
+};
+
+const rasterBandRawValueExtentsCache: WeakMap<
+  RasterImage,
+  Map<number, SingleBandScalarExtents>
+> = new WeakMap();
 
 const BYTES_PER_PIXEL = 4;
 const BYTE_TO_UNIT_SCALE = 1 / 255;
 
 export function computeImageRgbChannelExtents(
   source: ViewportImageSource,
+  selectedBandIndex: number = 0,
 ): RgbChannelExtents {
+  if (source.kind === "raster") {
+    return broadcastSingleBandExtentsAcrossRgb(
+      computeSingleBandRasterUnitExtents(source.raster, selectedBandIndex),
+    );
+  }
   const rgbaBytes = readRgbaBytesFromSource(source);
   return computeRgbChannelExtentsFromBytes(rgbaBytes);
 }
 
+export function computeRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents {
+  const cached = readCachedRasterBandRawValueExtents(raster, bandIndex);
+  if (cached) return cached;
+  const computed = computeRasterBandRawValueExtentsWithoutMemoization(raster, bandIndex);
+  storeRasterBandRawValueExtents(raster, bandIndex, computed);
+  return computed;
+}
+
+function readCachedRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents | undefined {
+  const innerMap = rasterBandRawValueExtentsCache.get(raster);
+  if (!innerMap) return undefined;
+  return innerMap.get(bandIndex);
+}
+
+function storeRasterBandRawValueExtents(
+  raster: RasterImage,
+  bandIndex: number,
+  extents: SingleBandScalarExtents,
+): void {
+  let innerMap = rasterBandRawValueExtentsCache.get(raster);
+  if (!innerMap) {
+    innerMap = new Map();
+    rasterBandRawValueExtentsCache.set(raster, innerMap);
+  }
+  innerMap.set(bandIndex, extents);
+}
+
+function computeRasterBandRawValueExtentsWithoutMemoization(
+  raster: RasterImage,
+  bandIndex: number,
+): SingleBandScalarExtents {
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const range = computeBandPixelValueRange(pixels);
+  if (!Number.isFinite(range.min)) return IDENTITY_RAW_VALUE_EXTENTS;
+  return { min: range.min, max: range.max };
+}
+
+export function computePerBandRawValueExtentsForRaster(
+  raster: RasterImage,
+): ReadonlyArray<SingleBandScalarExtents> {
+  const extents: SingleBandScalarExtents[] = [];
+  for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
+    extents.push(computeRasterBandRawValueExtents(raster, bandIndex));
+  }
+  return extents;
+}
+
+export function computeSingleBandRasterUnitExtents(
+  raster: RasterImage,
+  bandIndex: number = 0,
+): SingleBandScalarExtents {
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const range = computeBandPixelValueRange(pixels);
+  if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
+  const containerScale = chooseUnitScaleForRaster(raster);
+  return {
+    min: clampToUnit(range.min * containerScale),
+    max: clampToUnit(range.max * containerScale),
+  };
+}
+
+function broadcastSingleBandExtentsAcrossRgb(
+  scalar: SingleBandScalarExtents,
+): RgbChannelExtents {
+  return {
+    min: [scalar.min, scalar.min, scalar.min],
+    max: [scalar.max, scalar.max, scalar.max],
+  };
+}
+
 function readRgbaBytesFromSource(
-  source: ViewportImageSource,
+  source: Exclude<ViewportImageSource, { kind: "raster" }>,
 ): Uint8ClampedArray | Uint8Array {
   if (source.kind === "pixels") return source.pixels;
   return readRgbaBytesByDrawingToOffscreenCanvas(source.image);
+}
+
+interface NumericRange {
+  min: number;
+  max: number;
+}
+
+function computeBandPixelValueRange(pixels: RasterTypedArray): NumericRange {
+  const range: NumericRange = {
+    min: Number.POSITIVE_INFINITY,
+    max: Number.NEGATIVE_INFINITY,
+  };
+  for (let i = 0; i < pixels.length; i++) {
+    expandRangeWithValue(range, pixels[i] ?? 0);
+  }
+  return range;
+}
+
+function expandRangeWithValue(range: NumericRange, value: number): void {
+  if (value < range.min) range.min = value;
+  if (value > range.max) range.max = value;
+}
+
+function chooseUnitScaleForRaster(raster: RasterImage): number {
+  if (raster.sampleFormat === "float") return 1;
+  return 1 / containerMaxForBitsPerSample(raster.bitsPerSample);
+}
+
+function containerMaxForBitsPerSample(bitsPerSample: number): number {
+  if (bitsPerSample <= 0) return 1;
+  return Math.pow(2, bitsPerSample) - 1;
+}
+
+function clampToUnit(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }
 
 function readRgbaBytesByDrawingToOffscreenCanvas(

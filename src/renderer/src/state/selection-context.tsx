@@ -26,6 +26,7 @@ export interface ViewportSelectionState {
   selectedCount: number;
   isViewportSelected: (index: number) => boolean;
   selectViewportFromClick: (index: number, modifiers: ViewportSelectionClickModifiers) => void;
+  replaceSelection: (indices: ReadonlySet<number>) => void;
   clearSelection: () => void;
   pruneSelectionToCellCount: (cellCount: number) => void;
   compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
@@ -63,6 +64,7 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
   const [selectedIndices, setSelectedIndices] = useState<ReadonlySet<number>>(EMPTY_SELECTION);
   const anchorRef = useRef<number | null>(null);
   const selectViewportFromClick = useSelectViewportFromClickCallback(anchorRef, setSelectedIndices);
+  const replaceSelection = useReplaceSelectionCallback(anchorRef, setSelectedIndices);
   const clearSelection = useClearSelectionCallback(anchorRef, setSelectedIndices);
   const pruneSelectionToCellCount = usePruneSelectionToCellCountCallback(
     anchorRef,
@@ -77,6 +79,7 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
       buildSelectionState({
         selectedIndices,
         selectViewportFromClick,
+        replaceSelection,
         clearSelection,
         pruneSelectionToCellCount,
         compactSelectionAfterRemovingIndex,
@@ -84,6 +87,7 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
     [
       selectedIndices,
       selectViewportFromClick,
+      replaceSelection,
       clearSelection,
       pruneSelectionToCellCount,
       compactSelectionAfterRemovingIndex,
@@ -91,9 +95,28 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
   );
 }
 
+function useReplaceSelectionCallback(
+  anchorRef: SelectionAnchorRef,
+  setSelectedIndices: SelectionSetter,
+): ViewportSelectionState["replaceSelection"] {
+  return useCallback(
+    (indices) => {
+      anchorRef.current = pickFirstIndexFromSetOrNull(indices);
+      setSelectedIndices(new Set(indices));
+    },
+    [anchorRef, setSelectedIndices],
+  );
+}
+
+function pickFirstIndexFromSetOrNull(indices: ReadonlySet<number>): number | null {
+  for (const value of indices) return value;
+  return null;
+}
+
 interface SelectionStateInputs {
   selectedIndices: ReadonlySet<number>;
   selectViewportFromClick: ViewportSelectionState["selectViewportFromClick"];
+  replaceSelection: ViewportSelectionState["replaceSelection"];
   clearSelection: ViewportSelectionState["clearSelection"];
   pruneSelectionToCellCount: ViewportSelectionState["pruneSelectionToCellCount"];
   compactSelectionAfterRemovingIndex: ViewportSelectionState["compactSelectionAfterRemovingIndex"];
@@ -105,6 +128,7 @@ function buildSelectionState(inputs: SelectionStateInputs): ViewportSelectionSta
     selectedCount: inputs.selectedIndices.size,
     isViewportSelected: (index) => inputs.selectedIndices.has(index),
     selectViewportFromClick: inputs.selectViewportFromClick,
+    replaceSelection: inputs.replaceSelection,
     clearSelection: inputs.clearSelection,
     pruneSelectionToCellCount: inputs.pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex: inputs.compactSelectionAfterRemovingIndex,

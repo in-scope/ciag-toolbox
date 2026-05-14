@@ -38,13 +38,52 @@ function sendMenuChannelToRenderer(
   window.webContents.send(channel);
 }
 
-function buildOpenImageMenuItem(
+function buildOpenImagesMenuItem(
   window: BrowserWindow,
 ): MenuItemConstructorOptions {
   return {
-    label: "Open Image...",
+    label: "Open Images...",
     accelerator: "CmdOrCtrl+O",
     click: () => sendMenuChannelToRenderer(window, "menu:open-image"),
+  };
+}
+
+function buildSaveImageMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Image...",
+    accelerator: "CmdOrCtrl+S",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-image"),
+  };
+}
+
+function buildOpenProjectMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Open Project...",
+    accelerator: "CmdOrCtrl+Shift+O",
+    click: () => sendMenuChannelToRenderer(window, "menu:open-project"),
+  };
+}
+
+function buildSaveProjectMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Project",
+    accelerator: "CmdOrCtrl+Shift+S",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-project"),
+  };
+}
+
+function buildSaveProjectAsMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Save Project As...",
+    click: () => sendMenuChannelToRenderer(window, "menu:save-project-as"),
   };
 }
 
@@ -52,7 +91,12 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
     submenu: [
-      buildOpenImageMenuItem(window),
+      buildOpenImagesMenuItem(window),
+      buildSaveImageMenuItem(window),
+      { type: "separator" },
+      buildOpenProjectMenuItem(window),
+      buildSaveProjectMenuItem(window),
+      buildSaveProjectAsMenuItem(window),
       { type: "separator" },
       isRunningOnMac ? { role: "close" } : { role: "quit" },
     ],

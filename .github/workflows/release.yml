@@ -87,10 +87,12 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish GitHub Release
+    name: Upload installers to GitHub Release
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - name: Download Windows installer artifact
         uses: actions/download-artifact@v4
@@ -104,12 +106,19 @@ jobs:
           name: macos-dmgs
           path: artifacts
 
-      - name: Create GitHub Release with installer artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          files: artifacts/*
-          draft: false
-          prerelease: false
-          fail_on_unmatched_files: true
+      - name: Ensure GitHub Release exists for tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes ""
+          fi
+
+      - name: Upload installers to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" artifacts/* --clobber

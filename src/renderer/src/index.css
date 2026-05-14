@@ -4,6 +4,7 @@
 @source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant light (&:not(:is(.dark *)));
 
 :root {
   --background: oklch(1 0 0);

@@ -5,6 +5,11 @@ export interface AppInfo {
   version: string;
 }
 
+export interface OpenImageDialogSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
 export type OpenImageDialogResult =
   | { canceled: true }
   | {
@@ -12,6 +17,142 @@ export type OpenImageDialogResult =
       filePath: string;
       fileName: string;
       bytes: Uint8Array;
+      contentHash: string;
+      sidecar?: OpenImageDialogSidecar;
+    };
+
+export interface OpenImagesDialogFileMetadataEntry {
+  fileName: string;
+  filePath: string;
+  fileSizeBytes: number;
+  mtimeMs: number;
+}
+
+export type OpenImagesDialogResult =
+  | { canceled: true }
+  | { canceled: false; files: ReadonlyArray<OpenImagesDialogFileMetadataEntry> };
+
+export interface OpenedImagesFileSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export interface OpenedImagesFileEntry {
+  fileName: string;
+  filePath: string;
+  bytes: Uint8Array;
+  contentHash: string;
+  fileSizeBytes: number;
+  mtimeMs: number;
+  sidecar?: OpenedImagesFileSidecar;
+}
+
+export interface SaveImageDialogFilter {
+  name: string;
+  extensions: ReadonlyArray<string>;
+}
+
+export interface SaveImageDialogSidecar {
+  extension: string;
+  bytes: Uint8Array;
+}
+
+export interface SaveImageDialogRequest {
+  suggestedFileName: string;
+  bytes: Uint8Array;
+  fileFilter: SaveImageDialogFilter;
+  sidecar?: SaveImageDialogSidecar;
+}
+
+export type SaveImageDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
+export interface SaveBundleDraftRenderingState {
+  normalizationEnabled: boolean;
+  selectedBandIndex: number;
+  lastAppliedOperationLabel: string | null;
+}
+
+export type SaveBundleDraftOperationHistoryParameterValue = number | string | boolean;
+
+export interface SaveBundleDraftOperationHistoryEntry {
+  actionId: string;
+  actionLabel: string;
+  appliedLabel: string;
+  parameterValues: Readonly<Record<string, SaveBundleDraftOperationHistoryParameterValue>>;
+  timestampMs: number;
+}
+
+export interface SaveBundleDraftBakedAssetSidecar {
+  extension: string;
+  bytes: Uint8Array;
+}
+
+export interface SaveBundleDraftBakedAsset {
+  kind: "baked";
+  bytes: Uint8Array;
+  extension: string;
+  sidecar?: SaveBundleDraftBakedAssetSidecar;
+}
+
+export interface SaveBundleDraftExternalAsset {
+  kind: "external";
+  absolutePath: string;
+  extension: string;
+}
+
+export type SaveBundleDraftAsset =
+  | SaveBundleDraftBakedAsset
+  | SaveBundleDraftExternalAsset;
+
+export interface SaveBundleDraftViewportEntry {
+  index: number;
+  fileName: string;
+  asset: SaveBundleDraftAsset;
+  renderingState: SaveBundleDraftRenderingState;
+  operationHistory: ReadonlyArray<SaveBundleDraftOperationHistoryEntry>;
+}
+
+export interface SaveBundleDraft {
+  formatVersion: number;
+  gridLayout: string;
+  selectedViewportIndices: ReadonlyArray<number>;
+  viewports: ReadonlyArray<SaveBundleDraftViewportEntry>;
+}
+
+export interface SaveBundleDialogRequest {
+  draft: SaveBundleDraft;
+  currentProjectFilePath: string | null;
+  saveAs: boolean;
+}
+
+export type SaveBundleDialogResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string };
+
+export type OpenBundleDialogResult =
+  | { canceled: true }
+  | { canceled: false; projectFilePath: string; bytes: Uint8Array };
+
+export interface ReadBundleAssetRequest {
+  projectFilePath: string;
+  relativePath: string;
+}
+
+export interface ReadBundleAssetSidecar {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export type ReadBundleAssetResult =
+  | { kind: "missing"; relativePath: string }
+  | {
+      kind: "found";
+      absolutePath: string;
+      fileName: string;
+      bytes: Uint8Array;
+      sidecar?: ReadBundleAssetSidecar;
     };
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -28,7 +169,17 @@ export type UnsubscribeThemeListener = () => void;
 
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
+const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
+const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
+const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
+const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
+const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
+const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
+const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
+const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
+const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
+const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -41,6 +192,54 @@ function showOpenImageDialogThroughMainProcess(): Promise<OpenImageDialogResult>
   return ipcRenderer.invoke(
     OPEN_IMAGE_DIALOG_CHANNEL,
   ) as Promise<OpenImageDialogResult>;
+}
+
+function showOpenImagesDialogThroughMainProcess(): Promise<OpenImagesDialogResult> {
+  return ipcRenderer.invoke(
+    OPEN_IMAGES_DIALOG_CHANNEL,
+  ) as Promise<OpenImagesDialogResult>;
+}
+
+function readSingleOpenedImageFileThroughMainProcess(
+  metadata: OpenImagesDialogFileMetadataEntry,
+): Promise<OpenedImagesFileEntry> {
+  return ipcRenderer.invoke(
+    OPEN_IMAGES_READ_FILE_CHANNEL,
+    metadata,
+  ) as Promise<OpenedImagesFileEntry>;
+}
+
+function showSaveImageDialogThroughMainProcess(
+  request: SaveImageDialogRequest,
+): Promise<SaveImageDialogResult> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_DIALOG_CHANNEL,
+    request,
+  ) as Promise<SaveImageDialogResult>;
+}
+
+function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
+  return ipcRenderer.invoke(
+    OPEN_BUNDLE_DIALOG_CHANNEL,
+  ) as Promise<OpenBundleDialogResult>;
+}
+
+function readBundleAssetThroughMainProcess(
+  request: ReadBundleAssetRequest,
+): Promise<ReadBundleAssetResult> {
+  return ipcRenderer.invoke(
+    READ_BUNDLE_ASSET_CHANNEL,
+    request,
+  ) as Promise<ReadBundleAssetResult>;
+}
+
+function showSaveBundleDialogThroughMainProcess(
+  request: SaveBundleDialogRequest,
+): Promise<SaveBundleDialogResult> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_DIALOG_CHANNEL,
+    request,
+  ) as Promise<SaveBundleDialogResult>;
 }
 
 function subscribeToMenuChannel(
@@ -56,6 +255,30 @@ function subscribeToOpenImageMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
   return subscribeToMenuChannel(MENU_OPEN_IMAGE_CHANNEL, listener);
+}
+
+function subscribeToSaveImageMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_IMAGE_CHANNEL, listener);
+}
+
+function subscribeToOpenProjectMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_OPEN_PROJECT_CHANNEL, listener);
+}
+
+function subscribeToSaveProjectMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_PROJECT_CHANNEL, listener);
+}
+
+function subscribeToSaveProjectAsMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_SAVE_PROJECT_AS_CHANNEL, listener);
 }
 
 function subscribeToAboutMenuEvent(
@@ -88,7 +311,17 @@ const apiBridge = {
   },
   getAppInfo: fetchAppInfoFromMainProcess,
   openImageDialog: showOpenImageDialogThroughMainProcess,
+  openImagesDialog: showOpenImagesDialogThroughMainProcess,
+  readOpenedImageFile: readSingleOpenedImageFileThroughMainProcess,
+  saveImageDialog: showSaveImageDialogThroughMainProcess,
+  openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
+  readProjectBundleAsset: readBundleAssetThroughMainProcess,
+  saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
+  onMenuSaveImage: subscribeToSaveImageMenuEvent,
+  onMenuOpenProject: subscribeToOpenProjectMenuEvent,
+  onMenuSaveProject: subscribeToSaveProjectMenuEvent,
+  onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,

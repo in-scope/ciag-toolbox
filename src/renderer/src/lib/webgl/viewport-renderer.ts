@@ -8,11 +8,25 @@ import {
   linkProgramOrThrow,
 } from "./shaders";
 import {
-  createTextureFromSource,
+  createTextureFromBrowserSource,
   deleteTextureSafely,
   getImageSourceDimensions,
   type ViewportImageSource,
 } from "./texture";
+import {
+  DEFAULT_RASTER_TILE_SIZE,
+  splitRasterBandIntoTiles,
+} from "./raster-tile-splitter";
+import {
+  createR16FTextureForRasterTile,
+  deleteRasterTileTexturesSafely,
+  probeHalfFloatColorBufferExtension,
+  type RasterTileTexture,
+} from "./raster-tile-texture";
+import {
+  composeTileQuadTransform,
+  type QuadTransform,
+} from "./tile-quad-transform";
 import {
   IDENTITY_PAN,
   clampUserZoom,
@@ -25,18 +39,32 @@ import {
   type ViewportSize,
 } from "./view-transform";
 import {
+  convertCanvasPixelToImagePixelOrNull,
+  convertImagePixelToCanvasPointOrNull,
+  type CanvasPixelPoint,
+  type ImagePixelPoint,
+} from "./canvas-to-image-pixel";
+import {
   IDENTITY_RGB_CHANNEL_EXTENTS,
   computeImageRgbChannelExtents,
   type RgbChannelExtents,
 } from "@/lib/image/compute-image-channel-extents";
+import {
+  clampBandIndexToRaster,
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+} from "@/lib/image/raster-image";
 
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const TEXCOORD_ATTRIBUTE_LOCATION = 1;
 const VERTEX_FLOAT_COUNT = 4;
 const VERTEX_STRIDE_BYTES = VERTEX_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
-const TEXCOORD_OFFSET_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT;
 const INITIAL_USER_ZOOM = 1;
 const FALLBACK_SIZE: ViewportSize = { width: 1, height: 1 };
+
+const HALF_FLOAT_UNSUPPORTED_MESSAGE =
+  "Half-float texture support (EXT_color_buffer_half_float) was not detected. " +
+  "16-bit raster images may not display correctly on this hardware.";
 
 const FULLSCREEN_TEXTURED_QUAD_VERTICES = new Float32Array([
   -1, -1, 0, 1,
@@ -56,9 +84,14 @@ interface NormalizationUniformLocations {
   maxColor: WebGLUniformLocation | null;
 }
 
+interface BandModeUniformLocations {
+  isSingleBand: WebGLUniformLocation | null;
+}
+
 interface ProgramUniformLocations {
   quadTransform: QuadTransformUniformLocations;
   normalization: NormalizationUniformLocations;
+  bandMode: BandModeUniformLocations;
 }
 
 interface RendererProgramResources {
@@ -68,21 +101,28 @@ interface RendererProgramResources {
   uniforms: ProgramUniformLocations;
 }
 
-interface QuadTransform {
-  scale: ClipPoint;
-  translate: ClipPoint;
-}
-
 interface NormalizationState {
   enabled: boolean;
   extents: RgbChannelExtents;
 }
 
+interface RenderPassState {
+  readonly normalization: NormalizationState;
+  readonly isSingleBand: boolean;
+}
+
+export interface ViewportRendererOptions {
+  readonly onError?: (message: string) => void;
+}
+
 export class ViewportRenderer {
   private gl: WebGL2RenderingContext | null = null;
   private programResources: RendererProgramResources | null = null;
-  private texture: WebGLTexture | null = null;
+  private singleTexture: WebGLTexture | null = null;
+  private rasterTileTextures: RasterTileTexture[] = [];
   private currentSource: ViewportImageSource | null = null;
+  private selectedRasterBandIndex = 0;
+  private isSingleBandSource = false;
   private displaySize: ViewportSize = FALLBACK_SIZE;
   private imageSize: ViewportSize = FALLBACK_SIZE;
   private userZoom = INITIAL_USER_ZOOM;
@@ -91,22 +131,38 @@ export class ViewportRenderer {
     enabled: false,
     extents: IDENTITY_RGB_CHANNEL_EXTENTS,
   };
+  private readonly viewTransformChangeListeners = new Set<() => void>();
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
   private readonly handleContextRestored = (): void =>
     this.respondToContextRestored();
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly options: ViewportRendererOptions = {},
+  ) {
     this.attachContextLifecycleListeners();
     this.initializeWebGl();
   }
 
-  setImageSource(source: ViewportImageSource): void {
+  setImageSource(source: ViewportImageSource, selectedBandIndex: number = 0): void {
     this.currentSource = source;
+    this.selectedRasterBandIndex = clampBandIndexForSource(source, selectedBandIndex);
     this.imageSize = getImageSourceDimensions(source);
+    this.isSingleBandSource = isSingleBandSourceWithSelectedBand(source);
     this.cacheNormalizationExtentsForSource(source);
     this.resetViewState();
     this.uploadCurrentSourceIfReady();
+    this.draw();
+  }
+
+  setSelectedRasterBandIndex(bandIndex: number): void {
+    if (!this.currentSource || this.currentSource.kind !== "raster") return;
+    const clamped = clampBandIndexToRaster(this.currentSource.raster, bandIndex);
+    if (clamped === this.selectedRasterBandIndex) return;
+    this.selectedRasterBandIndex = clamped;
+    this.cacheNormalizationExtentsForSource(this.currentSource);
+    this.rebuildRasterTilesForSelectedBand();
     this.draw();
   }
 
@@ -119,7 +175,7 @@ export class ViewportRenderer {
   private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
     this.normalization = {
       enabled: this.normalization.enabled,
-      extents: computeImageRgbChannelExtents(source),
+      extents: computeImageRgbChannelExtents(source, this.selectedRasterBandIndex),
     };
   }
 
@@ -142,7 +198,7 @@ export class ViewportRenderer {
 
   zoomAtCanvasPoint(xPx: number, yPx: number, wheelDeltaY: number): void {
     const factor = computeWheelZoomFactor(wheelDeltaY);
-    const newZoom = clampUserZoom(this.userZoom * factor);
+    const newZoom = clampUserZoom(this.userZoom * factor, this.imageSize, this.displaySize);
     if (newZoom === this.userZoom) return;
     const cursorClip = convertCanvasPointToClipSpace(xPx, yPx, this.displaySize);
     this.userPan = computePanForZoomAtCursor(
@@ -158,6 +214,37 @@ export class ViewportRenderer {
   resetView(): void {
     this.resetViewState();
     this.draw();
+  }
+
+  getImagePixelAtCanvasPoint(xPx: number, yPx: number): ImagePixelPoint | null {
+    if (!this.currentSource) return null;
+    return convertCanvasPixelToImagePixelOrNull({
+      canvasPointPx: { x: xPx, y: yPx },
+      displaySize: this.displaySize,
+      imageSize: this.imageSize,
+      fitScale: computeFitToViewportScale(this.imageSize, this.displaySize),
+      userZoom: this.userZoom,
+      userPan: this.userPan,
+    });
+  }
+
+  getCanvasPointForImagePixel(imageX: number, imageY: number): CanvasPixelPoint | null {
+    if (!this.currentSource) return null;
+    return convertImagePixelToCanvasPointOrNull({
+      imagePixelPoint: { x: imageX, y: imageY },
+      displaySize: this.displaySize,
+      imageSize: this.imageSize,
+      fitScale: computeFitToViewportScale(this.imageSize, this.displaySize),
+      userZoom: this.userZoom,
+      userPan: this.userPan,
+    });
+  }
+
+  subscribeToViewTransformChanges(listener: () => void): () => void {
+    this.viewTransformChangeListeners.add(listener);
+    return () => {
+      this.viewTransformChangeListeners.delete(listener);
+    };
   }
 
   dispose(): void {
@@ -197,6 +284,7 @@ export class ViewportRenderer {
       return;
     }
     this.gl = gl;
+    reportHalfFloatExtensionMissingOnce(gl, this.options.onError);
     this.programResources = createViewportRendererProgram(gl);
     this.applyViewportToCanvasSize();
     this.uploadCurrentSourceIfReady();
@@ -206,7 +294,8 @@ export class ViewportRenderer {
   private respondToContextLost(event: Event): void {
     event.preventDefault();
     this.programResources = null;
-    this.texture = null;
+    this.singleTexture = null;
+    this.rasterTileTextures = [];
     this.gl = null;
     console.warn("[viewport] WebGL context lost");
   }
@@ -218,8 +307,34 @@ export class ViewportRenderer {
 
   private uploadCurrentSourceIfReady(): void {
     if (!this.gl || !this.currentSource) return;
-    deleteTextureSafely(this.gl, this.texture);
-    this.texture = createTextureFromSource(this.gl, this.currentSource);
+    this.releaseCurrentSourceTextures();
+    if (this.currentSource.kind === "raster") {
+      this.rasterTileTextures = createRasterTileTexturesForRasterBand(
+        this.gl,
+        this.currentSource.raster,
+        this.selectedRasterBandIndex,
+      );
+      return;
+    }
+    this.singleTexture = createTextureFromBrowserSource(this.gl, this.currentSource);
+  }
+
+  private rebuildRasterTilesForSelectedBand(): void {
+    if (!this.gl || !this.currentSource || this.currentSource.kind !== "raster") return;
+    deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
+    this.rasterTileTextures = createRasterTileTexturesForRasterBand(
+      this.gl,
+      this.currentSource.raster,
+      this.selectedRasterBandIndex,
+    );
+  }
+
+  private releaseCurrentSourceTextures(): void {
+    if (!this.gl) return;
+    deleteTextureSafely(this.gl, this.singleTexture);
+    this.singleTexture = null;
+    deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
+    this.rasterTileTextures = [];
   }
 
   private applyViewportToCanvasSize(): void {
@@ -228,18 +343,46 @@ export class ViewportRenderer {
   }
 
   private draw(): void {
-    const { gl, programResources, texture } = this;
+    const { gl, programResources } = this;
     if (!gl || !programResources) return;
     clearCanvasToTransparentBlack(gl);
-    if (!texture) return;
     const transform = this.computeCurrentQuadTransform();
-    drawTexturedFullscreenQuad(
-      gl,
-      programResources,
-      texture,
-      transform,
-      this.normalization,
-    );
+    const renderState = this.snapshotCurrentRenderState();
+    if (this.singleTexture) {
+      drawSingleTextureWithTransform(gl, programResources, this.singleTexture, transform, renderState);
+      this.notifyViewTransformChangeListeners();
+      return;
+    }
+    if (this.rasterTileTextures.length > 0) {
+      this.drawRasterTilesWithPerTileTransforms(gl, programResources, transform, renderState);
+    }
+    this.notifyViewTransformChangeListeners();
+  }
+
+  private notifyViewTransformChangeListeners(): void {
+    for (const listener of this.viewTransformChangeListeners) listener();
+  }
+
+  private snapshotCurrentRenderState(): RenderPassState {
+    return { normalization: this.normalization, isSingleBand: this.isSingleBandSource };
+  }
+
+  private drawRasterTilesWithPerTileTransforms(
+    gl: WebGL2RenderingContext,
+    programResources: RendererProgramResources,
+    globalTransform: QuadTransform,
+    renderState: RenderPassState,
+  ): void {
+    for (const tile of this.rasterTileTextures) {
+      const tileTransform = composeTileQuadTransform(globalTransform, tile, this.imageSize);
+      drawSingleTextureWithTransform(
+        gl,
+        programResources,
+        tile.texture,
+        tileTransform,
+        renderState,
+      );
+    }
   }
 
   private computeCurrentQuadTransform(): QuadTransform {
@@ -252,12 +395,46 @@ export class ViewportRenderer {
 
   private releaseAllWebGlResources(): void {
     if (!this.gl) return;
-    deleteTextureSafely(this.gl, this.texture);
+    this.releaseCurrentSourceTextures();
     deleteRendererProgramResources(this.gl, this.programResources);
-    this.texture = null;
     this.programResources = null;
     this.gl = null;
   }
+}
+
+let halfFloatExtensionWarningShown = false;
+
+function reportHalfFloatExtensionMissingOnce(
+  gl: WebGL2RenderingContext,
+  onError: ((message: string) => void) | undefined,
+): void {
+  if (probeHalfFloatColorBufferExtension(gl)) return;
+  if (halfFloatExtensionWarningShown) return;
+  halfFloatExtensionWarningShown = true;
+  if (onError) onError(HALF_FLOAT_UNSUPPORTED_MESSAGE);
+  else console.warn(`[viewport] ${HALF_FLOAT_UNSUPPORTED_MESSAGE}`);
+}
+
+function clampBandIndexForSource(source: ViewportImageSource, bandIndex: number): number {
+  if (source.kind !== "raster") return 0;
+  return clampBandIndexToRaster(source.raster, bandIndex);
+}
+
+function isSingleBandSourceWithSelectedBand(source: ViewportImageSource): boolean {
+  return source.kind === "raster";
+}
+
+function createRasterTileTexturesForRasterBand(
+  gl: WebGL2RenderingContext,
+  raster: RasterImage,
+  bandIndex: number,
+): RasterTileTexture[] {
+  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const rasterTiles = splitRasterBandIntoTiles(
+    { pixels, width: raster.width, height: raster.height },
+    DEFAULT_RASTER_TILE_SIZE,
+  );
+  return rasterTiles.map((tile) => createR16FTextureForRasterTile(gl, tile, raster));
 }
 
 function syncCanvasBackingResolution(
@@ -277,21 +454,31 @@ function clearCanvasToTransparentBlack(gl: WebGL2RenderingContext): void {
   gl.clear(gl.COLOR_BUFFER_BIT);
 }
 
-function drawTexturedFullscreenQuad(
+function drawSingleTextureWithTransform(
   gl: WebGL2RenderingContext,
   resources: RendererProgramResources,
   texture: WebGLTexture,
   transform: QuadTransform,
-  normalization: NormalizationState,
+  renderState: RenderPassState,
 ): void {
   gl.useProgram(resources.program);
   applyQuadTransformUniforms(gl, resources.uniforms.quadTransform, transform);
-  applyNormalizationUniforms(gl, resources.uniforms.normalization, normalization);
+  applyNormalizationUniforms(gl, resources.uniforms.normalization, renderState.normalization);
+  applyBandModeUniforms(gl, resources.uniforms.bandMode, renderState.isSingleBand);
   gl.bindVertexArray(resources.vao);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
+}
+
+function applyBandModeUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: BandModeUniformLocations,
+  isSingleBand: boolean,
+): void {
+  if (uniforms.isSingleBand === null) return;
+  gl.uniform1i(uniforms.isSingleBand, isSingleBand ? 1 : 0);
 }
 
 function applyQuadTransformUniforms(
@@ -350,6 +537,16 @@ function lookUpProgramUniformLocations(
   return {
     quadTransform: lookUpQuadTransformUniformLocations(gl, program),
     normalization: lookUpNormalizationUniformLocations(gl, program),
+    bandMode: lookUpBandModeUniformLocations(gl, program),
+  };
+}
+
+function lookUpBandModeUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): BandModeUniformLocations {
+  return {
+    isSingleBand: gl.getUniformLocation(program, "u_isSingleBand"),
   };
 }
 
@@ -427,7 +624,7 @@ function configureFullscreenQuadVertexAttributes(
   enableInterleavedFloat2Attribute(
     gl,
     TEXCOORD_ATTRIBUTE_LOCATION,
-    TEXCOORD_OFFSET_BYTES,
+    2 * Float32Array.BYTES_PER_ELEMENT,
   );
 }
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FolderOpen, Grid2x2 } from "lucide-react";
+import { BoxSelect, FolderOpen, Grid2x2, Layers } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,8 +13,24 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
+import { cn } from "@/lib/utils";
 
 export type { GridLayout };
+
+export interface ActionAvailabilityForActiveViewport {
+  readonly isAvailable: boolean;
+  readonly disabledReason?: string;
+}
+
+export type GetActionAvailabilityForActiveViewport = (
+  action: RegisteredViewportAction,
+) => ActionAvailabilityForActiveViewport;
+
+export interface BandSubsetToolbarToggleState {
+  readonly isAvailable: boolean;
+  readonly isActive: boolean;
+  readonly onToggle: () => void;
+}
 
 interface ToolbarProps {
   onOpenImage: () => void;
@@ -22,7 +38,10 @@ interface ToolbarProps {
   onGridLayoutChange: (layout: GridLayout) => void;
   registeredActions: ReadonlyArray<RegisteredViewportAction>;
   onInvokeAction: (action: RegisteredViewportAction) => void;
-  canInvokeActions: boolean;
+  getActionAvailability: GetActionAvailabilityForActiveViewport;
+  isRegionToolActive: boolean;
+  onToggleRegionTool: () => void;
+  bandSubsetToggle: BandSubsetToolbarToggleState;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -35,13 +54,87 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           onGridLayoutChange={props.onGridLayoutChange}
         />
         <ToolbarSeparator />
+        <RegionToolToggleButton
+          isRegionToolActive={props.isRegionToolActive}
+          onToggleRegionTool={props.onToggleRegionTool}
+        />
+        <SubsetBandsToggleButton toggleState={props.bandSubsetToggle} />
+        <ToolbarSeparator />
         <RegisteredActionButtons
           registeredActions={props.registeredActions}
           onInvokeAction={props.onInvokeAction}
-          canInvokeActions={props.canInvokeActions}
+          getActionAvailability={props.getActionAvailability}
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+interface SubsetBandsToggleButtonProps {
+  readonly toggleState: BandSubsetToolbarToggleState;
+}
+
+function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Element {
+  const label = pickSubsetBandsToggleLabel(props.toggleState);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={label}
+            aria-pressed={props.toggleState.isActive}
+            disabled={!props.toggleState.isAvailable}
+            className={cn(
+              props.toggleState.isActive &&
+                "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+            )}
+            onClick={props.toggleState.onToggle}
+          >
+            <Layers className="size-5" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function pickSubsetBandsToggleLabel(state: BandSubsetToolbarToggleState): string {
+  if (!state.isAvailable) return "Subset Bands (select a multi-band image)";
+  if (state.isActive) return "Subset Bands (active)";
+  return "Subset Bands";
+}
+
+interface RegionToolToggleButtonProps {
+  readonly isRegionToolActive: boolean;
+  readonly onToggleRegionTool: () => void;
+}
+
+function RegionToolToggleButton(props: RegionToolToggleButtonProps): JSX.Element {
+  const label = props.isRegionToolActive
+    ? "Select Region (active)"
+    : "Select Region";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          aria-pressed={props.isRegionToolActive}
+          className={cn(
+            props.isRegionToolActive &&
+              "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+          )}
+          onClick={props.onToggleRegionTool}
+        >
+          <BoxSelect className="size-5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -112,7 +205,7 @@ function ToolbarSeparator(): JSX.Element {
 interface RegisteredActionButtonsProps {
   registeredActions: ReadonlyArray<RegisteredViewportAction>;
   onInvokeAction: (action: RegisteredViewportAction) => void;
-  canInvokeActions: boolean;
+  getActionAvailability: GetActionAvailabilityForActiveViewport;
 }
 
 function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Element {
@@ -122,8 +215,8 @@ function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Eleme
         <ActionToolbarButton
           key={action.id}
           action={action}
+          availability={props.getActionAvailability(action)}
           onInvoke={() => props.onInvokeAction(action)}
-          disabled={!props.canInvokeActions}
         />
       ))}
     </>
@@ -132,23 +225,33 @@ function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Eleme
 
 interface ActionToolbarButtonProps {
   action: RegisteredViewportAction;
+  availability: ActionAvailabilityForActiveViewport;
   onInvoke: () => void;
-  disabled: boolean;
 }
 
 function ActionToolbarButton(props: ActionToolbarButtonProps): JSX.Element {
   const Icon = props.action.icon;
-  const tooltipLabel = formatActionToolbarTooltipLabel(props.action.label, props.disabled);
+  const disabled = !props.availability.isAvailable;
+  const tooltipLabel = formatActionToolbarTooltipLabel(
+    props.action.label,
+    disabled,
+    props.availability.disabledReason,
+  );
   return (
-    <IconButtonWithTooltip label={tooltipLabel} onClick={props.onInvoke} disabled={props.disabled}>
+    <IconButtonWithTooltip label={tooltipLabel} onClick={props.onInvoke} disabled={disabled}>
       <Icon className="size-5" />
     </IconButtonWithTooltip>
   );
 }
 
-function formatActionToolbarTooltipLabel(actionLabel: string, disabled: boolean): string {
-  if (disabled) return `${actionLabel} (select a viewport with a loaded image)`;
-  return actionLabel;
+function formatActionToolbarTooltipLabel(
+  actionLabel: string,
+  disabled: boolean,
+  disabledReason: string | undefined,
+): string {
+  if (!disabled) return actionLabel;
+  if (disabledReason) return `${actionLabel} (${disabledReason})`;
+  return `${actionLabel} (select a viewport with a loaded image)`;
 }
 
 interface IconButtonWithTooltipProps {
