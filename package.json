@@ -21,7 +21,8 @@
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "test": "vitest run",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build:icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -63,7 +64,10 @@
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "icon-gen": "^5.0.0",
+    "png-to-ico": "^3.0.1",
     "prettier": "^3.4.2",
+    "sharp": "^0.34.5",
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.9"
@@ -72,7 +76,8 @@
     "onlyBuiltDependencies": [
       "electron",
       "electron-builder",
-      "esbuild"
+      "esbuild",
+      "sharp"
     ]
   }
 }

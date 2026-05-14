@@ -14,6 +14,7 @@ node_modules/
 out/
 dist/
 electron.vite.config.*.mjs
+build/icon-source.png
 
 # Editor / logs
 *.log
