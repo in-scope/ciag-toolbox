@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BoxSelect, FolderOpen, Grid2x2 } from "lucide-react";
+import { BoxSelect, FolderOpen, Grid2x2, Layers } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,12 @@ export type GetActionAvailabilityForActiveViewport = (
   action: RegisteredViewportAction,
 ) => ActionAvailabilityForActiveViewport;
 
+export interface BandSubsetToolbarToggleState {
+  readonly isAvailable: boolean;
+  readonly isActive: boolean;
+  readonly onToggle: () => void;
+}
+
 interface ToolbarProps {
   onOpenImage: () => void;
   gridLayout: GridLayout;
@@ -35,6 +41,7 @@ interface ToolbarProps {
   getActionAvailability: GetActionAvailabilityForActiveViewport;
   isRegionToolActive: boolean;
   onToggleRegionTool: () => void;
+  bandSubsetToggle: BandSubsetToolbarToggleState;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -51,6 +58,7 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           isRegionToolActive={props.isRegionToolActive}
           onToggleRegionTool={props.onToggleRegionTool}
         />
+        <SubsetBandsToggleButton toggleState={props.bandSubsetToggle} />
         <ToolbarSeparator />
         <RegisteredActionButtons
           registeredActions={props.registeredActions}
@@ -60,6 +68,43 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
       </div>
     </TooltipProvider>
   );
+}
+
+interface SubsetBandsToggleButtonProps {
+  readonly toggleState: BandSubsetToolbarToggleState;
+}
+
+function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Element {
+  const label = pickSubsetBandsToggleLabel(props.toggleState);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={label}
+            aria-pressed={props.toggleState.isActive}
+            disabled={!props.toggleState.isAvailable}
+            className={cn(
+              props.toggleState.isActive &&
+                "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+            )}
+            onClick={props.toggleState.onToggle}
+          >
+            <Layers className="size-5" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function pickSubsetBandsToggleLabel(state: BandSubsetToolbarToggleState): string {
+  if (!state.isAvailable) return "Subset Bands (select a multi-band image)";
+  if (state.isActive) return "Subset Bands (active)";
+  return "Subset Bands";
 }
 
 interface RegionToolToggleButtonProps {

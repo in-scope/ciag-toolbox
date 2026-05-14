@@ -1,11 +1,10 @@
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
 
 import { BandThumbnail } from "@/components/band-thumbnail";
 import {
   HistogramSection,
   shouldShowHistogramSection,
 } from "@/components/histogram-section";
-import { KeepBandsModal } from "@/components/keep-bands-modal";
 import {
   PixelInspectorSection,
   shouldShowPixelInspectorSection,
@@ -14,6 +13,10 @@ import {
   SpectrumPlot,
   type SpectrumLinePlotInput,
 } from "@/components/spectrum-plot";
+import {
+  SubsetBandsSection,
+  type SubsetBandsApplyOptions,
+} from "@/components/subset-bands-section";
 import { Button } from "@/components/ui/button";
 import {
   formatOperationHistoryParameterValuesAsInlineText,
@@ -59,7 +62,10 @@ export interface ViewportRightPanelActiveSource {
   readonly selectedBandIndex: number;
   readonly onSelectBandIndex: (bandIndex: number) => void;
   readonly removedBandIndexes: ReadonlyArray<number>;
-  readonly onApplyBandSelection: (removedBandIndexes: ReadonlyArray<number>) => void;
+  readonly isBandSubsetEditModeActive: boolean;
+  readonly onEnterBandSubsetEditMode: () => void;
+  readonly onExitBandSubsetEditMode: () => void;
+  readonly onApplyBandSubset: (options: SubsetBandsApplyOptions) => void;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
@@ -161,23 +167,52 @@ interface BandsSectionProps {
 
 function BandsSection(props: BandsSectionProps): JSX.Element | null {
   if (!props.activeSource.raster) return null;
+  if (props.activeSource.isBandSubsetEditModeActive) {
+    return (
+      <SubsetBandsSectionForActiveSource
+        activeSource={props.activeSource}
+        raster={props.activeSource.raster}
+      />
+    );
+  }
   return (
-    <BandsSectionBody activeSource={props.activeSource} raster={props.activeSource.raster} />
+    <BandsDisplaySection
+      activeSource={props.activeSource}
+      raster={props.activeSource.raster}
+    />
   );
 }
 
-interface BandsSectionBodyProps {
+interface BandsSectionForActiveSourceProps {
   activeSource: ViewportRightPanelActiveSource;
   raster: RasterImage;
 }
 
-function BandsSectionBody(props: BandsSectionBodyProps): JSX.Element {
+function SubsetBandsSectionForActiveSource(
+  props: BandsSectionForActiveSourceProps,
+): JSX.Element {
+  const displayedBandIndex = clampBandIndexToRaster(
+    props.raster,
+    props.activeSource.selectedBandIndex,
+  );
+  return (
+    <SubsetBandsSection
+      raster={props.raster}
+      viewportNumber={props.activeSource.viewportNumber}
+      activeBandIndex={displayedBandIndex}
+      initialRemovedBandIndexes={props.activeSource.removedBandIndexes}
+      onCancel={props.activeSource.onExitBandSubsetEditMode}
+      onApply={props.activeSource.onApplyBandSubset}
+    />
+  );
+}
+
+function BandsDisplaySection(props: BandsSectionForActiveSourceProps): JSX.Element {
   const items = useMemo(() => buildBandRowItemsForRaster(props.raster), [props.raster]);
   const displayedBandIndex = clampBandIndexToRaster(
     props.raster,
     props.activeSource.selectedBandIndex,
   );
-  const [isModalOpen, setIsModalOpen] = useState(false);
   return (
     <section aria-label="Bands" className={RIGHT_PANEL_SECTION_CLASSES}>
       <BandsSectionHeader viewportNumber={props.activeSource.viewportNumber} />
@@ -187,32 +222,8 @@ function BandsSectionBody(props: BandsSectionBodyProps): JSX.Element {
         selectedBandIndex={displayedBandIndex}
         onSelectBandIndex={props.activeSource.onSelectBandIndex}
       />
-      <KeepBandsTriggerButton onOpenKeepBandsModal={() => setIsModalOpen(true)} />
-      <KeepBandsModal
-        isOpen={isModalOpen}
-        raster={props.raster}
-        initialRemovedBandIndexes={props.activeSource.removedBandIndexes}
-        activeBandIndex={displayedBandIndex}
-        onCancel={() => setIsModalOpen(false)}
-        onConfirm={(removedBandIndexes) =>
-          confirmKeepBandsApply(
-            removedBandIndexes,
-            setIsModalOpen,
-            props.activeSource.onApplyBandSelection,
-          )
-        }
-      />
     </section>
   );
-}
-
-function confirmKeepBandsApply(
-  removedBandIndexes: ReadonlyArray<number>,
-  setIsModalOpen: (open: boolean) => void,
-  onApplyBandSelection: (removedBandIndexes: ReadonlyArray<number>) => void,
-): void {
-  setIsModalOpen(false);
-  onApplyBandSelection(removedBandIndexes);
 }
 
 function BandsSectionHeader({ viewportNumber }: { viewportNumber: number }): JSX.Element {
@@ -358,24 +369,6 @@ function getBandRowClassName(isSelected: boolean): string {
     isSelected
       ? "bg-accent text-foreground"
       : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-  );
-}
-
-interface KeepBandsTriggerButtonProps {
-  onOpenKeepBandsModal: () => void;
-}
-
-function KeepBandsTriggerButton(props: KeepBandsTriggerButtonProps): JSX.Element {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="secondary"
-      className="self-start"
-      onClick={props.onOpenKeepBandsModal}
-    >
-      Keep Bands...
-    </Button>
   );
 }
 

@@ -30,6 +30,7 @@ import {
 import {
   Toolbar,
   type ActionAvailabilityForActiveViewport,
+  type BandSubsetToolbarToggleState,
 } from "@/components/toolbar";
 import {
   ViewportRightPanel,
@@ -50,9 +51,9 @@ import {
   type ApplyActionFlowBindings,
 } from "@/lib/actions/apply-action-flow";
 import {
-  BAND_KEEP_ACTION,
+  BAND_SUBSET_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
-  buildBandKeepParameterValuesFromKeptIndexes,
+  buildBandSubsetParameterValuesFromKeptIndexes,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
 import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
@@ -337,6 +338,11 @@ function ApplicationShell(): JSX.Element {
         }
         isRegionToolActive={regionTool.isRegionToolActive}
         onToggleRegionTool={regionTool.toggleRegionTool}
+        bandSubsetToggle={deriveBandSubsetToggleStateForToolbar(
+          singleSelectedSource,
+          imagesByIndex,
+          renderingApi,
+        )}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
@@ -1443,11 +1449,17 @@ function buildRightPanelActiveSource(
         selectedBandIndex: bandIndex,
       }),
     removedBandIndexes: renderingState.removedBandIndexes,
-    onApplyBandSelection: (removedBandIndexes) =>
-      runApplyBandSelectionForViewport({
+    isBandSubsetEditModeActive: renderingState.isBandSubsetEditModeActive,
+    onEnterBandSubsetEditMode: () =>
+      setBandSubsetEditModeActiveAtViewport(viewportIndex, true, renderingApi),
+    onExitBandSubsetEditMode: () =>
+      setBandSubsetEditModeActiveAtViewport(viewportIndex, false, renderingApi),
+    onApplyBandSubset: (options) =>
+      runApplyBandSubsetForViewport({
         viewportIndex,
         raster,
-        removedBandIndexes,
+        removedBandIndexes: options.removedBandIndexes,
+        openInNewViewport: options.openInNewViewport,
         applyActionFlowBindings: inputs.applyActionFlowBindings,
       }),
     operationHistory: renderingState.operationHistory,
@@ -1464,38 +1476,94 @@ function buildRightPanelActiveSource(
   };
 }
 
-interface ApplyBandSelectionInputs {
+interface ApplyBandSubsetInputs {
   readonly viewportIndex: number;
   readonly raster: ViewportRightPanelActiveSource["raster"];
   readonly removedBandIndexes: ReadonlyArray<number>;
+  readonly openInNewViewport: boolean;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
 }
 
-function runApplyBandSelectionForViewport(inputs: ApplyBandSelectionInputs): void {
-  const { raster, removedBandIndexes } = inputs;
-  if (!raster) {
-    toast.error("Keep Bands requires a raster source.");
-    return;
-  }
-  const keptBandIndexes = listKeptBandIndexesFromRemoved(
-    raster.bandCount,
-    removedBandIndexes,
-  );
-  if (keptBandIndexes.length === 0) {
-    toast.error("Keep at least one band before applying.");
-    return;
-  }
-  if (keptBandIndexes.length === raster.bandCount) {
-    toast.info("Uncheck a band to remove it on apply.");
-    return;
-  }
-  applyActionToDuplicateOfSource(
-    BAND_KEEP_ACTION,
-    buildBandKeepParameterValuesFromKeptIndexes(keptBandIndexes),
+function runApplyBandSubsetForViewport(inputs: ApplyBandSubsetInputs): void {
+  const keptBandIndexes = pickKeptBandIndexesForSubsetOrNull(inputs);
+  if (keptBandIndexes === null) return;
+  invokeBandSubsetActionOnSourceViewport(
     inputs.viewportIndex,
+    keptBandIndexes,
+    inputs.openInNewViewport,
     inputs.applyActionFlowBindings,
   );
 }
+
+function pickKeptBandIndexesForSubsetOrNull(
+  inputs: ApplyBandSubsetInputs,
+): ReadonlyArray<number> | null {
+  const { raster, removedBandIndexes } = inputs;
+  if (!raster) {
+    toast.error("Subset Bands requires a raster source.");
+    return null;
+  }
+  const keptBandIndexes = listKeptBandIndexesFromRemoved(raster.bandCount, removedBandIndexes);
+  if (keptBandIndexes.length === 0) {
+    toast.error("Keep at least one band before applying.");
+    return null;
+  }
+  if (keptBandIndexes.length === raster.bandCount) {
+    toast.info("Uncheck a band to remove it on apply.");
+    return null;
+  }
+  return keptBandIndexes;
+}
+
+function invokeBandSubsetActionOnSourceViewport(
+  sourceIndex: number,
+  keptBandIndexes: ReadonlyArray<number>,
+  openInNewViewport: boolean,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const parameterValues = buildBandSubsetParameterValuesFromKeptIndexes(keptBandIndexes);
+  if (openInNewViewport) {
+    applyActionToDuplicateOfSource(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceAtSourceIndex(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
+}
+
+function setBandSubsetEditModeActiveAtViewport(
+  viewportIndex: number,
+  isActive: boolean,
+  renderingApi: ViewportRenderingApi,
+): void {
+  const previous = renderingApi.getRenderingState(viewportIndex);
+  if (previous.isBandSubsetEditModeActive === isActive) return;
+  renderingApi.setRenderingState(viewportIndex, {
+    ...previous,
+    isBandSubsetEditModeActive: isActive,
+  });
+}
+
+function deriveBandSubsetToggleStateForToolbar(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): BandSubsetToolbarToggleState {
+  if (!singleSelectedSource) return DISABLED_BAND_SUBSET_TOOLBAR_TOGGLE;
+  const viewportIndex = singleSelectedSource.index;
+  const raster = extractRasterFromContentOrNull(imagesByIndex.get(viewportIndex) ?? null);
+  if (!raster || raster.bandCount < 2) return DISABLED_BAND_SUBSET_TOOLBAR_TOGGLE;
+  const isActive = renderingApi.getRenderingState(viewportIndex).isBandSubsetEditModeActive;
+  return {
+    isAvailable: true,
+    isActive,
+    onToggle: () => setBandSubsetEditModeActiveAtViewport(viewportIndex, !isActive, renderingApi),
+  };
+}
+
+const DISABLED_BAND_SUBSET_TOOLBAR_TOGGLE: BandSubsetToolbarToggleState = {
+  isAvailable: false,
+  isActive: false,
+  onToggle: () => {},
+};
 
 function buildRoiMeanSpectrumForDisplayOrNull(
   raster: ViewportRightPanelActiveSource["raster"],

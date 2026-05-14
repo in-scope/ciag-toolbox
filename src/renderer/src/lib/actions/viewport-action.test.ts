@@ -51,6 +51,7 @@ describe("applyActionToSelectedViewports", () => {
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       removedBandIndexes: [],
+      isBandSubsetEditModeActive: false,
     });
   });
 
@@ -76,6 +77,7 @@ describe("NORMALIZE_ACTION", () => {
           roi: null,
           pinnedSpectra: EMPTY_PINNED_SPECTRA,
           removedBandIndexes: [],
+          isBandSubsetEditModeActive: false,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -87,6 +89,7 @@ describe("NORMALIZE_ACTION", () => {
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       removedBandIndexes: [],
+      isBandSubsetEditModeActive: false,
     });
     expect(
       NORMALIZE_ACTION.apply(
@@ -98,6 +101,7 @@ describe("NORMALIZE_ACTION", () => {
           roi: null,
           pinnedSpectra: EMPTY_PINNED_SPECTRA,
           removedBandIndexes: [],
+          isBandSubsetEditModeActive: false,
         },
         NO_PARAMETER_VALUES,
       ),
@@ -109,6 +113,7 @@ describe("NORMALIZE_ACTION", () => {
       roi: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       removedBandIndexes: [],
+      isBandSubsetEditModeActive: false,
     });
   });
 });

@@ -236,33 +236,45 @@ function formatCropToRegionAppliedLabel(parameterValues: ParameterValuesById): s
   return `Crop to (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
 }
 
-const BAND_KEEP_PARAMETER_ID_KEPT_INDEXES = "keptBandIndexes";
+const BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES = "keptBandIndexes";
 
-export const BAND_KEEP_ACTION: RegisteredViewportAction = {
-  id: "band-keep",
-  label: "Keep Bands",
+export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
+  id: "band-subset",
+  label: "Subset Bands",
   icon: Layers,
-  successMessage: "Band selection applied",
-  appliedLabel: "Keep bands",
-  formatAppliedLabel: formatBandKeepAppliedLabel,
-  apply: clearBandKeepStateAfterApply,
-  transformSource: createBandKeepSourceTransform(),
+  successMessage: "Band subset applied",
+  appliedLabel: "Subset bands",
+  formatAppliedLabel: formatBandSubsetAppliedLabel,
+  apply: clearBandSubsetStateAfterApply,
+  clearConsumedSourceStateAfterApply: clearBandSubsetEditModeFromSource,
+  transformSource: createBandSubsetSourceTransform(),
 };
 
-function clearBandKeepStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
   return {
     ...state,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     selectedBandIndex: 0,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    isBandSubsetEditModeActive: false,
   };
 }
 
-function createBandKeepSourceTransform(): ViewportActionSourceTransform {
+function clearBandSubsetEditModeFromSource(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return {
+    ...state,
+    removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
+    isBandSubsetEditModeActive: false,
+  };
+}
+
+function createBandSubsetSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Keep Bands only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Subset Bands only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
       );
     }
     const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
@@ -270,20 +282,20 @@ function createBandKeepSourceTransform(): ViewportActionSourceTransform {
   };
 }
 
-export function buildBandKeepParameterValuesFromKeptIndexes(
+export function buildBandSubsetParameterValuesFromKeptIndexes(
   keptBandIndexes: ReadonlyArray<number>,
 ): ParameterValuesById {
   return Object.freeze({
-    [BAND_KEEP_PARAMETER_ID_KEPT_INDEXES]: encodeKeptBandIndexesAsString(keptBandIndexes),
+    [BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES]: encodeKeptBandIndexesAsString(keptBandIndexes),
   });
 }
 
 function readKeptBandIndexesFromParameterValues(
   parameterValues: ParameterValuesById,
 ): ReadonlyArray<number> {
-  const raw = parameterValues[BAND_KEEP_PARAMETER_ID_KEPT_INDEXES];
+  const raw = parameterValues[BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES];
   if (typeof raw !== "string") {
-    throw new Error("Keep Bands missing keptBandIndexes parameter.");
+    throw new Error("Subset Bands missing keptBandIndexes parameter.");
   }
   return parseKeptBandIndexesFromString(raw);
 }
@@ -294,7 +306,7 @@ function encodeKeptBandIndexesAsString(keptBandIndexes: ReadonlyArray<number>): 
 
 function parseKeptBandIndexesFromString(value: string): ReadonlyArray<number> {
   if (value.length === 0) {
-    throw new Error("Keep Bands keptBandIndexes parameter is empty.");
+    throw new Error("Subset Bands keptBandIndexes parameter is empty.");
   }
   return value.split(",").map(parseSingleBandIndexOrThrow);
 }
@@ -302,14 +314,14 @@ function parseKeptBandIndexesFromString(value: string): ReadonlyArray<number> {
 function parseSingleBandIndexOrThrow(token: string): number {
   const parsed = Number.parseInt(token.trim(), 10);
   if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Keep Bands received invalid band index '${token}'.`);
+    throw new Error(`Subset Bands received invalid band index '${token}'.`);
   }
   return parsed;
 }
 
-function formatBandKeepAppliedLabel(parameterValues: ParameterValuesById): string {
+function formatBandSubsetAppliedLabel(parameterValues: ParameterValuesById): string {
   const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
-  return `Keep bands [${keptBandIndexes.join(", ")}]`;
+  return `Subset bands [${keptBandIndexes.join(", ")}]`;
 }
 
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
