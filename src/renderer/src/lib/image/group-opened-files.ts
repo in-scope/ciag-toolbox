@@ -85,7 +85,7 @@ function buildStackGroupOrNull(
   const suggestion = parseStackBandOrderSuggestion(stackable.map((file) => file.fileName));
   const rows = buildOrderedRowsFromStackableAndSuggestion(stackable, suggestion);
   return {
-    id: "stack-1",
+    id: "image-1",
     mode: stackable.length >= 2 ? "stack" : "singles",
     rows,
     hadConfidentWavelengthParse: suggestion.hadConfidentWavelengthParse,

@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { AlertTriangle, Check, GripVertical, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatFileSizeBytesForDisplay } from "@/lib/image/image-metadata-display";
 import { findStackedRasterMismatchOrNull } from "@/lib/image/stack-rasters";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type {
@@ -80,13 +82,13 @@ function OpenImagesReviewBody(props: OpenImagesReviewBodyProps): JSX.Element {
   const dragHandlers = useDragBetweenGroupsHandlers(groups, setGroups);
   return (
     <>
-      <OpenImagesReviewHeader totalRows={countTotalRowsAcrossGroups(groups)} />
+      <OpenImagesReviewHeader />
       <OpenImagesReviewGroupList
         groups={groups}
         setGroups={setGroups}
         dragHandlers={dragHandlers}
       />
-      <AddNewStackGroupButton onAdd={() => setGroups(appendEmptyStackGroup(groups))} />
+      <AddNewImageButton onAdd={() => setGroups(appendEmptyStackGroup(groups))} />
       <OpenImagesReviewFooter
         groups={groups}
         onCancel={props.onCancel}
@@ -119,19 +121,13 @@ function convertViewModelsToGroups(
     }));
 }
 
-function countTotalRowsAcrossGroups(
-  groups: ReadonlyArray<ReviewGroupViewModel>,
-): number {
-  return groups.reduce((sum, group) => sum + group.rows.length, 0);
-}
-
 function appendEmptyStackGroup(
   groups: ReadonlyArray<ReviewGroupViewModel>,
 ): ReadonlyArray<ReviewGroupViewModel> {
   return [
     ...groups,
     {
-      id: `stack-${groups.length + 1}-${Date.now()}`,
+      id: `image-${groups.length + 1}-${Date.now()}`,
       mode: "stack",
       rows: [],
       sortBy: "custom",
@@ -140,12 +136,12 @@ function appendEmptyStackGroup(
   ];
 }
 
-function OpenImagesReviewHeader({ totalRows }: { totalRows: number }): JSX.Element {
+function OpenImagesReviewHeader(): JSX.Element {
   return (
     <DialogHeader>
       <DialogTitle>Review images</DialogTitle>
       <DialogDescription>
-        {`Choose how to open ${totalRows} files. Drag rows to reorder within a group, or between groups.`}
+        Drag rows to reorder within an image, or between images.
       </DialogDescription>
     </DialogHeader>
   );
@@ -157,14 +153,23 @@ interface DragBetweenGroupsHandlers {
   readonly onRowDropAtEnd: (targetGroupId: string) => void;
 }
 
+interface DragSourceRefValue {
+  readonly groupId: string;
+  readonly rowIndex: number;
+  readonly isMultiBandRaster: boolean;
+}
+
 function useDragBetweenGroupsHandlers(
   groups: ReadonlyArray<ReviewGroupViewModel>,
   setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void,
 ): DragBetweenGroupsHandlers {
-  const dragSourceRef = useRef<{ groupId: string; rowIndex: number } | null>(null);
-  const onRowDragStart = useCallback((groupId: string, rowIndex: number) => {
-    dragSourceRef.current = { groupId, rowIndex };
-  }, []);
+  const dragSourceRef = useRef<DragSourceRefValue | null>(null);
+  const onRowDragStart = useCallback(
+    (groupId: string, rowIndex: number) => {
+      dragSourceRef.current = buildDragSourceForGroupAndRow(groups, groupId, rowIndex);
+    },
+    [groups],
+  );
   const onRowDropAtRow = useCallback(
     (targetGroupId: string, targetRowIndex: number) => {
       runDropAtRowWithDragRef(dragSourceRef, targetGroupId, targetRowIndex, groups, setGroups);
@@ -180,8 +185,36 @@ function useDragBetweenGroupsHandlers(
   return { onRowDragStart, onRowDropAtRow, onRowDropAtEnd };
 }
 
+function buildDragSourceForGroupAndRow(
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+  groupId: string,
+  rowIndex: number,
+): DragSourceRefValue {
+  const sourceGroup = groups.find((group) => group.id === groupId);
+  const sourceRow = sourceGroup?.rows[rowIndex];
+  return { groupId, rowIndex, isMultiBandRaster: sourceRow ? isMultiBandRasterRow(sourceRow) : false };
+}
+
+function isMultiBandRasterRow(row: GroupedOpenedFileRow): boolean {
+  if (row.source === null) return false;
+  if (row.source.kind !== "raster") return false;
+  return row.source.raster.bandCount > 1;
+}
+
+function rejectMultiBandDragIntoDifferentGroupOrPass(
+  source: DragSourceRefValue,
+  targetGroupId: string,
+): boolean {
+  const isCrossGroupMove = source.groupId !== targetGroupId;
+  if (!source.isMultiBandRaster || !isCrossGroupMove) return true;
+  toast.error("Multi-band image must open as its own image; it cannot be combined with other bands.", {
+    duration: 8000,
+  });
+  return false;
+}
+
 function runDropAtRowWithDragRef(
-  dragSourceRef: React.MutableRefObject<{ groupId: string; rowIndex: number } | null>,
+  dragSourceRef: React.MutableRefObject<DragSourceRefValue | null>,
   targetGroupId: string,
   targetRowIndex: number,
   groups: ReadonlyArray<ReviewGroupViewModel>,
@@ -190,11 +223,12 @@ function runDropAtRowWithDragRef(
   const source = dragSourceRef.current;
   if (!source) return;
   dragSourceRef.current = null;
+  if (!rejectMultiBandDragIntoDifferentGroupOrPass(source, targetGroupId)) return;
   setGroups(moveRowAcrossGroups(groups, source, { groupId: targetGroupId, rowIndex: targetRowIndex }));
 }
 
 function runDropAtEndWithDragRef(
-  dragSourceRef: React.MutableRefObject<{ groupId: string; rowIndex: number } | null>,
+  dragSourceRef: React.MutableRefObject<DragSourceRefValue | null>,
   targetGroupId: string,
   groups: ReadonlyArray<ReviewGroupViewModel>,
   setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void,
@@ -202,6 +236,7 @@ function runDropAtEndWithDragRef(
   const source = dragSourceRef.current;
   if (!source) return;
   dragSourceRef.current = null;
+  if (!rejectMultiBandDragIntoDifferentGroupOrPass(source, targetGroupId)) return;
   const targetGroup = groups.find((group) => group.id === targetGroupId);
   if (!targetGroup) return;
   setGroups(
@@ -285,10 +320,11 @@ interface OpenImagesReviewGroupListProps {
 function OpenImagesReviewGroupList(props: OpenImagesReviewGroupListProps): JSX.Element {
   return (
     <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
-      {props.groups.map((group) => (
+      {props.groups.map((group, index) => (
         <OpenImagesReviewGroupCard
           key={group.id}
           group={group}
+          groupIndex={index}
           onUpdateGroup={(next) => props.setGroups(replaceGroupById(props.groups, group.id, next))}
           onRemoveGroup={() => props.setGroups(removeGroupById(props.groups, group.id))}
           dragHandlers={props.dragHandlers}
@@ -315,6 +351,7 @@ function removeGroupById(
 
 interface OpenImagesReviewGroupCardProps {
   readonly group: ReviewGroupViewModel;
+  readonly groupIndex: number;
   readonly onUpdateGroup: (next: ReviewGroupViewModel) => void;
   readonly onRemoveGroup: () => void;
   readonly dragHandlers: DragBetweenGroupsHandlers;
@@ -327,13 +364,14 @@ function OpenImagesReviewGroupCard(props: OpenImagesReviewGroupCardProps): JSX.E
   );
   return (
     <section
-      aria-label={describeGroupAriaLabel(props.group)}
+      aria-label={describeGroupAriaLabel(props.group, props.groupIndex)}
       className="rounded-md border bg-card p-2"
       onDragOver={(event) => event.preventDefault()}
       onDrop={() => props.dragHandlers.onRowDropAtEnd(props.group.id)}
     >
       <OpenImagesReviewGroupCardHeader
         group={props.group}
+        groupIndex={props.groupIndex}
         onUpdateGroup={props.onUpdateGroup}
         onRemoveGroup={props.onRemoveGroup}
         canSwitchModes={canSwitchGroupToStackMode(props.group, validation)}
@@ -351,11 +389,12 @@ function OpenImagesReviewGroupCard(props: OpenImagesReviewGroupCardProps): JSX.E
   );
 }
 
-function describeGroupAriaLabel(group: ReviewGroupViewModel): string {
+function describeGroupAriaLabel(group: ReviewGroupViewModel, groupIndex: number): string {
+  const positionLabel = `Image ${groupIndex + 1}`;
   if (group.mode === "stack") {
-    return `Stack group ${group.id} (${group.rows.length} rows)`;
+    return `Multi-band ${positionLabel} (${group.rows.length} rows)`;
   }
-  return `Singles group (${group.rows.length} rows)`;
+  return `${positionLabel} - separate images (${group.rows.length} rows)`;
 }
 
 interface GroupValidationSummary {
@@ -442,11 +481,11 @@ function describeStackDisabledReason(
   rows: ReadonlyArray<GroupedOpenedFileRow>,
   perRow: ReadonlyArray<RowValidationState>,
 ): string {
-  if (rows.length < 2) return "Stacks need at least 2 rows";
+  if (rows.length < 2) return "Need at least 2 rows to combine bands";
   if (perRow.some((state) => state.kind === "decode-failed")) return "One or more rows failed to decode";
-  if (perRow.some((state) => state.kind === "already-multi-band")) return "Multi-band rasters cannot stack";
+  if (perRow.some((state) => state.kind === "already-multi-band")) return "Already multi-band rasters cannot be combined";
   if (perRow.some((state) => state.kind === "property-mismatch")) return "Row dimensions or formats do not match";
-  return "Not stackable";
+  return "Cannot combine bands";
 }
 
 function canSwitchGroupToStackMode(
@@ -459,6 +498,7 @@ function canSwitchGroupToStackMode(
 
 interface OpenImagesReviewGroupCardHeaderProps {
   readonly group: ReviewGroupViewModel;
+  readonly groupIndex: number;
   readonly onUpdateGroup: (next: ReviewGroupViewModel) => void;
   readonly onRemoveGroup: () => void;
   readonly canSwitchModes: boolean;
@@ -467,26 +507,32 @@ interface OpenImagesReviewGroupCardHeaderProps {
 function OpenImagesReviewGroupCardHeader(
   props: OpenImagesReviewGroupCardHeaderProps,
 ): JSX.Element {
-  const title = pickGroupTitle(props.group);
+  const title = pickGroupTitle(props.group, props.groupIndex);
   return (
     <div className="mb-2 flex items-center gap-2">
       <span className="flex-1 truncate text-sm font-medium">{title}</span>
-      <GroupModeDropdown
-        group={props.group}
-        onUpdateGroup={props.onUpdateGroup}
-        canSwitchToStack={props.canSwitchModes}
-      />
+      {shouldShowGroupModeDropdown(props.group) ? (
+        <GroupModeDropdown
+          group={props.group}
+          onUpdateGroup={props.onUpdateGroup}
+          canSwitchToStack={props.canSwitchModes}
+        />
+      ) : null}
       <RemoveGroupButton onRemoveGroup={props.onRemoveGroup} />
     </div>
   );
 }
 
-function pickGroupTitle(group: ReviewGroupViewModel): string {
-  if (group.rows.length === 0) return "Empty stack group";
+function shouldShowGroupModeDropdown(group: ReviewGroupViewModel): boolean {
+  return group.rows.length >= 2;
+}
+
+function pickGroupTitle(group: ReviewGroupViewModel, groupIndex: number): string {
+  if (group.rows.length === 0) return "Empty image";
   if (group.mode === "singles" && group.rows.length === 1) {
     return group.rows[0]!.fileName;
   }
-  return group.id;
+  return `Image ${groupIndex + 1}`;
 }
 
 interface GroupModeDropdownProps {
@@ -496,7 +542,7 @@ interface GroupModeDropdownProps {
 }
 
 function GroupModeDropdown(props: GroupModeDropdownProps): JSX.Element {
-  const tooltip = props.canSwitchToStack ? null : "Group is not stackable";
+  const tooltip = props.canSwitchToStack ? null : "Bands cannot be combined";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -527,7 +573,7 @@ function GroupModeNativeSelect(props: GroupModeDropdownProps): JSX.Element {
       className="h-8 w-44 rounded-md border bg-card px-2 text-xs text-foreground"
     >
       <option value="stack" disabled={!props.canSwitchToStack}>
-        Stack
+        Combine into one image
       </option>
       <option value="singles">Open as separate images</option>
     </select>
@@ -540,7 +586,7 @@ function RemoveGroupButton({ onRemoveGroup }: { onRemoveGroup: () => void }): JS
       type="button"
       variant="ghost"
       size="icon"
-      aria-label="Remove group"
+      aria-label="Remove image"
       className="size-8 text-muted-foreground"
       onClick={onRemoveGroup}
     >
@@ -679,7 +725,7 @@ function OpenImagesReviewGroupRowList(
 function EmptyGroupHint(): JSX.Element {
   return (
     <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-      Drop rows here to add them to this stack.
+      Drop rows here to add them to this image.
     </div>
   );
 }
@@ -719,6 +765,7 @@ interface OpenImagesReviewRowProps {
 
 function OpenImagesReviewRow(props: OpenImagesReviewRowProps): JSX.Element {
   const [isDragOver, setIsDragOver] = useState(false);
+  const effectiveState = filterValidationStateForGroupMode(props.validationState, props.group.mode);
   return (
     <li
       draggable
@@ -737,9 +784,19 @@ function OpenImagesReviewRow(props: OpenImagesReviewRowProps): JSX.Element {
     >
       <RowDragHandle />
       <StackThumbnailPreview raster={pickRowRasterOrNull(props.row)} sizePx={48} />
-      <RowMainContent row={props.row} validationState={props.validationState} />
+      <RowMainContent row={props.row} validationState={effectiveState} />
     </li>
   );
+}
+
+function filterValidationStateForGroupMode(
+  state: RowValidationState,
+  mode: OpenedFilesGroup["mode"],
+): RowValidationState {
+  if (mode !== "singles") return state;
+  if (state.kind === "already-multi-band") return { kind: "valid" };
+  if (state.kind === "property-mismatch") return { kind: "valid" };
+  return state;
 }
 
 function handleRowDragOver(
@@ -853,7 +910,7 @@ function RowMetadataLine({ row }: { row: GroupedOpenedFileRow }): JSX.Element {
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       {row.wavelength !== null ? <RowWavelengthBadge wavelength={row.wavelength} /> : null}
-      <span>{formatFileSizeAsMegabytes(row.fileSizeBytes)}</span>
+      <span>{formatFileSizeBytesForDisplay(totalRowSizeIncludingSidecar(row))}</span>
     </div>
   );
 }
@@ -866,8 +923,8 @@ function RowWavelengthBadge({ wavelength }: { wavelength: number }): JSX.Element
   );
 }
 
-function formatFileSizeAsMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function totalRowSizeIncludingSidecar(row: GroupedOpenedFileRow): number {
+  return row.fileSizeBytes + (row.sidecarBytes ? row.sidecarBytes.byteLength : 0);
 }
 
 function RowValidationBadge({ state }: { state: RowValidationState }): JSX.Element {
@@ -912,11 +969,11 @@ function describeRowValidationErrorTooltip(state: RowValidationState): string {
   return state.message;
 }
 
-interface AddNewStackGroupButtonProps {
+interface AddNewImageButtonProps {
   readonly onAdd: () => void;
 }
 
-function AddNewStackGroupButton(props: AddNewStackGroupButtonProps): JSX.Element {
+function AddNewImageButton(props: AddNewImageButtonProps): JSX.Element {
   return (
     <Button
       type="button"
@@ -925,7 +982,7 @@ function AddNewStackGroupButton(props: AddNewStackGroupButtonProps): JSX.Element
       className="self-start"
       onClick={props.onAdd}
     >
-      <Plus className="mr-2 size-4" /> New stack
+      <Plus className="mr-2 size-4" /> New image
     </Button>
   );
 }
@@ -955,29 +1012,33 @@ function canConfirmAllGroupsValid(
 ): boolean {
   for (const group of groups) {
     if (group.rows.length === 0) return false;
-    if (group.mode === "stack" && !buildValidationStatesForGroup(group).canStack) return false;
+    if (!isSingleRowGroupOrCanStack(group)) return false;
   }
   return groups.length > 0;
+}
+
+function isSingleRowGroupOrCanStack(group: ReviewGroupViewModel): boolean {
+  if (group.rows.length < 2) return true;
+  if (group.mode !== "stack") return true;
+  return buildValidationStatesForGroup(group).canStack;
 }
 
 function buildConfirmButtonLabelForGroups(
   groups: ReadonlyArray<ReviewGroupViewModel>,
 ): string {
-  const stackCount = groups.filter((group) => group.mode === "stack").length;
-  const singleCount = groups.reduce(
-    (sum, group) => sum + (group.mode === "singles" ? group.rows.length : 0),
-    0,
-  );
-  return formatConfirmButtonLabelFromCounts(stackCount, singleCount);
+  const imageCount = countResultingImagesAcrossGroups(groups);
+  if (imageCount === 0) return "Open";
+  return `Open ${imageCount} ${imageCount === 1 ? "image" : "images"}`;
 }
 
-function formatConfirmButtonLabelFromCounts(
-  stackCount: number,
-  singleCount: number,
-): string {
-  const parts: string[] = [];
-  if (stackCount > 0) parts.push(`${stackCount} ${stackCount === 1 ? "stack" : "stacks"}`);
-  if (singleCount > 0) parts.push(`${singleCount} ${singleCount === 1 ? "image" : "images"}`);
-  if (parts.length === 0) return "Open";
-  return `Open ${parts.join(" + ")}`;
+function countResultingImagesAcrossGroups(
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+): number {
+  return groups.reduce((sum, group) => sum + countResultingImagesForGroup(group), 0);
+}
+
+function countResultingImagesForGroup(group: ReviewGroupViewModel): number {
+  if (group.rows.length === 0) return 0;
+  if (group.mode === "stack") return 1;
+  return group.rows.length;
 }
