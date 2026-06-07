@@ -24,6 +24,7 @@ import {
   type HistogramAxisTickLabel,
 } from "@/lib/image/compute-histogram-axis-tick-labels";
 import { computeHistogramBarHeightsInPixels } from "@/lib/image/compute-histogram-bar-heights";
+import { computeHistogramBarHorizontalSpan } from "@/lib/image/compute-histogram-bar-layout";
 import {
   clampBandIndexToRaster,
   getRasterBandLabelOrDefault,
@@ -369,10 +370,8 @@ function paintOneHistogramBarAtIndex(
   barCount: number,
 ): void {
   if (barHeight <= 0) return;
-  const left = (index / barCount) * widthPx;
-  const right = ((index + 1) / barCount) * widthPx;
-  const barWidth = Math.max(1, right - left);
-  context.fillRect(Math.floor(left), heightPx - barHeight, barWidth, barHeight);
+  const span = computeHistogramBarHorizontalSpan(index, barCount, widthPx);
+  context.fillRect(span.left, heightPx - barHeight, span.width, barHeight);
 }
 
 function readCanvasCurrentColorOrFallback(canvas: HTMLCanvasElement): string {
