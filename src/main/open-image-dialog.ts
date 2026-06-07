@@ -1,5 +1,4 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
@@ -7,6 +6,7 @@ import {
   findEnviBinarySiblingPathOrNull,
   isEnviHeaderFilePath,
 } from "./envi-binary-sibling";
+import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
 export interface OpenImageSidecar {
   fileName: string;
@@ -57,8 +57,7 @@ async function showImageOpenDialog(
 }
 
 async function readImageFileAsBytes(filePath: string): Promise<Uint8Array> {
-  const buffer = await readFile(filePath);
-  return new Uint8Array(buffer);
+  return readFileWithinOpenableSizeLimitOrThrow(filePath);
 }
 
 async function buildOpenImageResultFromPath(
