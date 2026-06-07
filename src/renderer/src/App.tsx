@@ -853,17 +853,38 @@ function applyOpenImagesPlacementPlan(
   items: ReadonlyArray<PendingOpenImageReplaceItem>,
   bindings: ConfirmReviewBindings,
 ): void {
-  if (plan.kind === "promptReplace") {
-    bindings.setPendingOpenImagesReplace({ items });
+  if (plan.kind === "growFillThenPromptReplace") {
+    applyGrowFillThenPromptReplacePlan(plan, items, bindings);
     return;
   }
   if (plan.expandedLayout !== undefined) {
     bindings.setGridLayout(plan.expandedLayout);
   }
-  for (let i = 0; i < plan.targetIndices.length && i < items.length; i++) {
-    const item = items[i]!;
-    const targetIndex = plan.targetIndices[i]!;
-    applyLoadedImageAtIndex(targetIndex, item, bindings);
+  placeItemsAtTargetIndices(plan.targetIndices, items, bindings);
+}
+
+function applyGrowFillThenPromptReplacePlan(
+  plan: Extract<OpenImagesPlacementPlan, { kind: "growFillThenPromptReplace" }>,
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ConfirmReviewBindings,
+): void {
+  if (plan.expandedLayout !== undefined) {
+    bindings.setGridLayout(plan.expandedLayout);
+  }
+  placeItemsAtTargetIndices(plan.filledTargetIndices, items, bindings);
+  const overflowItems = items.slice(plan.filledTargetIndices.length);
+  if (overflowItems.length > 0) {
+    bindings.setPendingOpenImagesReplace({ items: overflowItems });
+  }
+}
+
+function placeItemsAtTargetIndices(
+  targetIndices: ReadonlyArray<number>,
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ApplyLoadedImageBindings,
+): void {
+  for (let i = 0; i < targetIndices.length && i < items.length; i++) {
+    applyLoadedImageAtIndex(targetIndices[i]!, items[i]!, bindings);
   }
 }
 
