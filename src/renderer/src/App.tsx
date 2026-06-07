@@ -100,7 +100,10 @@ import {
   type OpenedProjectViewportSnapshot,
 } from "@/lib/project/run-open-project-flow";
 import { runSaveProjectBundleFlowThroughMainProcess } from "@/lib/project/run-save-bundle-flow";
-import type { SaveableProjectSnapshot } from "@/lib/project/serialize-project";
+import {
+  saveableSnapshotRequiresRasterRebake,
+  type SaveableProjectSnapshot,
+} from "@/lib/project/serialize-project";
 import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
 import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 import {
@@ -114,6 +117,7 @@ import {
 import {
   BusyStateProvider,
   useBusyEntryRegistrar,
+  waitForBusyIndicatorToClearAntiFlashThreshold,
   type BusyEntryHandle,
   type BusyEntryRegistrar,
 } from "@/state/busy-state-context";
@@ -1768,6 +1772,7 @@ async function invokeSaveProjectFlowWithToastFeedback(
     progress: 0,
   });
   try {
+    await letBusyIndicatorPaintBeforeHeavySaveWork(snapshot);
     const result = await runSaveProjectBundleFlowThroughMainProcess({
       snapshot,
       currentProjectFilePath: bindings.currentProjectFilePathRef.current,
@@ -1780,6 +1785,17 @@ async function invokeSaveProjectFlowWithToastFeedback(
   } finally {
     handle.clear();
   }
+}
+
+// When the save will re-encode a raster (the slow path), yield long enough for
+// the "Saving project..." indicator to paint before the synchronous bake blocks
+// the renderer thread, so the save never feels frozen (CT-072). Saves that only
+// reference unmodified on-disk files skip the wait and stay flash-free.
+async function letBusyIndicatorPaintBeforeHeavySaveWork(
+  snapshot: SaveableProjectSnapshot,
+): Promise<void> {
+  if (!saveableSnapshotRequiresRasterRebake(snapshot)) return;
+  await waitForBusyIndicatorToClearAntiFlashThreshold();
 }
 
 function updateSaveBundleProgressOnHandle(

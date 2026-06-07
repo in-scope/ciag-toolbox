@@ -92,6 +92,22 @@ function buildDraftBundleAssetForViewportOrThrow(
   return buildExternalAssetForBrowserSourceOrThrow(viewport);
 }
 
+// Re-encoding (baking) a raster source is a CPU-bound, multi-second operation
+// for large cubes that blocks the renderer thread. The save flow uses this to
+// decide whether to let the busy indicator paint before that synchronous work
+// begins (CT-072), so a save that only references unmodified on-disk files
+// stays as fast and flash-free as before.
+export function saveableSnapshotRequiresRasterRebake(
+  snapshot: SaveableProjectSnapshot,
+): boolean {
+  return snapshot.viewports.some(viewportRequiresRasterRebake);
+}
+
+function viewportRequiresRasterRebake(viewport: SaveableViewportSnapshot): boolean {
+  if (canStreamUnmodifiedSourceFromDisk(viewport)) return false;
+  return viewport.source.kind === "raster";
+}
+
 // Re-encoding a raster into the bundle materialises a second full-size copy in
 // the renderer and clones it again across IPC, which crashes the renderer for
 // large ENVI cubes (CT-061). When the source is still the untouched on-disk

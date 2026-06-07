@@ -6,6 +6,7 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { PROJECT_FILE_FORMAT_VERSION } from "./project-schema";
 import {
   buildDraftBundleFromSnapshot,
+  saveableSnapshotRequiresRasterRebake,
   type SaveableProjectSnapshot,
 } from "./serialize-project";
 
@@ -98,6 +99,34 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(draft.viewports[0]?.operationHistory).toHaveLength(1);
     expect(draft.viewports[0]?.operationHistory[0]?.actionId).toBe("bit-shift");
     expect(draft.viewports[0]?.operationHistory[0]?.parameterValues).toEqual({ shiftAmount: 4 });
+  });
+});
+
+// CT-072: the save flow waits for the busy indicator to paint before the heavy
+// raster bake, but only when a bake will actually happen. An all-external save
+// must report no rebake so it stays fast and flash-free.
+describe("saveableSnapshotRequiresRasterRebake", () => {
+  it("reports a rebake when a modified raster source must be re-encoded", () => {
+    const snapshot = withAppliedOperation(buildSingleViewportSnapshot());
+    expect(saveableSnapshotRequiresRasterRebake(snapshot)).toBe(true);
+  });
+
+  it("reports no rebake for an unmodified on-disk raster streamed by reference", () => {
+    expect(saveableSnapshotRequiresRasterRebake(buildMultiBandRasterSnapshot())).toBe(false);
+  });
+
+  it("reports no rebake for a large unmodified ENVI cube streamed by reference", () => {
+    expect(saveableSnapshotRequiresRasterRebake(buildLargeUnmodifiedEnviSnapshot())).toBe(false);
+  });
+
+  it("reports a rebake when any viewport in a multi-viewport save was modified", () => {
+    const unmodified = buildSingleViewportSnapshot().viewports[0]!;
+    const modified = withAppliedOperation(buildMultiBandRasterSnapshot()).viewports[0]!;
+    const snapshot: SaveableProjectSnapshot = {
+      ...buildSingleViewportSnapshot(),
+      viewports: [unmodified, { ...modified, index: 1 }],
+    };
+    expect(saveableSnapshotRequiresRasterRebake(snapshot)).toBe(true);
   });
 });
 
