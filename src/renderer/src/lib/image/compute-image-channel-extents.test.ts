@@ -40,6 +40,20 @@ describe("computeSingleBandRasterUnitExtents", () => {
     expect(extents.max).toBeCloseTo(0.9, 6);
   });
 
+  it("maps signed int16 extents by the type range so the offset matches the upload mapping", () => {
+    const raster: RasterImage = {
+      bandPixels: [new Int16Array([-32768, 0, 32767])],
+      width: 3,
+      height: 1,
+      bitsPerSample: 16,
+      sampleFormat: "int",
+      bandCount: 1,
+    };
+    const extents = computeSingleBandRasterUnitExtents(raster);
+    expect(extents.min).toBe(0);
+    expect(extents.max).toBeCloseTo(1, 6);
+  });
+
   it("returns identity extents for an empty raster", () => {
     const raster = buildUint16RasterFromValues([]);
     expect(computeSingleBandRasterUnitExtents(raster)).toEqual(

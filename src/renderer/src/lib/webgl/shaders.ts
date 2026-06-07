@@ -30,6 +30,12 @@ void main() {
     bvec3 hasRange = greaterThan(range, vec3(0.0));
     vec3 safeRange = mix(vec3(1.0), range, hasRange);
     rgb = clamp((rgb - u_normalizeMinColor) / safeRange, 0.0, 1.0);
+  } else {
+    // Default display (CT-062): the data-type range is mapped to black-to-white.
+    // Integer bands arrive pre-scaled to [0, 1]; float bands are clamped here so
+    // values outside [0, 1] read as black/white rather than wrapping or relying
+    // on the framebuffer to clamp.
+    rgb = clamp(rgb, 0.0, 1.0);
   }
   outColor = vec4(rgb, sampled.a);
 }
