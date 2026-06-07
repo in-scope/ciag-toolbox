@@ -21,6 +21,7 @@ export interface RasterImage {
   readonly bandCount: number;
   readonly bandLabels?: ReadonlyArray<string>;
   readonly bandWavelengths?: ReadonlyArray<number>;
+  readonly bandOriginalNumbers?: ReadonlyArray<number>;
   readonly sourceInterleave?: RasterSourceInterleave;
 }
 
@@ -30,6 +31,7 @@ export function cloneRasterImage(raster: RasterImage): RasterImage {
     bandPixels: raster.bandPixels.map(copyRasterTypedArray),
     bandLabels: raster.bandLabels ? [...raster.bandLabels] : undefined,
     bandWavelengths: raster.bandWavelengths ? [...raster.bandWavelengths] : undefined,
+    bandOriginalNumbers: raster.bandOriginalNumbers ? [...raster.bandOriginalNumbers] : undefined,
   };
 }
 
@@ -52,7 +54,22 @@ export function getRasterBandLabelOrDefault(
 ): string {
   const explicit = raster.bandLabels?.[bandIndex];
   if (explicit && explicit.length > 0) return explicit;
-  return `Band ${bandIndex + 1}`;
+  return `Band ${getRasterBandOriginalNumber(raster, bandIndex)}`;
+}
+
+export function getRasterBandOriginalNumber(
+  raster: RasterImage,
+  bandIndex: number,
+): number {
+  return raster.bandOriginalNumbers?.[bandIndex] ?? bandIndex + 1;
+}
+
+export function listRasterBandOriginalNumbers(
+  raster: RasterImage,
+): ReadonlyArray<number> {
+  return Array.from({ length: raster.bandCount }, (_, index) =>
+    getRasterBandOriginalNumber(raster, index),
+  );
 }
 
 export function clampBandIndexToRaster(

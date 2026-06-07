@@ -1,4 +1,8 @@
-import type { RasterImage, RasterSampleFormat } from "@/lib/image/raster-image";
+import {
+  listRasterBandOriginalNumbers,
+  type RasterImage,
+  type RasterSampleFormat,
+} from "@/lib/image/raster-image";
 
 export interface SpectrumXAxisDescriptor {
   readonly label: string;
@@ -13,7 +17,7 @@ export function buildSpectrumXAxisFromRaster(raster: RasterImage): SpectrumXAxis
   if (raster.bandWavelengths && raster.bandWavelengths.length === raster.bandCount) {
     return buildWavelengthAxisFromBandCenters(raster.bandWavelengths);
   }
-  return buildBandIndexAxis(raster.bandCount);
+  return buildBandIndexAxis(raster);
 }
 
 function buildWavelengthAxisFromBandCenters(
@@ -29,8 +33,8 @@ function buildWavelengthAxisFromBandCenters(
   };
 }
 
-function buildBandIndexAxis(bandCount: number): SpectrumXAxisDescriptor {
-  const positions = Array.from({ length: bandCount }, (_, index) => index + 1);
+function buildBandIndexAxis(raster: RasterImage): SpectrumXAxisDescriptor {
+  const positions = [...listRasterBandOriginalNumbers(raster)];
   const ticks = pickTicksEvenlySpacedAcrossValueRange(positions, MAX_X_AXIS_TICKS).map(Math.round);
   const uniqueTicks = removeAdjacentDuplicateTicks(ticks);
   return {

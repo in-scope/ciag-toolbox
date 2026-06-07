@@ -53,10 +53,11 @@ import {
 import {
   BAND_SUBSET_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
-  buildBandSubsetParameterValuesFromKeptIndexes,
+  buildBandSubsetParameterValuesFromKeptNumbers,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
 import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
+import { getRasterBandOriginalNumber } from "@/lib/image/raster-image";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -1506,17 +1507,17 @@ interface ApplyBandSubsetInputs {
 }
 
 function runApplyBandSubsetForViewport(inputs: ApplyBandSubsetInputs): void {
-  const keptBandIndexes = pickKeptBandIndexesForSubsetOrNull(inputs);
-  if (keptBandIndexes === null) return;
+  const keptBandNumbers = pickKeptBandOriginalNumbersForSubsetOrNull(inputs);
+  if (keptBandNumbers === null) return;
   invokeBandSubsetActionOnSourceViewport(
     inputs.viewportIndex,
-    keptBandIndexes,
+    keptBandNumbers,
     inputs.openInNewViewport,
     inputs.applyActionFlowBindings,
   );
 }
 
-function pickKeptBandIndexesForSubsetOrNull(
+function pickKeptBandOriginalNumbersForSubsetOrNull(
   inputs: ApplyBandSubsetInputs,
 ): ReadonlyArray<number> | null {
   const { raster, removedBandIndexes } = inputs;
@@ -1533,16 +1534,16 @@ function pickKeptBandIndexesForSubsetOrNull(
     toast.info("Uncheck a band to remove it on apply.");
     return null;
   }
-  return keptBandIndexes;
+  return keptBandIndexes.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
 }
 
 function invokeBandSubsetActionOnSourceViewport(
   sourceIndex: number,
-  keptBandIndexes: ReadonlyArray<number>,
+  keptBandNumbers: ReadonlyArray<number>,
   openInNewViewport: boolean,
   bindings: ApplyActionFlowBindings,
 ): void {
-  const parameterValues = buildBandSubsetParameterValuesFromKeptIndexes(keptBandIndexes);
+  const parameterValues = buildBandSubsetParameterValuesFromKeptNumbers(keptBandNumbers);
   if (openInNewViewport) {
     applyActionToDuplicateOfSource(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
     return;

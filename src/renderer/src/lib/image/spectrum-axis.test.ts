@@ -37,6 +37,16 @@ describe("buildSpectrumXAxisFromRaster", () => {
     expect(axis.bandPositions).toEqual([1, 2, 3]);
   });
 
+  it("uses preserved original band numbers for the band index axis after subsetting", () => {
+    const raster: RasterImage = {
+      ...buildRasterWithBandCount(4),
+      bandOriginalNumbers: [2, 3, 4, 7],
+    };
+    const axis = buildSpectrumXAxisFromRaster(raster);
+    expect(axis.label).toBe("Band index");
+    expect(axis.bandPositions).toEqual([2, 3, 4, 7]);
+  });
+
   it("falls back to band index axis when wavelength count mismatches", () => {
     const raster = buildRasterWithBandCount(3, [400, 500]);
     const axis = buildSpectrumXAxisFromRaster(raster);

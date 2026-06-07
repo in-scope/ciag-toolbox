@@ -4,7 +4,9 @@ import {
   cloneRasterImage,
   clampBandIndexToRaster,
   getRasterBandLabelOrDefault,
+  getRasterBandOriginalNumber,
   getRasterBandPixelsOrThrow,
+  listRasterBandOriginalNumbers,
   type RasterImage,
 } from "@/lib/image/raster-image";
 
@@ -80,6 +82,34 @@ describe("getRasterBandLabelOrDefault", () => {
   it("falls back to a one-based default name when no label is set", () => {
     const raster = buildSampleRasterImage();
     expect(getRasterBandLabelOrDefault(raster, 0)).toBe("Band 1");
+  });
+
+  it("uses the preserved original band number for the default name", () => {
+    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandLabels: undefined, bandOriginalNumbers: [3, 7] };
+    expect(getRasterBandLabelOrDefault(raster, 0)).toBe("Band 3");
+    expect(getRasterBandLabelOrDefault(raster, 1)).toBe("Band 7");
+  });
+});
+
+describe("getRasterBandOriginalNumber", () => {
+  it("returns the preserved original number when present", () => {
+    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [4, 8] };
+    expect(getRasterBandOriginalNumber(raster, 1)).toBe(8);
+  });
+
+  it("falls back to the one-based position when no original numbers exist", () => {
+    expect(getRasterBandOriginalNumber(buildMultiBandRasterImage(), 1)).toBe(2);
+  });
+});
+
+describe("listRasterBandOriginalNumbers", () => {
+  it("lists preserved original numbers for every band", () => {
+    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [2, 7] };
+    expect(listRasterBandOriginalNumbers(raster)).toEqual([2, 7]);
+  });
+
+  it("defaults to one-based positions when not subsetted", () => {
+    expect(listRasterBandOriginalNumbers(buildMultiBandRasterImage())).toEqual([1, 2]);
   });
 });
 
