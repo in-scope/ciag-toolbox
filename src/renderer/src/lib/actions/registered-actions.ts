@@ -52,7 +52,8 @@ const BIT_SHIFT_PARAMETER_SCHEMA: IntegerParameterSchema = {
   kind: "integer",
   id: BIT_SHIFT_PARAMETER_ID,
   label: "Shift amount",
-  description: "Number of bits to shift each pixel value to the left.",
+  description:
+    "Brightens images from cameras that pack a smaller bit depth (such as 12-bit) into a 16-bit file, scaling the values up so they fill the full expected brightness range. Each step doubles the values.",
   defaultValue: 4,
   min: 0,
   max: 8,
