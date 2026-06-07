@@ -1,7 +1,12 @@
 import { createWriteStream } from "node:fs";
 import { ZipFile } from "yazl";
 
+import { findEnviBinarySiblingPathOrNull } from "./envi-binary-sibling";
+
 const BUNDLE_FORMAT_VERSION = 2;
+
+const ENVI_HEADER_ASSET_EXTENSION = "hdr";
+const ENVI_BINARY_SIDECAR_EXTENSION = "bin";
 
 export type BundleDraftOperationHistoryParameterValue = number | string | boolean;
 
@@ -88,8 +93,17 @@ function buildAssetPathsForViewport(
 }
 
 function pickSidecarRelativePathOrNull(stem: string, asset: BundleDraftAsset): string | null {
-  if (asset.kind !== "baked" || !asset.sidecar) return null;
-  return `assets/${stem}.${asset.sidecar.extension}`;
+  if (asset.kind === "baked" && asset.sidecar) {
+    return `assets/${stem}.${asset.sidecar.extension}`;
+  }
+  if (asset.kind === "external" && isEnviHeaderAsset(asset)) {
+    return `assets/${stem}.${ENVI_BINARY_SIDECAR_EXTENSION}`;
+  }
+  return null;
+}
+
+function isEnviHeaderAsset(asset: BundleDraftExternalAsset): boolean {
+  return asset.extension.toLowerCase() === ENVI_HEADER_ASSET_EXTENSION;
 }
 
 async function streamBundleZipFileToOutputPath(
@@ -100,7 +114,7 @@ async function streamBundleZipFileToOutputPath(
   const zip = new ZipFile();
   const completion = pipeZipOutputStreamToFile(zip, outputPath);
   appendProjectJsonEntryToZip(zip, draft, assetPaths);
-  appendAllAssetEntriesToZip(zip, draft, assetPaths);
+  await appendAllAssetEntriesToZip(zip, draft, assetPaths);
   zip.end();
   await completion;
 }
@@ -130,26 +144,46 @@ function appendProjectJsonEntryToZip(
   zip.addBuffer(buffer, "project.json");
 }
 
-function appendAllAssetEntriesToZip(
+async function appendAllAssetEntriesToZip(
   zip: ZipFile,
   draft: BundleDraft,
   assetPaths: ReadonlyArray<ResolvedBundleAssetPaths>,
-): void {
+): Promise<void> {
   for (let i = 0; i < draft.viewports.length; i += 1) {
-    appendAssetEntriesForViewport(zip, draft.viewports[i]!, assetPaths[i]!);
+    await appendAssetEntriesForViewport(zip, draft.viewports[i]!, assetPaths[i]!);
   }
 }
 
-function appendAssetEntriesForViewport(
+async function appendAssetEntriesForViewport(
   zip: ZipFile,
   viewport: BundleDraftViewportEntry,
   paths: ResolvedBundleAssetPaths,
-): void {
+): Promise<void> {
   if (viewport.asset.kind === "baked") {
     appendBakedAssetEntriesToZip(zip, viewport.asset, paths);
     return;
   }
-  zip.addFile(viewport.asset.absolutePath, paths.primaryRelativePath);
+  await appendExternalAssetEntriesToZip(zip, viewport.asset, paths);
+}
+
+async function appendExternalAssetEntriesToZip(
+  zip: ZipFile,
+  asset: BundleDraftExternalAsset,
+  paths: ResolvedBundleAssetPaths,
+): Promise<void> {
+  zip.addFile(asset.absolutePath, paths.primaryRelativePath);
+  await appendExternalEnviBinarySidecarIfPresent(zip, asset, paths);
+}
+
+async function appendExternalEnviBinarySidecarIfPresent(
+  zip: ZipFile,
+  asset: BundleDraftExternalAsset,
+  paths: ResolvedBundleAssetPaths,
+): Promise<void> {
+  if (paths.sidecarRelativePath === null) return;
+  const sidecarSourcePath = await findEnviBinarySiblingPathOrNull(asset.absolutePath);
+  if (sidecarSourcePath === null) return;
+  zip.addFile(sidecarSourcePath, paths.sidecarRelativePath);
 }
 
 function appendBakedAssetEntriesToZip(

@@ -15,8 +15,8 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(draft.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
   });
 
-  it("bakes a raster source as a single-band TIFF asset", () => {
-    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
+  it("bakes a modified raster source as a single-band TIFF asset", () => {
+    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
@@ -25,14 +25,38 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(first.asset.bytes.byteLength).toBeGreaterThan(0);
   });
 
-  it("bakes a multi-band raster source as an ENVI asset with a .bin sidecar", () => {
-    const draft = buildDraftBundleFromSnapshot(buildMultiBandRasterSnapshot());
+  it("bakes a modified multi-band raster source as an ENVI asset with a .bin sidecar", () => {
+    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
     expect(first.asset.extension).toBe("hdr");
     expect(first.asset.sidecar?.extension).toBe("bin");
     expect(first.asset.sidecar?.bytes.byteLength).toBeGreaterThan(0);
+  });
+
+  it("references an unmodified on-disk raster as an external asset instead of baking it", () => {
+    const draft = buildDraftBundleFromSnapshot(buildMultiBandRasterSnapshot());
+    const [first] = draft.viewports;
+    expect(first?.asset.kind).toBe("external");
+    if (first?.asset.kind !== "external") return;
+    expect(first.asset.absolutePath).toBe("/abs/path/to/cube.hdr");
+    expect(first.asset.extension).toBe("hdr");
+  });
+
+  // CT-061: a large unmodified ENVI cube must never be re-encoded into renderer
+  // memory or cloned across IPC. The external path declares the source by path
+  // and reads no pixels, so a cube with huge declared dimensions packs without
+  // allocating anything.
+  it("streams a large unmodified ENVI cube by reference without baking it", () => {
+    const snapshot = buildLargeUnmodifiedEnviSnapshot();
+    const draft = buildDraftBundleFromSnapshot(snapshot);
+    expect(draft.viewports[0]?.asset.kind).toBe("external");
+  });
+
+  it("rejects baking a modified raster that exceeds the bundle bake size limit", () => {
+    const snapshot = withAppliedOperation(buildLargeUnmodifiedEnviSnapshot());
+    expect(() => buildDraftBundleFromSnapshot(snapshot)).toThrow(/too large/i);
   });
 
   it("sorts the selected viewport indices ascending", () => {
@@ -114,6 +138,41 @@ function buildMultiBandRasterSnapshot(): SaveableProjectSnapshot {
           lastAppliedOperationLabel: null,
         },
         operationHistory: [],
+      },
+    ],
+  };
+}
+
+function withAppliedOperation(
+  snapshot: SaveableProjectSnapshot,
+): SaveableProjectSnapshot {
+  return {
+    ...snapshot,
+    viewports: snapshot.viewports.map((viewport) => ({
+      ...viewport,
+      operationHistory: [
+        {
+          actionId: "bit-shift",
+          actionLabel: "Bit Shift",
+          appliedLabel: "Bit shift +4",
+          parameterValues: { shiftAmount: 4 },
+          timestampMs: 1_700_000_000_000,
+        },
+      ],
+    })),
+  };
+}
+
+function buildLargeUnmodifiedEnviSnapshot(): SaveableProjectSnapshot {
+  const base = buildMultiBandRasterSnapshot();
+  const viewport = base.viewports[0]!;
+  const source = viewport.source as Extract<ViewportImageSource, { kind: "raster" }>;
+  return {
+    ...base,
+    viewports: [
+      {
+        ...viewport,
+        source: { kind: "raster", raster: { ...source.raster, width: 20_000, height: 20_000, bandCount: 10 } },
       },
     ],
   };
