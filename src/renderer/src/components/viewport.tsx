@@ -3,6 +3,7 @@ import type { MutableRefObject, RefObject } from "react";
 import { Contrast, FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -40,6 +41,7 @@ interface ViewportProps {
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
+  onSelectBandIndex: (bandIndex: number) => void;
   lastAppliedOperationLabel?: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -112,6 +114,13 @@ export function Viewport(props: ViewportProps): JSX.Element {
           inProgressDragRect={inProgressDragRect}
           transformVersion={transformVersion}
         />
+        {shouldShowBandNavigator(imageSource) ? (
+          <ViewportBandNavigator
+            bandCount={getMultiBandSourceBandCount(imageSource)}
+            selectedBandIndex={props.selectedBandIndex}
+            onSelectBandIndex={props.onSelectBandIndex}
+          />
+        ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
       </div>
     </div>
@@ -133,6 +142,15 @@ function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.E
 function describeViewportAriaLabel(viewportNumber: number | null | undefined): string {
   if (typeof viewportNumber === "number") return `Viewport ${viewportNumber}`;
   return "Image viewport";
+}
+
+function shouldShowBandNavigator(source: ViewportImageSource | null): boolean {
+  return getMultiBandSourceBandCount(source) > 1;
+}
+
+function getMultiBandSourceBandCount(source: ViewportImageSource | null): number {
+  if (!source || source.kind !== "raster") return 0;
+  return source.raster.bandCount;
 }
 
 interface ViewportHeaderStripProps {

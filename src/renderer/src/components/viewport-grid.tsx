@@ -123,6 +123,7 @@ function renderViewportCellViewport(
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       selectedBandIndex={settings.selectedBandIndex}
+      onSelectBandIndex={settings.handleSelectBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
@@ -151,6 +152,7 @@ interface ViewportCellInteractionSettings {
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
+  handleSelectBandIndex: (bandIndex: number) => void;
   lastAppliedOperationLabel: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -200,6 +202,11 @@ function useViewportCellInteractionSettings(
       }),
     [cellIndex, renderingState, setRenderingState],
   );
+  const handleSelectBandIndex = useCallback(
+    (bandIndex: number) =>
+      setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   return {
     isSelected,
     handleClick,
@@ -207,6 +214,7 @@ function useViewportCellInteractionSettings(
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,
+    handleSelectBandIndex,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
     isRegionToolActive,
     roi: renderingState.roi,
