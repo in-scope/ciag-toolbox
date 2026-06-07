@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from "react";
 
+import { BandIndexBadge } from "@/components/band-index-badge";
 import { BandThumbnail } from "@/components/band-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +11,7 @@ import {
   toggleBandIndexInKeptSet,
 } from "@/lib/image/kept-band-set";
 import {
-  getRasterBandLabelOrDefault,
+  describeRasterBandDisplayIdentity,
   type RasterImage,
 } from "@/lib/image/raster-image";
 import { cn } from "@/lib/utils";
@@ -124,14 +125,26 @@ function buildSubsetBandsApplyOptions(
 interface SubsetBandsRowItem {
   readonly bandIndex: number;
   readonly label: string;
+  readonly originalNumber: number;
+  readonly hasExplicitLabel: boolean;
 }
 
 function buildBandRowItemsForRaster(raster: RasterImage): ReadonlyArray<SubsetBandsRowItem> {
   const items: SubsetBandsRowItem[] = [];
   for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
-    items.push({ bandIndex, label: getRasterBandLabelOrDefault(raster, bandIndex) });
+    items.push(buildSubsetBandsRowItem(raster, bandIndex));
   }
   return items;
+}
+
+function buildSubsetBandsRowItem(raster: RasterImage, bandIndex: number): SubsetBandsRowItem {
+  const identity = describeRasterBandDisplayIdentity(raster, bandIndex);
+  return {
+    bandIndex,
+    label: identity.label,
+    originalNumber: identity.originalNumber,
+    hasExplicitLabel: identity.hasExplicitLabel,
+  };
 }
 
 interface SubsetBandsRowListProps {
@@ -185,6 +198,9 @@ function SubsetBandsRow(props: SubsetBandsRowProps): JSX.Element {
         onCheckedChange={props.onToggleKept}
       />
       <BandThumbnail raster={props.raster} bandIndex={props.item.bandIndex} />
+      {props.item.hasExplicitLabel ? (
+        <BandIndexBadge originalNumber={props.item.originalNumber} />
+      ) : null}
       <span className="flex-1 truncate text-sm" title={props.item.label}>
         {props.item.label}
       </span>

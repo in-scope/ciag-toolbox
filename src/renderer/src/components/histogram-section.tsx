@@ -27,7 +27,7 @@ import { computeHistogramBarHeightsInPixels } from "@/lib/image/compute-histogra
 import { computeHistogramBarHorizontalSpan } from "@/lib/image/compute-histogram-bar-layout";
 import {
   clampBandIndexToRaster,
-  getRasterBandLabelOrDefault,
+  formatRasterBandIdentityText,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
@@ -79,7 +79,7 @@ function HistogramSectionBody(props: HistogramSectionProps): JSX.Element {
       <section aria-label="Histogram" className={RIGHT_PANEL_SECTION_CLASSES}>
         <HistogramSectionHeader
           viewportNumber={props.activeSource.viewportNumber}
-          activeBandLabel={getRasterBandLabelOrDefault(raster, activeBandIndex)}
+          activeBandLabel={formatRasterBandIdentityText(raster, activeBandIndex)}
           isCollapsed={isCollapsed}
         />
         <CollapsibleContent>

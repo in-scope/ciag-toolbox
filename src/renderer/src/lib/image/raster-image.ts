@@ -48,13 +48,48 @@ export function getRasterBandPixelsOrThrow(
   return pixels;
 }
 
+export function getRasterBandExplicitLabelOrNull(
+  raster: RasterImage,
+  bandIndex: number,
+): string | null {
+  const explicit = raster.bandLabels?.[bandIndex];
+  if (explicit && explicit.length > 0) return explicit;
+  return null;
+}
+
 export function getRasterBandLabelOrDefault(
   raster: RasterImage,
   bandIndex: number,
 ): string {
-  const explicit = raster.bandLabels?.[bandIndex];
-  if (explicit && explicit.length > 0) return explicit;
-  return `Band ${getRasterBandOriginalNumber(raster, bandIndex)}`;
+  return describeRasterBandDisplayIdentity(raster, bandIndex).label;
+}
+
+export interface RasterBandDisplayIdentity {
+  readonly label: string;
+  readonly originalNumber: number;
+  readonly hasExplicitLabel: boolean;
+}
+
+export function describeRasterBandDisplayIdentity(
+  raster: RasterImage,
+  bandIndex: number,
+): RasterBandDisplayIdentity {
+  const explicitLabel = getRasterBandExplicitLabelOrNull(raster, bandIndex);
+  const originalNumber = getRasterBandOriginalNumber(raster, bandIndex);
+  return {
+    label: explicitLabel ?? `Band ${originalNumber}`,
+    originalNumber,
+    hasExplicitLabel: explicitLabel !== null,
+  };
+}
+
+export function formatRasterBandIdentityText(
+  raster: RasterImage,
+  bandIndex: number,
+): string {
+  const identity = describeRasterBandDisplayIdentity(raster, bandIndex);
+  if (identity.hasExplicitLabel) return `#${identity.originalNumber} ${identity.label}`;
+  return identity.label;
 }
 
 export function getRasterBandOriginalNumber(
