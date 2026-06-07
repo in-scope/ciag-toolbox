@@ -1,5 +1,8 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent, type WheelEvent } from "react";
 
+import { useDebouncedBandSelection } from "@/components/use-debounced-band-selection";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -18,23 +21,39 @@ interface ViewportBandNavigatorProps {
 
 export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.Element {
   const activeBandIndex = clampBandIndexWithinCount(props.selectedBandIndex, props.bandCount);
+  const selection = useDebouncedBandSelection(activeBandIndex, props.onSelectBandIndex);
+  const displayedBandIndex = selection.displayedBandIndex;
   const stepBandBy = (direction: number) =>
-    props.onSelectBandIndex(stepBandIndexInDirection(activeBandIndex, direction, props.bandCount));
+    selection.requestBandSelectionDebounced(
+      stepBandIndexInDirection(displayedBandIndex, direction, props.bandCount),
+    );
   return (
     <div
-      className="pointer-events-auto absolute inset-x-0 bottom-3 mx-auto flex w-[min(420px,80%)] items-center gap-3 rounded-md border bg-card/90 px-3 py-2 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute inset-x-0 bottom-3 mx-auto flex w-[min(460px,86%)] items-center gap-2 rounded-md border bg-card/90 px-3 py-2 shadow-lg backdrop-blur"
       onWheel={(event) => handleBandNavigatorWheel(event, stepBandBy)}
     >
       <span className="shrink-0 text-xs font-medium text-muted-foreground">Band</span>
+      <BandStepButton
+        label="Previous band"
+        icon={<ChevronLeft />}
+        disabled={displayedBandIndex <= 0}
+        onStep={() => stepBandBy(-1)}
+      />
       <BandSlider
         bandCount={props.bandCount}
-        activeBandIndex={activeBandIndex}
-        onSelectBandIndex={props.onSelectBandIndex}
+        activeBandIndex={displayedBandIndex}
+        onRequestBandIndex={selection.requestBandSelectionDebounced}
+      />
+      <BandStepButton
+        label="Next band"
+        icon={<ChevronRight />}
+        disabled={displayedBandIndex >= props.bandCount - 1}
+        onStep={() => stepBandBy(1)}
       />
       <BandNumberInput
         bandCount={props.bandCount}
-        activeBandIndex={activeBandIndex}
-        onSelectBandIndex={props.onSelectBandIndex}
+        activeBandIndex={displayedBandIndex}
+        onCommitBandIndex={selection.commitBandSelectionImmediately}
       />
       <span className="shrink-0 font-mono text-xs text-muted-foreground">/ {props.bandCount}</span>
     </div>
@@ -50,10 +69,33 @@ function handleBandNavigatorWheel(
   stepBandBy(pickBandStepDirectionFromWheelDelta(event.deltaY));
 }
 
+interface BandStepButtonProps {
+  label: string;
+  icon: JSX.Element;
+  disabled: boolean;
+  onStep: () => void;
+}
+
+function BandStepButton(props: BandStepButtonProps): JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={props.label}
+      className="size-7 shrink-0"
+      disabled={props.disabled}
+      onClick={props.onStep}
+    >
+      {props.icon}
+    </Button>
+  );
+}
+
 interface BandSliderProps {
   bandCount: number;
   activeBandIndex: number;
-  onSelectBandIndex: (bandIndex: number) => void;
+  onRequestBandIndex: (bandIndex: number) => void;
 }
 
 function BandSlider(props: BandSliderProps): JSX.Element {
@@ -65,7 +107,7 @@ function BandSlider(props: BandSliderProps): JSX.Element {
       max={props.bandCount - 1}
       step={1}
       value={[props.activeBandIndex]}
-      onValueChange={(values) => commitSliderValue(values, props.bandCount, props.onSelectBandIndex)}
+      onValueChange={(values) => commitSliderValue(values, props.bandCount, props.onRequestBandIndex)}
     />
   );
 }
@@ -73,17 +115,17 @@ function BandSlider(props: BandSliderProps): JSX.Element {
 function commitSliderValue(
   values: ReadonlyArray<number>,
   bandCount: number,
-  onSelectBandIndex: (bandIndex: number) => void,
+  onRequestBandIndex: (bandIndex: number) => void,
 ): void {
   const next = values[0];
   if (next === undefined) return;
-  onSelectBandIndex(clampBandIndexWithinCount(next, bandCount));
+  onRequestBandIndex(clampBandIndexWithinCount(next, bandCount));
 }
 
 interface BandNumberInputProps {
   bandCount: number;
   activeBandIndex: number;
-  onSelectBandIndex: (bandIndex: number) => void;
+  onCommitBandIndex: (bandIndex: number) => void;
 }
 
 function BandNumberInput(props: BandNumberInputProps): JSX.Element {
@@ -124,5 +166,5 @@ function commitDraftBandNumber(
     setDraftText(formatBandNumberForInput(props.activeBandIndex));
     return;
   }
-  props.onSelectBandIndex(parsedIndex);
+  props.onCommitBandIndex(parsedIndex);
 }
