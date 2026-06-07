@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Layers } from "lucide-react";
+import { ChevronsLeft, Crop, Layers } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import { applyBandKeepToRasterImage } from "@/lib/image/apply-band-keep";
@@ -38,15 +38,6 @@ export interface RegisteredViewportAction extends ViewportAction {
     sourceRenderingState: ViewportRenderingState,
   ) => ViewportRenderingState;
 }
-
-export const NORMALIZE_ACTION: RegisteredViewportAction = {
-  id: "normalize",
-  label: "Normalize",
-  icon: Contrast,
-  successMessage: "Normalization applied",
-  appliedLabel: "Normalized",
-  apply: (state) => ({ ...state, normalizationEnabled: true }),
-};
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
 const BIT_SHIFT_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
@@ -325,7 +316,6 @@ function formatBandSubsetAppliedLabel(parameterValues: ParameterValuesById): str
 }
 
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
-  NORMALIZE_ACTION,
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
 ];
