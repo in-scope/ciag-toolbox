@@ -19,6 +19,15 @@ export interface IntegerParameterSchema extends ParameterSchemaBase {
   readonly max?: number;
 }
 
+export interface SliderParameterSchema extends ParameterSchemaBase {
+  readonly kind: "slider";
+  readonly defaultValue: number;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly valueSuffix?: string;
+}
+
 export interface EnumParameterSchema extends ParameterSchemaBase {
   readonly kind: "enum";
   readonly defaultValue: string;
@@ -56,6 +65,7 @@ export const NO_RASTER_REFERENCE_SELECTED = "";
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
+  | SliderParameterSchema
   | EnumParameterSchema
   | BooleanParameterSchema
   | CubeScopeParameterSchema
@@ -119,6 +129,13 @@ export function clampNumericParameterValueToSchema(
 ): number {
   const clamped = clampValueToOptionalRange(rawValue, schema.min, schema.max);
   return schema.kind === "integer" ? Math.round(clamped) : clamped;
+}
+
+export function clampSliderParameterValueToSchema(
+  schema: SliderParameterSchema,
+  rawValue: number,
+): number {
+  return clampValueToOptionalRange(rawValue, schema.min, schema.max);
 }
 
 function clampValueToOptionalRange(value: number, min?: number, max?: number): number {

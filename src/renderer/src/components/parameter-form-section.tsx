@@ -2,10 +2,12 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
 import {
   clampNumericParameterValueToSchema,
+  clampSliderParameterValueToSchema,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   NO_RASTER_REFERENCE_SELECTED,
@@ -17,6 +19,7 @@ import {
   type NumberParameterSchema,
   type ParameterSchema,
   type RasterReferenceParameterSchema,
+  type SliderParameterSchema,
   type ParameterValue,
   type ParameterValuesById,
 } from "@/lib/actions/parameter-schema";
@@ -101,6 +104,15 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       />
     );
   }
+  if (props.schema.kind === "slider") {
+    return (
+      <SliderParameterField
+        schema={props.schema}
+        value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
   return (
     <NumericParameterField
       schema={props.schema}
@@ -170,6 +182,44 @@ function parseNumericInputValueOrFallback(rawValue: string, fallback: number): n
   if (trimmed === "") return fallback;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+interface SliderParameterFieldProps {
+  schema: SliderParameterSchema;
+  value: number;
+  onChangeValue: (next: number) => void;
+}
+
+function SliderParameterField(props: SliderParameterFieldProps): JSX.Element {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id} className="text-foreground">
+          {props.schema.label}
+        </label>
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatSliderValueWithSuffix(props.value, props.schema.valueSuffix)}
+        </span>
+      </div>
+      <Slider
+        id={id}
+        aria-label={props.schema.label}
+        min={props.schema.min}
+        max={props.schema.max}
+        step={props.schema.step}
+        value={[props.value]}
+        onValueChange={(values) =>
+          props.onChangeValue(clampSliderParameterValueToSchema(props.schema, values[0] ?? props.value))
+        }
+      />
+    </div>
+  );
+}
+
+function formatSliderValueWithSuffix(value: number, valueSuffix: string | undefined): string {
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return valueSuffix ? `${formatted}${valueSuffix}` : formatted;
 }
 
 interface EnumParameterFieldProps {

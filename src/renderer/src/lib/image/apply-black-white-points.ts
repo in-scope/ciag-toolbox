@@ -1,9 +1,14 @@
 import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
-  type RasterSampleFormat,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import {
+  clampValueToDataTypeRangeRoundingIntegers,
+  dataTypeValueRangeForBand,
+  isFloatTypedArray,
+  type DataTypeValueRange,
+} from "@/lib/image/data-type-value-range";
 import {
   clampViewportRoiToImageBounds,
   type ViewportRoi,
@@ -12,11 +17,6 @@ import {
 export interface BlackWhitePointRange {
   readonly black: number;
   readonly white: number;
-}
-
-interface DataTypeValueRange {
-  readonly min: number;
-  readonly max: number;
 }
 
 interface PixelRectangle {
@@ -67,20 +67,6 @@ function replaceBandPixelsAtIndex(
   return bands.map((band, index) => (index === bandIndex ? replacement : band));
 }
 
-function dataTypeValueRangeForBand(
-  band: RasterTypedArray,
-  sampleFormat: RasterSampleFormat,
-): DataTypeValueRange {
-  if (sampleFormat === "float") return { min: 0, max: 1 };
-  if (band instanceof Uint8Array) return { min: 0, max: 0xff };
-  if (band instanceof Uint16Array) return { min: 0, max: 0xffff };
-  if (band instanceof Uint32Array) return { min: 0, max: 0xffffffff };
-  if (band instanceof Int8Array) return { min: -0x80, max: 0x7f };
-  if (band instanceof Int16Array) return { min: -0x8000, max: 0x7fff };
-  if (band instanceof Int32Array) return { min: -0x80000000, max: 0x7fffffff };
-  return { min: 0, max: 1 };
-}
-
 function remapBandBlackWhitePointsWithinRegion(
   band: RasterTypedArray,
   rasterWidth: number,
@@ -105,18 +91,7 @@ function mapValueToTypeRange(
 ): number {
   const fraction = (value - points.black) / (points.white - points.black);
   const mapped = typeRange.min + fraction * (typeRange.max - typeRange.min);
-  const clamped = clampValueToRange(mapped, typeRange);
-  return roundForOutput ? Math.round(clamped) : clamped;
-}
-
-function clampValueToRange(value: number, range: DataTypeValueRange): number {
-  if (value < range.min) return range.min;
-  if (value > range.max) return range.max;
-  return value;
-}
-
-function isFloatTypedArray(band: RasterTypedArray): boolean {
-  return band instanceof Float32Array || band instanceof Float64Array;
+  return clampValueToDataTypeRangeRoundingIntegers(mapped, typeRange, roundForOutput);
 }
 
 function copyBandPixels(band: RasterTypedArray): RasterTypedArray {

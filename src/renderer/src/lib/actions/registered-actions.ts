@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Layers, SunDim, Target } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Layers, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -8,6 +8,11 @@ import {
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyBlackWhitePointsToRasterBand } from "@/lib/image/apply-black-white-points";
+import {
+  applyBrightnessToRasterBands,
+  brightnessDeltaForRangeFractionOfBand,
+} from "@/lib/image/apply-brightness";
+import { applyContrastToRasterBands } from "@/lib/image/apply-contrast";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
@@ -18,13 +23,18 @@ import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
-import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+} from "@/lib/image/raster-image";
 import {
   NO_RASTER_REFERENCE_SELECTED,
   readRasterReferenceTokenOrEmpty,
+  type BooleanParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
   type RasterReferenceParameterSchema,
+  type SliderParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
 import type {
@@ -647,10 +657,153 @@ function formatPointValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(3);
 }
 
+const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID = "brightnessPercent";
+const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID = "contrastRatio";
+const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID = "applyToAllBands";
+const BRIGHTNESS_CONTRAST_BAND_PARAMETER_ID = "targetBandIndex";
+
+const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_SCHEMA: SliderParameterSchema = {
+  kind: "slider",
+  id: BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID,
+  label: "Brightness",
+  description:
+    "Adds a constant to every pixel, as a percentage of the data-type range. Values clip to the data-type range at both ends.",
+  defaultValue: 0,
+  min: -100,
+  max: 100,
+  step: 1,
+  valueSuffix: "%",
+};
+
+const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
+  kind: "slider",
+  id: BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID,
+  label: "Contrast",
+  description:
+    "Scales each pixel around the band mean: (value - mean) * contrast + mean. 1 leaves the band unchanged; values clip to the data-type range.",
+  defaultValue: 1,
+  min: 0,
+  max: 4,
+  step: 0.05,
+};
+
+const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
+  kind: "boolean",
+  id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
+  label: "Apply to all bands",
+  description: "Off applies to the selected band only; on applies to every band in the cube.",
+  defaultValue: false,
+};
+
+export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
+  id: "brightness-contrast",
+  label: "Brightness & Contrast",
+  icon: SlidersHorizontal,
+  parameters: [
+    BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_SCHEMA,
+    BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA,
+    BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA,
+  ],
+  successMessage: "Brightness and contrast applied",
+  appliedLabel: "Brightness & contrast",
+  formatAppliedLabel: formatBrightnessContrastAppliedLabel,
+  prepareParameterValuesForApply: injectSelectedBandIndexForBrightnessContrast,
+  apply: (state) => state,
+  transformSource: createBrightnessContrastSourceTransform(),
+};
+
+function injectSelectedBandIndexForBrightnessContrast(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  return Object.freeze({
+    ...rawParameterValues,
+    [BRIGHTNESS_CONTRAST_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
+  });
+}
+
+function createBrightnessContrastSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Brightness & Contrast only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const bandIndexes = resolveBrightnessContrastBandIndexes(parameterValues, source.raster);
+    return { kind: "raster", raster: adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues) };
+  };
+}
+
+function adjustBrightnessThenContrast(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+  parameterValues: ParameterValuesById,
+): RasterImage {
+  const brightnessFraction = readBrightnessPercent(parameterValues) / 100;
+  const firstBand = getRasterBandPixelsOrThrow(raster, bandIndexes[0] ?? 0);
+  const brightnessDelta = brightnessDeltaForRangeFractionOfBand(firstBand, raster.sampleFormat, brightnessFraction);
+  const brightened = applyBrightnessToRasterBands(raster, bandIndexes, brightnessDelta);
+  return applyContrastToRasterBands(brightened, bandIndexes, readContrastRatio(parameterValues));
+}
+
+function resolveBrightnessContrastBandIndexes(
+  parameterValues: ParameterValuesById,
+  raster: RasterImage,
+): ReadonlyArray<number> {
+  if (readApplyToAllBands(parameterValues)) return listAllBandIndexes(raster.bandPixels.length);
+  return [readBrightnessContrastTargetBandIndex(parameterValues)];
+}
+
+function listAllBandIndexes(bandCount: number): ReadonlyArray<number> {
+  return Array.from({ length: bandCount }, (_unused, index) => index);
+}
+
+function readApplyToAllBands(parameterValues: ParameterValuesById): boolean {
+  return parameterValues[BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID] === true;
+}
+
+function readBrightnessContrastTargetBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[BRIGHTNESS_CONTRAST_BAND_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function readBrightnessPercent(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_SCHEMA.defaultValue;
+  }
+  return raw;
+}
+
+function readContrastRatio(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA.defaultValue;
+  }
+  return raw;
+}
+
+function formatBrightnessContrastAppliedLabel(parameterValues: ParameterValuesById): string {
+  const brightness = formatSignedPercent(readBrightnessPercent(parameterValues));
+  const contrast = readContrastRatio(parameterValues).toFixed(2);
+  return `Brightness ${brightness}, contrast ${contrast} (${describeAffectedBands(parameterValues)})`;
+}
+
+function describeAffectedBands(parameterValues: ParameterValuesById): string {
+  if (readApplyToAllBands(parameterValues)) return "all bands";
+  return `band ${readBrightnessContrastTargetBandIndex(parameterValues) + 1}`;
+}
+
+function formatSignedPercent(percent: number): string {
+  return `${percent >= 0 ? "+" : ""}${percent}%`;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
   FLAT_FIELD_ACTION,
   SPECTRALON_ACTION,
   BLACK_WHITE_POINTS_ACTION,
+  BRIGHTNESS_CONTRAST_ACTION,
 ];

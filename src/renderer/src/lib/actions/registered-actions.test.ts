@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { BLACK_WHITE_POINTS_ACTION, REGISTERED_VIEWPORT_ACTIONS } from "./registered-actions";
+import {
+  BLACK_WHITE_POINTS_ACTION,
+  BRIGHTNESS_CONTRAST_ACTION,
+  REGISTERED_VIEWPORT_ACTIONS,
+} from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
 
@@ -18,7 +22,66 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "flat-field",
       "spectralon",
       "black-white-points",
+      "brightness-contrast",
     ]);
+  });
+});
+
+function makeTwoBandUint8Raster(
+  bandOne: ReadonlyArray<number>,
+  bandTwo: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from(bandOne), Uint8Array.from(bandTwo)],
+    width: bandOne.length,
+    height: 1,
+    bandCount: 2,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
+
+describe("BRIGHTNESS_CONTRAST_ACTION", () => {
+  it("brightens only the selected band by a percentage of the data-type range", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: 10, contrastRatio: 1, applyToAllBands: false },
+      state,
+      "whole-image",
+    );
+    const result = BRIGHTNESS_CONTRAST_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [0, 100]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 100]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([26, 126]);
+  });
+
+  it("applies to every band when the all-bands flag is set", () => {
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: 0, contrastRatio: 0, applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const result = BRIGHTNESS_CONTRAST_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [40, 60]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([50, 50]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([50, 50]);
+  });
+
+  it("records the slider values and affected bands in the applied label", () => {
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: -20, contrastRatio: 1.5, applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    expect(BRIGHTNESS_CONTRAST_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Brightness -20%, contrast 1.50 (all bands)",
+    );
   });
 });
 
