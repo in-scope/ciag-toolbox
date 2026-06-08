@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -21,6 +21,7 @@ import {
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
+import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
@@ -46,7 +47,7 @@ import {
   type ResolvedCubeScopeSelection,
   type SliderParameterSchema,
 } from "./parameter-schema";
-import type { ParameterValuesById } from "./parameter-schema";
+import type { ParameterValue, ParameterValuesById } from "./parameter-schema";
 import type {
   ApplyScope,
   ViewportAction,
@@ -955,6 +956,132 @@ function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): stri
   return `Normalize to [0,1] (band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1})`;
 }
 
+const STANDARDIZE_SCOPE_PARAMETER_ID = "scope";
+const STANDARDIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const STANDARDIZE_TARGET_MEAN_PARAMETER_ID = "targetMean";
+const STANDARDIZE_TARGET_STD_PARAMETER_ID = "targetStandardDeviation";
+
+const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
+  kind: "cube-scope",
+  id: STANDARDIZE_SCOPE_PARAMETER_ID,
+  label: "Scope",
+  description:
+    "Full cube standardizes by one cube-wide mean and std; band-wise standardizes the selected band by its own mean and std.",
+  defaultValue: FULL_CUBE_SCOPE,
+};
+
+const STANDARDIZE_TARGET_MEAN_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: STANDARDIZE_TARGET_MEAN_PARAMETER_ID,
+  label: "Target mean",
+  description: "The mean the standardized data should be centered on.",
+  defaultValue: 0,
+  step: 0.1,
+};
+
+const STANDARDIZE_TARGET_STD_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: STANDARDIZE_TARGET_STD_PARAMETER_ID,
+  label: "Target standard deviation",
+  description: "The standard deviation the standardized data should be scaled to.",
+  defaultValue: 1,
+  step: 0.1,
+};
+
+export const STANDARDIZE_ACTION: RegisteredViewportAction = {
+  id: "standardize",
+  label: "Standardize",
+  icon: Sigma,
+  parameters: [
+    STANDARDIZE_SCOPE_PARAMETER_SCHEMA,
+    STANDARDIZE_TARGET_MEAN_PARAMETER_SCHEMA,
+    STANDARDIZE_TARGET_STD_PARAMETER_SCHEMA,
+  ],
+  successMessage: "Standardize applied",
+  appliedLabel: "Standardize",
+  formatAppliedLabel: formatStandardizeAppliedLabel,
+  prepareParameterValuesForApply: injectSelectedBandIndexForStandardize,
+  apply: (state) => state,
+  transformSource: createStandardizeSourceTransform(),
+};
+
+function injectSelectedBandIndexForStandardize(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  return Object.freeze({
+    ...rawParameterValues,
+    [STANDARDIZE_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
+  });
+}
+
+function createStandardizeSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Standardize only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const selection = resolveStandardizeScopeSelection(parameterValues);
+    const target = readStandardizeTargetDistribution(parameterValues);
+    return { kind: "raster", raster: applyStandardizeToRaster(source.raster, selection, target) };
+  };
+}
+
+function resolveStandardizeScopeSelection(
+  parameterValues: ParameterValuesById,
+): ResolvedCubeScopeSelection {
+  const choice = readCubeScopeChoiceOrDefault(
+    parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
+    FULL_CUBE_SCOPE,
+  );
+  return resolveCubeScopeSelection(choice, [readStandardizeTargetBandIndex(parameterValues)]);
+}
+
+function readStandardizeTargetBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[STANDARDIZE_BAND_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function readStandardizeTargetDistribution(parameterValues: ParameterValuesById): {
+  targetMean: number;
+  targetStandardDeviation: number;
+} {
+  return {
+    targetMean: readNumberParameterOrDefault(
+      parameterValues[STANDARDIZE_TARGET_MEAN_PARAMETER_ID],
+      STANDARDIZE_TARGET_MEAN_PARAMETER_SCHEMA.defaultValue,
+    ),
+    targetStandardDeviation: readNumberParameterOrDefault(
+      parameterValues[STANDARDIZE_TARGET_STD_PARAMETER_ID],
+      STANDARDIZE_TARGET_STD_PARAMETER_SCHEMA.defaultValue,
+    ),
+  };
+}
+
+function readNumberParameterOrDefault(
+  raw: ParameterValue | undefined,
+  fallback: number,
+): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback;
+  return raw;
+}
+
+function formatStandardizeAppliedLabel(parameterValues: ParameterValuesById): string {
+  const target = readStandardizeTargetDistribution(parameterValues);
+  return `Standardize (${describeStandardizeScope(parameterValues)}, mean ${target.targetMean}, std ${target.targetStandardDeviation})`;
+}
+
+function describeStandardizeScope(parameterValues: ParameterValuesById): string {
+  const choice = readCubeScopeChoiceOrDefault(
+    parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
+    FULL_CUBE_SCOPE,
+  );
+  if (choice === FULL_CUBE_SCOPE) return "full cube";
+  return `band-wise: band ${readStandardizeTargetBandIndex(parameterValues) + 1}`;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -964,4 +1091,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   BRIGHTNESS_CONTRAST_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
+  STANDARDIZE_ACTION,
 ];

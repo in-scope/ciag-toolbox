@@ -27,6 +27,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "brightness-contrast",
       "invert",
       "normalize-data",
+      "standardize",
     ]);
   });
 
