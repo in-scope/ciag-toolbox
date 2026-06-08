@@ -194,6 +194,7 @@ function buildRenderingStateWithHistory(
     selectedBandIndex: 0,
     operationHistory: history,
     roi: null,
+    blackWhitePoints: null,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,

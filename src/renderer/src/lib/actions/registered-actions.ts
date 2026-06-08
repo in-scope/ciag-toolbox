@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Crop, Layers, SunDim, Target } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Layers, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -7,6 +7,7 @@ import {
   mapKeptBandNumbersToCurrentPositions,
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
+import { applyBlackWhitePointsToRasterBand } from "@/lib/image/apply-black-white-points";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
@@ -520,9 +521,136 @@ function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): str
   );
 }
 
+const BLACK_WHITE_POINTS_BLACK_PARAMETER_ID = "blackPoint";
+const BLACK_WHITE_POINTS_WHITE_PARAMETER_ID = "whitePoint";
+const BLACK_WHITE_POINTS_BAND_PARAMETER_ID = "targetBandIndex";
+const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
+const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0 = "regionImagePixelY0";
+const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1 = "regionImagePixelX1";
+const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1 = "regionImagePixelY1";
+
+export const BLACK_WHITE_POINTS_ACTION: RegisteredViewportAction = {
+  id: "black-white-points",
+  label: "Stretch Contrast",
+  icon: Contrast,
+  successMessage: "Black/white-point stretch applied",
+  appliedLabel: "Stretch contrast",
+  formatAppliedLabel: formatBlackWhitePointsAppliedLabel,
+  prepareParameterValuesForApply: prepareBlackWhitePointsParameterValues,
+  isAvailableForActiveViewport: (state) => state.blackWhitePoints !== null,
+  apply: clearBlackWhitePointsAfterApply,
+  clearConsumedSourceStateAfterApply: clearBlackWhitePointsAfterApply,
+  transformSource: createBlackWhitePointsSourceTransform(),
+};
+
+function clearBlackWhitePointsAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, blackWhitePoints: null };
+}
+
+function prepareBlackWhitePointsParameterValues(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  const points = sourceRenderingState.blackWhitePoints;
+  if (!points) {
+    throw new Error("Stretch Contrast needs black and white points. Drag the histogram markers first.");
+  }
+  const withPoints = withBlackWhitePointAndBandValues(rawParameterValues, points, sourceRenderingState.selectedBandIndex);
+  return injectActiveRoiCornersIfPresent(withPoints, sourceRenderingState.roi);
+}
+
+function withBlackWhitePointAndBandValues(
+  rawParameterValues: ParameterValuesById,
+  points: { readonly black: number; readonly white: number },
+  selectedBandIndex: number,
+): ParameterValuesById {
+  return {
+    ...rawParameterValues,
+    [BLACK_WHITE_POINTS_BLACK_PARAMETER_ID]: points.black,
+    [BLACK_WHITE_POINTS_WHITE_PARAMETER_ID]: points.white,
+    [BLACK_WHITE_POINTS_BAND_PARAMETER_ID]: selectedBandIndex,
+  };
+}
+
+function injectActiveRoiCornersIfPresent(
+  parameterValues: ParameterValuesById,
+  roi: ViewportRoi | null,
+): ParameterValuesById {
+  if (!roi) return Object.freeze({ ...parameterValues });
+  return Object.freeze({
+    ...parameterValues,
+    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0]: roi.imagePixelX0,
+    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0]: roi.imagePixelY0,
+    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1]: roi.imagePixelX1,
+    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1]: roi.imagePixelY1,
+  });
+}
+
+function createBlackWhitePointsSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Stretch Contrast only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const bandIndex = readBlackWhitePointsBandIndex(parameterValues);
+    const points = readBlackWhitePointRangeOrThrow(parameterValues);
+    const region = readBlackWhitePointsRegionIfPresent(parameterValues);
+    const raster = applyBlackWhitePointsToRasterBand(source.raster, bandIndex, points, region ? { region } : {});
+    return { kind: "raster", raster };
+  };
+}
+
+function readBlackWhitePointsBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[BLACK_WHITE_POINTS_BAND_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function readBlackWhitePointRangeOrThrow(
+  parameterValues: ParameterValuesById,
+): { readonly black: number; readonly white: number } {
+  const black = parameterValues[BLACK_WHITE_POINTS_BLACK_PARAMETER_ID];
+  const white = parameterValues[BLACK_WHITE_POINTS_WHITE_PARAMETER_ID];
+  if (typeof black !== "number" || typeof white !== "number") {
+    throw new Error("Stretch Contrast needs black and white points. Drag the histogram markers first.");
+  }
+  return { black, white };
+}
+
+function readBlackWhitePointsRegionIfPresent(
+  parameterValues: ParameterValuesById,
+): ViewportRoi | null {
+  const x0 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0];
+  const y0 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0];
+  const x1 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1];
+  const y1 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1];
+  if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
+  return {
+    imagePixelX0: Math.round(x0 as number),
+    imagePixelY0: Math.round(y0 as number),
+    imagePixelX1: Math.round(x1 as number),
+    imagePixelY1: Math.round(y1 as number),
+  };
+}
+
+function formatBlackWhitePointsAppliedLabel(parameterValues: ParameterValuesById): string {
+  const points = readBlackWhitePointRangeOrThrow(parameterValues);
+  const label = `Stretch contrast [${formatPointValue(points.black)}, ${formatPointValue(points.white)}]`;
+  const region = readBlackWhitePointsRegionIfPresent(parameterValues);
+  if (!region) return label;
+  const canonical = canonicalizeViewportRoiCorners(region);
+  return `${label} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
+}
+
+function formatPointValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(3);
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
   FLAT_FIELD_ACTION,
   SPECTRALON_ACTION,
+  BLACK_WHITE_POINTS_ACTION,
 ];

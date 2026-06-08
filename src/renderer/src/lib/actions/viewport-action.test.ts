@@ -61,6 +61,7 @@ describe("applyActionToSelectedViewports", () => {
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
+      blackWhitePoints: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       removedBandIndexes: [],
       isBandSubsetEditModeActive: false,

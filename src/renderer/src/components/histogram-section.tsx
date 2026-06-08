@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { HistogramBlackWhiteMarkers } from "@/components/histogram-black-white-markers";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
@@ -31,9 +32,11 @@ import {
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import type { BlackWhitePointSelection } from "@/lib/image/black-white-point-selection";
 import { cn } from "@/lib/utils";
 import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useRightPanelCollapsedSection } from "@/state/right-panel-collapsed-state";
+import { useViewportRendering } from "@/state/viewport-rendering-context";
 
 const HISTOGRAM_CANVAS_HEIGHT_PX = 120;
 
@@ -149,8 +152,33 @@ function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
     props.bandIndex,
     props.viewportIndex,
   );
+  const markerBinding = useBlackWhitePointMarkerBinding(props.viewportIndex);
   if (!histogram) return <HistogramSkeleton />;
-  return <HistogramCanvas histogram={histogram} sampleFormat={props.raster.sampleFormat} />;
+  return (
+    <HistogramCanvas
+      histogram={histogram}
+      sampleFormat={props.raster.sampleFormat}
+      markerBinding={markerBinding}
+    />
+  );
+}
+
+interface BlackWhitePointMarkerBinding {
+  selection: BlackWhitePointSelection | null;
+  onChange: (next: BlackWhitePointSelection) => void;
+}
+
+function useBlackWhitePointMarkerBinding(viewportIndex: number): BlackWhitePointMarkerBinding {
+  const renderingApi = useViewportRendering();
+  const selection = renderingApi.getRenderingState(viewportIndex).blackWhitePoints;
+  const onChange = useCallback(
+    (next: BlackWhitePointSelection) => {
+      const current = renderingApi.getRenderingState(viewportIndex);
+      renderingApi.setRenderingState(viewportIndex, { ...current, blackWhitePoints: next });
+    },
+    [renderingApi, viewportIndex],
+  );
+  return { selection, onChange };
 }
 
 function HistogramSkeleton(): JSX.Element {
@@ -245,6 +273,7 @@ function absorbBandHistogramAbandonmentOrRethrow(reason: unknown): void {
 interface HistogramCanvasProps {
   histogram: BandHistogram;
   sampleFormat: RasterSampleFormat;
+  markerBinding: BlackWhitePointMarkerBinding;
 }
 
 function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
@@ -261,15 +290,23 @@ function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
   }, [props.histogram, canvasWidthPx]);
   return (
     <div className="flex flex-col gap-1">
-      <canvas
-        ref={canvasRef}
-        width={canvasWidthPx}
-        height={HISTOGRAM_CANVAS_HEIGHT_PX}
-        aria-label="Active band intensity histogram"
-        role="img"
-        className="block w-full rounded-sm bg-muted text-primary"
-        style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
-      />
+      <div className="relative" style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}>
+        <canvas
+          ref={canvasRef}
+          width={canvasWidthPx}
+          height={HISTOGRAM_CANVAS_HEIGHT_PX}
+          aria-label="Active band intensity histogram"
+          role="img"
+          className="block w-full rounded-sm bg-muted text-primary"
+          style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
+        />
+        <HistogramBlackWhiteMarkers
+          min={props.histogram.min}
+          max={props.histogram.max}
+          selection={props.markerBinding.selection}
+          onChange={props.markerBinding.onChange}
+        />
+      </div>
       <HistogramAxisTickLabelsRow
         histogram={props.histogram}
         sampleFormat={props.sampleFormat}

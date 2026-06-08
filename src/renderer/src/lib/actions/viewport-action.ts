@@ -1,3 +1,4 @@
+import type { BlackWhitePointSelection } from "@/lib/image/black-white-point-selection";
 import {
   EMPTY_PINNED_SPECTRA,
   type PinnedSpectraList,
@@ -18,6 +19,7 @@ export interface ViewportRenderingState {
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
+  readonly blackWhitePoints: BlackWhitePointSelection | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
   readonly isBandSubsetEditModeActive: boolean;
@@ -31,6 +33,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
+  blackWhitePoints: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
   isBandSubsetEditModeActive: false,

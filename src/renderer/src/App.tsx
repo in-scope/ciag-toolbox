@@ -1699,6 +1699,7 @@ function deriveActionAvailabilityForActiveViewport(
 function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
   if (action.id === "crop-to-region") return "draw a region first";
   if (action.id === "spectralon") return "draw a bright-target region first";
+  if (action.id === "black-white-points") return "drag the histogram black/white markers first";
   return "not available for this viewport";
 }
 
