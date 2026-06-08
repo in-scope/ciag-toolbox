@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyBandKeepToRasterImage,
   listKeptBandIndexesFromRemoved,
+  mapKeptBandNumbersToCurrentPositions,
 } from "./apply-band-keep";
-import type { RasterImage } from "./raster-image";
+import { getRasterBandLabelOrDefault, type RasterImage } from "./raster-image";
 
 describe("applyBandKeepToRasterImage", () => {
   it("keeps only the specified bands and remaps band indexes", () => {
@@ -52,6 +53,22 @@ describe("applyBandKeepToRasterImage", () => {
     expect(result.bandWavelengths).toEqual([650, 450]);
   });
 
+  it("preserves the original 1-based band numbers of the kept bands", () => {
+    const raster = createThreeBandUint16Raster();
+    const result = applyBandKeepToRasterImage(raster, [1, 2]);
+    expect(result.bandOriginalNumbers).toEqual([2, 3]);
+    expect(getRasterBandLabelOrDefault(result, 0)).toBe("Band 2");
+    expect(getRasterBandLabelOrDefault(result, 1)).toBe("Band 3");
+  });
+
+  it("composes preserved numbers across a second keep", () => {
+    const raster = createThreeBandUint16Raster();
+    const firstKeep = applyBandKeepToRasterImage(raster, [1, 2]);
+    const secondKeep = applyBandKeepToRasterImage(firstKeep, [1]);
+    expect(secondKeep.bandOriginalNumbers).toEqual([3]);
+    expect(getRasterBandLabelOrDefault(secondKeep, 0)).toBe("Band 3");
+  });
+
   it("sorts and deduplicates the input index list", () => {
     const raster = createThreeBandUint16Raster();
     const result = applyBandKeepToRasterImage(raster, [2, 0, 2]);
@@ -93,6 +110,28 @@ describe("applyBandKeepToRasterImage", () => {
     };
     applyBandKeepToRasterImage(raster, [0]);
     expect(Array.from(sourceBand)).toEqual([7, 8, 9]);
+  });
+});
+
+describe("mapKeptBandNumbersToCurrentPositions", () => {
+  it("maps original band numbers back to their current positions", () => {
+    const subset: RasterImage = {
+      ...createThreeBandUint16Raster(),
+      bandOriginalNumbers: [2, 4, 7],
+    };
+    expect(mapKeptBandNumbersToCurrentPositions(subset, [4, 7])).toEqual([1, 2]);
+  });
+
+  it("defaults to one-based numbering for an un-subsetted raster", () => {
+    const raster = createThreeBandUint16Raster();
+    expect(mapKeptBandNumbersToCurrentPositions(raster, [1, 3])).toEqual([0, 2]);
+  });
+
+  it("throws when a requested band number is no longer present", () => {
+    const raster = createThreeBandUint16Raster();
+    expect(() => mapKeptBandNumbersToCurrentPositions(raster, [9])).toThrow(
+      "Band 9 is no longer present in this image.",
+    );
   });
 });
 

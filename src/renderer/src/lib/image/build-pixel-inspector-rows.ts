@@ -4,7 +4,7 @@ import {
 } from "@/lib/image/compute-pixel-readout";
 import type { SingleBandScalarExtents } from "@/lib/image/compute-image-channel-extents";
 import {
-  getRasterBandLabelOrDefault,
+  describeRasterBandDisplayIdentity,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
@@ -16,6 +16,8 @@ const BROWSER_BYTE_MAX = 255;
 export interface PixelInspectorRow {
   readonly bandIndex: number;
   readonly label: string;
+  readonly originalNumber: number;
+  readonly hasExplicitLabel: boolean;
   readonly displayValue: string;
   readonly normalizedFraction: number | null;
 }
@@ -70,9 +72,12 @@ function buildRasterRowForBandIndex(
   values: ReadonlyArray<number> | null,
   normalizedFractions: ReadonlyArray<number | null>,
 ): PixelInspectorRow {
+  const identity = describeRasterBandDisplayIdentity(raster, bandIndex);
   return {
     bandIndex,
-    label: getRasterBandLabelOrDefault(raster, bandIndex),
+    label: identity.label,
+    originalNumber: identity.originalNumber,
+    hasExplicitLabel: identity.hasExplicitLabel,
     displayValue: formatRasterBandDisplayValue(values, bandIndex, raster.sampleFormat),
     normalizedFraction: normalizedFractions[bandIndex] ?? null,
   };
@@ -94,6 +99,8 @@ export function buildBrowserSourcePixelInspectorRow(
   return {
     bandIndex: 0,
     label: BROWSER_PIXEL_LABEL,
+    originalNumber: 1,
+    hasExplicitLabel: false,
     displayValue: formatBrowserDisplayValue(cursorRgbaValues),
     normalizedFraction: computeBrowserRowNormalizedFraction(cursorRgbaValues),
   };

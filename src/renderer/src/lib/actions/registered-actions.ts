@@ -1,8 +1,11 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Layers } from "lucide-react";
+import { ChevronsLeft, Crop, Layers } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
-import { applyBandKeepToRasterImage } from "@/lib/image/apply-band-keep";
+import {
+  applyBandKeepToRasterImage,
+  mapKeptBandNumbersToCurrentPositions,
+} from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
 import {
@@ -39,15 +42,6 @@ export interface RegisteredViewportAction extends ViewportAction {
   ) => ViewportRenderingState;
 }
 
-export const NORMALIZE_ACTION: RegisteredViewportAction = {
-  id: "normalize",
-  label: "Normalize",
-  icon: Contrast,
-  successMessage: "Normalization applied",
-  appliedLabel: "Normalized",
-  apply: (state) => ({ ...state, normalizationEnabled: true }),
-};
-
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
 const BIT_SHIFT_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
 const BIT_SHIFT_REGION_PARAMETER_ID_Y0 = "regionImagePixelY0";
@@ -58,7 +52,8 @@ const BIT_SHIFT_PARAMETER_SCHEMA: IntegerParameterSchema = {
   kind: "integer",
   id: BIT_SHIFT_PARAMETER_ID,
   label: "Shift amount",
-  description: "Number of bits to shift each pixel value to the left.",
+  description:
+    "Brightens images from cameras that pack a smaller bit depth (such as 12-bit) into a 16-bit file, scaling the values up so they fill the full expected brightness range. Each step doubles the values.",
   defaultValue: 4,
   min: 0,
   max: 8,
@@ -236,7 +231,7 @@ function formatCropToRegionAppliedLabel(parameterValues: ParameterValuesById): s
   return `Crop to (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
 }
 
-const BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES = "keptBandIndexes";
+const BAND_SUBSET_PARAMETER_ID_KEPT_NUMBERS = "keptBandNumbers";
 
 export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
   id: "band-subset",
@@ -277,55 +272,55 @@ function createBandSubsetSourceTransform(): ViewportActionSourceTransform {
         "Subset Bands only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
       );
     }
-    const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
-    return { kind: "raster", raster: applyBandKeepToRasterImage(source.raster, keptBandIndexes) };
+    const keptBandNumbers = readKeptBandNumbersFromParameterValues(parameterValues);
+    const keptPositions = mapKeptBandNumbersToCurrentPositions(source.raster, keptBandNumbers);
+    return { kind: "raster", raster: applyBandKeepToRasterImage(source.raster, keptPositions) };
   };
 }
 
-export function buildBandSubsetParameterValuesFromKeptIndexes(
-  keptBandIndexes: ReadonlyArray<number>,
+export function buildBandSubsetParameterValuesFromKeptNumbers(
+  keptBandNumbers: ReadonlyArray<number>,
 ): ParameterValuesById {
   return Object.freeze({
-    [BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES]: encodeKeptBandIndexesAsString(keptBandIndexes),
+    [BAND_SUBSET_PARAMETER_ID_KEPT_NUMBERS]: encodeKeptBandNumbersAsString(keptBandNumbers),
   });
 }
 
-function readKeptBandIndexesFromParameterValues(
+function readKeptBandNumbersFromParameterValues(
   parameterValues: ParameterValuesById,
 ): ReadonlyArray<number> {
-  const raw = parameterValues[BAND_SUBSET_PARAMETER_ID_KEPT_INDEXES];
+  const raw = parameterValues[BAND_SUBSET_PARAMETER_ID_KEPT_NUMBERS];
   if (typeof raw !== "string") {
-    throw new Error("Subset Bands missing keptBandIndexes parameter.");
+    throw new Error("Subset Bands missing keptBandNumbers parameter.");
   }
-  return parseKeptBandIndexesFromString(raw);
+  return parseKeptBandNumbersFromString(raw);
 }
 
-function encodeKeptBandIndexesAsString(keptBandIndexes: ReadonlyArray<number>): string {
-  return keptBandIndexes.join(",");
+function encodeKeptBandNumbersAsString(keptBandNumbers: ReadonlyArray<number>): string {
+  return keptBandNumbers.join(",");
 }
 
-function parseKeptBandIndexesFromString(value: string): ReadonlyArray<number> {
+function parseKeptBandNumbersFromString(value: string): ReadonlyArray<number> {
   if (value.length === 0) {
-    throw new Error("Subset Bands keptBandIndexes parameter is empty.");
+    throw new Error("Subset Bands keptBandNumbers parameter is empty.");
   }
-  return value.split(",").map(parseSingleBandIndexOrThrow);
+  return value.split(",").map(parseSingleBandNumberOrThrow);
 }
 
-function parseSingleBandIndexOrThrow(token: string): number {
+function parseSingleBandNumberOrThrow(token: string): number {
   const parsed = Number.parseInt(token.trim(), 10);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Subset Bands received invalid band index '${token}'.`);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Subset Bands received invalid band number '${token}'.`);
   }
   return parsed;
 }
 
 function formatBandSubsetAppliedLabel(parameterValues: ParameterValuesById): string {
-  const keptBandIndexes = readKeptBandIndexesFromParameterValues(parameterValues);
-  return `Subset bands [${keptBandIndexes.join(", ")}]`;
+  const keptBandNumbers = readKeptBandNumbersFromParameterValues(parameterValues);
+  return `Subset bands [${keptBandNumbers.join(", ")}]`;
 }
 
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
-  NORMALIZE_ACTION,
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
 ];

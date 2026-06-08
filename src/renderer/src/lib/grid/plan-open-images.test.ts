@@ -60,36 +60,48 @@ describe("planOpenImagesPlacement", () => {
     });
   });
 
-  it("grows along the chain to the smallest layout that accommodates 10 new items", () => {
+  it("grows to the largest layout, fills every cell, and prompts to replace for the remaining 4 of 10 items", () => {
     const result = planOpenImagesPlacement({
       currentLayout: "1x1",
       imagesByIndex: new Map(),
       newItemCount: 10,
     });
-    expect(result.kind).toBe("promptReplace");
+    expect(result).toEqual({
+      kind: "growFillThenPromptReplace",
+      expandedLayout: "2x3",
+      filledTargetIndices: [0, 1, 2, 3, 4, 5],
+      overflowItemCount: 4,
+    });
   });
 
-  it("prompts to replace when the next layer along the chain cannot fit and grid is at max", () => {
+  it("prompts to replace with no grid growth and no auto-fill when the grid is already full at max (CT-059)", () => {
     const occupied = buildOccupiedImagesMapForIndices([0, 1, 2, 3, 4, 5]);
     const result = planOpenImagesPlacement({
       currentLayout: "2x3",
       imagesByIndex: occupied,
       newItemCount: 1,
     });
-    expect(result).toEqual({ kind: "promptReplace", overflow: 1 });
+    expect(result).toEqual({
+      kind: "growFillThenPromptReplace",
+      expandedLayout: undefined,
+      filledTargetIndices: [],
+      overflowItemCount: 1,
+    });
   });
 
-  it("returns overflow count when more items arrive than the largest layout can fit", () => {
+  it("grows the grid and fills the empty cells before prompting when 8 items arrive into a near-empty grid (CT-059 repro)", () => {
     const occupied = buildOccupiedImagesMapForIndices([0]);
     const result = planOpenImagesPlacement({
       currentLayout: "1x1",
       imagesByIndex: occupied,
       newItemCount: 8,
     });
-    expect(result.kind).toBe("promptReplace");
-    if (result.kind === "promptReplace") {
-      expect(result.overflow).toBeGreaterThanOrEqual(1);
-    }
+    expect(result).toEqual({
+      kind: "growFillThenPromptReplace",
+      expandedLayout: "2x3",
+      filledTargetIndices: [1, 2, 3, 4, 5],
+      overflowItemCount: 3,
+    });
   });
 
   it("exact-fit boundary: when 6 cells are needed and grid grows to 2x3, all 6 indices are returned", () => {

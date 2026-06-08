@@ -83,10 +83,50 @@ export function buildDraftBundleViewportEntryOrThrow(
 function buildDraftBundleAssetForViewportOrThrow(
   viewport: SaveableViewportSnapshot,
 ): DraftBundleAsset {
+  if (canStreamUnmodifiedSourceFromDisk(viewport)) {
+    return buildExternalAssetReferencingOriginalFile(viewport);
+  }
   if (viewport.source.kind === "raster") {
     return encodeBakedBundleAssetForRasterSource(viewport.source.raster);
   }
   return buildExternalAssetForBrowserSourceOrThrow(viewport);
+}
+
+// Re-encoding (baking) a raster source is a CPU-bound, multi-second operation
+// for large cubes that blocks the renderer thread. The save flow uses this to
+// decide whether to let the busy indicator paint before that synchronous work
+// begins (CT-072), so a save that only references unmodified on-disk files
+// stays as fast and flash-free as before.
+export function saveableSnapshotRequiresRasterRebake(
+  snapshot: SaveableProjectSnapshot,
+): boolean {
+  return snapshot.viewports.some(viewportRequiresRasterRebake);
+}
+
+function viewportRequiresRasterRebake(viewport: SaveableViewportSnapshot): boolean {
+  if (canStreamUnmodifiedSourceFromDisk(viewport)) return false;
+  return viewport.source.kind === "raster";
+}
+
+// Re-encoding a raster into the bundle materialises a second full-size copy in
+// the renderer and clones it again across IPC, which crashes the renderer for
+// large ENVI cubes (CT-061). When the source is still the untouched on-disk
+// file, reference it instead so the main process streams it straight from disk.
+function canStreamUnmodifiedSourceFromDisk(
+  viewport: SaveableViewportSnapshot,
+): boolean {
+  if (!viewport.originalFilePath) return false;
+  return viewport.operationHistory.length === 0;
+}
+
+function buildExternalAssetReferencingOriginalFile(
+  viewport: SaveableViewportSnapshot,
+): DraftBundleExternalAsset {
+  return {
+    kind: "external",
+    absolutePath: viewport.originalFilePath!,
+    extension: extractFileExtensionWithoutLeadingDot(viewport.fileName),
+  };
 }
 
 function buildExternalAssetForBrowserSourceOrThrow(
@@ -97,11 +137,7 @@ function buildExternalAssetForBrowserSourceOrThrow(
       `Viewport "${viewport.fileName}" has no on-disk source to pack into the bundle`,
     );
   }
-  return {
-    kind: "external",
-    absolutePath: viewport.originalFilePath,
-    extension: extractFileExtensionWithoutLeadingDot(viewport.fileName),
-  };
+  return buildExternalAssetReferencingOriginalFile(viewport);
 }
 
 function extractFileExtensionWithoutLeadingDot(fileName: string): string {

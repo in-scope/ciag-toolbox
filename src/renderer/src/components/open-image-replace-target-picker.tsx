@@ -9,6 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { getViewportNumberFromIndex } from "@/lib/grid/grid-layout";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -51,7 +57,7 @@ export function OpenImageReplaceTargetPicker(
       open={props.pending !== null && props.pending.items.length > 0}
       onOpenChange={(open) => closePickerWhenDismissed(open, props.onCancel)}
     >
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         {props.pending ? (
           <ReplacePickerForm
             pending={props.pending}
@@ -89,24 +95,26 @@ function ReplacePickerForm(props: ReplacePickerFormProps): JSX.Element {
   const handleKeyDown = (event: KeyboardEvent<HTMLFormElement>) =>
     submitOnEnterWhenReady(event, isReadyToConfirm, assignments, props.onConfirm);
   return (
-    <form className="contents" onSubmit={handleSubmit} onKeyDown={handleKeyDown}>
-      <ReplacePickerHeader pending={props.pending} />
-      <ReplaceAllStartingAtViewportControl
-        viewports={props.viewports}
-        onApplyStartAt={(startIndex) =>
-          setAssignments(buildSequentialAssignmentsFromStart(startIndex, props.pending, props.viewports))
-        }
-      />
-      <ReplacePickerItemAssignmentList
-        items={props.pending.items}
-        viewports={props.viewports}
-        assignments={assignments}
-        onChoose={(itemIndex, targetIndex) =>
-          setAssignments(updateAssignmentForItem(assignments, itemIndex, targetIndex))
-        }
-      />
-      <ReplacePickerFooter ready={isReadyToConfirm} onCancel={props.onCancel} />
-    </form>
+    <TooltipProvider delayDuration={300}>
+      <form className="contents" onSubmit={handleSubmit} onKeyDown={handleKeyDown}>
+        <ReplacePickerHeader pending={props.pending} />
+        <ReplaceAllStartingAtViewportControl
+          viewports={props.viewports}
+          onApplyStartAt={(startIndex) =>
+            setAssignments(buildSequentialAssignmentsFromStart(startIndex, props.pending, props.viewports))
+          }
+        />
+        <ReplacePickerItemAssignmentList
+          items={props.pending.items}
+          viewports={props.viewports}
+          assignments={assignments}
+          onChoose={(itemIndex, targetIndex) =>
+            setAssignments(updateAssignmentForItem(assignments, itemIndex, targetIndex))
+          }
+        />
+        <ReplacePickerFooter ready={isReadyToConfirm} onCancel={props.onCancel} />
+      </form>
+    </TooltipProvider>
   );
 }
 
@@ -280,26 +288,59 @@ function ReplacePickerItemAssignmentRow(
   props: ReplacePickerItemAssignmentRowProps,
 ): JSX.Element {
   return (
-    <div className="flex items-center gap-2 rounded-md border p-2 text-sm">
-      <span className="min-w-0 flex-1 truncate" title={props.item.fileName}>
-        {props.item.fileName}
-      </span>
-      <select
-        aria-label={`Replacement target for ${props.item.fileName}`}
-        value={props.assignedTarget !== null ? String(props.assignedTarget) : ""}
-        onChange={(event) => props.onChoose(Number(event.target.value))}
-        className="h-7 rounded-md border bg-card px-2 text-xs text-foreground"
-      >
-        <option value="" disabled>
-          Choose viewport...
-        </option>
-        {props.viewports.map((viewport) => (
-          <option key={viewport.index} value={viewport.index}>
-            {describeReplacePickerRowLabel(viewport)}
-          </option>
-        ))}
-      </select>
+    <div className="flex flex-col gap-2 rounded-md border p-2 text-sm">
+      <ReplacePickerItemNameWithTooltip fileName={props.item.fileName} />
+      <ReplacePickerItemTargetSelect
+        item={props.item}
+        viewports={props.viewports}
+        assignedTarget={props.assignedTarget}
+        onChoose={props.onChoose}
+      />
     </div>
+  );
+}
+
+function ReplacePickerItemNameWithTooltip({
+  fileName,
+}: {
+  fileName: string;
+}): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block min-w-0 truncate font-medium">{fileName}</span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-md break-all">{fileName}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+interface ReplacePickerItemTargetSelectProps {
+  item: PendingOpenImageReplaceItem;
+  viewports: ReadonlyArray<OpenImageReplaceTargetEntry>;
+  assignedTarget: number | null;
+  onChoose: (targetIndex: number) => void;
+}
+
+function ReplacePickerItemTargetSelect(
+  props: ReplacePickerItemTargetSelectProps,
+): JSX.Element {
+  return (
+    <select
+      aria-label={`Replacement target for ${props.item.fileName}`}
+      value={props.assignedTarget !== null ? String(props.assignedTarget) : ""}
+      onChange={(event) => props.onChoose(Number(event.target.value))}
+      className="h-7 w-full rounded-md border bg-card px-2 text-xs text-foreground"
+    >
+      <option value="" disabled>
+        Choose viewport...
+      </option>
+      {props.viewports.map((viewport) => (
+        <option key={viewport.index} value={viewport.index}>
+          {describeReplacePickerRowLabel(viewport)}
+        </option>
+      ))}
+    </select>
   );
 }
 

@@ -53,10 +53,11 @@ import {
 import {
   BAND_SUBSET_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
-  buildBandSubsetParameterValuesFromKeptIndexes,
+  buildBandSubsetParameterValuesFromKeptNumbers,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
 import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
+import { getRasterBandOriginalNumber } from "@/lib/image/raster-image";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -99,7 +100,10 @@ import {
   type OpenedProjectViewportSnapshot,
 } from "@/lib/project/run-open-project-flow";
 import { runSaveProjectBundleFlowThroughMainProcess } from "@/lib/project/run-save-bundle-flow";
-import type { SaveableProjectSnapshot } from "@/lib/project/serialize-project";
+import {
+  saveableSnapshotRequiresRasterRebake,
+  type SaveableProjectSnapshot,
+} from "@/lib/project/serialize-project";
 import { applyDarkClassToDocumentRoot } from "@/lib/theme/apply-theme-class";
 import { useCurrentThemeSnapshot } from "@/lib/theme/use-current-theme-snapshot";
 import {
@@ -113,6 +117,7 @@ import {
 import {
   BusyStateProvider,
   useBusyEntryRegistrar,
+  waitForBusyIndicatorToClearAntiFlashThreshold,
   type BusyEntryHandle,
   type BusyEntryRegistrar,
 } from "@/state/busy-state-context";
@@ -853,17 +858,38 @@ function applyOpenImagesPlacementPlan(
   items: ReadonlyArray<PendingOpenImageReplaceItem>,
   bindings: ConfirmReviewBindings,
 ): void {
-  if (plan.kind === "promptReplace") {
-    bindings.setPendingOpenImagesReplace({ items });
+  if (plan.kind === "growFillThenPromptReplace") {
+    applyGrowFillThenPromptReplacePlan(plan, items, bindings);
     return;
   }
   if (plan.expandedLayout !== undefined) {
     bindings.setGridLayout(plan.expandedLayout);
   }
-  for (let i = 0; i < plan.targetIndices.length && i < items.length; i++) {
-    const item = items[i]!;
-    const targetIndex = plan.targetIndices[i]!;
-    applyLoadedImageAtIndex(targetIndex, item, bindings);
+  placeItemsAtTargetIndices(plan.targetIndices, items, bindings);
+}
+
+function applyGrowFillThenPromptReplacePlan(
+  plan: Extract<OpenImagesPlacementPlan, { kind: "growFillThenPromptReplace" }>,
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ConfirmReviewBindings,
+): void {
+  if (plan.expandedLayout !== undefined) {
+    bindings.setGridLayout(plan.expandedLayout);
+  }
+  placeItemsAtTargetIndices(plan.filledTargetIndices, items, bindings);
+  const overflowItems = items.slice(plan.filledTargetIndices.length);
+  if (overflowItems.length > 0) {
+    bindings.setPendingOpenImagesReplace({ items: overflowItems });
+  }
+}
+
+function placeItemsAtTargetIndices(
+  targetIndices: ReadonlyArray<number>,
+  items: ReadonlyArray<PendingOpenImageReplaceItem>,
+  bindings: ApplyLoadedImageBindings,
+): void {
+  for (let i = 0; i < targetIndices.length && i < items.length; i++) {
+    applyLoadedImageAtIndex(targetIndices[i]!, items[i]!, bindings);
   }
 }
 
@@ -1485,17 +1511,17 @@ interface ApplyBandSubsetInputs {
 }
 
 function runApplyBandSubsetForViewport(inputs: ApplyBandSubsetInputs): void {
-  const keptBandIndexes = pickKeptBandIndexesForSubsetOrNull(inputs);
-  if (keptBandIndexes === null) return;
+  const keptBandNumbers = pickKeptBandOriginalNumbersForSubsetOrNull(inputs);
+  if (keptBandNumbers === null) return;
   invokeBandSubsetActionOnSourceViewport(
     inputs.viewportIndex,
-    keptBandIndexes,
+    keptBandNumbers,
     inputs.openInNewViewport,
     inputs.applyActionFlowBindings,
   );
 }
 
-function pickKeptBandIndexesForSubsetOrNull(
+function pickKeptBandOriginalNumbersForSubsetOrNull(
   inputs: ApplyBandSubsetInputs,
 ): ReadonlyArray<number> | null {
   const { raster, removedBandIndexes } = inputs;
@@ -1512,16 +1538,16 @@ function pickKeptBandIndexesForSubsetOrNull(
     toast.info("Uncheck a band to remove it on apply.");
     return null;
   }
-  return keptBandIndexes;
+  return keptBandIndexes.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
 }
 
 function invokeBandSubsetActionOnSourceViewport(
   sourceIndex: number,
-  keptBandIndexes: ReadonlyArray<number>,
+  keptBandNumbers: ReadonlyArray<number>,
   openInNewViewport: boolean,
   bindings: ApplyActionFlowBindings,
 ): void {
-  const parameterValues = buildBandSubsetParameterValuesFromKeptIndexes(keptBandIndexes);
+  const parameterValues = buildBandSubsetParameterValuesFromKeptNumbers(keptBandNumbers);
   if (openInNewViewport) {
     applyActionToDuplicateOfSource(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
     return;
@@ -1746,6 +1772,7 @@ async function invokeSaveProjectFlowWithToastFeedback(
     progress: 0,
   });
   try {
+    await letBusyIndicatorPaintBeforeHeavySaveWork(snapshot);
     const result = await runSaveProjectBundleFlowThroughMainProcess({
       snapshot,
       currentProjectFilePath: bindings.currentProjectFilePathRef.current,
@@ -1758,6 +1785,17 @@ async function invokeSaveProjectFlowWithToastFeedback(
   } finally {
     handle.clear();
   }
+}
+
+// When the save will re-encode a raster (the slow path), yield long enough for
+// the "Saving project..." indicator to paint before the synchronous bake blocks
+// the renderer thread, so the save never feels frozen (CT-072). Saves that only
+// reference unmodified on-disk files skip the wait and stay flash-free.
+async function letBusyIndicatorPaintBeforeHeavySaveWork(
+  snapshot: SaveableProjectSnapshot,
+): Promise<void> {
+  if (!saveableSnapshotRequiresRasterRebake(snapshot)) return;
+  await waitForBusyIndicatorToClearAntiFlashThreshold();
 }
 
 function updateSaveBundleProgressOnHandle(
