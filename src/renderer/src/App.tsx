@@ -89,7 +89,10 @@ import type {
 } from "@/lib/image/group-opened-files";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
-import { removePinnedSpectrumById } from "@/lib/image/spectrum-entry";
+import {
+  removePinnedSpectrumById,
+  removeRoiSpectrumById,
+} from "@/lib/image/spectrum-entry";
 import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
@@ -1578,11 +1581,17 @@ function buildRightPanelActiveSource(
     onClearRoi: () =>
       renderingApi.setRenderingState(viewportIndex, { ...renderingState, roi: null }),
     pinnedSpectra: renderingState.pinnedSpectra,
-    roiMeanSpectrum: buildRoiMeanSpectrumForDisplayOrNull(raster, renderingState.roi),
+    pinnedRoiSpectra: renderingState.pinnedRoiSpectra,
+    activeRoiMeanSpectrum: buildRoiMeanSpectrumForDisplayOrNull(raster, renderingState.roi),
     onRemovePinnedSpectrum: (spectrumId) =>
       renderingApi.setRenderingState(viewportIndex, {
         ...renderingState,
         pinnedSpectra: removePinnedSpectrumById(renderingState.pinnedSpectra, spectrumId),
+      }),
+    onRemovePinnedRoiSpectrum: (spectrumId) =>
+      renderingApi.setRenderingState(viewportIndex, {
+        ...renderingState,
+        pinnedRoiSpectra: removeRoiSpectrumById(renderingState.pinnedRoiSpectra, spectrumId),
       }),
   };
 }
@@ -1679,7 +1688,7 @@ const DISABLED_BAND_SUBSET_TOOLBAR_TOGGLE: BandSubsetToolbarToggleState = {
 function buildRoiMeanSpectrumForDisplayOrNull(
   raster: ViewportRightPanelActiveSource["raster"],
   roi: ViewportRightPanelActiveSource["roi"],
-): ViewportRightPanelActiveSource["roiMeanSpectrum"] {
+): ViewportRightPanelActiveSource["activeRoiMeanSpectrum"] {
   if (!raster || !roi) return null;
   const spectrum = computeRoiMeanSpectrumOrNull(raster, roi);
   if (!spectrum) return null;

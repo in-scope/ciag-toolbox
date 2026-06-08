@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+import {
+  EMPTY_PINNED_ROI_SPECTRA,
+  EMPTY_PINNED_SPECTRA,
+} from "@/lib/image/spectrum-entry";
 
 import { EMPTY_OPERATION_HISTORY } from "./operation-history";
 import { NO_PARAMETER_VALUES } from "./parameter-schema";
@@ -63,6 +66,7 @@ describe("applyActionToSelectedViewports", () => {
       roi: null,
       blackWhitePoints: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],
       isBandSubsetEditModeActive: false,
     });

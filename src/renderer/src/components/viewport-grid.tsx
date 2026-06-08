@@ -14,10 +14,15 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
-import { computePixelSpectrumOrNull } from "@/lib/image/compute-spectrum";
+import {
+  computePixelSpectrumOrNull,
+  computeRoiMeanSpectrumOrNull,
+} from "@/lib/image/compute-spectrum";
 import {
   appendPinnedSpectrumWithCapLimit,
+  appendRoiSpectrumKeepingLastTwo,
   buildPinnedSpectrumIdFromTimestamp,
+  type PinnedRoiMeanSpectrum,
   type PinnedSpectrum,
 } from "@/lib/image/spectrum-entry";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -181,10 +186,17 @@ function useViewportCellInteractionSettings(
     : undefined;
   const handleCommitRoi = useCallback(
     (roi: ViewportRoi) => {
-      setRenderingState(cellIndex, { ...renderingState, roi });
+      const roiSpectrum = buildPinnedRoiSpectrumFromRegion(content, roi);
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        roi,
+        pinnedRoiSpectra: roiSpectrum
+          ? appendRoiSpectrumKeepingLastTwo(renderingState.pinnedRoiSpectra, roiSpectrum)
+          : renderingState.pinnedRoiSpectra,
+      });
       selectViewportFromClick(cellIndex, { ctrlOrMeta: false, shift: false });
     },
-    [cellIndex, renderingState, setRenderingState, selectViewportFromClick],
+    [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
   );
   const handlePinPixelSpectrum = useCallback(
     (imageX: number, imageY: number) => {
@@ -242,6 +254,22 @@ function buildPinnedPixelSpectrumFromImagePoint(
     imagePixelX: imageX,
     imagePixelY: imageY,
     bandValues: spectrum.bandValues,
+  };
+}
+
+function buildPinnedRoiSpectrumFromRegion(
+  content: ViewportCellContent | null,
+  roi: ViewportRoi,
+): PinnedRoiMeanSpectrum | null {
+  if (!content || content.source.kind !== "raster") return null;
+  const spectrum = computeRoiMeanSpectrumOrNull(content.source.raster, roi);
+  if (!spectrum) return null;
+  return {
+    kind: "roi-mean",
+    id: buildPinnedSpectrumIdFromTimestamp(Date.now(), Math.random()),
+    samplePixelCount: spectrum.samplePixelCount,
+    bandMeans: spectrum.bandMeans,
+    bandStandardDeviations: spectrum.bandStandardDeviations,
   };
 }
 

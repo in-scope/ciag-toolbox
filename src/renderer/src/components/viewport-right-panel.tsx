@@ -42,6 +42,8 @@ import {
 } from "@/lib/image/spectrum-axis";
 import {
   MAX_PINNED_SPECTRA_PER_VIEWPORT,
+  type PinnedRoiMeanSpectrum,
+  type PinnedRoiSpectraList,
   type PinnedSpectrum,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
@@ -71,8 +73,10 @@ export interface ViewportRightPanelActiveSource {
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
   readonly pinnedSpectra: PinnedSpectraList;
-  readonly roiMeanSpectrum: RoiMeanSpectrumForDisplay | null;
+  readonly pinnedRoiSpectra: PinnedRoiSpectraList;
+  readonly activeRoiMeanSpectrum: RoiMeanSpectrumForDisplay | null;
   readonly onRemovePinnedSpectrum: (spectrumId: string) => void;
+  readonly onRemovePinnedRoiSpectrum: (spectrumId: string) => void;
 }
 
 export interface RoiMeanSpectrumForDisplay {
@@ -632,7 +636,17 @@ const SPECTRUM_LINE_COLOR_CLASSES: ReadonlyArray<string> = [
   "text-violet-400",
 ];
 
-const ROI_MEAN_SPECTRUM_COLOR_CLASS = "text-primary";
+const ROI_MEAN_SPECTRUM_COLOR_CLASSES: ReadonlyArray<string> = [
+  "text-primary",
+  "text-fuchsia-400",
+];
+
+function pickRoiSpectrumColorClassForIndex(index: number): string {
+  return (
+    ROI_MEAN_SPECTRUM_COLOR_CLASSES[index % ROI_MEAN_SPECTRUM_COLOR_CLASSES.length] ??
+    "text-primary"
+  );
+}
 
 interface SpectraSectionProps {
   activeSource: ViewportRightPanelActiveSource;
@@ -741,11 +755,15 @@ interface SpectraLegendProps {
 function SpectraLegend(props: SpectraLegendProps): JSX.Element {
   return (
     <ul className="flex flex-col gap-1 text-[11px]">
-      {props.activeSource.roiMeanSpectrum ? (
+      {props.activeSource.pinnedRoiSpectra.map((spectrum, index) => (
         <SpectraLegendRoiMeanRow
-          spectrum={props.activeSource.roiMeanSpectrum}
+          key={spectrum.id}
+          spectrum={spectrum}
+          label={formatRoiSpectrumLabel(index)}
+          colorClass={pickRoiSpectrumColorClassForIndex(index)}
+          onRemove={() => props.activeSource.onRemovePinnedRoiSpectrum(spectrum.id)}
         />
-      ) : null}
+      ))}
       {props.activeSource.pinnedSpectra.map((spectrum, index) => (
         <SpectraLegendPinnedRow
           key={spectrum.id}
@@ -756,6 +774,10 @@ function SpectraLegend(props: SpectraLegendProps): JSX.Element {
       ))}
     </ul>
   );
+}
+
+function formatRoiSpectrumLabel(index: number): string {
+  return `ROI ${index + 1}`;
 }
 
 function pickPinnedSpectrumColorClassForIndex(index: number): string {
@@ -789,18 +811,29 @@ function SpectraLegendPinnedRow(props: SpectraLegendPinnedRowProps): JSX.Element
 }
 
 interface SpectraLegendRoiMeanRowProps {
-  spectrum: RoiMeanSpectrumForDisplay;
+  spectrum: PinnedRoiMeanSpectrum;
+  label: string;
+  colorClass: string;
+  onRemove: () => void;
 }
 
 function SpectraLegendRoiMeanRow(props: SpectraLegendRoiMeanRowProps): JSX.Element {
+  const description = `${props.label} mean (n=${props.spectrum.samplePixelCount}px) +/- 1 sigma`;
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="flex items-center gap-1.5">
-        <SpectrumColorSwatch colorClass={ROI_MEAN_SPECTRUM_COLOR_CLASS} />
-        <span className="font-mono">
-          ROI mean (n={props.spectrum.samplePixelCount}px) +/- 1 sigma
-        </span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <SpectrumColorSwatch colorClass={props.colorClass} />
+        <span className="truncate font-mono">{description}</span>
       </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-5 px-1.5 text-[11px] text-muted-foreground"
+        onClick={props.onRemove}
+        aria-label={`Remove pinned spectrum ${description}`}
+      >
+        Remove
+      </Button>
     </li>
   );
 }
@@ -825,9 +858,9 @@ function buildSpectrumPlotLinesFromActiveSource(
   activeSource: ViewportRightPanelActiveSource,
 ): ReadonlyArray<SpectrumLinePlotInput> {
   const lines: SpectrumLinePlotInput[] = [];
-  if (activeSource.roiMeanSpectrum) {
-    lines.push(buildRoiMeanSpectrumPlotLine(activeSource.roiMeanSpectrum));
-  }
+  activeSource.pinnedRoiSpectra.forEach((spectrum, index) => {
+    lines.push(buildRoiMeanSpectrumPlotLine(spectrum, index));
+  });
   activeSource.pinnedSpectra.forEach((spectrum, index) => {
     lines.push(buildPinnedSpectrumPlotLine(spectrum, index));
   });
@@ -835,11 +868,12 @@ function buildSpectrumPlotLinesFromActiveSource(
 }
 
 function buildRoiMeanSpectrumPlotLine(
-  spectrum: RoiMeanSpectrumForDisplay,
+  spectrum: PinnedRoiMeanSpectrum,
+  index: number,
 ): SpectrumLinePlotInput {
   return {
-    id: "roi-mean",
-    colorClass: ROI_MEAN_SPECTRUM_COLOR_CLASS,
+    id: spectrum.id,
+    colorClass: pickRoiSpectrumColorClassForIndex(index),
     values: spectrum.bandMeans,
     bandStandardDeviations: spectrum.bandStandardDeviations,
   };

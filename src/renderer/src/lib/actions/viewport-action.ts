@@ -1,6 +1,8 @@
 import type { BlackWhitePointSelection } from "@/lib/image/black-white-point-selection";
 import {
+  EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
+  type PinnedRoiSpectraList,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -21,6 +23,7 @@ export interface ViewportRenderingState {
   readonly roi: ViewportRoi | null;
   readonly blackWhitePoints: BlackWhitePointSelection | null;
   readonly pinnedSpectra: PinnedSpectraList;
+  readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
   readonly isBandSubsetEditModeActive: boolean;
 }
@@ -35,6 +38,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   roi: null,
   blackWhitePoints: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
+  pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
   isBandSubsetEditModeActive: false,
 };

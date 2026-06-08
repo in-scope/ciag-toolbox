@@ -150,7 +150,7 @@ function buildRasterRowsFromActiveSource(
     raster,
     perBandRawValueExtents: computePerBandRawValueExtentsForRaster(raster),
     cursorBandValues: readCursorBandValuesForActiveViewportOrNull(activeSource, snapshot),
-    roiMeanBandValues: activeSource.roiMeanSpectrum?.bandMeans ?? null,
+    roiMeanBandValues: activeSource.activeRoiMeanSpectrum?.bandMeans ?? null,
   });
 }
 

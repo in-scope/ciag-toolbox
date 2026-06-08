@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
-import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+import {
+  EMPTY_PINNED_ROI_SPECTRA,
+  EMPTY_PINNED_SPECTRA,
+} from "@/lib/image/spectrum-entry";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -196,6 +199,7 @@ function buildRenderingStateWithHistory(
     roi: null,
     blackWhitePoints: null,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,
   };

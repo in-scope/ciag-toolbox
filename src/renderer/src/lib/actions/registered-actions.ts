@@ -1,7 +1,10 @@
 import type { ComponentType, SVGProps } from "react";
 import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
-import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+import {
+  EMPTY_PINNED_ROI_SPECTRA,
+  EMPTY_PINNED_SPECTRA,
+} from "@/lib/image/spectrum-entry";
 import {
   applyBandKeepToRasterImage,
   mapKeptBandNumbersToCurrentPositions,
@@ -304,6 +307,7 @@ function clearBandSubsetStateAfterApply(state: ViewportRenderingState): Viewport
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     selectedBandIndex: 0,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     isBandSubsetEditModeActive: false,
   };
 }
@@ -1159,6 +1163,7 @@ function resetBandDependentStateAfterBandCountChange(
     ...state,
     selectedBandIndex: 0,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,
   };
