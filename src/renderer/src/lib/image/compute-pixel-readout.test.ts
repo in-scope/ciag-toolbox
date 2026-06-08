@@ -48,7 +48,14 @@ describe("readPixelReadoutBandsAtImagePointOrNull", () => {
     const source: ViewportImageSource = { kind: "raster", raster: buildMultiBandRaster() };
     const bands = readPixelReadoutBandsAtImagePointOrNull(source, 0, 1);
     expect(bands!.values).toEqual([3, 30, expect.closeTo(0.3, 5)]);
-    expect(bands!.labels).toEqual(["R", "G", "B"]);
+    expect(bands!.labels).toEqual(["#1 R", "#2 G", "#3 B"]);
+  });
+
+  it("prefixes the original band number when labels survive a band subset", () => {
+    const subsetRaster: RasterImage = { ...buildMultiBandRaster(), bandOriginalNumbers: [3, 5, 9] };
+    const source: ViewportImageSource = { kind: "raster", raster: subsetRaster };
+    const bands = readPixelReadoutBandsAtImagePointOrNull(source, 0, 1);
+    expect(bands!.labels).toEqual(["#3 R", "#5 G", "#9 B"]);
   });
 
   it("returns null when the requested raster pixel is outside image bounds", () => {

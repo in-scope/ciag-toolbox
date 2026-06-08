@@ -1,4 +1,5 @@
 import {
+  getRasterBandOriginalNumber,
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
@@ -14,8 +15,45 @@ export function applyBandKeepToRasterImage(
     bandPixels: pickBandPixelsByIndexList(raster.bandPixels, sortedIndexes),
     bandLabels: pickOptionalBandStringsByIndexList(raster.bandLabels, sortedIndexes),
     bandWavelengths: pickOptionalBandNumbersByIndexList(raster.bandWavelengths, sortedIndexes),
+    bandOriginalNumbers: pickPreservedOriginalBandNumbers(raster, sortedIndexes),
     bandCount: sortedIndexes.length,
   };
+}
+
+export function mapKeptBandNumbersToCurrentPositions(
+  raster: RasterImage,
+  keptBandNumbers: ReadonlyArray<number>,
+): ReadonlyArray<number> {
+  const numberToPosition = buildOriginalNumberToPositionMap(raster);
+  return keptBandNumbers.map((bandNumber) =>
+    resolvePositionForBandNumberOrThrow(numberToPosition, bandNumber),
+  );
+}
+
+function buildOriginalNumberToPositionMap(raster: RasterImage): Map<number, number> {
+  const map = new Map<number, number>();
+  for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
+    map.set(getRasterBandOriginalNumber(raster, bandIndex), bandIndex);
+  }
+  return map;
+}
+
+function resolvePositionForBandNumberOrThrow(
+  numberToPosition: Map<number, number>,
+  bandNumber: number,
+): number {
+  const position = numberToPosition.get(bandNumber);
+  if (position === undefined) {
+    throw new Error(`Band ${bandNumber} is no longer present in this image.`);
+  }
+  return position;
+}
+
+function pickPreservedOriginalBandNumbers(
+  raster: RasterImage,
+  sortedIndexes: ReadonlyArray<number>,
+): ReadonlyArray<number> {
+  return sortedIndexes.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
 }
 
 export function listKeptBandIndexesFromRemoved(

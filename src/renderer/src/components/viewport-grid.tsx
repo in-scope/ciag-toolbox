@@ -121,7 +121,9 @@ function renderViewportCellViewport(
       imageSource={props.content?.source ?? null}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
+      onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       selectedBandIndex={settings.selectedBandIndex}
+      onSelectBandIndex={settings.handleSelectBandIndex}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
@@ -148,7 +150,9 @@ interface ViewportCellInteractionSettings {
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   handleClose: (() => void) | undefined;
   normalizationEnabled: boolean;
+  handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
+  handleSelectBandIndex: (bandIndex: number) => void;
   lastAppliedOperationLabel: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -190,12 +194,27 @@ function useViewportCellInteractionSettings(
     },
     [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
   );
+  const handleToggleNormalizedViewing = useCallback(
+    () =>
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        normalizationEnabled: !renderingState.normalizationEnabled,
+      }),
+    [cellIndex, renderingState, setRenderingState],
+  );
+  const handleSelectBandIndex = useCallback(
+    (bandIndex: number) =>
+      setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   return {
     isSelected,
     handleClick,
     handleClose,
     normalizationEnabled: renderingState.normalizationEnabled,
+    handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,
+    handleSelectBandIndex,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
     isRegionToolActive,
     roi: renderingState.roi,

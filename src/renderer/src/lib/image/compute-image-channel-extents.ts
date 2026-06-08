@@ -3,6 +3,10 @@ import {
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import {
+  computeDataTypeUnitMappingForRaster,
+  mapRawValueToDisplayUnit,
+} from "@/lib/image/data-type-display-range";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface RgbChannelExtents {
@@ -111,10 +115,10 @@ export function computeSingleBandRasterUnitExtents(
   const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
   const range = computeBandPixelValueRange(pixels);
   if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
-  const containerScale = chooseUnitScaleForRaster(raster);
+  const mapping = computeDataTypeUnitMappingForRaster(raster);
   return {
-    min: clampToUnit(range.min * containerScale),
-    max: clampToUnit(range.max * containerScale),
+    min: mapRawValueToDisplayUnit(range.min, mapping),
+    max: mapRawValueToDisplayUnit(range.max, mapping),
   };
 }
 
@@ -153,22 +157,6 @@ function computeBandPixelValueRange(pixels: RasterTypedArray): NumericRange {
 function expandRangeWithValue(range: NumericRange, value: number): void {
   if (value < range.min) range.min = value;
   if (value > range.max) range.max = value;
-}
-
-function chooseUnitScaleForRaster(raster: RasterImage): number {
-  if (raster.sampleFormat === "float") return 1;
-  return 1 / containerMaxForBitsPerSample(raster.bitsPerSample);
-}
-
-function containerMaxForBitsPerSample(bitsPerSample: number): number {
-  if (bitsPerSample <= 0) return 1;
-  return Math.pow(2, bitsPerSample) - 1;
-}
-
-function clampToUnit(value: number): number {
-  if (value < 0) return 0;
-  if (value > 1) return 1;
-  return value;
 }
 
 function readRgbaBytesByDrawingToOffscreenCanvas(
