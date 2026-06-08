@@ -35,11 +35,45 @@ export interface BooleanParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: boolean;
 }
 
+export type CubeScopeChoice = "full-cube" | "band-wise";
+
+export const FULL_CUBE_SCOPE: CubeScopeChoice = "full-cube";
+export const BAND_WISE_SCOPE: CubeScopeChoice = "band-wise";
+
+export interface CubeScopeParameterSchema extends ParameterSchemaBase {
+  readonly kind: "cube-scope";
+  readonly defaultValue: CubeScopeChoice;
+}
+
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
   | EnumParameterSchema
-  | BooleanParameterSchema;
+  | BooleanParameterSchema
+  | CubeScopeParameterSchema;
+
+export type ResolvedCubeScopeSelection =
+  | { readonly scope: "full-cube" }
+  | { readonly scope: "band-wise"; readonly bandIndexes: number[] };
+
+export function resolveCubeScopeSelection(
+  choice: CubeScopeChoice,
+  selectedBandIndexes: ReadonlyArray<number>,
+): ResolvedCubeScopeSelection {
+  if (choice === FULL_CUBE_SCOPE) return { scope: "full-cube" };
+  return { scope: "band-wise", bandIndexes: sortAndDedupeBandIndexesAscending(selectedBandIndexes) };
+}
+
+export function readCubeScopeChoiceOrDefault(
+  value: ParameterValue,
+  fallback: CubeScopeChoice,
+): CubeScopeChoice {
+  return value === FULL_CUBE_SCOPE || value === BAND_WISE_SCOPE ? value : fallback;
+}
+
+function sortAndDedupeBandIndexesAscending(bandIndexes: ReadonlyArray<number>): number[] {
+  return Array.from(new Set(bandIndexes)).sort((a, b) => a - b);
+}
 
 export type ParameterValue = number | string | boolean;
 export type ParameterValuesById = Readonly<Record<string, ParameterValue>>;

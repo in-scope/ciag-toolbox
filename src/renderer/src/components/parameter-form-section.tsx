@@ -3,7 +3,10 @@ import { useId } from "react";
 import { Switch } from "@/components/ui/switch";
 import {
   clampNumericParameterValueToSchema,
+  readCubeScopeChoiceOrDefault,
   type BooleanParameterSchema,
+  type CubeScopeChoice,
+  type CubeScopeParameterSchema,
   type EnumParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
@@ -70,6 +73,15 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       <EnumParameterField
         schema={props.schema}
         value={readStringValueOrDefault(props.value, props.schema.defaultValue)}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "cube-scope") {
+    return (
+      <CubeScopeParameterField
+        schema={props.schema}
+        value={readCubeScopeChoiceOrDefault(props.value, props.schema.defaultValue)}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -174,6 +186,58 @@ function EnumParameterField(props: EnumParameterFieldProps): JSX.Element {
 
 const ENUM_SELECT_CLASSES =
   "h-8 rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+
+interface CubeScopeParameterFieldProps {
+  schema: CubeScopeParameterSchema;
+  value: CubeScopeChoice;
+  onChangeValue: (next: CubeScopeChoice) => void;
+}
+
+function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Element {
+  const radioGroupName = useId();
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="text-sm text-foreground">{props.schema.label}</legend>
+      <CubeScopeRadioRow
+        radioGroupName={radioGroupName}
+        choice="full-cube"
+        label="Full cube"
+        currentChoice={props.value}
+        onSelect={props.onChangeValue}
+      />
+      <CubeScopeRadioRow
+        radioGroupName={radioGroupName}
+        choice="band-wise"
+        label="Band-wise (selected bands)"
+        currentChoice={props.value}
+        onSelect={props.onChangeValue}
+      />
+    </fieldset>
+  );
+}
+
+interface CubeScopeRadioRowProps {
+  radioGroupName: string;
+  choice: CubeScopeChoice;
+  label: string;
+  currentChoice: CubeScopeChoice;
+  onSelect: (choice: CubeScopeChoice) => void;
+}
+
+function CubeScopeRadioRow(props: CubeScopeRadioRowProps): JSX.Element {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <input
+        type="radio"
+        className="size-4 cursor-pointer accent-primary"
+        name={props.radioGroupName}
+        checked={props.currentChoice === props.choice}
+        onChange={() => props.onSelect(props.choice)}
+      />
+      <span>{props.label}</span>
+    </label>
+  );
+}
 
 interface BooleanParameterFieldProps {
   schema: BooleanParameterSchema;

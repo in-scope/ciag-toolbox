@@ -4,7 +4,10 @@ import {
   buildDefaultParameterValuesForSchemas,
   clampNumericParameterValueToSchema,
   parseParameterValuesFromJsonString,
+  readCubeScopeChoiceOrDefault,
+  resolveCubeScopeSelection,
   serializeParameterValuesToJsonString,
+  type CubeScopeParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
   type ParameterSchema,
@@ -76,6 +79,60 @@ describe("clampNumericParameterValueToSchema", () => {
       defaultValue: 1.0,
     };
     expect(clampNumericParameterValueToSchema(schema, 1.25)).toBe(1.25);
+  });
+});
+
+describe("resolveCubeScopeSelection", () => {
+  it("maps the full-cube choice to a full-cube selection ignoring selected bands", () => {
+    expect(resolveCubeScopeSelection("full-cube", [0, 1, 2])).toEqual({ scope: "full-cube" });
+  });
+
+  it("keeps a single band-wise selection distinct from full cube", () => {
+    expect(resolveCubeScopeSelection("band-wise", [2])).toEqual({
+      scope: "band-wise",
+      bandIndexes: [2],
+    });
+  });
+
+  it("sorts and dedupes a multi-band band-wise selection", () => {
+    expect(resolveCubeScopeSelection("band-wise", [3, 1, 1, 0])).toEqual({
+      scope: "band-wise",
+      bandIndexes: [0, 1, 3],
+    });
+  });
+
+  it("resolves an all-bands band-wise selection to every selected index", () => {
+    expect(resolveCubeScopeSelection("band-wise", [0, 1, 2, 3])).toEqual({
+      scope: "band-wise",
+      bandIndexes: [0, 1, 2, 3],
+    });
+  });
+});
+
+describe("readCubeScopeChoiceOrDefault", () => {
+  it("accepts the two valid scope choices", () => {
+    expect(readCubeScopeChoiceOrDefault("full-cube", "band-wise")).toBe("full-cube");
+    expect(readCubeScopeChoiceOrDefault("band-wise", "full-cube")).toBe("band-wise");
+  });
+
+  it("falls back when the stored value is not a scope choice", () => {
+    expect(readCubeScopeChoiceOrDefault(7, "full-cube")).toBe("full-cube");
+    expect(readCubeScopeChoiceOrDefault("nonsense", "band-wise")).toBe("band-wise");
+  });
+});
+
+describe("cube-scope schema in the parameter values flow", () => {
+  it("records its default choice and round-trips through JSON serialization", () => {
+    const schema: CubeScopeParameterSchema = {
+      kind: "cube-scope",
+      id: "scope",
+      label: "Scope",
+      defaultValue: "full-cube",
+    };
+    const values = buildDefaultParameterValuesForSchemas([schema]);
+    expect(values).toEqual({ scope: "full-cube" });
+    const json = serializeParameterValuesToJsonString({ scope: "band-wise" });
+    expect(parseParameterValuesFromJsonString(json)).toEqual({ scope: "band-wise" });
   });
 });
 
