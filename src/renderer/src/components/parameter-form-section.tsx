@@ -1,9 +1,14 @@
-import { useId } from "react";
+import { useId, useState } from "react";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
 import {
   clampNumericParameterValueToSchema,
   readCubeScopeChoiceOrDefault,
+  readRasterReferenceTokenOrEmpty,
+  NO_RASTER_REFERENCE_SELECTED,
   type BooleanParameterSchema,
   type CubeScopeChoice,
   type CubeScopeParameterSchema,
@@ -11,6 +16,7 @@ import {
   type IntegerParameterSchema,
   type NumberParameterSchema,
   type ParameterSchema,
+  type RasterReferenceParameterSchema,
   type ParameterValue,
   type ParameterValuesById,
 } from "@/lib/actions/parameter-schema";
@@ -82,6 +88,15 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       <CubeScopeParameterField
         schema={props.schema}
         value={readCubeScopeChoiceOrDefault(props.value, props.schema.defaultValue)}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "raster-reference") {
+    return (
+      <RasterReferenceParameterField
+        schema={props.schema}
+        value={readRasterReferenceTokenOrEmpty(props.value)}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -236,6 +251,98 @@ function CubeScopeRadioRow(props: CubeScopeRadioRowProps): JSX.Element {
       />
       <span>{props.label}</span>
     </label>
+  );
+}
+
+interface RasterReferenceParameterFieldProps {
+  schema: RasterReferenceParameterSchema;
+  value: string;
+  onChangeValue: (next: string) => void;
+}
+
+function RasterReferenceParameterField(props: RasterReferenceParameterFieldProps): JSX.Element {
+  const [isPicking, setIsPicking] = useState(false);
+  const selectedFileName = readBaseFileNameFromTokenOrNull(props.value);
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <span className="text-foreground">{props.schema.label}</span>
+      <RasterReferenceSelectedFileText fileName={selectedFileName} optional={props.schema.optional} />
+      <RasterReferencePickerButtons
+        hasSelection={selectedFileName !== null}
+        optional={props.schema.optional}
+        isPicking={isPicking}
+        onPick={() => void pickReferenceRasterIntoField(props.onChangeValue, setIsPicking)}
+        onClear={() => props.onChangeValue(NO_RASTER_REFERENCE_SELECTED)}
+      />
+    </div>
+  );
+}
+
+async function pickReferenceRasterIntoField(
+  onChangeValue: (next: string) => void,
+  setIsPicking: (next: boolean) => void,
+): Promise<void> {
+  setIsPicking(true);
+  try {
+    const picked = await pickAndRememberReferenceRasterFromDisk();
+    if (picked) onChangeValue(picked.token);
+  } catch (error) {
+    toast.error(describeReferencePickError(error));
+  } finally {
+    setIsPicking(false);
+  }
+}
+
+function describeReferencePickError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readBaseFileNameFromTokenOrNull(token: string): string | null {
+  if (token === NO_RASTER_REFERENCE_SELECTED) return null;
+  const segments = token.split(/[\\/]/);
+  return segments[segments.length - 1] ?? token;
+}
+
+interface RasterReferenceSelectedFileTextProps {
+  fileName: string | null;
+  optional: boolean;
+}
+
+function RasterReferenceSelectedFileText(props: RasterReferenceSelectedFileTextProps): JSX.Element {
+  if (props.fileName) {
+    return (
+      <span className="truncate font-mono text-xs text-foreground" title={props.fileName}>
+        {props.fileName}
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-muted-foreground">
+      {props.optional ? "No file selected (optional)" : "No file selected"}
+    </span>
+  );
+}
+
+interface RasterReferencePickerButtonsProps {
+  hasSelection: boolean;
+  optional: boolean;
+  isPicking: boolean;
+  onPick: () => void;
+  onClear: () => void;
+}
+
+function RasterReferencePickerButtons(props: RasterReferencePickerButtonsProps): JSX.Element {
+  return (
+    <div className="flex gap-2">
+      <Button type="button" variant="outline" size="sm" disabled={props.isPicking} onClick={props.onPick}>
+        {props.hasSelection ? "Replace file..." : "Choose file..."}
+      </Button>
+      {props.optional && props.hasSelection ? (
+        <Button type="button" variant="ghost" size="sm" onClick={props.onClear}>
+          Clear
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

@@ -45,12 +45,21 @@ export interface CubeScopeParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: CubeScopeChoice;
 }
 
+export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
+  readonly kind: "raster-reference";
+  readonly optional: boolean;
+  readonly defaultValue: string;
+}
+
+export const NO_RASTER_REFERENCE_SELECTED = "";
+
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
   | EnumParameterSchema
   | BooleanParameterSchema
-  | CubeScopeParameterSchema;
+  | CubeScopeParameterSchema
+  | RasterReferenceParameterSchema;
 
 export type ResolvedCubeScopeSelection =
   | { readonly scope: "full-cube" }
@@ -69,6 +78,10 @@ export function readCubeScopeChoiceOrDefault(
   fallback: CubeScopeChoice,
 ): CubeScopeChoice {
   return value === FULL_CUBE_SCOPE || value === BAND_WISE_SCOPE ? value : fallback;
+}
+
+export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefined): string {
+  return typeof value === "string" ? value : NO_RASTER_REFERENCE_SELECTED;
 }
 
 function sortAndDedupeBandIndexesAscending(bandIndexes: ReadonlyArray<number>): number[] {

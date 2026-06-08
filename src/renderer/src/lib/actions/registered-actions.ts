@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Crop, Layers } from "lucide-react";
+import { ChevronsLeft, Crop, Layers, SunDim } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -8,11 +8,21 @@ import {
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
+import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import {
+  readRememberedReferenceRasterOrNull,
+} from "@/lib/image/reference-raster-store";
 import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
-import type { IntegerParameterSchema } from "./parameter-schema";
+import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  NO_RASTER_REFERENCE_SELECTED,
+  readRasterReferenceTokenOrEmpty,
+  type IntegerParameterSchema,
+  type RasterReferenceParameterSchema,
+} from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
 import type {
   ApplyScope,
@@ -320,7 +330,96 @@ function formatBandSubsetAppliedLabel(parameterValues: ParameterValuesById): str
   return `Subset bands [${keptBandNumbers.join(", ")}]`;
 }
 
+const FLAT_FIELD_LIGHT_PARAMETER_ID = "lightReferenceToken";
+const FLAT_FIELD_DARK_PARAMETER_ID = "darkReferenceToken";
+
+const FLAT_FIELD_LIGHT_PARAMETER_SCHEMA: RasterReferenceParameterSchema = {
+  kind: "raster-reference",
+  id: FLAT_FIELD_LIGHT_PARAMETER_ID,
+  label: "Light reference (required)",
+  description:
+    "A bright flat-field capture (raster cube) used to remove illumination and sensor non-uniformity. Must match the image dimensions and band count.",
+  optional: false,
+  defaultValue: NO_RASTER_REFERENCE_SELECTED,
+};
+
+const FLAT_FIELD_DARK_PARAMETER_SCHEMA: RasterReferenceParameterSchema = {
+  kind: "raster-reference",
+  id: FLAT_FIELD_DARK_PARAMETER_ID,
+  label: "Dark reference (optional)",
+  description:
+    "An optional dark capture subtracted from both the image and the light reference. Defaults to zeros when omitted.",
+  optional: true,
+  defaultValue: NO_RASTER_REFERENCE_SELECTED,
+};
+
+export const FLAT_FIELD_ACTION: RegisteredViewportAction = {
+  id: "flat-field",
+  label: "Flat-field Correction",
+  icon: SunDim,
+  parameters: [FLAT_FIELD_LIGHT_PARAMETER_SCHEMA, FLAT_FIELD_DARK_PARAMETER_SCHEMA],
+  successMessage: "Flat-field correction applied",
+  appliedLabel: "Flat-field correction",
+  formatAppliedLabel: formatFlatFieldAppliedLabel,
+  apply: (state) => state,
+  transformSource: createFlatFieldSourceTransform(),
+};
+
+function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Flat-field correction only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const lightReference = resolveRequiredLightReferenceOrThrow(parameterValues);
+    const darkReference = resolveOptionalDarkReferenceOrThrow(parameterValues);
+    const raster = applyFlatFieldToRasterImage(source.raster, lightReference, darkReference ?? undefined);
+    return { kind: "raster", raster };
+  };
+}
+
+function resolveRequiredLightReferenceOrThrow(parameterValues: ParameterValuesById): RasterImage {
+  const token = readRasterReferenceTokenOrEmpty(parameterValues[FLAT_FIELD_LIGHT_PARAMETER_ID]);
+  if (token === NO_RASTER_REFERENCE_SELECTED) {
+    throw new Error("Choose a light reference cube before applying flat-field correction.");
+  }
+  return readRememberedReferenceRasterForTokenOrThrow(token);
+}
+
+function resolveOptionalDarkReferenceOrThrow(parameterValues: ParameterValuesById): RasterImage | null {
+  const token = readRasterReferenceTokenOrEmpty(parameterValues[FLAT_FIELD_DARK_PARAMETER_ID]);
+  if (token === NO_RASTER_REFERENCE_SELECTED) return null;
+  return readRememberedReferenceRasterForTokenOrThrow(token);
+}
+
+function readRememberedReferenceRasterForTokenOrThrow(token: string): RasterImage {
+  const raster = readRememberedReferenceRasterOrNull(token);
+  if (!raster) {
+    throw new Error("The reference cube is no longer loaded. Re-select the reference file and try again.");
+  }
+  return raster;
+}
+
+function formatFlatFieldAppliedLabel(parameterValues: ParameterValuesById): string {
+  const lightName = readReferenceFileNameForLabel(parameterValues[FLAT_FIELD_LIGHT_PARAMETER_ID]);
+  const darkToken = readRasterReferenceTokenOrEmpty(parameterValues[FLAT_FIELD_DARK_PARAMETER_ID]);
+  if (darkToken === NO_RASTER_REFERENCE_SELECTED) return `Flat-field (light: ${lightName})`;
+  return `Flat-field (light: ${lightName}, dark: ${readBaseFileNameFromToken(darkToken)})`;
+}
+
+function readReferenceFileNameForLabel(value: ParameterValuesById[string] | undefined): string {
+  const token = readRasterReferenceTokenOrEmpty(value);
+  return token === NO_RASTER_REFERENCE_SELECTED ? "none" : readBaseFileNameFromToken(token);
+}
+
+function readBaseFileNameFromToken(token: string): string {
+  const segments = token.split(/[\\/]/);
+  return segments[segments.length - 1] ?? token;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
+  FLAT_FIELD_ACTION,
 ];
