@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Palette, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -18,6 +18,13 @@ import {
   buildFalseColorComposite,
   type FalseColorBandAssignment,
 } from "@/lib/image/apply-false-color-composite";
+import {
+  applyGeometricTransformToRasterImage,
+  GEOMETRIC_TRANSFORM_LABELS,
+  GEOMETRIC_TRANSFORMS,
+  isGeometricTransform,
+  type GeometricTransform,
+} from "@/lib/image/apply-geometric-transform";
 import {
   applyInvertToRasterBands,
   assertRasterDataRangeIsBoundedForInvert,
@@ -52,6 +59,7 @@ import {
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
   type CubeScopeParameterSchema,
+  type EnumParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
   type RasterReferenceParameterSchema,
@@ -1265,6 +1273,60 @@ function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): str
   return `False-color (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
 }
 
+const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";
+
+const GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA: EnumParameterSchema = {
+  kind: "enum",
+  id: GEOMETRIC_TRANSFORM_PARAMETER_ID,
+  label: "Transform",
+  description:
+    "Rotate the whole cube clockwise or flip it. Rotations of 90 and 270 degrees swap the reported width and height.",
+  defaultValue: "rotate-90-cw",
+  options: GEOMETRIC_TRANSFORMS.map((transform) => ({
+    value: transform,
+    label: GEOMETRIC_TRANSFORM_LABELS[transform],
+  })),
+};
+
+export const ROTATE_REFLECT_ACTION: RegisteredViewportAction = {
+  id: "rotate-reflect",
+  label: "Rotate & Reflect",
+  icon: RotateCw,
+  parameters: [GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA],
+  successMessage: "Geometric transform applied",
+  appliedLabel: "Rotate / reflect",
+  formatAppliedLabel: formatGeometricTransformAppliedLabel,
+  apply: clearRegionAfterGeometricTransform,
+  clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  transformSource: createGeometricTransformSourceTransform(),
+};
+
+function clearRegionAfterGeometricTransform(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, roi: null };
+}
+
+function createGeometricTransformSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Rotate & Reflect only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const transform = readGeometricTransformChoice(parameterValues);
+    return { kind: "raster", raster: applyGeometricTransformToRasterImage(source.raster, transform) };
+  };
+}
+
+function readGeometricTransformChoice(parameterValues: ParameterValuesById): GeometricTransform {
+  const raw = parameterValues[GEOMETRIC_TRANSFORM_PARAMETER_ID];
+  if (isGeometricTransform(raw)) return raw;
+  return GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA.defaultValue as GeometricTransform;
+}
+
+function formatGeometricTransformAppliedLabel(parameterValues: ParameterValuesById): string {
+  return GEOMETRIC_TRANSFORM_LABELS[readGeometricTransformChoice(parameterValues)];
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -1277,4 +1339,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   STANDARDIZE_ACTION,
   RGB_TO_GRAYSCALE_ACTION,
   FALSE_COLOR_ACTION,
+  ROTATE_REFLECT_ACTION,
 ];

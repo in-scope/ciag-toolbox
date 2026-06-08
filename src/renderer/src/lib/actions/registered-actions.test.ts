@@ -8,6 +8,7 @@ import {
   NORMALIZE_DATA_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
   RGB_TO_GRAYSCALE_ACTION,
+  ROTATE_REFLECT_ACTION,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -32,6 +33,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "standardize",
       "rgb-to-grayscale",
       "false-color",
+      "rotate-reflect",
     ]);
   });
 
@@ -332,5 +334,28 @@ describe("FALSE_COLOR_ACTION", () => {
     expect(
       FALSE_COLOR_ACTION.formatAppliedLabel!({ redBandNumber: 5, greenBandNumber: 3, blueBandNumber: 8 }),
     ).toBe("False-color (R band 5, G band 3, B band 8)");
+  });
+});
+
+describe("ROTATE_REFLECT_ACTION", () => {
+  it("rotates the whole cube and swaps the reported dimensions for a 90 degree rotation", () => {
+    const result = ROTATE_REFLECT_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([1, 2], [3, 4], [5, 6]) },
+      { transform: "rotate-90-cw" },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect([raster.width, raster.height]).toEqual([1, 2]);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([1, 2]);
+  });
+
+  it("clears any active region after a geometric transform so the stale ROI is dropped", () => {
+    const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi };
+    expect(ROTATE_REFLECT_ACTION.apply(state, { transform: "rotate-90-cw" }).roi).toBeNull();
+  });
+
+  it("records the chosen transform in the applied label", () => {
+    expect(ROTATE_REFLECT_ACTION.formatAppliedLabel!({ transform: "flip-vertical" })).toBe("Flip vertical");
+    expect(ROTATE_REFLECT_ACTION.formatAppliedLabel!({ transform: "rotate-270-cw" })).toBe("Rotate 270 clockwise");
   });
 });
