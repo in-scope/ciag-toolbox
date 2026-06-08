@@ -4,6 +4,7 @@ import {
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
   INVERT_ACTION,
+  NORMALIZE_DATA_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
@@ -25,7 +26,12 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "black-white-points",
       "brightness-contrast",
       "invert",
+      "normalize-data",
     ]);
+  });
+
+  it("keeps the data-changing Normalize distinct from the view-only normalize id", () => {
+    expect(NORMALIZE_DATA_ACTION.id).toBe("normalize-data");
   });
 });
 
@@ -198,5 +204,45 @@ describe("INVERT_ACTION", () => {
     expect(INVERT_ACTION.formatAppliedLabel!(single)).toBe("Invert (band 4)");
     const all = INVERT_ACTION.prepareParameterValuesForApply!({ applyToAllBands: true }, state, "whole-image");
     expect(INVERT_ACTION.formatAppliedLabel!(all)).toBe("Invert (all bands)");
+  });
+});
+
+describe("NORMALIZE_DATA_ACTION", () => {
+  it("normalizes the whole cube by one cube-wide min and max in full-cube scope", () => {
+    const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+      { scope: "full-cube" },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const result = NORMALIZE_DATA_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0.5, 1]);
+  });
+
+  it("normalizes only the selected band by its own min and max in band-wise scope", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
+    const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+      { scope: "band-wise" },
+      state,
+      "whole-image",
+    );
+    const result = NORMALIZE_DATA_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 100]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 1]);
+  });
+
+  it("records the scope and selected band in the applied label", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 2 };
+    const fullCube = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "full-cube" }, state, "whole-image");
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full cube)");
+    const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "band-wise" }, state, "whole-image");
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: band 3)");
   });
 });

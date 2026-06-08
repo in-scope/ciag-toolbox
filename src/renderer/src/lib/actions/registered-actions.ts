@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -19,6 +19,7 @@ import {
   assertRasterDataRangeIsBoundedForInvert,
 } from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import {
   readRememberedReferenceRasterOrNull,
@@ -32,12 +33,17 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import {
+  FULL_CUBE_SCOPE,
   NO_RASTER_REFERENCE_SELECTED,
+  readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
+  resolveCubeScopeSelection,
   type BooleanParameterSchema,
+  type CubeScopeParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
   type RasterReferenceParameterSchema,
+  type ResolvedCubeScopeSelection,
   type SliderParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
@@ -877,6 +883,78 @@ function describeInvertAffectedBands(parameterValues: ParameterValuesById): stri
   return `band ${readInvertTargetBandIndex(parameterValues) + 1}`;
 }
 
+const NORMALIZE_SCOPE_PARAMETER_ID = "scope";
+const NORMALIZE_BAND_PARAMETER_ID = "targetBandIndex";
+
+const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
+  kind: "cube-scope",
+  id: NORMALIZE_SCOPE_PARAMETER_ID,
+  label: "Scope",
+  description:
+    "Full cube scales every band by one cube-wide min and max; band-wise scales the selected band by its own min and max.",
+  defaultValue: FULL_CUBE_SCOPE,
+};
+
+export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
+  id: "normalize-data",
+  label: "Normalize",
+  icon: Scaling,
+  parameters: [NORMALIZE_SCOPE_PARAMETER_SCHEMA],
+  successMessage: "Normalize applied",
+  appliedLabel: "Normalize",
+  formatAppliedLabel: formatNormalizeAppliedLabel,
+  prepareParameterValuesForApply: injectSelectedBandIndexForNormalize,
+  apply: (state) => state,
+  transformSource: createNormalizeSourceTransform(),
+};
+
+function injectSelectedBandIndexForNormalize(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  return Object.freeze({
+    ...rawParameterValues,
+    [NORMALIZE_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
+  });
+}
+
+function createNormalizeSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Normalize only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const selection = resolveNormalizeScopeSelection(parameterValues);
+    return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection) };
+  };
+}
+
+function resolveNormalizeScopeSelection(
+  parameterValues: ParameterValuesById,
+): ResolvedCubeScopeSelection {
+  const choice = readCubeScopeChoiceOrDefault(
+    parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
+    FULL_CUBE_SCOPE,
+  );
+  return resolveCubeScopeSelection(choice, [readNormalizeTargetBandIndex(parameterValues)]);
+}
+
+function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[NORMALIZE_BAND_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
+  const choice = readCubeScopeChoiceOrDefault(
+    parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
+    FULL_CUBE_SCOPE,
+  );
+  if (choice === FULL_CUBE_SCOPE) return "Normalize to [0,1] (full cube)";
+  return `Normalize to [0,1] (band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1})`;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -885,4 +963,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
   INVERT_ACTION,
+  NORMALIZE_DATA_ACTION,
 ];
