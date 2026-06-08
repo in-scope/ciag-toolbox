@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -20,6 +20,11 @@ import {
 } from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
+import {
+  applyRgbToGrayscale,
+  LUMINANCE_GRAYSCALE_WEIGHTS,
+  type RgbToGrayscaleWeights,
+} from "@/lib/image/apply-rgb-to-grayscale";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
 import {
@@ -1082,6 +1087,101 @@ function describeStandardizeScope(parameterValues: ParameterValuesById): string 
   return `band-wise: band ${readStandardizeTargetBandIndex(parameterValues) + 1}`;
 }
 
+const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID = "redWeight";
+const RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_ID = "greenWeight";
+const RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_ID = "blueWeight";
+
+const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID,
+  label: "Red weight",
+  description: "Weight applied to the red band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.red,
+  step: 0.001,
+};
+
+const RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_ID,
+  label: "Green weight",
+  description: "Weight applied to the green band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.green,
+  step: 0.001,
+};
+
+const RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_ID,
+  label: "Blue weight",
+  description: "Weight applied to the blue band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.blue,
+  step: 0.001,
+};
+
+export const RGB_TO_GRAYSCALE_ACTION: RegisteredViewportAction = {
+  id: "rgb-to-grayscale",
+  label: "RGB to Grayscale",
+  icon: Blend,
+  parameters: [
+    RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_SCHEMA,
+    RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_SCHEMA,
+    RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_SCHEMA,
+  ],
+  successMessage: "Converted RGB to grayscale",
+  appliedLabel: "RGB to grayscale",
+  formatAppliedLabel: formatRgbToGrayscaleAppliedLabel,
+  apply: resetToSingleBandAfterGrayscaleApply,
+  transformSource: createRgbToGrayscaleSourceTransform(),
+};
+
+function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): ViewportRenderingState {
+  return {
+    ...state,
+    selectedBandIndex: 0,
+    pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
+    isBandSubsetEditModeActive: false,
+  };
+}
+
+function createRgbToGrayscaleSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "RGB to Grayscale only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const weights = readRgbToGrayscaleWeights(parameterValues);
+    return { kind: "raster", raster: applyRgbToGrayscale(source.raster, weights) };
+  };
+}
+
+function readRgbToGrayscaleWeights(parameterValues: ParameterValuesById): RgbToGrayscaleWeights {
+  return {
+    red: readNumberParameterOrDefault(
+      parameterValues[RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID],
+      LUMINANCE_GRAYSCALE_WEIGHTS.red,
+    ),
+    green: readNumberParameterOrDefault(
+      parameterValues[RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_ID],
+      LUMINANCE_GRAYSCALE_WEIGHTS.green,
+    ),
+    blue: readNumberParameterOrDefault(
+      parameterValues[RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_ID],
+      LUMINANCE_GRAYSCALE_WEIGHTS.blue,
+    ),
+  };
+}
+
+function formatRgbToGrayscaleAppliedLabel(parameterValues: ParameterValuesById): string {
+  const weights = readRgbToGrayscaleWeights(parameterValues);
+  return `RGB to grayscale (R ${formatWeight(weights.red)}, G ${formatWeight(weights.green)}, B ${formatWeight(weights.blue)})`;
+}
+
+function formatWeight(weight: number): string {
+  return Number.isInteger(weight) ? String(weight) : weight.toFixed(3);
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -1092,4 +1192,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
   STANDARDIZE_ACTION,
+  RGB_TO_GRAYSCALE_ACTION,
 ];

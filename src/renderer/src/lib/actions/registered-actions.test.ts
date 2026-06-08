@@ -6,6 +6,7 @@ import {
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
+  RGB_TO_GRAYSCALE_ACTION,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -28,6 +29,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "invert",
       "normalize-data",
       "standardize",
+      "rgb-to-grayscale",
     ]);
   });
 
@@ -245,5 +247,53 @@ describe("NORMALIZE_DATA_ACTION", () => {
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full cube)");
     const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "band-wise" }, state, "whole-image");
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: band 3)");
+  });
+});
+
+function makeThreeBandUint8Raster(
+  bandOne: ReadonlyArray<number>,
+  bandTwo: ReadonlyArray<number>,
+  bandThree: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from(bandOne), Uint8Array.from(bandTwo), Uint8Array.from(bandThree)],
+    width: bandOne.length,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
+
+describe("RGB_TO_GRAYSCALE_ACTION", () => {
+  it("collapses a 3-band RGB raster to a single band with the default luminance weights", () => {
+    const result = RGB_TO_GRAYSCALE_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([100], [200], [50]) },
+      { redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(raster.bandCount).toBe(1);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([Math.round(100 * 0.299 + 200 * 0.587 + 50 * 0.114)]);
+  });
+
+  it("rejects a source that is not 3-band RGB with a clear error", () => {
+    expect(() =>
+      RGB_TO_GRAYSCALE_ACTION.transformSource!(
+        { kind: "raster", raster: makeTwoBandUint8Raster([1], [2]) },
+        { redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 },
+      ),
+    ).toThrow(/3-band RGB/i);
+  });
+
+  it("resets the selected band to the single produced band after applying", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 2 };
+    const next = RGB_TO_GRAYSCALE_ACTION.apply(state, { redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 });
+    expect(next.selectedBandIndex).toBe(0);
+  });
+
+  it("records the weights used in the applied label", () => {
+    expect(
+      RGB_TO_GRAYSCALE_ACTION.formatAppliedLabel!({ redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 }),
+    ).toBe("RGB to grayscale (R 0.299, G 0.587, B 0.114)");
   });
 });
