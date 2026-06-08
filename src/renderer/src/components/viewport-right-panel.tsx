@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
 
-import { BandIndexBadge } from "@/components/band-index-badge";
 import { BandThumbnail } from "@/components/band-thumbnail";
 import {
   HistogramSection,
@@ -32,7 +31,7 @@ import {
 import type { ViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import {
   clampBandIndexToRaster,
-  describeRasterBandDisplayIdentity,
+  getRasterBandLabelOrDefault,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
@@ -315,26 +314,14 @@ function useBandRowKeyboardHandler(
 interface BandRowItem {
   readonly bandIndex: number;
   readonly label: string;
-  readonly originalNumber: number;
-  readonly hasExplicitLabel: boolean;
 }
 
 function buildBandRowItemsForRaster(raster: RasterImage): ReadonlyArray<BandRowItem> {
   const items: BandRowItem[] = [];
   for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
-    items.push(buildBandRowItemForBandIndex(raster, bandIndex));
+    items.push({ bandIndex, label: getRasterBandLabelOrDefault(raster, bandIndex) });
   }
   return items;
-}
-
-function buildBandRowItemForBandIndex(raster: RasterImage, bandIndex: number): BandRowItem {
-  const identity = describeRasterBandDisplayIdentity(raster, bandIndex);
-  return {
-    bandIndex,
-    label: identity.label,
-    originalNumber: identity.originalNumber,
-    hasExplicitLabel: identity.hasExplicitLabel,
-  };
 }
 
 interface BandRowProps {
@@ -358,9 +345,6 @@ function BandRow(props: BandRowProps): JSX.Element {
       className={getBandRowClassName(props.isSelected)}
     >
       <BandThumbnail raster={props.raster} bandIndex={props.item.bandIndex} />
-      {props.item.hasExplicitLabel ? (
-        <BandIndexBadge originalNumber={props.item.originalNumber} />
-      ) : null}
       <span className="flex-1 truncate text-left text-sm" title={props.item.label}>
         {props.item.label}
       </span>

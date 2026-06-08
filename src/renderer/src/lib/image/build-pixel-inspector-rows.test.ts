@@ -87,18 +87,6 @@ describe("buildRasterPixelInspectorRows", () => {
     });
     expect(rows.map((row) => row.label)).toEqual(["B1", "B2", "B3"]);
   });
-
-  it("surfaces the preserved original band number for each row after a subset", () => {
-    const raster: RasterImage = { ...buildThreeBandUint16Raster(), bandOriginalNumbers: [3, 5, 9] };
-    const rows = buildRasterPixelInspectorRows({
-      raster,
-      perBandRawValueExtents: computePerBandRawValueExtentsForRaster(raster),
-      cursorBandValues: null,
-      roiMeanBandValues: null,
-    });
-    expect(rows.map((row) => row.originalNumber)).toEqual([3, 5, 9]);
-    expect(rows.every((row) => row.hasExplicitLabel)).toBe(true);
-  });
 });
 
 describe("buildBrowserSourcePixelInspectorRow", () => {

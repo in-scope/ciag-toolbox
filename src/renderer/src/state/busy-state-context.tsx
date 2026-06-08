@@ -158,21 +158,7 @@ export function useMostRecentViewportBusyEntry(viewportIndex: number): BusyEntry
   );
 }
 
-export const BUSY_INDICATOR_PAINT_DELAY_MS = 50;
-
-// A small margin past the anti-flash threshold so the re-render that the
-// threshold triggers has time to commit and paint before the caller resumes.
-const BUSY_INDICATOR_PAINT_MARGIN_MS = 16;
-
-// Resolves once a freshly registered busy entry has had time to clear its
-// anti-flash threshold and paint. Callers about to run CPU-bound work on the
-// renderer thread await this first so the indicator is visible before the
-// thread blocks (CT-072: large project saves felt frozen because the heavy
-// bake started before the indicator could paint).
-export function waitForBusyIndicatorToClearAntiFlashThreshold(): Promise<void> {
-  const totalDelayMs = BUSY_INDICATOR_PAINT_DELAY_MS + BUSY_INDICATOR_PAINT_MARGIN_MS;
-  return new Promise((resolve) => window.setTimeout(resolve, totalDelayMs));
-}
+const BUSY_INDICATOR_PAINT_DELAY_MS = 50;
 
 export function useShouldRenderBusyEntryAfterDelay(entry: BusyEntry | null): boolean {
   const [hasPassedThreshold, setHasPassedThreshold] = useState(false);

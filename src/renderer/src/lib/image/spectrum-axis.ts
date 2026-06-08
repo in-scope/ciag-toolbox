@@ -1,8 +1,4 @@
-import {
-  listRasterBandOriginalNumbers,
-  type RasterImage,
-  type RasterSampleFormat,
-} from "@/lib/image/raster-image";
+import type { RasterImage, RasterSampleFormat } from "@/lib/image/raster-image";
 
 export interface SpectrumXAxisDescriptor {
   readonly label: string;
@@ -17,14 +13,14 @@ export function buildSpectrumXAxisFromRaster(raster: RasterImage): SpectrumXAxis
   if (raster.bandWavelengths && raster.bandWavelengths.length === raster.bandCount) {
     return buildWavelengthAxisFromBandCenters(raster.bandWavelengths);
   }
-  return buildBandIndexAxis(raster);
+  return buildBandIndexAxis(raster.bandCount);
 }
 
 function buildWavelengthAxisFromBandCenters(
   bandWavelengths: ReadonlyArray<number>,
 ): SpectrumXAxisDescriptor {
   const positions = [...bandWavelengths];
-  const ticks = pickTicksEvenlySpacedAcrossValueRange(positions, MAX_X_AXIS_TICKS);
+  const ticks = pickEvenlySpacedSubsequence(positions, MAX_X_AXIS_TICKS);
   return {
     label: "Wavelength (nm)",
     bandPositions: positions,
@@ -33,41 +29,35 @@ function buildWavelengthAxisFromBandCenters(
   };
 }
 
-function buildBandIndexAxis(raster: RasterImage): SpectrumXAxisDescriptor {
-  const positions = [...listRasterBandOriginalNumbers(raster)];
-  const ticks = pickTicksEvenlySpacedAcrossValueRange(positions, MAX_X_AXIS_TICKS).map(Math.round);
-  const uniqueTicks = removeAdjacentDuplicateTicks(ticks);
+function buildBandIndexAxis(bandCount: number): SpectrumXAxisDescriptor {
+  const positions = Array.from({ length: bandCount }, (_, index) => index + 1);
+  const ticks = pickEvenlySpacedSubsequence(positions, MAX_X_AXIS_TICKS);
   return {
     label: "Band index",
     bandPositions: positions,
-    tickPositions: uniqueTicks,
-    tickLabels: uniqueTicks.map((tick) => tick.toString()),
+    tickPositions: ticks,
+    tickLabels: ticks.map((tick) => tick.toString()),
   };
 }
 
-function pickTicksEvenlySpacedAcrossValueRange(
+function pickEvenlySpacedSubsequence(
   positions: ReadonlyArray<number>,
   maxCount: number,
-): number[] {
+): ReadonlyArray<number> {
   if (positions.length === 0) return [];
-  const minPosition = Math.min(...positions);
-  const maxPosition = Math.max(...positions);
-  const tickCount = Math.min(maxCount, positions.length);
-  if (tickCount <= 1 || minPosition === maxPosition) return [minPosition];
-  return buildEvenlySpacedValues(minPosition, maxPosition, tickCount);
-}
-
-function buildEvenlySpacedValues(minValue: number, maxValue: number, count: number): number[] {
-  const span = maxValue - minValue;
-  return Array.from({ length: count }, (_, index) => minValue + (index / (count - 1)) * span);
-}
-
-function removeAdjacentDuplicateTicks(ticks: ReadonlyArray<number>): number[] {
-  return ticks.filter((tick, index) => index === 0 || tick !== ticks[index - 1]);
+  if (positions.length <= maxCount) return [...positions];
+  const result: number[] = [];
+  for (let i = 0; i < maxCount; i++) {
+    const fraction = i / (maxCount - 1);
+    const sourceIndex = Math.round(fraction * (positions.length - 1));
+    result.push(positions[sourceIndex] ?? 0);
+  }
+  return result;
 }
 
 function formatWavelengthTickLabel(value: number): string {
-  return Math.round(value).toString();
+  if (Number.isInteger(value)) return value.toString();
+  return value.toFixed(1);
 }
 
 export function describeSpectrumYAxisLabel(sampleFormat: RasterSampleFormat): string {

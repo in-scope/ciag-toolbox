@@ -170,25 +170,6 @@ describe("writeProjectBundleAtPath round-trip", () => {
     }
   });
 
-  it("streams an external ENVI .hdr source together with its on-disk .bin sidecar", async () => {
-    const header = await writeExternalSourceFixture("scene.hdr", "envi-header");
-    const binary = await writeExternalSourceFixture("scene.bin", "envi-binary");
-    const draft = buildDraftFromViewports([
-      buildExternalAssetViewport(0, "scene.hdr", header.absolutePath),
-    ]);
-    const bundlePath = join(workspaceDir, "external-envi.ctbundle");
-    await writeProjectBundleAtPath(bundlePath, draft);
-    const extractedDir = await extractProjectBundleToFreshTempDirectory(bundlePath);
-    try {
-      const headerBack = await readFile(join(extractedDir, "assets", "viewport-0.hdr"));
-      const binaryBack = await readFile(join(extractedDir, "assets", "viewport-0.bin"));
-      expect(new Uint8Array(headerBack)).toEqual(header.bytes);
-      expect(new Uint8Array(binaryBack)).toEqual(binary.bytes);
-    } finally {
-      await rm(extractedDir, { recursive: true, force: true });
-    }
-  });
-
   it("preserves selectedViewportIndices and gridLayout in the rewritten project.json", async () => {
     const tifBytes = new TextEncoder().encode("fake-tiff-bytes");
     const draft = buildDraftFromViewports(

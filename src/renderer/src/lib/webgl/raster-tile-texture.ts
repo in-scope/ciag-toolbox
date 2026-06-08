@@ -1,8 +1,4 @@
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
-import {
-  computeDataTypeUnitMappingForRaster,
-  mapRawValueToDisplayUnit,
-} from "@/lib/image/data-type-display-range";
 import type { RasterTile } from "@/lib/webgl/raster-tile-splitter";
 
 const HALF_FLOAT_COLOR_BUFFER_EXTENSION_NAME = "EXT_color_buffer_half_float";
@@ -82,7 +78,7 @@ function convertRasterTilePixelsToNormalizedFloat32(
   if (raster.sampleFormat === "float") {
     return copyFloatPixelsAsFloat32(pixels);
   }
-  return convertIntegerPixelsToDisplayUnitFloat32(pixels, raster);
+  return convertIntegerPixelsToFloat32WithUnitScale(pixels, raster.bitsPerSample);
 }
 
 function copyFloatPixelsAsFloat32(pixels: RasterTypedArray): Float32Array {
@@ -91,16 +87,21 @@ function copyFloatPixelsAsFloat32(pixels: RasterTypedArray): Float32Array {
   return out;
 }
 
-function convertIntegerPixelsToDisplayUnitFloat32(
+function convertIntegerPixelsToFloat32WithUnitScale(
   pixels: RasterTypedArray,
-  raster: RasterImage,
+  bitsPerSample: number,
 ): Float32Array {
-  const mapping = computeDataTypeUnitMappingForRaster(raster);
+  const scale = chooseUnitScaleForIntegerBitsPerSample(bitsPerSample);
   const out = new Float32Array(pixels.length);
   for (let i = 0; i < pixels.length; i++) {
-    out[i] = mapRawValueToDisplayUnit(pixels[i] ?? 0, mapping);
+    out[i] = (pixels[i] ?? 0) * scale;
   }
   return out;
+}
+
+function chooseUnitScaleForIntegerBitsPerSample(bitsPerSample: number): number {
+  if (bitsPerSample <= 0) return 1;
+  return 1 / (Math.pow(2, bitsPerSample) - 1);
 }
 
 export function deleteRasterTileTexturesSafely(

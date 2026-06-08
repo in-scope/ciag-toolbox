@@ -1,8 +1,8 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 
 import { extractProjectBundleToFreshTempDirectory } from "./extract-project-bundle";
-import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
@@ -58,7 +58,8 @@ async function openProjectFromBundleAtPath(
 }
 
 async function readFileAsBytes(filePath: string): Promise<Uint8Array> {
-  return readFileWithinOpenableSizeLimitOrThrow(filePath);
+  const buffer = await readFile(filePath);
+  return new Uint8Array(buffer);
 }
 
 function resolveAbsolutePathFromProjectFile(

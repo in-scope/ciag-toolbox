@@ -1,9 +1,8 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
-import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
 const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
@@ -117,7 +116,8 @@ async function handleOpenImagesDialogIpc(
 }
 
 async function readBytesAtPathAsUint8Array(filePath: string): Promise<Uint8Array> {
-  return readFileWithinOpenableSizeLimitOrThrow(filePath);
+  const buffer = await readFile(filePath);
+  return new Uint8Array(buffer);
 }
 
 async function findEnviSidecarForOpenedImageFile(
