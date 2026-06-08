@@ -4,13 +4,17 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
 import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
+  describeBandNumberRangeErrorOrNull,
+  readBandNumberOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   NO_RASTER_REFERENCE_SELECTED,
+  type BandNumberParameterSchema,
   type BooleanParameterSchema,
   type CubeScopeChoice,
   type CubeScopeParameterSchema,
@@ -28,6 +32,7 @@ interface ParameterFormSectionProps {
   schemas: ReadonlyArray<ParameterSchema>;
   values: ParameterValuesById;
   onChangeValue: (id: string, next: ParameterValue) => void;
+  sourceBandCount?: number | null;
 }
 
 export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Element {
@@ -39,6 +44,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           key={schema.id}
           schema={schema}
           value={props.values[schema.id] ?? schema.defaultValue}
+          sourceBandCount={props.sourceBandCount ?? null}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
         />
       ))}
@@ -49,6 +55,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
 interface ParameterFieldRowProps {
   schema: ParameterSchema;
   value: ParameterValue;
+  sourceBandCount: number | null;
   onChangeValue: (next: ParameterValue) => void;
 }
 
@@ -58,6 +65,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
       <ParameterFieldInput
         schema={props.schema}
         value={props.value}
+        sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
       />
       {props.schema.description ? (
@@ -109,6 +117,16 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       <SliderParameterField
         schema={props.schema}
         value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "band-number") {
+    return (
+      <BandNumberParameterField
+        schema={props.schema}
+        value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
+        sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -182,6 +200,37 @@ function parseNumericInputValueOrFallback(rawValue: string, fallback: number): n
   if (trimmed === "") return fallback;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+interface BandNumberParameterFieldProps {
+  schema: BandNumberParameterSchema;
+  value: number;
+  sourceBandCount: number | null;
+  onChangeValue: (next: number) => void;
+}
+
+function BandNumberParameterField(props: BandNumberParameterFieldProps): JSX.Element {
+  const id = useId();
+  const rangeError = describeBandNumberRangeErrorOrNull(props.value, props.sourceBandCount);
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
+      <span className="text-foreground">{props.schema.label}</span>
+      <input
+        id={id}
+        type="number"
+        value={props.value}
+        min={1}
+        max={props.sourceBandCount ?? undefined}
+        step={1}
+        aria-invalid={rangeError !== null}
+        onChange={(event) =>
+          props.onChangeValue(readBandNumberOrDefault(parseNumericInputValueOrFallback(event.target.value, props.value), props.value))
+        }
+        className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
+      />
+      {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
+    </label>
+  );
 }
 
 interface SliderParameterFieldProps {

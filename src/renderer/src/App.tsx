@@ -54,10 +54,13 @@ import {
   BAND_SUBSET_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
   buildBandSubsetParameterValuesFromKeptNumbers,
+  readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
 import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
-import { getRasterBandOriginalNumber } from "@/lib/image/raster-image";
+import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
+import { getRasterBandOriginalNumber, type RasterImage } from "@/lib/image/raster-image";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -128,6 +131,12 @@ import {
   useRegionTool,
 } from "@/state/region-tool-context";
 import {
+  FalseColorPreviewProvider,
+  useFalseColorPreview,
+  type FalseColorPreview,
+  type FalseColorPreviewApi,
+} from "@/state/false-color-preview-context";
+import {
   ViewportReimportProvider,
   type ViewportReimportApi,
 } from "@/state/reimport-context";
@@ -147,7 +156,7 @@ import {
   type ApplyScope,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
-import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
+import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -179,16 +188,18 @@ export function App(): JSX.Element {
       <ViewportSelectionProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
-            <PixelReadoutProvider>
-              <BusyStateProvider>
-                <RightPanelCollapsedStateProvider>
-                  <ApplicationShell />
-                  <AboutDialog />
-                  <AppBusyModal />
-                  <Toaster />
-                </RightPanelCollapsedStateProvider>
-              </BusyStateProvider>
-            </PixelReadoutProvider>
+            <FalseColorPreviewProvider>
+              <PixelReadoutProvider>
+                <BusyStateProvider>
+                  <RightPanelCollapsedStateProvider>
+                    <ApplicationShell />
+                    <AboutDialog />
+                    <AppBusyModal />
+                    <Toaster />
+                  </RightPanelCollapsedStateProvider>
+                </BusyStateProvider>
+              </PixelReadoutProvider>
+            </FalseColorPreviewProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
       </ViewportSelectionProvider>
@@ -223,6 +234,9 @@ function ApplicationShell(): JSX.Element {
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
   const regionTool = useRegionTool();
+  const falseColorPreview = useFalseColorPreview();
+  const [activeActionParameterValues, setActiveActionParameterValues] =
+    useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
@@ -284,6 +298,13 @@ function ApplicationShell(): JSX.Element {
     busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
+  usePublishFalseColorPreview({
+    activeAction,
+    singleSelectedSource,
+    imagesByIndex,
+    parameterValues: activeActionParameterValues,
+    falseColorPreview,
+  });
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
     selectedIndices,
     imagesByIndex,
@@ -361,6 +382,7 @@ function ApplicationShell(): JSX.Element {
               rightPanelActiveSource={rightPanelActiveSource}
               onCancelAction={handleCancelAction}
               onApplyAction={handleApplyAction}
+              onActiveActionParametersChange={setActiveActionParameterValues}
             />
           </ViewportReimportProvider>
         </ViewportClosingProvider>
@@ -441,6 +463,7 @@ interface ApplicationStageContentProps {
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
+  onActiveActionParametersChange: (values: ParameterValuesById) => void;
 }
 
 function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Element {
@@ -470,6 +493,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
         sourceViewport={props.sourceViewport}
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
+        onParametersChange={props.onActiveActionParametersChange}
       />
     );
   }
@@ -1394,8 +1418,69 @@ function deriveSingleSelectedSource(
       viewportNumber: getViewportNumberFromIndex(onlyIndex),
       fileName: content.fileName,
       hasRoi: renderingApi.getRenderingState(onlyIndex).roi !== null,
+      sourceBandCount: readRasterBandCountFromContentOrNull(content),
     },
   };
+}
+
+function readRasterBandCountFromContentOrNull(content: ViewportCellContent): number | null {
+  return content.source.kind === "raster" ? content.source.raster.bandCount : null;
+}
+
+interface PublishFalseColorPreviewInputs {
+  readonly activeAction: RegisteredViewportAction | null;
+  readonly singleSelectedSource: SingleSelectedSource | null;
+  readonly imagesByIndex: ImagesByIndexMap;
+  readonly parameterValues: ParameterValuesById;
+  readonly falseColorPreview: FalseColorPreviewApi;
+}
+
+function usePublishFalseColorPreview(inputs: PublishFalseColorPreviewInputs): void {
+  const raster = resolveFalseColorPreviewRasterOrNull(
+    inputs.activeAction,
+    inputs.singleSelectedSource,
+    inputs.imagesByIndex,
+  );
+  const assignment = useMemo(
+    () => readFalseColorBandAssignment(inputs.parameterValues),
+    [inputs.parameterValues],
+  );
+  const previewSource = useMemo(
+    () => (raster ? buildFalseColorPreviewSourceOrNull(raster, assignment) : null),
+    [raster, assignment],
+  );
+  const sourceIndex = inputs.singleSelectedSource?.index ?? null;
+  usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, previewSource, sourceIndex);
+}
+
+function resolveFalseColorPreviewRasterOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): RasterImage | null {
+  if (!activeAction || activeAction.id !== "false-color" || !singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return content.source.raster;
+}
+
+function usePublishPreviewSourceForViewport(
+  setPreview: FalseColorPreviewApi["setPreview"],
+  previewSource: ViewportImageSource | null,
+  sourceIndex: number | null,
+): void {
+  useEffect(() => {
+    setPreview(buildFalseColorPreviewOrNull(previewSource, sourceIndex));
+    return () => setPreview(null);
+  }, [setPreview, previewSource, sourceIndex]);
+}
+
+function buildFalseColorPreviewOrNull(
+  source: ViewportImageSource | null,
+  sourceIndex: number | null,
+): FalseColorPreview | null {
+  if (source === null || sourceIndex === null) return null;
+  return { viewportIndex: sourceIndex, source };
 }
 
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {

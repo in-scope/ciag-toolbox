@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
+  FALSE_COLOR_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
@@ -30,6 +31,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "normalize-data",
       "standardize",
       "rgb-to-grayscale",
+      "false-color",
     ]);
   });
 
@@ -295,5 +297,40 @@ describe("RGB_TO_GRAYSCALE_ACTION", () => {
     expect(
       RGB_TO_GRAYSCALE_ACTION.formatAppliedLabel!({ redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 }),
     ).toBe("RGB to grayscale (R 0.299, G 0.587, B 0.114)");
+  });
+});
+
+describe("FALSE_COLOR_ACTION", () => {
+  it("maps the three chosen bands to the R, G, and B channels, order-sensitive", () => {
+    const result = FALSE_COLOR_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([10], [20], [30]) },
+      { redBandNumber: 3, greenBandNumber: 1, blueBandNumber: 2 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(raster.bandCount).toBe(3);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([30]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([10]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([20]);
+  });
+
+  it("rejects a band number outside the source's band range", () => {
+    expect(() =>
+      FALSE_COLOR_ACTION.transformSource!(
+        { kind: "raster", raster: makeThreeBandUint8Raster([10], [20], [30]) },
+        { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 4 },
+      ),
+    ).toThrow(/out of range/i);
+  });
+
+  it("resets the selected band after the band count changes", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 7 };
+    const next = FALSE_COLOR_ACTION.apply(state, { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 3 });
+    expect(next.selectedBandIndex).toBe(0);
+  });
+
+  it("records the three band assignments in the applied label", () => {
+    expect(
+      FALSE_COLOR_ACTION.formatAppliedLabel!({ redBandNumber: 5, greenBandNumber: 3, blueBandNumber: 8 }),
+    ).toBe("False-color (R band 5, G band 3, B band 8)");
   });
 });

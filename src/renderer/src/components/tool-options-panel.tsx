@@ -27,6 +27,7 @@ export interface ToolOptionsSourceViewport {
   readonly viewportNumber: number;
   readonly fileName: string;
   readonly hasRoi: boolean;
+  readonly sourceBandCount: number | null;
 }
 
 interface ToolOptionsPanelProps {
@@ -34,6 +35,7 @@ interface ToolOptionsPanelProps {
   sourceViewport: ToolOptionsSourceViewport | null;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
+  onParametersChange?: (values: ParameterValuesById) => void;
 }
 
 export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | null {
@@ -44,6 +46,7 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
       sourceViewport={props.sourceViewport}
       onCancel={props.onCancel}
       onApply={props.onApply}
+      onParametersChange={props.onParametersChange}
     />
   );
 }
@@ -53,6 +56,7 @@ interface ToolOptionsPanelShellProps {
   sourceViewport: ToolOptionsSourceViewport | null;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
+  onParametersChange?: (values: ParameterValuesById) => void;
 }
 
 function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
@@ -69,6 +73,7 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
     setParameterValues,
     setApplyScope,
   );
+  useReportParameterValuesToParent(parameterValues, props.onParametersChange);
   useResetApplyScopeWhenRegionDisappears(props.sourceViewport, setApplyScope);
   const showApplyScopeSelector = shouldShowApplyScopeSelector(props.action, props.sourceViewport);
   const handleApply = () =>
@@ -134,6 +139,15 @@ function useResetPanelStateWhenActionChanges(
   }, [actionId, parameterSchemas, setOpenInNewViewport, setParameterValues, setApplyScope]);
 }
 
+function useReportParameterValuesToParent(
+  parameterValues: ParameterValuesById,
+  onParametersChange: ((values: ParameterValuesById) => void) | undefined,
+): void {
+  useEffect(() => {
+    onParametersChange?.(parameterValues);
+  }, [parameterValues, onParametersChange]);
+}
+
 function useResetApplyScopeWhenRegionDisappears(
   sourceViewport: ToolOptionsSourceViewport | null,
   setApplyScope: (scope: ApplyScope) => void,
@@ -197,6 +211,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
         <ParameterFormSection
           schemas={props.parameterSchemas}
           values={props.parameterValues}
+          sourceBandCount={props.sourceViewport?.sourceBandCount ?? null}
           onChangeValue={props.onChangeParameterValue}
         />
       ) : null}

@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
+import { useFalseColorPreview } from "@/state/false-color-preview-context";
 import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
@@ -119,6 +120,7 @@ function renderViewportCellViewport(
     <Viewport
       viewportNumber={props.viewportNumber}
       imageSource={props.content?.source ?? null}
+      previewImageSource={settings.previewImageSource}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
@@ -149,6 +151,7 @@ interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   handleClose: (() => void) | undefined;
+  previewImageSource: ViewportImageSource | null;
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
@@ -167,6 +170,7 @@ function useViewportCellInteractionSettings(
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
+  const { getPreviewSourceForViewport } = useFalseColorPreview();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
@@ -211,6 +215,7 @@ function useViewportCellInteractionSettings(
     isSelected,
     handleClick,
     handleClose,
+    previewImageSource: getPreviewSourceForViewport(cellIndex),
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,

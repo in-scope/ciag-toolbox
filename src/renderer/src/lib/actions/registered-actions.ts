@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Palette, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -14,6 +14,10 @@ import {
 } from "@/lib/image/apply-brightness";
 import { applyContrastToRasterBands } from "@/lib/image/apply-contrast";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
+import {
+  buildFalseColorComposite,
+  type FalseColorBandAssignment,
+} from "@/lib/image/apply-false-color-composite";
 import {
   applyInvertToRasterBands,
   assertRasterDataRangeIsBoundedForInvert,
@@ -41,9 +45,11 @@ import {
 import {
   FULL_CUBE_SCOPE,
   NO_RASTER_REFERENCE_SELECTED,
+  readBandNumberOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   resolveCubeScopeSelection,
+  type BandNumberParameterSchema,
   type BooleanParameterSchema,
   type CubeScopeParameterSchema,
   type IntegerParameterSchema,
@@ -1135,6 +1141,12 @@ export const RGB_TO_GRAYSCALE_ACTION: RegisteredViewportAction = {
 };
 
 function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): ViewportRenderingState {
+  return resetBandDependentStateAfterBandCountChange(state);
+}
+
+function resetBandDependentStateAfterBandCountChange(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
   return {
     ...state,
     selectedBandIndex: 0,
@@ -1182,6 +1194,77 @@ function formatWeight(weight: number): string {
   return Number.isInteger(weight) ? String(weight) : weight.toFixed(3);
 }
 
+const FALSE_COLOR_RED_BAND_PARAMETER_ID = "redBandNumber";
+const FALSE_COLOR_GREEN_BAND_PARAMETER_ID = "greenBandNumber";
+const FALSE_COLOR_BLUE_BAND_PARAMETER_ID = "blueBandNumber";
+
+const FALSE_COLOR_RED_BAND_PARAMETER_SCHEMA: BandNumberParameterSchema = {
+  kind: "band-number",
+  id: FALSE_COLOR_RED_BAND_PARAMETER_ID,
+  label: "Band R",
+  description: "Source band mapped to the red output channel.",
+  defaultValue: 1,
+};
+
+const FALSE_COLOR_GREEN_BAND_PARAMETER_SCHEMA: BandNumberParameterSchema = {
+  kind: "band-number",
+  id: FALSE_COLOR_GREEN_BAND_PARAMETER_ID,
+  label: "Band G",
+  description: "Source band mapped to the green output channel.",
+  defaultValue: 2,
+};
+
+const FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA: BandNumberParameterSchema = {
+  kind: "band-number",
+  id: FALSE_COLOR_BLUE_BAND_PARAMETER_ID,
+  label: "Band B",
+  description: "Source band mapped to the blue output channel.",
+  defaultValue: 3,
+};
+
+export const FALSE_COLOR_ACTION: RegisteredViewportAction = {
+  id: "false-color",
+  label: "False-color Composite",
+  icon: Palette,
+  parameters: [
+    FALSE_COLOR_RED_BAND_PARAMETER_SCHEMA,
+    FALSE_COLOR_GREEN_BAND_PARAMETER_SCHEMA,
+    FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA,
+  ],
+  successMessage: "False-color composite applied",
+  appliedLabel: "False-color composite",
+  formatAppliedLabel: formatFalseColorAppliedLabel,
+  apply: resetBandDependentStateAfterBandCountChange,
+  transformSource: createFalseColorSourceTransform(),
+};
+
+export function readFalseColorBandAssignment(
+  parameterValues: ParameterValuesById,
+): FalseColorBandAssignment {
+  return {
+    r: readBandNumberOrDefault(parameterValues[FALSE_COLOR_RED_BAND_PARAMETER_ID], FALSE_COLOR_RED_BAND_PARAMETER_SCHEMA.defaultValue),
+    g: readBandNumberOrDefault(parameterValues[FALSE_COLOR_GREEN_BAND_PARAMETER_ID], FALSE_COLOR_GREEN_BAND_PARAMETER_SCHEMA.defaultValue),
+    b: readBandNumberOrDefault(parameterValues[FALSE_COLOR_BLUE_BAND_PARAMETER_ID], FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA.defaultValue),
+  };
+}
+
+function createFalseColorSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "False-color Composite only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const assignment = readFalseColorBandAssignment(parameterValues);
+    return { kind: "raster", raster: buildFalseColorComposite(source.raster, assignment) };
+  };
+}
+
+function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): string {
+  const assignment = readFalseColorBandAssignment(parameterValues);
+  return `False-color (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -1193,4 +1276,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   NORMALIZE_DATA_ACTION,
   STANDARDIZE_ACTION,
   RGB_TO_GRAYSCALE_ACTION,
+  FALSE_COLOR_ACTION,
 ];

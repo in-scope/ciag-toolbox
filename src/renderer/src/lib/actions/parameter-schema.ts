@@ -62,6 +62,11 @@ export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
 
 export const NO_RASTER_REFERENCE_SELECTED = "";
 
+export interface BandNumberParameterSchema extends ParameterSchemaBase {
+  readonly kind: "band-number";
+  readonly defaultValue: number;
+}
+
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
@@ -69,7 +74,8 @@ export type ParameterSchema =
   | EnumParameterSchema
   | BooleanParameterSchema
   | CubeScopeParameterSchema
-  | RasterReferenceParameterSchema;
+  | RasterReferenceParameterSchema
+  | BandNumberParameterSchema;
 
 export type ResolvedCubeScopeSelection =
   | { readonly scope: "full-cube" }
@@ -92,6 +98,22 @@ export function readCubeScopeChoiceOrDefault(
 
 export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefined): string {
   return typeof value === "string" ? value : NO_RASTER_REFERENCE_SELECTED;
+}
+
+export function readBandNumberOrDefault(value: ParameterValue | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.round(value);
+}
+
+export function describeBandNumberRangeErrorOrNull(
+  value: number,
+  sourceBandCount: number | null,
+): string | null {
+  if (!Number.isInteger(value) || value < 1) return "Enter a band number of 1 or higher.";
+  if (sourceBandCount !== null && value > sourceBandCount) {
+    return `Band must be between 1 and ${sourceBandCount}.`;
+  }
+  return null;
 }
 
 function sortAndDedupeBandIndexesAscending(bandIndexes: ReadonlyArray<number>): number[] {

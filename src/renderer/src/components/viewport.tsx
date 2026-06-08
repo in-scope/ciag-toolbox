@@ -36,6 +36,7 @@ import {
 
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
+  previewImageSource?: ViewportImageSource | null;
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
@@ -56,12 +57,13 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
   const imageSource = props.imageSource ?? null;
+  const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
-  useImageSourceUploadEffect(rendererRef, imageSource, props.selectedBandIndex);
-  useSelectedBandIndexEffect(rendererRef, imageSource, props.selectedBandIndex);
+  useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
+  useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
