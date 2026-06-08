@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Contrast, Crop, Layers, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { ChevronsLeft, Contrast, Crop, Eclipse, Layers, SlidersHorizontal, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -14,6 +14,10 @@ import {
 } from "@/lib/image/apply-brightness";
 import { applyContrastToRasterBands } from "@/lib/image/apply-contrast";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
+import {
+  applyInvertToRasterBands,
+  assertRasterDataRangeIsBoundedForInvert,
+} from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import {
@@ -799,6 +803,80 @@ function formatSignedPercent(percent: number): string {
   return `${percent >= 0 ? "+" : ""}${percent}%`;
 }
 
+const INVERT_ALL_BANDS_PARAMETER_ID = "applyToAllBands";
+const INVERT_BAND_PARAMETER_ID = "targetBandIndex";
+
+const INVERT_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
+  kind: "boolean",
+  id: INVERT_ALL_BANDS_PARAMETER_ID,
+  label: "Apply to all bands",
+  description: "Off inverts the selected band only; on inverts every band in the cube.",
+  defaultValue: false,
+};
+
+export const INVERT_ACTION: RegisteredViewportAction = {
+  id: "invert",
+  label: "Invert",
+  icon: Eclipse,
+  parameters: [INVERT_ALL_BANDS_PARAMETER_SCHEMA],
+  successMessage: "Invert applied",
+  appliedLabel: "Invert",
+  formatAppliedLabel: formatInvertAppliedLabel,
+  prepareParameterValuesForApply: injectSelectedBandIndexForInvert,
+  apply: (state) => state,
+  transformSource: createInvertSourceTransform(),
+};
+
+function injectSelectedBandIndexForInvert(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  return Object.freeze({
+    ...rawParameterValues,
+    [INVERT_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
+  });
+}
+
+function createInvertSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Invert only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    assertRasterDataRangeIsBoundedForInvert(source.raster);
+    const bandIndexes = resolveInvertBandIndexes(parameterValues, source.raster);
+    return { kind: "raster", raster: applyInvertToRasterBands(source.raster, bandIndexes) };
+  };
+}
+
+function resolveInvertBandIndexes(
+  parameterValues: ParameterValuesById,
+  raster: RasterImage,
+): ReadonlyArray<number> {
+  if (readInvertApplyToAllBands(parameterValues)) return listAllBandIndexes(raster.bandPixels.length);
+  return [readInvertTargetBandIndex(parameterValues)];
+}
+
+function readInvertApplyToAllBands(parameterValues: ParameterValuesById): boolean {
+  return parameterValues[INVERT_ALL_BANDS_PARAMETER_ID] === true;
+}
+
+function readInvertTargetBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[INVERT_BAND_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function formatInvertAppliedLabel(parameterValues: ParameterValuesById): string {
+  return `Invert (${describeInvertAffectedBands(parameterValues)})`;
+}
+
+function describeInvertAffectedBands(parameterValues: ParameterValuesById): string {
+  if (readInvertApplyToAllBands(parameterValues)) return "all bands";
+  return `band ${readInvertTargetBandIndex(parameterValues) + 1}`;
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -806,4 +884,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   SPECTRALON_ACTION,
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
+  INVERT_ACTION,
 ];

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
+  INVERT_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
@@ -23,6 +24,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "spectralon",
       "black-white-points",
       "brightness-contrast",
+      "invert",
     ]);
   });
 });
@@ -127,5 +129,74 @@ describe("BLACK_WHITE_POINTS_ACTION", () => {
     expect(BLACK_WHITE_POINTS_ACTION.formatAppliedLabel!(prepared)).toBe(
       "Stretch contrast [10, 200] in (1, 2) - (5, 6)",
     );
+  });
+});
+
+function makeTwoBandFloatRaster(
+  bandOne: ReadonlyArray<number>,
+  bandTwo: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [Float32Array.from(bandOne), Float32Array.from(bandTwo)],
+    width: bandOne.length,
+    height: 1,
+    bandCount: 2,
+    sampleFormat: "float",
+    bitsPerSample: 32,
+  };
+}
+
+describe("INVERT_ACTION", () => {
+  it("inverts only the selected uint8 band as 255 minus the value", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: false },
+      state,
+      "whole-image",
+    );
+    const result = INVERT_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 255], [0, 100]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 255]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([255, 155]);
+  });
+
+  it("inverts every band of a float [0,1] cube when the all-bands flag is set", () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const result = INVERT_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandFloatRaster([0, 0.25], [0.75, 1]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([1, 0.75]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0.25, 0]);
+  });
+
+  it("rejects an unbounded float raster with a user-readable error", () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    expect(() =>
+      INVERT_ACTION.transformSource!(
+        { kind: "raster", raster: makeTwoBandFloatRaster([0, 1.5], [0, 0.5]) },
+        prepared,
+      ),
+    ).toThrow(/bounded data range/i);
+  });
+
+  it("records the affected bands in the applied label", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 3 };
+    const single = INVERT_ACTION.prepareParameterValuesForApply!({ applyToAllBands: false }, state, "whole-image");
+    expect(INVERT_ACTION.formatAppliedLabel!(single)).toBe("Invert (band 4)");
+    const all = INVERT_ACTION.prepareParameterValuesForApply!({ applyToAllBands: true }, state, "whole-image");
+    expect(INVERT_ACTION.formatAppliedLabel!(all)).toBe("Invert (all bands)");
   });
 });
