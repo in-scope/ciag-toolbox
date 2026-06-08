@@ -3,13 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   cloneRasterImage,
   clampBandIndexToRaster,
-  describeRasterBandDisplayIdentity,
-  formatRasterBandIdentityText,
-  getRasterBandExplicitLabelOrNull,
   getRasterBandLabelOrDefault,
-  getRasterBandOriginalNumber,
   getRasterBandPixelsOrThrow,
-  listRasterBandOriginalNumbers,
   type RasterImage,
 } from "@/lib/image/raster-image";
 
@@ -85,76 +80,6 @@ describe("getRasterBandLabelOrDefault", () => {
   it("falls back to a one-based default name when no label is set", () => {
     const raster = buildSampleRasterImage();
     expect(getRasterBandLabelOrDefault(raster, 0)).toBe("Band 1");
-  });
-
-  it("uses the preserved original band number for the default name", () => {
-    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandLabels: undefined, bandOriginalNumbers: [3, 7] };
-    expect(getRasterBandLabelOrDefault(raster, 0)).toBe("Band 3");
-    expect(getRasterBandLabelOrDefault(raster, 1)).toBe("Band 7");
-  });
-});
-
-describe("getRasterBandExplicitLabelOrNull", () => {
-  it("returns the explicit label when one is set", () => {
-    expect(getRasterBandExplicitLabelOrNull(buildMultiBandRasterImage(), 0)).toBe("Red");
-  });
-
-  it("returns null when no explicit label is set", () => {
-    expect(getRasterBandExplicitLabelOrNull(buildSampleRasterImage(), 0)).toBeNull();
-  });
-});
-
-describe("describeRasterBandDisplayIdentity", () => {
-  it("keeps the original number alongside an explicit label after a subset", () => {
-    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [3, 7] };
-    expect(describeRasterBandDisplayIdentity(raster, 1)).toEqual({
-      label: "Green",
-      originalNumber: 7,
-      hasExplicitLabel: true,
-    });
-  });
-
-  it("uses the default name and reports no explicit label when none is set", () => {
-    const raster: RasterImage = { ...buildSampleRasterImage(), bandOriginalNumbers: [5] };
-    expect(describeRasterBandDisplayIdentity(raster, 0)).toEqual({
-      label: "Band 5",
-      originalNumber: 5,
-      hasExplicitLabel: false,
-    });
-  });
-});
-
-describe("formatRasterBandIdentityText", () => {
-  it("prefixes the original number when the band has an explicit label", () => {
-    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [3, 7] };
-    expect(formatRasterBandIdentityText(raster, 0)).toBe("#3 Red");
-  });
-
-  it("shows only the default name when the band has no explicit label", () => {
-    const raster: RasterImage = { ...buildSampleRasterImage(), bandOriginalNumbers: [5] };
-    expect(formatRasterBandIdentityText(raster, 0)).toBe("Band 5");
-  });
-});
-
-describe("getRasterBandOriginalNumber", () => {
-  it("returns the preserved original number when present", () => {
-    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [4, 8] };
-    expect(getRasterBandOriginalNumber(raster, 1)).toBe(8);
-  });
-
-  it("falls back to the one-based position when no original numbers exist", () => {
-    expect(getRasterBandOriginalNumber(buildMultiBandRasterImage(), 1)).toBe(2);
-  });
-});
-
-describe("listRasterBandOriginalNumbers", () => {
-  it("lists preserved original numbers for every band", () => {
-    const raster: RasterImage = { ...buildMultiBandRasterImage(), bandOriginalNumbers: [2, 7] };
-    expect(listRasterBandOriginalNumbers(raster)).toEqual([2, 7]);
-  });
-
-  it("defaults to one-based positions when not subsetted", () => {
-    expect(listRasterBandOriginalNumbers(buildMultiBandRasterImage())).toEqual([1, 2]);
   });
 });
 

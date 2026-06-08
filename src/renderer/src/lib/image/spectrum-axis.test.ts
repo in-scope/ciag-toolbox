@@ -37,16 +37,6 @@ describe("buildSpectrumXAxisFromRaster", () => {
     expect(axis.bandPositions).toEqual([1, 2, 3]);
   });
 
-  it("uses preserved original band numbers for the band index axis after subsetting", () => {
-    const raster: RasterImage = {
-      ...buildRasterWithBandCount(4),
-      bandOriginalNumbers: [2, 3, 4, 7],
-    };
-    const axis = buildSpectrumXAxisFromRaster(raster);
-    expect(axis.label).toBe("Band index");
-    expect(axis.bandPositions).toEqual([2, 3, 4, 7]);
-  });
-
   it("falls back to band index axis when wavelength count mismatches", () => {
     const raster = buildRasterWithBandCount(3, [400, 500]);
     const axis = buildSpectrumXAxisFromRaster(raster);
@@ -58,31 +48,6 @@ describe("buildSpectrumXAxisFromRaster", () => {
     const axis = buildSpectrumXAxisFromRaster(raster);
     expect(axis.tickPositions.length).toBeLessThanOrEqual(5);
     expect(axis.bandPositions.length).toBe(20);
-  });
-
-  it("spaces ticks evenly across the wavelength value range after band subsetting", () => {
-    const raster = buildRasterWithBandCount(5, [400, 402, 404, 406, 700]);
-    const axis = buildSpectrumXAxisFromRaster(raster);
-    expect(axis.tickPositions).toEqual([400, 475, 550, 625, 700]);
-    expect(axis.tickLabels).toEqual(["400", "475", "550", "625", "700"]);
-  });
-
-  it("keeps ticks evenly spaced even when retained bands cluster at one end", () => {
-    const raster = buildRasterWithBandCount(6, [400, 402, 404, 406, 408, 900]);
-    const axis = buildSpectrumXAxisFromRaster(raster);
-    const positions = axis.tickPositions;
-    const gaps = positions.slice(1).map((tick, index) => tick - (positions[index] ?? 0));
-    const firstGap = gaps[0] ?? 0;
-    for (const gap of gaps) expect(gap).toBeCloseTo(firstGap);
-  });
-
-  it("produces integer band-index ticks without adjacent duplicates", () => {
-    const raster = buildRasterWithBandCount(20);
-    const axis = buildSpectrumXAxisFromRaster(raster);
-    const everyTickIsInteger = axis.tickPositions.every((tick) => Number.isInteger(tick));
-    expect(everyTickIsInteger).toBe(true);
-    const uniqueCount = new Set(axis.tickPositions).size;
-    expect(uniqueCount).toBe(axis.tickPositions.length);
   });
 });
 

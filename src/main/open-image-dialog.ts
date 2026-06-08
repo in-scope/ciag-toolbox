@@ -1,12 +1,8 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { basename } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { basename, dirname, extname, join } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
-import {
-  findEnviBinarySiblingPathOrNull,
-  isEnviHeaderFilePath,
-} from "./envi-binary-sibling";
-import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
 export interface OpenImageSidecar {
   fileName: string;
@@ -46,6 +42,15 @@ const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   ],
 };
 
+const ENVI_HEADER_EXTENSION = ".hdr";
+const ENVI_BINARY_EXTENSION_CANDIDATES: ReadonlyArray<string> = [
+  ".bin",
+  ".dat",
+  ".img",
+  ".raw",
+  "",
+];
+
 async function showImageOpenDialog(
   window: BrowserWindow,
 ): Promise<Electron.OpenDialogReturnValue> {
@@ -57,7 +62,8 @@ async function showImageOpenDialog(
 }
 
 async function readImageFileAsBytes(filePath: string): Promise<Uint8Array> {
-  return readFileWithinOpenableSizeLimitOrThrow(filePath);
+  const buffer = await readFile(filePath);
+  return new Uint8Array(buffer);
 }
 
 async function buildOpenImageResultFromPath(
@@ -80,22 +86,65 @@ async function findSidecarForOpenedImageFile(
   filePath: string,
 ): Promise<OpenImageSidecar | undefined> {
   if (!isEnviHeaderFilePath(filePath)) return undefined;
-  return readEnviBinarySiblingOrThrow(filePath);
+  return findEnviBinarySiblingOrThrow(filePath);
 }
 
-async function readEnviBinarySiblingOrThrow(
+function isEnviHeaderFilePath(filePath: string): boolean {
+  return extname(filePath).toLowerCase() === ENVI_HEADER_EXTENSION;
+}
+
+async function findEnviBinarySiblingOrThrow(
   headerPath: string,
 ): Promise<OpenImageSidecar> {
-  const siblingPath = await findEnviBinarySiblingPathOrNull(headerPath);
-  if (!siblingPath) {
+  const directoryEntries = await readdir(dirname(headerPath));
+  const matchingEntry = pickEnviBinarySiblingFromDirectoryEntries(headerPath, directoryEntries);
+  if (!matchingEntry) {
     throw new Error(
       `Could not find ENVI binary sibling for ${basename(headerPath)} (looked for .bin/.dat/.img/.raw or extensionless match)`,
     );
   }
+  const siblingPath = join(dirname(headerPath), matchingEntry);
   return {
-    fileName: basename(siblingPath),
+    fileName: matchingEntry,
     bytes: await readImageFileAsBytes(siblingPath),
   };
+}
+
+function pickEnviBinarySiblingFromDirectoryEntries(
+  headerPath: string,
+  directoryEntries: ReadonlyArray<string>,
+): string | undefined {
+  const headerBaseName = basename(headerPath, extname(headerPath));
+  const headerBaseNameLower = headerBaseName.toLowerCase();
+  for (const candidate of ENVI_BINARY_EXTENSION_CANDIDATES) {
+    const match = pickFirstMatchingDirectoryEntry(
+      directoryEntries,
+      headerBaseNameLower,
+      candidate,
+    );
+    if (match) return match;
+  }
+  return undefined;
+}
+
+function pickFirstMatchingDirectoryEntry(
+  entries: ReadonlyArray<string>,
+  baseNameLower: string,
+  expectedExtensionLower: string,
+): string | undefined {
+  return entries.find((entry) =>
+    entryMatchesBaseNameAndExtension(entry, baseNameLower, expectedExtensionLower),
+  );
+}
+
+function entryMatchesBaseNameAndExtension(
+  entry: string,
+  baseNameLower: string,
+  expectedExtensionLower: string,
+): boolean {
+  const entryLower = entry.toLowerCase();
+  if (expectedExtensionLower === "") return entryLower === baseNameLower;
+  return entryLower === baseNameLower + expectedExtensionLower;
 }
 
 async function chooseAndReadImageFromDialog(

@@ -16,12 +16,7 @@ export type OpenImagesPlacementPlan =
       readonly expandedLayout?: GridLayout;
       readonly targetIndices: ReadonlyArray<number>;
     }
-  | {
-      readonly kind: "growFillThenPromptReplace";
-      readonly expandedLayout?: GridLayout;
-      readonly filledTargetIndices: ReadonlyArray<number>;
-      readonly overflowItemCount: number;
-    };
+  | { readonly kind: "promptReplace"; readonly overflow: number };
 
 export function planOpenImagesPlacement(
   input: PlanOpenImagesPlacementInput,
@@ -36,7 +31,7 @@ export function planOpenImagesPlacement(
   if (existingEmpty.length >= input.newItemCount) {
     return buildPlanUsingExistingEmpties(existingEmpty, input.newItemCount);
   }
-  return planGrowOrPromptReplace(input);
+  return planGrowOrPromptReplace(input, existingEmpty);
 }
 
 function buildPlanUsingExistingEmpties(
@@ -51,10 +46,11 @@ function buildPlanUsingExistingEmpties(
 
 function planGrowOrPromptReplace(
   input: PlanOpenImagesPlacementInput,
+  existingEmpty: ReadonlyArray<number>,
 ): OpenImagesPlacementPlan {
   const smallestLayoutThatFits = findSmallestExpandedLayoutThatFitsAll(input);
   if (smallestLayoutThatFits === null) {
-    return buildGrowFillThenPromptReplacePlan(input);
+    return buildPromptReplacePlan(input, existingEmpty);
   }
   const targetIndices = collectTargetIndicesUnderLayout(
     input.imagesByIndex,
@@ -71,31 +67,13 @@ function planGrowOrPromptReplace(
   };
 }
 
-function buildGrowFillThenPromptReplacePlan(
+function buildPromptReplacePlan(
   input: PlanOpenImagesPlacementInput,
+  existingEmpty: ReadonlyArray<number>,
 ): OpenImagesPlacementPlan {
-  const largestLayout = findLargestReachableLayout(input.currentLayout);
-  const filledTargetIndices = collectTargetIndicesUnderLayout(
-    input.imagesByIndex,
-    largestLayout,
-    input.newItemCount,
-  );
-  return {
-    kind: "growFillThenPromptReplace",
-    expandedLayout: largestLayout === input.currentLayout ? undefined : largestLayout,
-    filledTargetIndices,
-    overflowItemCount: input.newItemCount - filledTargetIndices.length,
-  };
-}
-
-function findLargestReachableLayout(currentLayout: GridLayout): GridLayout {
-  let layout = currentLayout;
-  let next = getNextLargerGridLayout(layout);
-  while (next !== null) {
-    layout = next;
-    next = getNextLargerGridLayout(layout);
-  }
-  return layout;
+  const maxFitInChain = computeMaxFitInExpansionChain(input);
+  const overflow = input.newItemCount - Math.max(maxFitInChain, existingEmpty.length);
+  return { kind: "promptReplace", overflow: Math.max(0, overflow) };
 }
 
 function listEmptyCellIndicesInCurrentLayout(
@@ -147,4 +125,15 @@ function collectTargetIndicesUnderLayout(
     getGridLayoutCellCount(layout),
   );
   return empties.slice(0, newItemCount);
+}
+
+function computeMaxFitInExpansionChain(input: PlanOpenImagesPlacementInput): number {
+  let layout: GridLayout | null = input.currentLayout;
+  let best = 0;
+  while (layout !== null) {
+    const empties = countEmptyCellsUnderLayout(input.imagesByIndex, layout);
+    if (empties > best) best = empties;
+    layout = getNextLargerGridLayout(layout);
+  }
+  return best;
 }

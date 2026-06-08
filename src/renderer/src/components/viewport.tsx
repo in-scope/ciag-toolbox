@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Contrast, FolderOpen, X } from "lucide-react";
+import { FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { readPixelReadoutBandsAtImagePointOrNull } from "@/lib/image/compute-pixel-readout";
 import {
   canonicalizeViewportRoiCorners,
@@ -39,9 +37,7 @@ interface ViewportProps {
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
-  onToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
-  onSelectBandIndex: (bandIndex: number) => void;
   lastAppliedOperationLabel?: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -96,9 +92,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
-        normalizationEnabled={props.normalizationEnabled}
-        onToggleNormalizedViewing={props.onToggleNormalizedViewing}
-        showNormalizedViewingToggle={imageSource !== null}
         onClose={props.onClose ?? null}
         showCloseButton={imageSource !== null && Boolean(props.onClose)}
       />
@@ -114,13 +107,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
           inProgressDragRect={inProgressDragRect}
           transformVersion={transformVersion}
         />
-        {shouldShowBandNavigator(imageSource) ? (
-          <ViewportBandNavigator
-            bandCount={getMultiBandSourceBandCount(imageSource)}
-            selectedBandIndex={props.selectedBandIndex}
-            onSelectBandIndex={props.onSelectBandIndex}
-          />
-        ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
       </div>
     </div>
@@ -144,22 +130,10 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
   return "Image viewport";
 }
 
-function shouldShowBandNavigator(source: ViewportImageSource | null): boolean {
-  return getMultiBandSourceBandCount(source) > 1;
-}
-
-function getMultiBandSourceBandCount(source: ViewportImageSource | null): number {
-  if (!source || source.kind !== "raster") return 0;
-  return source.raster.bandCount;
-}
-
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
   lastAppliedOperationLabel: string | null;
-  normalizationEnabled: boolean;
-  onToggleNormalizedViewing: () => void;
-  showNormalizedViewingToggle: boolean;
   onClose: (() => void) | null;
   showCloseButton: boolean;
 }
@@ -176,52 +150,11 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
-      {props.showNormalizedViewingToggle ? (
-        <NormalizedViewingToggleButton
-          enabled={props.normalizationEnabled}
-          onToggle={props.onToggleNormalizedViewing}
-        />
-      ) : null}
       {props.showCloseButton && props.onClose ? (
         <ViewportCloseButton viewportNumber={props.viewportNumber} onClose={props.onClose} />
       ) : null}
     </div>
   );
-}
-
-interface NormalizedViewingToggleButtonProps {
-  enabled: boolean;
-  onToggle: () => void;
-}
-
-function NormalizedViewingToggleButton(props: NormalizedViewingToggleButtonProps): JSX.Element {
-  const label = props.enabled ? "Normalized viewing (on)" : "Normalized viewing";
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("ml-auto size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
-          aria-label={label}
-          aria-pressed={props.enabled}
-          onClick={handleNormalizedViewingToggleClick(props.onToggle)}
-        >
-          <Contrast className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function handleNormalizedViewingToggleClick(
-  onToggle: () => void,
-): (event: MouseEvent<HTMLButtonElement>) => void {
-  return (event) => {
-    event.stopPropagation();
-    onToggle();
-  };
 }
 
 interface ViewportCloseButtonProps {
@@ -241,7 +174,7 @@ function ViewportCloseButton(props: ViewportCloseButtonProps): JSX.Element {
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className="ml-auto size-6"
           aria-label={label}
           onClick={handleClick}
         >

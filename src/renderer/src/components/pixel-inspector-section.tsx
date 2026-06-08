@@ -1,6 +1,5 @@
 import { ChevronDown } from "lucide-react";
 
-import { BandIndexBadge } from "@/components/band-index-badge";
 import {
   Collapsible,
   CollapsibleContent,
@@ -192,7 +191,7 @@ interface PixelInspectorRowProps {
 function PixelInspectorRow(props: PixelInspectorRowProps): JSX.Element {
   return (
     <div className={getPixelInspectorRowClassName(props.isActive)}>
-      <PixelInspectorRowLabel row={props.row} />
+      <PixelInspectorRowLabel label={props.row.label} />
       <PixelInspectorRowDisplayValue text={props.row.displayValue} />
       <PixelInspectorRowMiniBar normalizedFraction={props.row.normalizedFraction} />
     </div>
@@ -206,15 +205,13 @@ function getPixelInspectorRowClassName(isActive: boolean): string {
   );
 }
 
-function PixelInspectorRowLabel(props: { row: PixelInspectorRowValues }): JSX.Element {
+function PixelInspectorRowLabel(props: { label: string }): JSX.Element {
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {props.row.hasExplicitLabel ? (
-        <BandIndexBadge originalNumber={props.row.originalNumber} />
-      ) : null}
-      <span className="truncate font-mono text-sm text-muted-foreground" title={props.row.label}>
-        {props.row.label}
-      </span>
+    <span
+      className="truncate font-mono text-sm text-muted-foreground"
+      title={props.label}
+    >
+      {props.label}
     </span>
   );
 }

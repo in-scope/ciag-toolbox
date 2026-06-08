@@ -1,6 +1,6 @@
 import type { SingleBandScalarExtents } from "@/lib/image/compute-image-channel-extents";
 import {
-  formatRasterBandIdentityText,
+  getRasterBandLabelOrDefault,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
@@ -38,7 +38,7 @@ function readRasterReadoutBandsAtImagePoint(
   if (!isImagePointInsideRaster(imageX, imageY, raster.width, raster.height)) return null;
   const offset = imageY * raster.width + imageX;
   const values = raster.bandPixels.map((band) => readNumberOrZero(band, offset));
-  const labels = raster.bandPixels.map((_, index) => formatRasterBandIdentityText(raster, index));
+  const labels = raster.bandPixels.map((_, index) => getRasterBandLabelOrDefault(raster, index));
   return { values, labels, sampleFormat: raster.sampleFormat };
 }
 

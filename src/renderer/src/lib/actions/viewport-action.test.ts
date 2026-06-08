@@ -4,6 +4,7 @@ import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 
 import { EMPTY_OPERATION_HISTORY } from "./operation-history";
 import { NO_PARAMETER_VALUES } from "./parameter-schema";
+import { NORMALIZE_ACTION } from "./registered-actions";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   applyActionToSelectedViewports,
@@ -11,23 +12,10 @@ import {
   type ViewportAction,
 } from "./viewport-action";
 
-function buildSampleEnableFlagAction(): ViewportAction {
-  return {
-    id: "sample-enable-flag",
-    label: "Sample Enable Flag",
-    apply: (state) => ({ ...state, normalizationEnabled: true }),
-  };
-}
-
 describe("applyActionToSelectedViewports", () => {
   it("does nothing when the selection is empty", () => {
     const callbacks = createMockApplyActionCallbacks();
-    applyActionToSelectedViewports(
-      buildSampleEnableFlagAction(),
-      NO_PARAMETER_VALUES,
-      new Set(),
-      callbacks,
-    );
+    applyActionToSelectedViewports(NORMALIZE_ACTION, NO_PARAMETER_VALUES, new Set(), callbacks);
     expect(callbacks.getViewportRenderingState).not.toHaveBeenCalled();
     expect(callbacks.setViewportRenderingState).not.toHaveBeenCalled();
     expect(callbacks.reportApplyFailure).not.toHaveBeenCalled();
@@ -36,7 +24,7 @@ describe("applyActionToSelectedViewports", () => {
   it("applies the action to every selected index in ascending order", () => {
     const callbacks = createMockApplyActionCallbacks();
     applyActionToSelectedViewports(
-      buildSampleEnableFlagAction(),
+      NORMALIZE_ACTION,
       NO_PARAMETER_VALUES,
       new Set([2, 0, 5]),
       callbacks,
@@ -74,6 +62,59 @@ describe("applyActionToSelectedViewports", () => {
     const callbacks = createMockApplyActionCallbacks();
     applyActionToSelectedViewports(action, parameterValues, new Set([0]), callbacks);
     expect(apply).toHaveBeenCalledWith(DEFAULT_VIEWPORT_RENDERING_STATE, parameterValues);
+  });
+});
+
+describe("NORMALIZE_ACTION", () => {
+  it("enables normalization regardless of the previous state", () => {
+    expect(
+      NORMALIZE_ACTION.apply(
+        {
+          normalizationEnabled: false,
+          lastAppliedOperationLabel: null,
+          selectedBandIndex: 0,
+          operationHistory: EMPTY_OPERATION_HISTORY,
+          roi: null,
+          pinnedSpectra: EMPTY_PINNED_SPECTRA,
+          removedBandIndexes: [],
+          isBandSubsetEditModeActive: false,
+        },
+        NO_PARAMETER_VALUES,
+      ),
+    ).toEqual({
+      normalizationEnabled: true,
+      lastAppliedOperationLabel: null,
+      selectedBandIndex: 0,
+      operationHistory: EMPTY_OPERATION_HISTORY,
+      roi: null,
+      pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      removedBandIndexes: [],
+      isBandSubsetEditModeActive: false,
+    });
+    expect(
+      NORMALIZE_ACTION.apply(
+        {
+          normalizationEnabled: true,
+          lastAppliedOperationLabel: null,
+          selectedBandIndex: 0,
+          operationHistory: EMPTY_OPERATION_HISTORY,
+          roi: null,
+          pinnedSpectra: EMPTY_PINNED_SPECTRA,
+          removedBandIndexes: [],
+          isBandSubsetEditModeActive: false,
+        },
+        NO_PARAMETER_VALUES,
+      ),
+    ).toEqual({
+      normalizationEnabled: true,
+      lastAppliedOperationLabel: null,
+      selectedBandIndex: 0,
+      operationHistory: EMPTY_OPERATION_HISTORY,
+      roi: null,
+      pinnedSpectra: EMPTY_PINNED_SPECTRA,
+      removedBandIndexes: [],
+      isBandSubsetEditModeActive: false,
+    });
   });
 });
 

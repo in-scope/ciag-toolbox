@@ -18,18 +18,11 @@ import {
   DEFAULT_BAND_HISTOGRAM_BIN_COUNT,
   type BandHistogram,
 } from "@/lib/image/compute-band-histogram";
-import {
-  computeHistogramAxisTickLabels,
-  type HistogramAxisTickAnchor,
-  type HistogramAxisTickLabel,
-} from "@/lib/image/compute-histogram-axis-tick-labels";
 import { computeHistogramBarHeightsInPixels } from "@/lib/image/compute-histogram-bar-heights";
-import { computeHistogramBarHorizontalSpan } from "@/lib/image/compute-histogram-bar-layout";
 import {
   clampBandIndexToRaster,
-  formatRasterBandIdentityText,
+  getRasterBandLabelOrDefault,
   type RasterImage,
-  type RasterSampleFormat,
 } from "@/lib/image/raster-image";
 import { cn } from "@/lib/utils";
 import { useBusyEntryRegistrar } from "@/state/busy-state-context";
@@ -79,7 +72,7 @@ function HistogramSectionBody(props: HistogramSectionProps): JSX.Element {
       <section aria-label="Histogram" className={RIGHT_PANEL_SECTION_CLASSES}>
         <HistogramSectionHeader
           viewportNumber={props.activeSource.viewportNumber}
-          activeBandLabel={formatRasterBandIdentityText(raster, activeBandIndex)}
+          activeBandLabel={getRasterBandLabelOrDefault(raster, activeBandIndex)}
           isCollapsed={isCollapsed}
         />
         <CollapsibleContent>
@@ -150,7 +143,7 @@ function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
     props.viewportIndex,
   );
   if (!histogram) return <HistogramSkeleton />;
-  return <HistogramCanvas histogram={histogram} sampleFormat={props.raster.sampleFormat} />;
+  return <HistogramCanvas histogram={histogram} />;
 }
 
 function HistogramSkeleton(): JSX.Element {
@@ -244,7 +237,6 @@ function absorbBandHistogramAbandonmentOrRethrow(reason: unknown): void {
 
 interface HistogramCanvasProps {
   histogram: BandHistogram;
-  sampleFormat: RasterSampleFormat;
 }
 
 function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
@@ -260,62 +252,16 @@ function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
     );
   }, [props.histogram, canvasWidthPx]);
   return (
-    <div className="flex flex-col gap-1">
-      <canvas
-        ref={canvasRef}
-        width={canvasWidthPx}
-        height={HISTOGRAM_CANVAS_HEIGHT_PX}
-        aria-label="Active band intensity histogram"
-        role="img"
-        className="block w-full rounded-sm bg-muted text-primary"
-        style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
-      />
-      <HistogramAxisTickLabelsRow
-        histogram={props.histogram}
-        sampleFormat={props.sampleFormat}
-      />
-    </div>
+    <canvas
+      ref={canvasRef}
+      width={canvasWidthPx}
+      height={HISTOGRAM_CANVAS_HEIGHT_PX}
+      aria-label="Active band intensity histogram"
+      role="img"
+      className="block w-full rounded-sm bg-muted text-primary"
+      style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
+    />
   );
-}
-
-interface HistogramAxisTickLabelsRowProps {
-  histogram: BandHistogram;
-  sampleFormat: RasterSampleFormat;
-}
-
-function HistogramAxisTickLabelsRow(props: HistogramAxisTickLabelsRowProps): JSX.Element {
-  const ticks = computeHistogramAxisTickLabels(
-    { min: props.histogram.min, max: props.histogram.max },
-    props.sampleFormat,
-  );
-  return (
-    <div className="relative h-4" aria-hidden="true">
-      {ticks.map((tick) => (
-        <span
-          key={tick.value}
-          className="absolute font-mono text-[11px] leading-4 text-muted-foreground"
-          style={positionStyleForAxisTickLabel(tick)}
-        >
-          {tick.text}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function positionStyleForAxisTickLabel(
-  tick: HistogramAxisTickLabel,
-): React.CSSProperties {
-  return {
-    left: `${tick.fraction * 100}%`,
-    transform: translateXForAxisTickAnchor(tick.anchor),
-  };
-}
-
-function translateXForAxisTickAnchor(anchor: HistogramAxisTickAnchor): string {
-  if (anchor === "start") return "translateX(0)";
-  if (anchor === "end") return "translateX(-100%)";
-  return "translateX(-50%)";
 }
 
 function useObserveCanvasWidthInPixels(
@@ -370,8 +316,10 @@ function paintOneHistogramBarAtIndex(
   barCount: number,
 ): void {
   if (barHeight <= 0) return;
-  const span = computeHistogramBarHorizontalSpan(index, barCount, widthPx);
-  context.fillRect(span.left, heightPx - barHeight, span.width, barHeight);
+  const left = (index / barCount) * widthPx;
+  const right = ((index + 1) / barCount) * widthPx;
+  const barWidth = Math.max(1, right - left);
+  context.fillRect(Math.floor(left), heightPx - barHeight, barWidth, barHeight);
 }
 
 function readCanvasCurrentColorOrFallback(canvas: HTMLCanvasElement): string {

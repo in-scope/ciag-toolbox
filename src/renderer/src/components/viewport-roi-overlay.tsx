@@ -16,7 +16,7 @@ interface ViewportRoiOverlayProps {
   readonly transformVersion: number;
 }
 
-export interface CanvasRectangle {
+interface CanvasRectangle {
   readonly leftPx: number;
   readonly topPx: number;
   readonly widthPx: number;
@@ -121,31 +121,25 @@ function RoiOverlayCornerHandles(props: RoiOverlaySvgRectangleProps): JSX.Elemen
   return (
     <>
       {corners.map((corner) => (
-        <RoiOverlayCornerHandleSquare key={corner.position} centerX={corner.x} centerY={corner.y} />
+        <RoiOverlayCornerHandleSquare key={`${corner.x}-${corner.y}`} centerX={corner.x} centerY={corner.y} />
       ))}
     </>
   );
 }
 
-type CornerHandlePosition = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
-
-export interface CornerHandleCenter {
-  readonly position: CornerHandlePosition;
+interface CornerHandleCenter {
   readonly x: number;
   readonly y: number;
 }
 
-// Keyed by a stable corner position rather than coordinates: a drag passes through
-// degenerate rectangles where corners share a point, and coordinate-based keys would
-// collide and leave stale handle nodes stranded on the overlay (CT-060).
-export function listFourCornerCenters(rect: CanvasRectangle): ReadonlyArray<CornerHandleCenter> {
+function listFourCornerCenters(rect: CanvasRectangle): ReadonlyArray<CornerHandleCenter> {
   const right = rect.leftPx + rect.widthPx;
   const bottom = rect.topPx + rect.heightPx;
   return [
-    { position: "topLeft", x: rect.leftPx, y: rect.topPx },
-    { position: "topRight", x: right, y: rect.topPx },
-    { position: "bottomLeft", x: rect.leftPx, y: bottom },
-    { position: "bottomRight", x: right, y: bottom },
+    { x: rect.leftPx, y: rect.topPx },
+    { x: right, y: rect.topPx },
+    { x: rect.leftPx, y: bottom },
+    { x: right, y: bottom },
   ];
 }
 
