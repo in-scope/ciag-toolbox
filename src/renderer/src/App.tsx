@@ -1698,6 +1698,7 @@ function deriveActionAvailabilityForActiveViewport(
 
 function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
   if (action.id === "crop-to-region") return "draw a region first";
+  if (action.id === "spectralon") return "draw a bright-target region first";
   return "not available for this viewport";
 }
 

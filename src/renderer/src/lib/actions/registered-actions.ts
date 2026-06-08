@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { ChevronsLeft, Crop, Layers, SunDim } from "lucide-react";
+import { ChevronsLeft, Crop, Layers, SunDim, Target } from "lucide-react";
 
 import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
 import {
@@ -9,6 +9,7 @@ import {
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
@@ -21,6 +22,7 @@ import {
   NO_RASTER_REFERENCE_SELECTED,
   readRasterReferenceTokenOrEmpty,
   type IntegerParameterSchema,
+  type NumberParameterSchema,
   type RasterReferenceParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValuesById } from "./parameter-schema";
@@ -418,8 +420,109 @@ function readBaseFileNameFromToken(token: string): string {
   return segments[segments.length - 1] ?? token;
 }
 
+const SPECTRALON_REFLECTANCE_PARAMETER_ID = "reflectance";
+const SPECTRALON_BRIGHT_PARAMETER_ID_X0 = "brightImagePixelX0";
+const SPECTRALON_BRIGHT_PARAMETER_ID_Y0 = "brightImagePixelY0";
+const SPECTRALON_BRIGHT_PARAMETER_ID_X1 = "brightImagePixelX1";
+const SPECTRALON_BRIGHT_PARAMETER_ID_Y1 = "brightImagePixelY1";
+
+const SPECTRALON_REFLECTANCE_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: SPECTRALON_REFLECTANCE_PARAMETER_ID,
+  label: "Known reflectance",
+  description:
+    "The known reflectance of the bright Spectralon target, as a fraction (e.g. 0.99). Pixel values are scaled so the bright target reads at this reflectance.",
+  defaultValue: 0.99,
+  min: 0,
+  max: 1,
+  step: 0.01,
+};
+
+export const SPECTRALON_ACTION: RegisteredViewportAction = {
+  id: "spectralon",
+  label: "Spectralon Calibration",
+  icon: Target,
+  parameters: [SPECTRALON_REFLECTANCE_PARAMETER_SCHEMA],
+  successMessage: "Spectralon reflectance calibration applied",
+  appliedLabel: "Spectralon calibration",
+  formatAppliedLabel: formatSpectralonAppliedLabel,
+  prepareParameterValuesForApply: prepareSpectralonBrightRegionFromActiveRoi,
+  isAvailableForActiveViewport: (state) => state.roi !== null,
+  apply: (state) => state,
+  transformSource: createSpectralonSourceTransform(),
+};
+
+function prepareSpectralonBrightRegionFromActiveRoi(
+  rawParameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+): ParameterValuesById {
+  const roi = sourceRenderingState.roi;
+  if (!roi) {
+    throw new Error("Spectralon Calibration requires a bright-target region. Draw a region first.");
+  }
+  return Object.freeze({
+    ...rawParameterValues,
+    [SPECTRALON_BRIGHT_PARAMETER_ID_X0]: roi.imagePixelX0,
+    [SPECTRALON_BRIGHT_PARAMETER_ID_Y0]: roi.imagePixelY0,
+    [SPECTRALON_BRIGHT_PARAMETER_ID_X1]: roi.imagePixelX1,
+    [SPECTRALON_BRIGHT_PARAMETER_ID_Y1]: roi.imagePixelY1,
+  });
+}
+
+function createSpectralonSourceTransform(): ViewportActionSourceTransform {
+  return (source, parameterValues) => {
+    if (source.kind !== "raster") {
+      throw new Error(
+        "Spectralon Calibration only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+      );
+    }
+    const brightRoi = readSpectralonBrightRoiOrThrow(parameterValues);
+    const reflectance = readSpectralonReflectanceFromParameterValues(parameterValues);
+    const raster = applySpectralonReflectanceCalibration(source.raster, { brightRoi, reflectance });
+    return { kind: "raster", raster };
+  };
+}
+
+function readSpectralonReflectanceFromParameterValues(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[SPECTRALON_REFLECTANCE_PARAMETER_ID];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return SPECTRALON_REFLECTANCE_PARAMETER_SCHEMA.defaultValue;
+  }
+  return raw;
+}
+
+function readSpectralonBrightRoiOrThrow(parameterValues: ParameterValuesById): ViewportRoi {
+  return {
+    imagePixelX0: readIntegerParameterOrThrowForSpectralon(parameterValues, SPECTRALON_BRIGHT_PARAMETER_ID_X0),
+    imagePixelY0: readIntegerParameterOrThrowForSpectralon(parameterValues, SPECTRALON_BRIGHT_PARAMETER_ID_Y0),
+    imagePixelX1: readIntegerParameterOrThrowForSpectralon(parameterValues, SPECTRALON_BRIGHT_PARAMETER_ID_X1),
+    imagePixelY1: readIntegerParameterOrThrowForSpectralon(parameterValues, SPECTRALON_BRIGHT_PARAMETER_ID_Y1),
+  };
+}
+
+function readIntegerParameterOrThrowForSpectralon(
+  parameterValues: ParameterValuesById,
+  parameterId: string,
+): number {
+  const raw = parameterValues[parameterId];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    throw new Error("Spectralon Calibration requires a bright-target region. Draw a region first.");
+  }
+  return Math.round(raw);
+}
+
+function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): string {
+  const reflectance = readSpectralonReflectanceFromParameterValues(parameterValues);
+  const canonical = canonicalizeViewportRoiCorners(readSpectralonBrightRoiOrThrow(parameterValues));
+  return (
+    `Spectralon reflectance ${reflectance} from ` +
+    `(${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`
+  );
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
   FLAT_FIELD_ACTION,
+  SPECTRALON_ACTION,
 ];

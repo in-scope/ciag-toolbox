@@ -10,6 +10,6 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
 
   it("registers only the data-changing operations that belong in the audit trail", () => {
     const registeredActionIds = REGISTERED_VIEWPORT_ACTIONS.map((action) => action.id);
-    expect(registeredActionIds).toEqual(["bit-shift", "crop-to-region", "flat-field"]);
+    expect(registeredActionIds).toEqual(["bit-shift", "crop-to-region", "flat-field", "spectralon"]);
   });
 });
