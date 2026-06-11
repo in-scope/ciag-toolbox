@@ -315,7 +315,7 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
       <CubeScopeRadioRow
         radioGroupName={radioGroupName}
         choice="full-cube"
-        label="Full cube"
+        label="Full stack"
         currentChoice={props.value}
         onSelect={props.onChangeValue}
       />

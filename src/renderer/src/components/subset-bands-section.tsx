@@ -64,10 +64,10 @@ function SubsetBandsSectionHeader(props: SubsetBandsSectionHeaderProps): JSX.Ele
     <header className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-foreground">Subset Bands</h2>
-        <span className="text-xs text-muted-foreground">Viewport {props.viewportNumber}</span>
+        <span className="text-xs text-muted-foreground">Panel {props.viewportNumber}</span>
       </div>
       <p className="text-xs text-muted-foreground">
-        Choose which bands to keep. Apply to create a new image with just those bands.
+        Choose which bands to keep. Apply to create a new stack with just those bands.
       </p>
     </header>
   );
@@ -254,7 +254,7 @@ function OpenInNewViewportSwitchRow(props: OpenInNewViewportSwitchRowProps): JSX
   const id = "subset-bands-open-in-new-viewport";
   return (
     <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-3 text-sm">
-      <span>Open in a new viewport</span>
+      <span>Open in a new panel</span>
       <Switch id={id} checked={props.checked} onCheckedChange={props.onCheckedChange} />
     </label>
   );

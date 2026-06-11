@@ -30,7 +30,7 @@ async function decodeDialogResultToRasterOrThrow(file: OpenedImageDialogFile): P
   });
   if (source.kind !== "raster") {
     throw new Error(
-      `${file.fileName} is not a raster image (TIFF, ENVI, or raw camera). Pick a raster reference cube.`,
+      `${file.fileName} is not a raster image (TIFF, ENVI, or raw camera). Pick a raster reference stack.`,
     );
   }
   return source.raster;

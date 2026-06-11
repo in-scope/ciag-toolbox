@@ -346,7 +346,7 @@ describe("NORMALIZE_DATA_ACTION", () => {
   it("records the scope and selected band in the applied label", () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 2 };
     const fullCube = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "full-cube" }, state, "whole-image");
-    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full cube)");
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full stack)");
     const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "band-wise" }, state, "whole-image");
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: band 3)");
   });

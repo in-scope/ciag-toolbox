@@ -162,7 +162,7 @@ function shouldShowHistorySection(
 
 function RightPanelShell(props: { children: ReadonlyArray<JSX.Element> }): JSX.Element {
   return (
-    <aside aria-label="Viewport details panel" className={RIGHT_PANEL_CLASSES}>
+    <aside aria-label="Panel details" className={RIGHT_PANEL_CLASSES}>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">{props.children}</div>
     </aside>
   );
@@ -310,7 +310,7 @@ function MetadataSectionHeader({ viewportNumber }: { viewportNumber: number }): 
   return (
     <header className="flex items-baseline justify-between">
       <h2 className="text-sm font-medium text-foreground">Metadata</h2>
-      <span className="text-xs text-muted-foreground">Viewport {viewportNumber}</span>
+      <span className="text-xs text-muted-foreground">Panel {viewportNumber}</span>
     </header>
   );
 }
@@ -336,7 +336,7 @@ function MetadataSectionBody({
 
 function MetadataEmptyState(): JSX.Element {
   return (
-    <p className="text-xs text-muted-foreground">No image loaded in this viewport.</p>
+    <p className="text-xs text-muted-foreground">No stack loaded in this panel.</p>
   );
 }
 

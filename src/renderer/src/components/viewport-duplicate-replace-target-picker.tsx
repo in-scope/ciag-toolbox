@@ -120,14 +120,14 @@ function submitOnEnterKeyWhenAnyTargetChosen(
 function ReplacePickerHeader({ fileName }: { fileName: string }): JSX.Element {
   return (
     <DialogHeader>
-      <DialogTitle>Replace which viewport?</DialogTitle>
+      <DialogTitle>Replace which panel?</DialogTitle>
       <DialogDescription>{describeReplacePickerPrompt(fileName)}</DialogDescription>
     </DialogHeader>
   );
 }
 
 function describeReplacePickerPrompt(fileName: string): string {
-  return `The grid is at its maximum size and every viewport is in use. Choose a viewport to replace with a duplicate of "${fileName}".`;
+  return `The grid is at its maximum size and every panel is in use. Choose a panel to replace with a duplicate of "${fileName}".`;
 }
 
 interface ReplacePickerViewportListProps {
@@ -142,7 +142,7 @@ function ReplacePickerViewportList(
   return (
     <div
       role="radiogroup"
-      aria-label="Replace target viewport"
+      aria-label="Replace target panel"
       className="flex max-h-72 flex-col gap-1 overflow-y-auto pr-1"
     >
       {props.viewports.map((viewport) => (
@@ -191,7 +191,7 @@ function ReplacePickerViewportRow(
 
 function describeReplacePickerRowLabel(viewport: DuplicateReplaceTargetEntry): string {
   const number = getViewportNumberFromIndex(viewport.index);
-  return `Viewport ${number} (${viewport.fileName})`;
+  return `Panel ${number} (${viewport.fileName})`;
 }
 
 function ReplacePickerFooter({

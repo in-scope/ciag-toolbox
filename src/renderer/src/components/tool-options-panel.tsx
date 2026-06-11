@@ -329,7 +329,7 @@ function SourceViewportSection({
 function SourceViewportEmptyState(): JSX.Element {
   return (
     <p className="text-xs text-muted-foreground">
-      Select a viewport with a loaded image to apply this tool.
+      Select a panel with a loaded stack to apply this tool.
     </p>
   );
 }
@@ -343,7 +343,7 @@ function SourceViewportDescription({
     <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground">Source</span>
       <span className="truncate text-sm text-foreground" title={sourceViewport.fileName}>
-        Viewport {sourceViewport.viewportNumber} ({sourceViewport.fileName})
+        Panel {sourceViewport.viewportNumber} ({sourceViewport.fileName})
       </span>
     </div>
   );
@@ -362,7 +362,7 @@ function ApplyScopeSelectorSection(props: ApplyScopeSelectorSectionProps): JSX.E
       <ApplyScopeRadioRow
         radioGroupName={radioGroupName}
         scope="whole-image"
-        label="Whole image"
+        label="Whole stack"
         currentScope={props.applyScope}
         onSelect={props.onChangeApplyScope}
       />
@@ -433,7 +433,7 @@ function OpenInNewViewportSwitchRow(props: SwitchRowProps): JSX.Element {
   const id = "tool-options-open-in-new-viewport";
   return (
     <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-3 text-sm">
-      <span>Open in a new viewport</span>
+      <span>Open in a new panel</span>
       <Switch id={id} checked={props.checked} onCheckedChange={props.onCheckedChange} />
     </label>
   );

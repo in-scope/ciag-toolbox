@@ -590,7 +590,7 @@ function useSaveImageRequestHandler(
       imagesByIndexRef.current,
     );
     if (!candidate) {
-      toast.info("Select a viewport with a loaded image to save");
+      toast.info("Select a panel with a loaded stack to save");
       return;
     }
     setPendingSaveImage({ fileName: candidate.fileName, viewportIndex: candidate.index });
@@ -837,7 +837,7 @@ async function confirmOpenImagesReviewGroups(
     if (pendingItems.length === 0) return;
     placePendingItemsAcrossViewports(pendingItems, bindings);
   } catch (error) {
-    toast.error(`Could not place images: ${describeUnknownError(error)}`);
+    toast.error(`Could not place stacks: ${describeUnknownError(error)}`);
   }
 }
 
@@ -1022,10 +1022,10 @@ function collectClosedLoadedViewports(
 function formatClosedViewportsMessage(closed: ReadonlyArray<ClosedViewportSummary>): string {
   if (closed.length === 1) {
     const only = closed[0]!;
-    return `Closed viewport ${only.viewportNumber} (${only.fileName})`;
+    return `Closed panel ${only.viewportNumber} (${only.fileName})`;
   }
   const list = closed.map((entry) => `${entry.viewportNumber} (${entry.fileName})`).join(", ");
-  return `Closed viewports: ${list}`;
+  return `Closed panels: ${list}`;
 }
 
 function filterImagesToWithinCellCount(
@@ -1155,7 +1155,7 @@ async function applyDuplicateToTargetIndex(
 
 function formatDuplicateSuccessMessage(fileName: string, targetIndex: number): string {
   const targetNumber = getViewportNumberFromIndex(targetIndex);
-  return `Duplicated ${fileName} to viewport ${targetNumber}`;
+  return `Duplicated ${fileName} to panel ${targetNumber}`;
 }
 
 interface ConfirmDuplicateReplaceBindings {
@@ -1400,7 +1400,7 @@ function collapseGridLayoutAndRestoreSelectionAfterClose(
 }
 
 function formatClosedSingleViewportMessage(index: number, fileName: string): string {
-  return `Closed viewport ${getViewportNumberFromIndex(index)} (${fileName})`;
+  return `Closed panel ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
 interface ToolPanelRegionRequestHandlerInputs {
@@ -1971,7 +1971,7 @@ function deriveActionAvailabilityForActiveViewport(
 
 function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
   if (action.id === "tone-curve") return "adjust the histogram tone curve first";
-  return "not available for this viewport";
+  return "not available for this panel";
 }
 
 function mergeParameterValuesWithSourceRenderingState(
@@ -2029,7 +2029,7 @@ async function runSaveProjectFlowAndShowToast(
 ): Promise<void> {
   const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
   if (snapshot.viewports.length === 0) {
-    toast.info("No viewports with loaded files to save");
+    toast.info("No panels with loaded files to save");
     return;
   }
   await invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings);

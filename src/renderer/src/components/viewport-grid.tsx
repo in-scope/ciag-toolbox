@@ -65,7 +65,7 @@ export function ViewportGrid(props: ViewportGridProps): JSX.Element {
   return (
     <div
       role="grid"
-      aria-label="Viewport grid"
+      aria-label="Panel grid"
       className={cn("grid h-full w-full gap-2", trackClasses)}
     >
       {renderViewportCells(cellCount, props)}

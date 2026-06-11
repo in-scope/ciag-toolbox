@@ -177,7 +177,7 @@ function createBitShiftSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Bit shift only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Bit shift only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
@@ -279,7 +279,7 @@ function createCropToRegionSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Crop to Region only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Crop to Region only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const roi = readRoiFromCropParameterValues(parameterValues);
@@ -351,7 +351,7 @@ function createBandSubsetSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Subset Bands only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Subset Bands only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const keptBandNumbers = readKeptBandNumbersFromParameterValues(parameterValues);
@@ -410,7 +410,7 @@ const FLAT_FIELD_LIGHT_PARAMETER_SCHEMA: RasterReferenceParameterSchema = {
   id: FLAT_FIELD_LIGHT_PARAMETER_ID,
   label: "Light reference (required)",
   description:
-    "A bright flat-field capture (raster cube) used to remove illumination and sensor non-uniformity. Must match the image dimensions and band count.",
+    "A bright flat-field capture (raster stack) used to remove illumination and sensor non-uniformity. Must match the stack dimensions and band count.",
   optional: false,
   defaultValue: NO_RASTER_REFERENCE_SELECTED,
 };
@@ -441,7 +441,7 @@ function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Flat-field correction only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Flat-field correction only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const lightReference = resolveRequiredLightReferenceOrThrow(parameterValues);
@@ -454,7 +454,7 @@ function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
 function resolveRequiredLightReferenceOrThrow(parameterValues: ParameterValuesById): RasterImage {
   const token = readRasterReferenceTokenOrEmpty(parameterValues[FLAT_FIELD_LIGHT_PARAMETER_ID]);
   if (token === NO_RASTER_REFERENCE_SELECTED) {
-    throw new Error("Choose a light reference cube before applying flat-field correction.");
+    throw new Error("Choose a light reference stack before applying flat-field correction.");
   }
   return readRememberedReferenceRasterForTokenOrThrow(token);
 }
@@ -468,7 +468,7 @@ function resolveOptionalDarkReferenceOrThrow(parameterValues: ParameterValuesByI
 function readRememberedReferenceRasterForTokenOrThrow(token: string): RasterImage {
   const raster = readRememberedReferenceRasterOrNull(token);
   if (!raster) {
-    throw new Error("The reference cube is no longer loaded. Re-select the reference file and try again.");
+    throw new Error("The reference stack is no longer loaded. Re-select the reference file and try again.");
   }
   return raster;
 }
@@ -542,7 +542,7 @@ function createSpectralonSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Spectralon Calibration only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Spectralon Calibration only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const brightRoi = readSpectralonBrightRoiOrThrow(parameterValues);
@@ -666,7 +666,7 @@ function createToneCurveSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Tone Curve only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Tone Curve only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const bandIndex = readToneCurveBandIndex(parameterValues);
@@ -753,7 +753,7 @@ const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
-  description: "Off applies to the selected band only; on applies to every band in the cube.",
+  description: "Off applies to the selected band only; on applies to every band in the stack.",
   defaultValue: false,
 };
 
@@ -788,7 +788,7 @@ function createBrightnessContrastSourceTransform(): ViewportActionSourceTransfor
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Brightness & Contrast only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Brightness & Contrast only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const bandIndexes = resolveBrightnessContrastBandIndexes(parameterValues, source.raster);
@@ -868,7 +868,7 @@ const INVERT_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: INVERT_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
-  description: "Off inverts the selected band only; on inverts every band in the cube.",
+  description: "Off inverts the selected band only; on inverts every band in the stack.",
   defaultValue: false,
 };
 
@@ -933,7 +933,7 @@ function listAutoNormalizedSecondaryOutputForUnboundedRaster(
 
 function invertRequiresRasterSourceError(): Error {
   return new Error(
-    "Invert only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+    "Invert only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
   );
 }
 
@@ -972,7 +972,7 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full cube scales every band by one cube-wide min and max; band-wise scales the selected band by its own min and max.",
+    "Full stack scales every band by one stack-wide min and max; band-wise scales the selected band by its own min and max.",
   defaultValue: FULL_CUBE_SCOPE,
 };
 
@@ -1003,7 +1003,7 @@ function createNormalizeSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Normalize only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Normalize only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const selection = resolveNormalizeScopeSelection(parameterValues);
@@ -1032,7 +1032,7 @@ function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): stri
     parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
     FULL_CUBE_SCOPE,
   );
-  if (choice === FULL_CUBE_SCOPE) return "Normalize to [0,1] (full cube)";
+  if (choice === FULL_CUBE_SCOPE) return "Normalize to [0,1] (full stack)";
   return `Normalize to [0,1] (band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1})`;
 }
 
@@ -1046,7 +1046,7 @@ const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   id: STANDARDIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full cube standardizes by one cube-wide mean and std; band-wise standardizes the selected band by its own mean and std.",
+    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes the selected band by its own mean and std.",
   defaultValue: FULL_CUBE_SCOPE,
 };
 
@@ -1099,7 +1099,7 @@ function createStandardizeSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Standardize only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Standardize only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const selection = resolveStandardizeScopeSelection(parameterValues);
@@ -1158,7 +1158,7 @@ function describeStandardizeScope(parameterValues: ParameterValuesById): string 
     parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
     FULL_CUBE_SCOPE,
   );
-  if (choice === FULL_CUBE_SCOPE) return "full cube";
+  if (choice === FULL_CUBE_SCOPE) return "full stack";
   return `band-wise: band ${readStandardizeTargetBandIndex(parameterValues) + 1}`;
 }
 
@@ -1230,7 +1230,7 @@ function createRgbToGrayscaleSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "RGB to Grayscale only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "RGB to Grayscale only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const weights = readRgbToGrayscaleWeights(parameterValues);
@@ -1322,7 +1322,7 @@ function createFalseColorSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "False-color Composite only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "False-color Composite only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const assignment = readFalseColorBandAssignment(parameterValues);
@@ -1342,7 +1342,7 @@ const GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA: EnumParameterSchema = {
   id: GEOMETRIC_TRANSFORM_PARAMETER_ID,
   label: "Transform",
   description:
-    "Rotate the whole cube clockwise or flip it. Rotations of 90 and 270 degrees swap the reported width and height.",
+    "Rotate the whole stack clockwise or flip it. Rotations of 90 and 270 degrees swap the reported width and height.",
   defaultValue: "rotate-90-cw",
   options: GEOMETRIC_TRANSFORMS.map((transform) => ({
     value: transform,
@@ -1371,7 +1371,7 @@ function createGeometricTransformSourceTransform(): ViewportActionSourceTransfor
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Rotate & Reflect only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Rotate & Reflect only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
       );
     }
     const transform = readGeometricTransformChoice(parameterValues);

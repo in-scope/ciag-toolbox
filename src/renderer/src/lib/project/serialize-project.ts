@@ -134,7 +134,7 @@ function buildExternalAssetForBrowserSourceOrThrow(
 ): DraftBundleExternalAsset {
   if (!viewport.originalFilePath) {
     throw new Error(
-      `Viewport "${viewport.fileName}" has no on-disk source to pack into the bundle`,
+      `Panel "${viewport.fileName}" has no on-disk source to pack into the bundle`,
     );
   }
   return buildExternalAssetReferencingOriginalFile(viewport);

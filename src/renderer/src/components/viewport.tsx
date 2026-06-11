@@ -141,7 +141,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
 function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.Element {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card">
-      <p className="text-sm text-muted-foreground">No image loaded</p>
+      <p className="text-sm text-muted-foreground">No stack loaded</p>
       <Button variant="outline" size="sm" onClick={onOpenImage}>
         <FolderOpen className="size-4" />
         Open image
@@ -151,8 +151,8 @@ function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.E
 }
 
 function describeViewportAriaLabel(viewportNumber: number | null | undefined): string {
-  if (typeof viewportNumber === "number") return `Viewport ${viewportNumber}`;
-  return "Image viewport";
+  if (typeof viewportNumber === "number") return `Panel ${viewportNumber}`;
+  return "Image panel";
 }
 
 function shouldShowBandNavigator(source: ViewportImageSource | null): boolean {
@@ -274,8 +274,8 @@ function ViewportCloseButton(props: ViewportCloseButtonProps): JSX.Element {
 }
 
 function formatCloseButtonLabel(viewportNumber: number | null): string {
-  if (typeof viewportNumber === "number") return `Close viewport ${viewportNumber}`;
-  return "Close viewport";
+  if (typeof viewportNumber === "number") return `Close panel ${viewportNumber}`;
+  return "Close panel";
 }
 
 interface ViewportFileNameLabelProps {

@@ -131,7 +131,7 @@ function HistogramSectionHeader(props: HistogramSectionHeaderProps): JSX.Element
             <h2 className="text-sm font-medium text-foreground">Histogram</h2>
           </span>
           <span className="text-xs text-muted-foreground">
-            Viewport {props.viewportNumber}
+            Panel {props.viewportNumber}
           </span>
         </button>
       </CollapsibleTrigger>

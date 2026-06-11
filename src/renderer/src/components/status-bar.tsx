@@ -22,7 +22,7 @@ export function StatusBar(): JSX.Element {
 function StatusBarReadoutRow({ fields }: { fields: StatusBarReadoutFields }): JSX.Element {
   return (
     <>
-      <StatusBarLabelValue label="Viewport" value={fields.viewportNumber} />
+      <StatusBarLabelValue label="Panel" value={fields.viewportNumber} />
       <StatusBarLabelValue label="X" value={fields.imagePixelX} />
       <StatusBarLabelValue label="Y" value={fields.imagePixelY} />
       {fields.activeBandLabel ? (

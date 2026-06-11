@@ -181,15 +181,15 @@ describe("listKeptBandOriginalNumbersAfterRemovingBand", () => {
 });
 
 describe("formatKeptOriginalBandsHistoryLabel", () => {
-  it("describes the kept bands as a correspondence to the original cube", () => {
+  it("describes the kept bands as a correspondence to the original stack", () => {
     expect(formatKeptOriginalBandsHistoryLabel([3, 5])).toBe(
-      "Kept bands 3, 5 of the original cube",
+      "Kept bands 3, 5 of the original stack",
     );
   });
 
   it("describes a single kept band", () => {
     expect(formatKeptOriginalBandsHistoryLabel([7])).toBe(
-      "Kept bands 7 of the original cube",
+      "Kept bands 7 of the original stack",
     );
   });
 });

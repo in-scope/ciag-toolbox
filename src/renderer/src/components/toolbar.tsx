@@ -102,7 +102,7 @@ function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Eleme
 }
 
 function pickSubsetBandsToggleLabel(state: BandSubsetToolbarToggleState): string {
-  if (!state.isAvailable) return "Subset Bands (select a multi-band image)";
+  if (!state.isAvailable) return "Subset Bands (select a multi-band stack)";
   if (state.isActive) return "Subset Bands (active)";
   return "Subset Bands";
 }
@@ -251,7 +251,7 @@ function formatActionToolbarTooltipLabel(
 ): string {
   if (!disabled) return actionLabel;
   if (disabledReason) return `${actionLabel} (${disabledReason})`;
-  return `${actionLabel} (select a viewport with a loaded image)`;
+  return `${actionLabel} (select a panel with a loaded stack)`;
 }
 
 interface IconButtonWithTooltipProps {
