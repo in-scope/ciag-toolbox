@@ -36,6 +36,7 @@ import {
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import type { BandRun } from "@/lib/image/spectrum-band-gaps";
 import {
   buildSpectrumXAxisFromRaster,
   describeSpectrumYAxisLabel,
@@ -675,6 +676,7 @@ function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
           xAxisLabel={xAxis.label}
           yAxisLabel={yAxisLabel}
           bandPositions={xAxis.bandPositions}
+          bandRuns={xAxis.bandRuns}
           tickPositions={xAxis.tickPositions}
           tickLabels={xAxis.tickLabels}
         />
@@ -724,6 +726,7 @@ interface SpectraSectionBodyProps {
   xAxisLabel: string;
   yAxisLabel: string;
   bandPositions: ReadonlyArray<number>;
+  bandRuns: ReadonlyArray<BandRun>;
   tickPositions: ReadonlyArray<number>;
   tickLabels: ReadonlyArray<string>;
 }
@@ -733,6 +736,7 @@ function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
     <div className="flex flex-col gap-2 rounded-md border bg-background p-2">
       <SpectrumPlot
         bandPositions={props.bandPositions}
+        bandRuns={props.bandRuns}
         tickPositions={props.tickPositions}
         tickLabels={props.tickLabels}
         xAxisLabel={props.xAxisLabel}

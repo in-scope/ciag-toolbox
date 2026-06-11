@@ -3,25 +3,29 @@ import {
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import { type BandRun, listContiguousBandRuns } from "@/lib/image/spectrum-band-gaps";
 
 export interface SpectrumXAxisDescriptor {
   readonly label: string;
   readonly bandPositions: ReadonlyArray<number>;
   readonly tickPositions: ReadonlyArray<number>;
   readonly tickLabels: ReadonlyArray<string>;
+  readonly bandRuns: ReadonlyArray<BandRun>;
 }
 
 const MAX_X_AXIS_TICKS = 5;
 
 export function buildSpectrumXAxisFromRaster(raster: RasterImage): SpectrumXAxisDescriptor {
+  const bandRuns = listContiguousBandRuns(listRasterBandOriginalNumbers(raster));
   if (raster.bandWavelengths && raster.bandWavelengths.length === raster.bandCount) {
-    return buildWavelengthAxisFromBandCenters(raster.bandWavelengths);
+    return buildWavelengthAxisFromBandCenters(raster.bandWavelengths, bandRuns);
   }
-  return buildBandIndexAxis(raster);
+  return buildBandIndexAxis(raster, bandRuns);
 }
 
 function buildWavelengthAxisFromBandCenters(
   bandWavelengths: ReadonlyArray<number>,
+  bandRuns: ReadonlyArray<BandRun>,
 ): SpectrumXAxisDescriptor {
   const positions = [...bandWavelengths];
   const ticks = pickTicksEvenlySpacedAcrossValueRange(positions, MAX_X_AXIS_TICKS);
@@ -30,10 +34,14 @@ function buildWavelengthAxisFromBandCenters(
     bandPositions: positions,
     tickPositions: ticks,
     tickLabels: ticks.map((tick) => formatWavelengthTickLabel(tick)),
+    bandRuns,
   };
 }
 
-function buildBandIndexAxis(raster: RasterImage): SpectrumXAxisDescriptor {
+function buildBandIndexAxis(
+  raster: RasterImage,
+  bandRuns: ReadonlyArray<BandRun>,
+): SpectrumXAxisDescriptor {
   const positions = [...listRasterBandOriginalNumbers(raster)];
   const ticks = pickTicksEvenlySpacedAcrossValueRange(positions, MAX_X_AXIS_TICKS).map(Math.round);
   const uniqueTicks = removeAdjacentDuplicateTicks(ticks);
@@ -42,6 +50,7 @@ function buildBandIndexAxis(raster: RasterImage): SpectrumXAxisDescriptor {
     bandPositions: positions,
     tickPositions: uniqueTicks,
     tickLabels: uniqueTicks.map((tick) => tick.toString()),
+    bandRuns,
   };
 }
 

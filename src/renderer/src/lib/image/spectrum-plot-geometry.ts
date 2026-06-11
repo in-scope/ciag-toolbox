@@ -1,3 +1,5 @@
+import type { BandRun } from "@/lib/image/spectrum-band-gaps";
+
 export interface SpectrumPlotPadding {
   readonly top: number;
   readonly right: number;
@@ -86,48 +88,90 @@ export function projectYValueToPixelY(
 export function buildSpectrumLinePathFromValues(
   bandPositions: ReadonlyArray<number>,
   values: ReadonlyArray<number>,
+  bandRuns: ReadonlyArray<BandRun>,
+  xRange: SpectrumPlotXRange,
+  valueRange: SpectrumPlotValueRange,
+  dimensions: SpectrumPlotDimensions,
+): string {
+  return bandRuns
+    .map((run) =>
+      buildLinePathForBandRun(run, bandPositions, values, xRange, valueRange, dimensions),
+    )
+    .filter((segment) => segment.length > 0)
+    .join(" ");
+}
+
+function buildLinePathForBandRun(
+  run: BandRun,
+  bandPositions: ReadonlyArray<number>,
+  values: ReadonlyArray<number>,
   xRange: SpectrumPlotXRange,
   valueRange: SpectrumPlotValueRange,
   dimensions: SpectrumPlotDimensions,
 ): string {
   const segments: string[] = [];
-  for (let index = 0; index < values.length; index++) {
-    const value = values[index];
-    const position = bandPositions[index];
-    if (value === undefined || position === undefined || !Number.isFinite(value)) continue;
-    const x = projectXPositionToPixelX(position, xRange, dimensions);
-    const y = projectYValueToPixelY(value, valueRange, dimensions);
-    segments.push(`${segments.length === 0 ? "M" : "L"}${formatCoordinate(x)} ${formatCoordinate(y)}`);
+  for (let index = run.startIndex; index < run.endIndexExclusive; index++) {
+    const point = projectBandValuePointOrNull(index, bandPositions, values, xRange, valueRange, dimensions);
+    if (point === null) continue;
+    segments.push(`${segments.length === 0 ? "M" : "L"}${point}`);
   }
   return segments.join(" ");
+}
+
+function projectBandValuePointOrNull(
+  index: number,
+  bandPositions: ReadonlyArray<number>,
+  values: ReadonlyArray<number>,
+  xRange: SpectrumPlotXRange,
+  valueRange: SpectrumPlotValueRange,
+  dimensions: SpectrumPlotDimensions,
+): string | null {
+  const value = values[index];
+  const position = bandPositions[index];
+  if (value === undefined || position === undefined || !Number.isFinite(value)) return null;
+  const x = projectXPositionToPixelX(position, xRange, dimensions);
+  const y = projectYValueToPixelY(value, valueRange, dimensions);
+  return `${formatCoordinate(x)} ${formatCoordinate(y)}`;
 }
 
 export function buildSpectrumStandardDeviationBandPath(
   bandPositions: ReadonlyArray<number>,
   bandMeans: ReadonlyArray<number>,
   bandStandardDeviations: ReadonlyArray<number>,
+  bandRuns: ReadonlyArray<BandRun>,
   xRange: SpectrumPlotXRange,
   valueRange: SpectrumPlotValueRange,
   dimensions: SpectrumPlotDimensions,
 ): string {
-  const upper = collectBandRibbonPoints(
-    bandPositions,
-    bandMeans,
-    bandStandardDeviations,
-    1,
-    xRange,
-    valueRange,
-    dimensions,
-  );
-  const lowerForward = collectBandRibbonPoints(
-    bandPositions,
-    bandMeans,
-    bandStandardDeviations,
-    -1,
-    xRange,
-    valueRange,
-    dimensions,
-  );
+  return bandRuns
+    .map((run) =>
+      buildRibbonPolygonForBandRun(
+        run,
+        { bandPositions, bandMeans, bandStandardDeviations },
+        xRange,
+        valueRange,
+        dimensions,
+      ),
+    )
+    .filter((polygon) => polygon.length > 0)
+    .join(" ");
+}
+
+interface BandRibbonInputs {
+  readonly bandPositions: ReadonlyArray<number>;
+  readonly bandMeans: ReadonlyArray<number>;
+  readonly bandStandardDeviations: ReadonlyArray<number>;
+}
+
+function buildRibbonPolygonForBandRun(
+  run: BandRun,
+  inputs: BandRibbonInputs,
+  xRange: SpectrumPlotXRange,
+  valueRange: SpectrumPlotValueRange,
+  dimensions: SpectrumPlotDimensions,
+): string {
+  const upper = collectBandRibbonPoints(run, inputs, 1, xRange, valueRange, dimensions);
+  const lowerForward = collectBandRibbonPoints(run, inputs, -1, xRange, valueRange, dimensions);
   const lower = [...lowerForward].reverse();
   if (upper.length === 0 || lower.length === 0) return "";
   return `M${upper[0]} ${appendLineSegments(upper.slice(1))} L${lower.join(" L")} Z`;
@@ -138,26 +182,36 @@ function appendLineSegments(points: ReadonlyArray<string>): string {
 }
 
 function collectBandRibbonPoints(
-  bandPositions: ReadonlyArray<number>,
-  bandMeans: ReadonlyArray<number>,
-  bandStandardDeviations: ReadonlyArray<number>,
+  run: BandRun,
+  inputs: BandRibbonInputs,
   multiplier: 1 | -1,
   xRange: SpectrumPlotXRange,
   valueRange: SpectrumPlotValueRange,
   dimensions: SpectrumPlotDimensions,
 ): ReadonlyArray<string> {
   const points: string[] = [];
-  for (let index = 0; index < bandMeans.length; index++) {
-    const mean = bandMeans[index];
-    const stddev = bandStandardDeviations[index] ?? 0;
-    const position = bandPositions[index];
-    if (mean === undefined || position === undefined || !Number.isFinite(mean)) continue;
-    const ribbonValue = mean + multiplier * stddev;
-    const x = projectXPositionToPixelX(position, xRange, dimensions);
-    const y = projectYValueToPixelY(ribbonValue, valueRange, dimensions);
-    points.push(`${formatCoordinate(x)} ${formatCoordinate(y)}`);
+  for (let index = run.startIndex; index < run.endIndexExclusive; index++) {
+    const point = projectBandRibbonPointOrNull(index, inputs, multiplier, xRange, valueRange, dimensions);
+    if (point !== null) points.push(point);
   }
   return points;
+}
+
+function projectBandRibbonPointOrNull(
+  index: number,
+  inputs: BandRibbonInputs,
+  multiplier: 1 | -1,
+  xRange: SpectrumPlotXRange,
+  valueRange: SpectrumPlotValueRange,
+  dimensions: SpectrumPlotDimensions,
+): string | null {
+  const mean = inputs.bandMeans[index];
+  const position = inputs.bandPositions[index];
+  if (mean === undefined || position === undefined || !Number.isFinite(mean)) return null;
+  const ribbonValue = mean + multiplier * (inputs.bandStandardDeviations[index] ?? 0);
+  const x = projectXPositionToPixelX(position, xRange, dimensions);
+  const y = projectYValueToPixelY(ribbonValue, valueRange, dimensions);
+  return `${formatCoordinate(x)} ${formatCoordinate(y)}`;
 }
 
 function formatCoordinate(value: number): string {

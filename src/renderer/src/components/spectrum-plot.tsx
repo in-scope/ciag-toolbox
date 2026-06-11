@@ -10,6 +10,7 @@ import {
   type SpectrumPlotValueRange,
   type SpectrumPlotXRange,
 } from "@/lib/image/spectrum-plot-geometry";
+import type { BandRun } from "@/lib/image/spectrum-band-gaps";
 
 const SPECTRUM_PLOT_WIDTH_PX = 268;
 const SPECTRUM_PLOT_HEIGHT_PX = 160;
@@ -23,6 +24,7 @@ export interface SpectrumLinePlotInput {
 
 export interface SpectrumPlotProps {
   readonly bandPositions: ReadonlyArray<number>;
+  readonly bandRuns: ReadonlyArray<BandRun>;
   readonly tickPositions: ReadonlyArray<number>;
   readonly tickLabels: ReadonlyArray<string>;
   readonly xAxisLabel: string;
@@ -41,6 +43,7 @@ export function SpectrumPlot(props: SpectrumPlotProps): JSX.Element {
         xRange={xRange}
         valueRange={valueRange}
         bandPositions={props.bandPositions}
+        bandRuns={props.bandRuns}
         tickPositions={props.tickPositions}
         tickLabels={props.tickLabels}
         lines={props.lines}
@@ -92,6 +95,7 @@ interface SpectrumPlotSvgProps {
   readonly xRange: SpectrumPlotXRange;
   readonly valueRange: SpectrumPlotValueRange;
   readonly bandPositions: ReadonlyArray<number>;
+  readonly bandRuns: ReadonlyArray<BandRun>;
   readonly tickPositions: ReadonlyArray<number>;
   readonly tickLabels: ReadonlyArray<string>;
   readonly lines: ReadonlyArray<SpectrumLinePlotInput>;
@@ -118,6 +122,7 @@ function SpectrumPlotSvg(props: SpectrumPlotSvgProps): JSX.Element {
           key={line.id}
           line={line}
           bandPositions={props.bandPositions}
+          bandRuns={props.bandRuns}
           xRange={props.xRange}
           valueRange={props.valueRange}
           dimensions={props.dimensions}
@@ -297,6 +302,7 @@ function formatYAxisTickLabel(value: number): string {
 interface SpectrumPlotLineGroupProps {
   readonly line: SpectrumLinePlotInput;
   readonly bandPositions: ReadonlyArray<number>;
+  readonly bandRuns: ReadonlyArray<BandRun>;
   readonly xRange: SpectrumPlotXRange;
   readonly valueRange: SpectrumPlotValueRange;
   readonly dimensions: SpectrumPlotDimensions;
@@ -306,6 +312,7 @@ function SpectrumPlotLineGroup(props: SpectrumPlotLineGroupProps): JSX.Element {
   const linePath = buildSpectrumLinePathFromValues(
     props.bandPositions,
     props.line.values,
+    props.bandRuns,
     props.xRange,
     props.valueRange,
     props.dimensions,
@@ -332,6 +339,7 @@ function buildOptionalRibbonPath(props: SpectrumPlotLineGroupProps): string | nu
     props.bandPositions,
     props.line.values,
     props.line.bandStandardDeviations,
+    props.bandRuns,
     props.xRange,
     props.valueRange,
     props.dimensions,
