@@ -20,6 +20,7 @@ export interface SpectrumLinePlotInput {
   readonly colorClass: string;
   readonly values: ReadonlyArray<number>;
   readonly bandStandardDeviations?: ReadonlyArray<number>;
+  readonly strokeDasharray?: string;
 }
 
 export interface SpectrumPlotProps {
@@ -327,6 +328,7 @@ function SpectrumPlotLineGroup(props: SpectrumPlotLineGroupProps): JSX.Element {
         d={linePath}
         fill="none"
         strokeWidth={1.5}
+        strokeDasharray={props.line.strokeDasharray}
         className={`stroke-current ${props.line.colorClass}`}
       />
     </g>
