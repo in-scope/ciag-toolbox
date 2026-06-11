@@ -4,7 +4,9 @@ import { Contrast, FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
+import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
+import type { RasterImage } from "@/lib/image/raster-image";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -98,6 +100,8 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        raster={getRasterFromSourceOrNull(imageSource)}
+        selectedBandIndex={props.selectedBandIndex}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
         normalizationEnabled={props.normalizationEnabled}
         onToggleNormalizedViewing={props.onToggleNormalizedViewing}
@@ -157,9 +161,16 @@ function getMultiBandSourceBandCount(source: ViewportImageSource | null): number
   return source.raster.bandCount;
 }
 
+function getRasterFromSourceOrNull(source: ViewportImageSource | null): RasterImage | null {
+  if (!source || source.kind !== "raster") return null;
+  return source.raster;
+}
+
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
@@ -177,6 +188,8 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
       {props.fileName ? (
         <ViewportFileNameLabel
           fileName={props.fileName}
+          raster={props.raster}
+          selectedBandIndex={props.selectedBandIndex}
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
@@ -264,24 +277,23 @@ function formatCloseButtonLabel(viewportNumber: number | null): string {
 
 interface ViewportFileNameLabelProps {
   fileName: string;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
 }
 
 function ViewportFileNameLabel(props: ViewportFileNameLabelProps): JSX.Element {
-  const display = formatViewportHeaderLabel(props.fileName, props.lastAppliedOperationLabel);
+  const display = formatViewportHeaderLabel({
+    fileName: props.fileName,
+    raster: props.raster,
+    selectedBandIndex: props.selectedBandIndex,
+    lastAppliedOperationLabel: props.lastAppliedOperationLabel,
+  });
   return (
     <span className="truncate font-medium text-foreground" title={display}>
       {display}
     </span>
   );
-}
-
-function formatViewportHeaderLabel(
-  fileName: string,
-  lastAppliedOperationLabel: string | null,
-): string {
-  if (!lastAppliedOperationLabel) return fileName;
-  return `${fileName} (${lastAppliedOperationLabel})`;
 }
 
 function ViewportNumberBadge({
