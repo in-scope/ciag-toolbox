@@ -65,7 +65,7 @@ describe("applyActionToSelectedViewports", () => {
       operationHistory: EMPTY_OPERATION_HISTORY,
       roi: null,
       operationRegion: null,
-      blackWhitePoints: null,
+      toneCurveAnchors: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],

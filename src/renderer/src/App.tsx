@@ -62,7 +62,12 @@ import {
   listKeptBandOriginalNumbersAfterRemovingBand,
 } from "@/lib/image/apply-band-keep";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
-import { getRasterBandOriginalNumber, type RasterImage } from "@/lib/image/raster-image";
+import { applyToneCurveToRasterBand, type ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
+import {
+  clampBandIndexToRaster,
+  getRasterBandOriginalNumber,
+  type RasterImage,
+} from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
@@ -314,12 +319,13 @@ function ApplicationShell(): JSX.Element {
     busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
-  usePublishFalseColorPreview({
+  usePublishActiveToolPreview({
     activeAction,
     singleSelectedSource,
     imagesByIndex,
     parameterValues: activeActionParameterValues,
     falseColorPreview,
+    renderingApi,
   });
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
     selectedIndices,
@@ -1503,38 +1509,70 @@ function readRasterBandCountFromContentOrNull(content: ViewportCellContent): num
   return content.source.kind === "raster" ? content.source.raster.bandCount : null;
 }
 
-interface PublishFalseColorPreviewInputs {
+interface PublishActiveToolPreviewInputs {
   readonly activeAction: RegisteredViewportAction | null;
   readonly singleSelectedSource: SingleSelectedSource | null;
   readonly imagesByIndex: ImagesByIndexMap;
   readonly parameterValues: ParameterValuesById;
   readonly falseColorPreview: FalseColorPreviewApi;
+  readonly renderingApi: ViewportRenderingApi;
 }
 
-function usePublishFalseColorPreview(inputs: PublishFalseColorPreviewInputs): void {
-  const raster = resolveFalseColorPreviewRasterOrNull(
-    inputs.activeAction,
-    inputs.singleSelectedSource,
-    inputs.imagesByIndex,
+function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
+  const falseColorSource = useFalseColorPreviewSource(inputs);
+  const toneCurveSource = useToneCurvePreviewSource(inputs);
+  const sourceIndex = inputs.singleSelectedSource?.index ?? null;
+  usePublishPreviewSourceForViewport(
+    inputs.falseColorPreview.setPreview,
+    falseColorSource ?? toneCurveSource,
+    sourceIndex,
   );
+}
+
+function useFalseColorPreviewSource(
+  inputs: PublishActiveToolPreviewInputs,
+): ViewportImageSource | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "false-color");
   const assignment = useMemo(
     () => readFalseColorBandAssignment(inputs.parameterValues),
     [inputs.parameterValues],
   );
-  const previewSource = useMemo(
+  return useMemo(
     () => (raster ? buildFalseColorPreviewSourceOrNull(raster, assignment) : null),
     [raster, assignment],
   );
-  const sourceIndex = inputs.singleSelectedSource?.index ?? null;
-  usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, previewSource, sourceIndex);
 }
 
-function resolveFalseColorPreviewRasterOrNull(
-  activeAction: RegisteredViewportAction | null,
-  singleSelectedSource: SingleSelectedSource | null,
-  imagesByIndex: ImagesByIndexMap,
+function useToneCurvePreviewSource(
+  inputs: PublishActiveToolPreviewInputs,
+): ViewportImageSource | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
+  const index = inputs.singleSelectedSource?.index ?? null;
+  const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
+  const anchors = state?.toneCurveAnchors ?? null;
+  const bandIndex = state?.selectedBandIndex ?? 0;
+  return useMemo(
+    () => buildToneCurvePreviewSourceOrNull(raster, bandIndex, anchors),
+    [raster, bandIndex, anchors],
+  );
+}
+
+function buildToneCurvePreviewSourceOrNull(
+  raster: RasterImage | null,
+  bandIndex: number,
+  anchors: ReadonlyArray<ToneCurveAnchor> | null,
+): ViewportImageSource | null {
+  if (!raster || !anchors || anchors.length < 2) return null;
+  const previewRaster = applyToneCurveToRasterBand(raster, clampBandIndexToRaster(raster, bandIndex), anchors);
+  return { kind: "raster", raster: previewRaster };
+}
+
+function resolveActiveToolRasterOrNull(
+  inputs: PublishActiveToolPreviewInputs,
+  actionId: string,
 ): RasterImage | null {
-  if (!activeAction || activeAction.id !== "false-color" || !singleSelectedSource) return null;
+  const { activeAction, singleSelectedSource, imagesByIndex } = inputs;
+  if (!activeAction || activeAction.id !== actionId || !singleSelectedSource) return null;
   const content = imagesByIndex.get(singleSelectedSource.index);
   if (!content || content.source.kind !== "raster") return null;
   return content.source.raster;
@@ -1932,7 +1970,7 @@ function deriveActionAvailabilityForActiveViewport(
 }
 
 function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
-  if (action.id === "black-white-points") return "drag the histogram black/white markers first";
+  if (action.id === "tone-curve") return "adjust the histogram tone curve first";
   return "not available for this viewport";
 }
 

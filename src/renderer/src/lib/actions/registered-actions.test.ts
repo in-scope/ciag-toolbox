@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
   CROP_TO_REGION_ACTION,
   FALSE_COLOR_ACTION,
@@ -11,6 +10,7 @@ import {
   RGB_TO_GRAYSCALE_ACTION,
   ROTATE_REFLECT_ACTION,
   SPECTRALON_ACTION,
+  TONE_CURVE_ACTION,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -28,7 +28,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "crop-to-region",
       "flat-field",
       "spectralon",
-      "black-white-points",
+      "tone-curve",
       "brightness-contrast",
       "invert",
       "normalize-data",
@@ -113,23 +113,28 @@ function makeSingleBandUint8Raster(values: ReadonlyArray<number>): RasterImage {
   };
 }
 
-describe("BLACK_WHITE_POINTS_ACTION", () => {
-  it("is unavailable until histogram black/white markers have been positioned", () => {
-    expect(BLACK_WHITE_POINTS_ACTION.isAvailableForActiveViewport!(DEFAULT_VIEWPORT_RENDERING_STATE)).toBe(false);
-    const withPoints = { ...DEFAULT_VIEWPORT_RENDERING_STATE, blackWhitePoints: { black: 0, white: 128 } };
-    expect(BLACK_WHITE_POINTS_ACTION.isAvailableForActiveViewport!(withPoints)).toBe(true);
+describe("TONE_CURVE_ACTION", () => {
+  const linearStretchAnchors = [
+    { input: 0, output: 0 },
+    { input: 128, output: 255 },
+  ];
+
+  it("is unavailable until the tone-curve editor has produced anchors", () => {
+    expect(TONE_CURVE_ACTION.isAvailableForActiveViewport!(DEFAULT_VIEWPORT_RENDERING_STATE)).toBe(false);
+    const withAnchors = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
+    expect(TONE_CURVE_ACTION.isAvailableForActiveViewport!(withAnchors)).toBe(true);
   });
 
-  it("injects the marker values and selected band index for the audit trail", () => {
-    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 2, blackWhitePoints: { black: 10, white: 200 } };
-    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    expect(prepared).toMatchObject({ blackPoint: 10, whitePoint: 200, targetBandIndex: 2 });
+  it("injects the serialized anchors and selected band index for the audit trail", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 2, toneCurveAnchors: linearStretchAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(prepared).toMatchObject({ targetBandIndex: 2, toneCurveAnchorsJson: "[[0,0],[128,255]]" });
   });
 
-  it("stretches the selected band when transforming the source", () => {
-    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, blackWhitePoints: { black: 0, white: 128 } };
-    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    const result = BLACK_WHITE_POINTS_ACTION.transformSource!(
+  it("applies the 2-anchor curve as a linear black/white stretch on the selected band", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    const result = TONE_CURVE_ACTION.transformSource!(
       { kind: "raster", raster: makeSingleBandUint8Raster([0, 64, 128, 255]) },
       prepared,
     );
@@ -137,24 +142,24 @@ describe("BLACK_WHITE_POINTS_ACTION", () => {
     expect(Array.from((result as { raster: RasterImage }).raster.bandPixels[0]!)).toEqual([0, 128, 255, 255]);
   });
 
-  it("records the two point values and the per-operation region in the applied label", () => {
+  it("records the anchor count and the per-operation region in the applied label", () => {
     const operationRegion = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
     const state = {
       ...DEFAULT_VIEWPORT_RENDERING_STATE,
       operationRegion,
-      blackWhitePoints: { black: 10, white: 200 },
+      toneCurveAnchors: linearStretchAnchors,
     };
-    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "roi");
-    expect(BLACK_WHITE_POINTS_ACTION.formatAppliedLabel!(prepared)).toBe(
-      "Stretch contrast [10, 200] in (1, 2) - (5, 6)",
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "roi");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Tone curve (2 points) in (1, 2) - (5, 6)",
     );
   });
 
-  it("ignores a stale inspection ROI and stretches the whole band when scope is whole-image", () => {
+  it("ignores a stale inspection ROI and curves the whole band when scope is whole-image", () => {
     const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
-    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi, blackWhitePoints: { black: 10, white: 200 } };
-    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    expect(BLACK_WHITE_POINTS_ACTION.formatAppliedLabel!(prepared)).toBe("Stretch contrast [10, 200]");
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi, toneCurveAnchors: linearStretchAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
   });
 });
 

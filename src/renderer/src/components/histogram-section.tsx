@@ -1,7 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { HistogramBlackWhiteMarkers } from "@/components/histogram-black-white-markers";
+import { HistogramToneCurveEditor } from "@/components/histogram-tone-curve-editor";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
@@ -29,10 +29,13 @@ import { computeHistogramBarHorizontalSpan } from "@/lib/image/compute-histogram
 import {
   clampBandIndexToRaster,
   formatRasterBandIdentityText,
+  getRasterBandPixelsOrThrow,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
-import type { BlackWhitePointSelection } from "@/lib/image/black-white-point-selection";
+import { dataTypeValueRangeForBand } from "@/lib/image/data-type-value-range";
+import type { ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
+import type { ToneCurveValueRanges } from "@/lib/image/tone-curve-editor-state";
 import { cn } from "@/lib/utils";
 import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useRightPanelCollapsedSection } from "@/state/right-panel-collapsed-state";
@@ -152,33 +155,49 @@ function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
     props.bandIndex,
     props.viewportIndex,
   );
-  const markerBinding = useBlackWhitePointMarkerBinding(props.viewportIndex);
+  const toneCurveBinding = useToneCurveAnchorBinding(props.viewportIndex);
   if (!histogram) return <HistogramSkeleton />;
   return (
     <HistogramCanvas
       histogram={histogram}
       sampleFormat={props.raster.sampleFormat}
-      markerBinding={markerBinding}
+      toneCurveRanges={buildToneCurveValueRanges(props.raster, props.bandIndex, histogram)}
+      toneCurveBinding={toneCurveBinding}
     />
   );
 }
 
-interface BlackWhitePointMarkerBinding {
-  selection: BlackWhitePointSelection | null;
-  onChange: (next: BlackWhitePointSelection) => void;
+function buildToneCurveValueRanges(
+  raster: RasterImage,
+  bandIndex: number,
+  histogram: BandHistogram,
+): ToneCurveValueRanges {
+  const band = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const outputRange = dataTypeValueRangeForBand(band, raster.sampleFormat);
+  return {
+    inputMin: histogram.min,
+    inputMax: histogram.max,
+    outputMin: outputRange.min,
+    outputMax: outputRange.max,
+  };
 }
 
-function useBlackWhitePointMarkerBinding(viewportIndex: number): BlackWhitePointMarkerBinding {
+interface ToneCurveAnchorBinding {
+  anchors: ReadonlyArray<ToneCurveAnchor> | null;
+  onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void;
+}
+
+function useToneCurveAnchorBinding(viewportIndex: number): ToneCurveAnchorBinding {
   const renderingApi = useViewportRendering();
-  const selection = renderingApi.getRenderingState(viewportIndex).blackWhitePoints;
+  const anchors = renderingApi.getRenderingState(viewportIndex).toneCurveAnchors;
   const onChange = useCallback(
-    (next: BlackWhitePointSelection) => {
+    (next: ReadonlyArray<ToneCurveAnchor>) => {
       const current = renderingApi.getRenderingState(viewportIndex);
-      renderingApi.setRenderingState(viewportIndex, { ...current, blackWhitePoints: next });
+      renderingApi.setRenderingState(viewportIndex, { ...current, toneCurveAnchors: next });
     },
     [renderingApi, viewportIndex],
   );
-  return { selection, onChange };
+  return { anchors, onChange };
 }
 
 function HistogramSkeleton(): JSX.Element {
@@ -273,7 +292,8 @@ function absorbBandHistogramAbandonmentOrRethrow(reason: unknown): void {
 interface HistogramCanvasProps {
   histogram: BandHistogram;
   sampleFormat: RasterSampleFormat;
-  markerBinding: BlackWhitePointMarkerBinding;
+  toneCurveRanges: ToneCurveValueRanges;
+  toneCurveBinding: ToneCurveAnchorBinding;
 }
 
 function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
@@ -300,11 +320,10 @@ function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
           className="block w-full rounded-sm bg-muted text-primary"
           style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
         />
-        <HistogramBlackWhiteMarkers
-          min={props.histogram.min}
-          max={props.histogram.max}
-          selection={props.markerBinding.selection}
-          onChange={props.markerBinding.onChange}
+        <HistogramToneCurveEditor
+          ranges={props.toneCurveRanges}
+          anchors={props.toneCurveBinding.anchors}
+          onChange={props.toneCurveBinding.onChange}
         />
       </div>
       <HistogramAxisTickLabelsRow

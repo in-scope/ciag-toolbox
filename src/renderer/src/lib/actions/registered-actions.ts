@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Contrast, Crop, Eclipse, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Crop, Eclipse, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
 import {
   EMPTY_PINNED_ROI_SPECTRA,
@@ -11,7 +11,10 @@ import {
   mapKeptBandNumbersToCurrentPositions,
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
-import { applyBlackWhitePointsToRasterBand } from "@/lib/image/apply-black-white-points";
+import {
+  applyToneCurveToRasterBand,
+  type ToneCurveAnchor,
+} from "@/lib/image/apply-tone-curve";
 import {
   applyBrightnessToRasterBands,
   brightnessDeltaForRangeFractionOfBand,
@@ -586,120 +589,118 @@ function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): str
   );
 }
 
-const BLACK_WHITE_POINTS_BLACK_PARAMETER_ID = "blackPoint";
-const BLACK_WHITE_POINTS_WHITE_PARAMETER_ID = "whitePoint";
-const BLACK_WHITE_POINTS_BAND_PARAMETER_ID = "targetBandIndex";
-const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
-const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0 = "regionImagePixelY0";
-const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1 = "regionImagePixelX1";
-const BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1 = "regionImagePixelY1";
+const TONE_CURVE_ANCHORS_PARAMETER_ID = "toneCurveAnchorsJson";
+const TONE_CURVE_BAND_PARAMETER_ID = "targetBandIndex";
+const TONE_CURVE_REGION_PARAMETER_IDS = {
+  x0: "regionImagePixelX0",
+  y0: "regionImagePixelY0",
+  x1: "regionImagePixelX1",
+  y1: "regionImagePixelY1",
+} as const;
 
-export const BLACK_WHITE_POINTS_ACTION: RegisteredViewportAction = {
-  id: "black-white-points",
-  label: "Stretch Contrast",
-  icon: Contrast,
-  successMessage: "Black/white-point stretch applied",
-  appliedLabel: "Stretch contrast",
+export const TONE_CURVE_ACTION: RegisteredViewportAction = {
+  id: "tone-curve",
+  label: "Tone Curve",
+  icon: Spline,
+  successMessage: "Tone curve applied",
+  appliedLabel: "Tone curve",
   supportsRoiScope: true,
-  formatAppliedLabel: formatBlackWhitePointsAppliedLabel,
-  prepareParameterValuesForApply: prepareBlackWhitePointsParameterValues,
-  isAvailableForActiveViewport: (state) => state.blackWhitePoints !== null,
-  apply: clearBlackWhitePointsAfterApply,
+  formatAppliedLabel: formatToneCurveAppliedLabel,
+  prepareParameterValuesForApply: prepareToneCurveParameterValues,
+  isAvailableForActiveViewport: (state) => state.toneCurveAnchors !== null,
+  apply: clearToneCurveAfterApply,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createBlackWhitePointsSourceTransform(),
+  transformSource: createToneCurveSourceTransform(),
 };
 
-function clearBlackWhitePointsAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, blackWhitePoints: null, operationRegion: null };
+function clearToneCurveAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, toneCurveAnchors: null, operationRegion: null };
 }
 
-function prepareBlackWhitePointsParameterValues(
+function prepareToneCurveParameterValues(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
   applyScope: ApplyScope,
 ): ParameterValuesById {
-  const points = sourceRenderingState.blackWhitePoints;
-  if (!points) {
-    throw new Error("Stretch Contrast needs black and white points. Drag the histogram markers first.");
+  const anchors = sourceRenderingState.toneCurveAnchors;
+  if (!anchors || anchors.length < 2) {
+    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
   }
-  const withPoints = withBlackWhitePointAndBandValues(rawParameterValues, points, sourceRenderingState.selectedBandIndex);
-  return injectActiveRoiCornersIfPresent(withPoints, resolveBlackWhitePointsRegion(sourceRenderingState, applyScope));
+  const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
+  return injectToneCurveRegionIfPresent(withAnchors, resolveToneCurveRegion(sourceRenderingState, applyScope));
 }
 
-function resolveBlackWhitePointsRegion(
+function resolveToneCurveRegion(
   sourceRenderingState: ViewportRenderingState,
   applyScope: ApplyScope,
 ): ViewportRoi | null {
   if (applyScope !== "roi") return null;
-  return requireOperationRegionForApply(sourceRenderingState, "Stretch Contrast");
+  return requireOperationRegionForApply(sourceRenderingState, "Tone Curve");
 }
 
-function withBlackWhitePointAndBandValues(
+function withToneCurveAnchorsAndBandValues(
   rawParameterValues: ParameterValuesById,
-  points: { readonly black: number; readonly white: number },
+  anchors: ReadonlyArray<ToneCurveAnchor>,
   selectedBandIndex: number,
 ): ParameterValuesById {
   return {
     ...rawParameterValues,
-    [BLACK_WHITE_POINTS_BLACK_PARAMETER_ID]: points.black,
-    [BLACK_WHITE_POINTS_WHITE_PARAMETER_ID]: points.white,
-    [BLACK_WHITE_POINTS_BAND_PARAMETER_ID]: selectedBandIndex,
+    [TONE_CURVE_ANCHORS_PARAMETER_ID]: serializeToneCurveAnchors(anchors),
+    [TONE_CURVE_BAND_PARAMETER_ID]: selectedBandIndex,
   };
 }
 
-function injectActiveRoiCornersIfPresent(
+function injectToneCurveRegionIfPresent(
   parameterValues: ParameterValuesById,
-  roi: ViewportRoi | null,
+  region: ViewportRoi | null,
 ): ParameterValuesById {
-  if (!roi) return Object.freeze({ ...parameterValues });
-  return Object.freeze({
-    ...parameterValues,
-    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0]: roi.imagePixelX0,
-    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0]: roi.imagePixelY0,
-    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1]: roi.imagePixelX1,
-    [BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1]: roi.imagePixelY1,
-  });
+  if (!region) return Object.freeze({ ...parameterValues });
+  return injectOperationRegionCorners(parameterValues, region, TONE_CURVE_REGION_PARAMETER_IDS);
 }
 
-function createBlackWhitePointsSourceTransform(): ViewportActionSourceTransform {
+function serializeToneCurveAnchors(anchors: ReadonlyArray<ToneCurveAnchor>): string {
+  return JSON.stringify(anchors.map((anchor) => [anchor.input, anchor.output]));
+}
+
+function createToneCurveSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
     if (source.kind !== "raster") {
       throw new Error(
-        "Stretch Contrast only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+        "Tone Curve only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
       );
     }
-    const bandIndex = readBlackWhitePointsBandIndex(parameterValues);
-    const points = readBlackWhitePointRangeOrThrow(parameterValues);
-    const region = readBlackWhitePointsRegionIfPresent(parameterValues);
-    const raster = applyBlackWhitePointsToRasterBand(source.raster, bandIndex, points, region ? { region } : {});
+    const bandIndex = readToneCurveBandIndex(parameterValues);
+    const anchors = readToneCurveAnchorsOrThrow(parameterValues);
+    const region = readToneCurveRegionIfPresent(parameterValues);
+    const raster = applyToneCurveToRasterBand(source.raster, bandIndex, anchors, region ? { region } : {});
     return { kind: "raster", raster };
   };
 }
 
-function readBlackWhitePointsBandIndex(parameterValues: ParameterValuesById): number {
-  const raw = parameterValues[BLACK_WHITE_POINTS_BAND_PARAMETER_ID];
+function readToneCurveBandIndex(parameterValues: ParameterValuesById): number {
+  const raw = parameterValues[TONE_CURVE_BAND_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
   return Math.max(0, Math.round(raw));
 }
 
-function readBlackWhitePointRangeOrThrow(
+function readToneCurveAnchorsOrThrow(
   parameterValues: ParameterValuesById,
-): { readonly black: number; readonly white: number } {
-  const black = parameterValues[BLACK_WHITE_POINTS_BLACK_PARAMETER_ID];
-  const white = parameterValues[BLACK_WHITE_POINTS_WHITE_PARAMETER_ID];
-  if (typeof black !== "number" || typeof white !== "number") {
-    throw new Error("Stretch Contrast needs black and white points. Drag the histogram markers first.");
+): ReadonlyArray<ToneCurveAnchor> {
+  const raw = parameterValues[TONE_CURVE_ANCHORS_PARAMETER_ID];
+  if (typeof raw !== "string") {
+    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
   }
-  return { black, white };
+  const pairs = JSON.parse(raw) as ReadonlyArray<readonly [number, number]>;
+  return pairs.map(([input, output]) => ({ input, output }));
 }
 
-function readBlackWhitePointsRegionIfPresent(
+function readToneCurveRegionIfPresent(
   parameterValues: ParameterValuesById,
 ): ViewportRoi | null {
-  const x0 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X0];
-  const y0 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y0];
-  const x1 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_X1];
-  const y1 = parameterValues[BLACK_WHITE_POINTS_REGION_PARAMETER_ID_Y1];
+  const x0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x0];
+  const y0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y0];
+  const x1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x1];
+  const y1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y1];
   if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
   return {
     imagePixelX0: Math.round(x0 as number),
@@ -709,17 +710,13 @@ function readBlackWhitePointsRegionIfPresent(
   };
 }
 
-function formatBlackWhitePointsAppliedLabel(parameterValues: ParameterValuesById): string {
-  const points = readBlackWhitePointRangeOrThrow(parameterValues);
-  const label = `Stretch contrast [${formatPointValue(points.black)}, ${formatPointValue(points.white)}]`;
-  const region = readBlackWhitePointsRegionIfPresent(parameterValues);
+function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): string {
+  const anchors = readToneCurveAnchorsOrThrow(parameterValues);
+  const label = `Tone curve (${anchors.length} points)`;
+  const region = readToneCurveRegionIfPresent(parameterValues);
   if (!region) return label;
   const canonical = canonicalizeViewportRoiCorners(region);
   return `${label} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
-}
-
-function formatPointValue(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(3);
 }
 
 const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID = "brightnessPercent";
@@ -1397,7 +1394,7 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   CROP_TO_REGION_ACTION,
   FLAT_FIELD_ACTION,
   SPECTRALON_ACTION,
-  BLACK_WHITE_POINTS_ACTION,
+  TONE_CURVE_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,

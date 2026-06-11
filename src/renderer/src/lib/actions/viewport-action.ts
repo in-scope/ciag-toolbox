@@ -1,4 +1,4 @@
-import type { BlackWhitePointSelection } from "@/lib/image/black-white-point-selection";
+import type { ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
@@ -22,7 +22,7 @@ export interface ViewportRenderingState {
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly operationRegion: ViewportRoi | null;
-  readonly blackWhitePoints: BlackWhitePointSelection | null;
+  readonly toneCurveAnchors: ReadonlyArray<ToneCurveAnchor> | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -38,7 +38,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
   operationRegion: null,
-  blackWhitePoints: null,
+  toneCurveAnchors: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
