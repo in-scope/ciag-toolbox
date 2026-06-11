@@ -71,11 +71,12 @@ import {
   type SliderParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValue, ParameterValuesById } from "./parameter-schema";
-import type {
-  ApplyScope,
-  ViewportAction,
-  ViewportActionSourceTransform,
-} from "./viewport-action";
+import {
+  clearOperationRegionFromState,
+  injectOperationRegionCorners,
+  requireOperationRegionForApply,
+} from "./operation-region";
+import type { ApplyScope, ViewportAction, ViewportActionSourceTransform } from "./viewport-action";
 import { EMPTY_REMOVED_BAND_INDEXES, type ViewportRenderingState } from "./viewport-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -84,6 +85,15 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly icon: RegisteredActionIcon;
   readonly successMessage: string;
   readonly appliedLabel: string;
+  /**
+   * The operation always needs an area; the operation flow makes the user select
+   * one (CT-095) and Apply stays disabled until they do.
+   */
+  readonly requiresOperationRegion?: boolean;
+  /**
+   * The operation can optionally be limited to an area; the user opts in via the
+   * "Apply to" scope selector and then selects the region (CT-095).
+   */
   readonly supportsRoiScope?: boolean;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
@@ -126,8 +136,16 @@ export const BIT_SHIFT_ACTION: RegisteredViewportAction = {
   appliedLabel: "Bit shift",
   formatAppliedLabel: formatBitShiftAppliedLabel,
   prepareParameterValuesForApply: prepareBitShiftParameterValuesForScope,
-  apply: (state) => state,
+  apply: clearOperationRegionFromState,
+  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
   transformSource: createBitShiftSourceTransform(),
+};
+
+const BIT_SHIFT_REGION_PARAMETER_IDS = {
+  x0: BIT_SHIFT_REGION_PARAMETER_ID_X0,
+  y0: BIT_SHIFT_REGION_PARAMETER_ID_Y0,
+  x1: BIT_SHIFT_REGION_PARAMETER_ID_X1,
+  y1: BIT_SHIFT_REGION_PARAMETER_ID_Y1,
 };
 
 function prepareBitShiftParameterValuesForScope(
@@ -136,17 +154,8 @@ function prepareBitShiftParameterValuesForScope(
   applyScope: ApplyScope,
 ): ParameterValuesById {
   if (applyScope !== "roi") return rawParameterValues;
-  const roi = sourceRenderingState.roi;
-  if (!roi) {
-    throw new Error("Bit Shift to region requires an active region. Draw a region first.");
-  }
-  return Object.freeze({
-    ...rawParameterValues,
-    [BIT_SHIFT_REGION_PARAMETER_ID_X0]: roi.imagePixelX0,
-    [BIT_SHIFT_REGION_PARAMETER_ID_Y0]: roi.imagePixelY0,
-    [BIT_SHIFT_REGION_PARAMETER_ID_X1]: roi.imagePixelX1,
-    [BIT_SHIFT_REGION_PARAMETER_ID_Y1]: roi.imagePixelY1,
-  });
+  const region = requireOperationRegionForApply(sourceRenderingState, "Bit Shift");
+  return injectOperationRegionCorners(rawParameterValues, region, BIT_SHIFT_REGION_PARAMETER_IDS);
 }
 
 function createBitShiftSourceTransform(): ViewportActionSourceTransform {
@@ -222,33 +231,33 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   icon: Crop,
   successMessage: "Crop to region applied",
   appliedLabel: "Crop to region",
+  requiresOperationRegion: true,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
-  prepareParameterValuesForApply: prepareCropParameterValuesFromActiveRoi,
-  isAvailableForActiveViewport: (state) => state.roi !== null,
-  apply: clearRoiAfterCropApply,
-  clearConsumedSourceStateAfterApply: clearRoiAfterCropApply,
+  prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
+  apply: clearRegionAndStaleInspectionRoiAfterCrop,
+  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
   transformSource: createCropToRegionSourceTransform(),
 };
 
-function clearRoiAfterCropApply(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, roi: null };
+function clearRegionAndStaleInspectionRoiAfterCrop(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return { ...state, operationRegion: null, roi: null };
 }
 
-function prepareCropParameterValuesFromActiveRoi(
+const CROP_REGION_PARAMETER_IDS = {
+  x0: CROP_PARAMETER_ID_X0,
+  y0: CROP_PARAMETER_ID_Y0,
+  x1: CROP_PARAMETER_ID_X1,
+  y1: CROP_PARAMETER_ID_Y1,
+};
+
+function prepareCropParameterValuesFromOperationRegion(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
 ): ParameterValuesById {
-  const roi = sourceRenderingState.roi;
-  if (!roi) {
-    throw new Error("Crop to Region requires an active region. Draw a region first.");
-  }
-  return Object.freeze({
-    ...rawParameterValues,
-    [CROP_PARAMETER_ID_X0]: roi.imagePixelX0,
-    [CROP_PARAMETER_ID_Y0]: roi.imagePixelY0,
-    [CROP_PARAMETER_ID_X1]: roi.imagePixelX1,
-    [CROP_PARAMETER_ID_Y1]: roi.imagePixelY1,
-  });
+  const region = requireOperationRegionForApply(sourceRenderingState, "Crop to Region");
+  return injectOperationRegionCorners(rawParameterValues, region, CROP_REGION_PARAMETER_IDS);
 }
 
 function createCropToRegionSourceTransform(): ViewportActionSourceTransform {
@@ -491,28 +500,27 @@ export const SPECTRALON_ACTION: RegisteredViewportAction = {
   parameters: [SPECTRALON_REFLECTANCE_PARAMETER_SCHEMA],
   successMessage: "Spectralon reflectance calibration applied",
   appliedLabel: "Spectralon calibration",
+  requiresOperationRegion: true,
   formatAppliedLabel: formatSpectralonAppliedLabel,
-  prepareParameterValuesForApply: prepareSpectralonBrightRegionFromActiveRoi,
-  isAvailableForActiveViewport: (state) => state.roi !== null,
-  apply: (state) => state,
+  prepareParameterValuesForApply: prepareSpectralonBrightRegionFromOperationRegion,
+  apply: clearOperationRegionFromState,
+  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
   transformSource: createSpectralonSourceTransform(),
 };
 
-function prepareSpectralonBrightRegionFromActiveRoi(
+const SPECTRALON_BRIGHT_REGION_PARAMETER_IDS = {
+  x0: SPECTRALON_BRIGHT_PARAMETER_ID_X0,
+  y0: SPECTRALON_BRIGHT_PARAMETER_ID_Y0,
+  x1: SPECTRALON_BRIGHT_PARAMETER_ID_X1,
+  y1: SPECTRALON_BRIGHT_PARAMETER_ID_Y1,
+};
+
+function prepareSpectralonBrightRegionFromOperationRegion(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
 ): ParameterValuesById {
-  const roi = sourceRenderingState.roi;
-  if (!roi) {
-    throw new Error("Spectralon Calibration requires a bright-target region. Draw a region first.");
-  }
-  return Object.freeze({
-    ...rawParameterValues,
-    [SPECTRALON_BRIGHT_PARAMETER_ID_X0]: roi.imagePixelX0,
-    [SPECTRALON_BRIGHT_PARAMETER_ID_Y0]: roi.imagePixelY0,
-    [SPECTRALON_BRIGHT_PARAMETER_ID_X1]: roi.imagePixelX1,
-    [SPECTRALON_BRIGHT_PARAMETER_ID_Y1]: roi.imagePixelY1,
-  });
+  const region = requireOperationRegionForApply(sourceRenderingState, "Spectralon Calibration");
+  return injectOperationRegionCorners(rawParameterValues, region, SPECTRALON_BRIGHT_REGION_PARAMETER_IDS);
 }
 
 function createSpectralonSourceTransform(): ViewportActionSourceTransform {
@@ -580,28 +588,38 @@ export const BLACK_WHITE_POINTS_ACTION: RegisteredViewportAction = {
   icon: Contrast,
   successMessage: "Black/white-point stretch applied",
   appliedLabel: "Stretch contrast",
+  supportsRoiScope: true,
   formatAppliedLabel: formatBlackWhitePointsAppliedLabel,
   prepareParameterValuesForApply: prepareBlackWhitePointsParameterValues,
   isAvailableForActiveViewport: (state) => state.blackWhitePoints !== null,
   apply: clearBlackWhitePointsAfterApply,
-  clearConsumedSourceStateAfterApply: clearBlackWhitePointsAfterApply,
+  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
   transformSource: createBlackWhitePointsSourceTransform(),
 };
 
 function clearBlackWhitePointsAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, blackWhitePoints: null };
+  return { ...state, blackWhitePoints: null, operationRegion: null };
 }
 
 function prepareBlackWhitePointsParameterValues(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
+  applyScope: ApplyScope,
 ): ParameterValuesById {
   const points = sourceRenderingState.blackWhitePoints;
   if (!points) {
     throw new Error("Stretch Contrast needs black and white points. Drag the histogram markers first.");
   }
   const withPoints = withBlackWhitePointAndBandValues(rawParameterValues, points, sourceRenderingState.selectedBandIndex);
-  return injectActiveRoiCornersIfPresent(withPoints, sourceRenderingState.roi);
+  return injectActiveRoiCornersIfPresent(withPoints, resolveBlackWhitePointsRegion(sourceRenderingState, applyScope));
+}
+
+function resolveBlackWhitePointsRegion(
+  sourceRenderingState: ViewportRenderingState,
+  applyScope: ApplyScope,
+): ViewportRoi | null {
+  if (applyScope !== "roi") return null;
+  return requireOperationRegionForApply(sourceRenderingState, "Stretch Contrast");
 }
 
 function withBlackWhitePointAndBandValues(

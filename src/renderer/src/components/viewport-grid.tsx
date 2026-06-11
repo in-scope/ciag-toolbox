@@ -31,6 +31,7 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
+import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
@@ -178,17 +179,19 @@ function useViewportCellInteractionSettings(
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
+  const regionRequest = useRegionRequest();
   const { getPreviewSourceForViewport } = useFalseColorPreview();
   const { removeBand } = useViewportBandRemoval();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
+  const isOperationRegionRequestActive = regionRequest.isRegionRequestActiveForViewport(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
   const handleClose = closing.hasContent(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
-  const handleCommitRoi = useCallback(
+  const handleCommitInspectionRoi = useCallback(
     (roi: ViewportRoi) => {
       const roiSpectrum = buildPinnedRoiSpectrumFromRegion(content, roi);
       setRenderingState(cellIndex, {
@@ -202,6 +205,16 @@ function useViewportCellInteractionSettings(
     },
     [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
   );
+  const handleCommitOperationRegion = useCallback(
+    (region: ViewportRoi) => {
+      setRenderingState(cellIndex, { ...renderingState, operationRegion: region });
+      regionRequest.endRegionRequest();
+    },
+    [cellIndex, renderingState, setRenderingState, regionRequest],
+  );
+  const handleCommitRoi = isOperationRegionRequestActive
+    ? handleCommitOperationRegion
+    : handleCommitInspectionRoi;
   const handlePinPixelSpectrum = useCallback(
     (imageX: number, imageY: number) => {
       const next = buildPinnedPixelSpectrumFromImagePoint(content, imageX, imageY);
@@ -242,8 +255,8 @@ function useViewportCellInteractionSettings(
     handleSelectBandIndex,
     handleRemoveBand,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
-    isRegionToolActive,
-    roi: renderingState.roi,
+    isRegionToolActive: isRegionToolActive || isOperationRegionRequestActive,
+    roi: renderingState.operationRegion ?? renderingState.roi,
     handleCommitRoi,
     handlePinPixelSpectrum,
   };

@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   BLACK_WHITE_POINTS_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
+  CROP_TO_REGION_ACTION,
   FALSE_COLOR_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
   RGB_TO_GRAYSCALE_ACTION,
   ROTATE_REFLECT_ACTION,
+  SPECTRALON_ACTION,
 } from "./registered-actions";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -135,13 +137,67 @@ describe("BLACK_WHITE_POINTS_ACTION", () => {
     expect(Array.from((result as { raster: RasterImage }).raster.bandPixels[0]!)).toEqual([0, 128, 255, 255]);
   });
 
-  it("records the two point values and the ROI in the applied label", () => {
-    const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
-    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi, blackWhitePoints: { black: 10, white: 200 } };
-    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+  it("records the two point values and the per-operation region in the applied label", () => {
+    const operationRegion = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      operationRegion,
+      blackWhitePoints: { black: 10, white: 200 },
+    };
+    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "roi");
     expect(BLACK_WHITE_POINTS_ACTION.formatAppliedLabel!(prepared)).toBe(
       "Stretch contrast [10, 200] in (1, 2) - (5, 6)",
     );
+  });
+
+  it("ignores a stale inspection ROI and stretches the whole band when scope is whole-image", () => {
+    const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi, blackWhitePoints: { black: 10, white: 200 } };
+    const prepared = BLACK_WHITE_POINTS_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(BLACK_WHITE_POINTS_ACTION.formatAppliedLabel!(prepared)).toBe("Stretch contrast [10, 200]");
+  });
+});
+
+describe("region-requesting operations (CT-095)", () => {
+  const operationRegion = { imagePixelX0: 2, imagePixelY0: 3, imagePixelX1: 7, imagePixelY1: 8 };
+  const staleInspectionRoi = { imagePixelX0: 90, imagePixelY0: 90, imagePixelX1: 95, imagePixelY1: 95 };
+
+  it("crop is always available to open: it requests its region in-flow, not from a pre-existing ROI", () => {
+    expect(CROP_TO_REGION_ACTION.isAvailableForActiveViewport).toBeUndefined();
+    expect(CROP_TO_REGION_ACTION.requiresOperationRegion).toBe(true);
+  });
+
+  it("crop reads the per-operation region and ignores a stale inspection ROI", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion };
+    const prepared = CROP_TO_REGION_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(prepared)).toBe("Crop to (2, 3) - (7, 8)");
+  });
+
+  it("crop rejects apply when no per-operation region was selected, even if an inspection ROI exists", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion: null };
+    expect(() => CROP_TO_REGION_ACTION.prepareParameterValuesForApply!({}, state, "whole-image")).toThrow(
+      /needs a region/,
+    );
+  });
+
+  it("crop clears the per-operation region and the now-out-of-bounds inspection ROI on the cropped result", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion };
+    const after = CROP_TO_REGION_ACTION.apply(state, {});
+    expect(after.operationRegion).toBeNull();
+    expect(after.roi).toBeNull();
+  });
+
+  it("crop keeps the untouched source's inspection ROI when applied to a duplicate", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion };
+    const after = CROP_TO_REGION_ACTION.clearConsumedSourceStateAfterApply!(state);
+    expect(after.operationRegion).toBeNull();
+    expect(after.roi).toEqual(staleInspectionRoi);
+  });
+
+  it("spectralon reads its bright-target region from the per-operation region, ignoring the inspection ROI", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion };
+    const prepared = SPECTRALON_ACTION.prepareParameterValuesForApply!({ reflectance: 0.99 }, state, "whole-image");
+    expect(SPECTRALON_ACTION.formatAppliedLabel!(prepared)).toContain("(2, 3) - (7, 8)");
   });
 });
 

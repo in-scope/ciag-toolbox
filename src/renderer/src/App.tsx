@@ -137,6 +137,11 @@ import {
   useRegionTool,
 } from "@/state/region-tool-context";
 import {
+  RegionRequestProvider,
+  useRegionRequest,
+  type RegionRequestApi,
+} from "@/state/region-request-context";
+import {
   FalseColorPreviewProvider,
   useFalseColorPreview,
   type FalseColorPreview,
@@ -198,6 +203,7 @@ export function App(): JSX.Element {
       <ViewportSelectionProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
+            <RegionRequestProvider>
             <FalseColorPreviewProvider>
               <PixelReadoutProvider>
                 <BusyStateProvider>
@@ -210,6 +216,7 @@ export function App(): JSX.Element {
                 </BusyStateProvider>
               </PixelReadoutProvider>
             </FalseColorPreviewProvider>
+            </RegionRequestProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
       </ViewportSelectionProvider>
@@ -244,6 +251,7 @@ function ApplicationShell(): JSX.Element {
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
   const regionTool = useRegionTool();
+  const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
   const [activeActionParameterValues, setActiveActionParameterValues] =
     useState<ParameterValuesById>(NO_PARAMETER_VALUES);
@@ -268,8 +276,6 @@ function ApplicationShell(): JSX.Element {
     selectViewportFromClick,
     busyRegistrar,
   });
-  const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
-  const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
   useMenuOpenImageTriggersHandler(handleOpenImagesRequested);
   const handleSaveImageRequested = useSaveImageRequestHandler({
     imagesByIndexRef,
@@ -326,14 +332,16 @@ function ApplicationShell(): JSX.Element {
     selectedIndicesRef: useLatestRef(selectedIndices),
     renderingApi,
   });
-  const handleApplyAction = (options: ToolOptionsApplyOptions) =>
-    runApplyActionFromPanel(
-      activeAction,
-      singleSelectedSource,
-      options,
-      applyActionFlowBindings,
-      setActiveAction,
-    );
+  const regionRequestHandlers = buildToolPanelRegionRequestHandlers({
+    activeSourceIndex: singleSelectedSource?.index ?? null,
+    regionRequest,
+    renderingApi,
+    setActiveAction,
+  });
+  const handleApplyAction = (options: ToolOptionsApplyOptions) => {
+    regionRequest.endRegionRequest();
+    runApplyActionFromPanel(activeAction, singleSelectedSource, options, applyActionFlowBindings, setActiveAction);
+  };
   const duplicationApi = useViewportDuplicationApi({
     gridLayout,
     cellCount,
@@ -369,7 +377,7 @@ function ApplicationShell(): JSX.Element {
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
         registeredActions={REGISTERED_VIEWPORT_ACTIONS}
-        onInvokeAction={handleInvokeAction}
+        onInvokeAction={regionRequestHandlers.openActionPanel}
         getActionAvailability={(action) =>
           deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi)
         }
@@ -392,9 +400,11 @@ function ApplicationShell(): JSX.Element {
                 activeAction={activeAction}
                 sourceViewport={singleSelectedSource?.summary ?? null}
                 rightPanelActiveSource={rightPanelActiveSource}
-                onCancelAction={handleCancelAction}
+                onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
                 onActiveActionParametersChange={setActiveActionParameterValues}
+                onBeginRegionRequest={regionRequestHandlers.beginRegionRequest}
+                onClearOperationRegion={regionRequestHandlers.clearOperationRegion}
               />
             </ViewportBandRemovalProvider>
           </ViewportReimportProvider>
@@ -477,6 +487,8 @@ interface ApplicationStageContentProps {
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
   onActiveActionParametersChange: (values: ParameterValuesById) => void;
+  onBeginRegionRequest: () => void;
+  onClearOperationRegion: () => void;
 }
 
 function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Element {
@@ -507,6 +519,8 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
         onParametersChange={props.onActiveActionParametersChange}
+        onBeginRegionRequest={props.onBeginRegionRequest}
+        onClearOperationRegion={props.onClearOperationRegion}
       />
     );
   }
@@ -1378,14 +1392,58 @@ function formatClosedSingleViewportMessage(index: number, fileName: string): str
   return `Closed viewport ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
-function useOpenPanelForActionHandler(
-  setActiveAction: SetActiveAction,
-): (action: RegisteredViewportAction) => void {
-  return useCallback((action) => setActiveAction(action), [setActiveAction]);
+interface ToolPanelRegionRequestHandlerInputs {
+  readonly activeSourceIndex: number | null;
+  readonly regionRequest: RegionRequestApi;
+  readonly renderingApi: ViewportRenderingApi;
+  readonly setActiveAction: SetActiveAction;
 }
 
-function useCloseToolPanelHandler(setActiveAction: SetActiveAction): () => void {
-  return useCallback(() => setActiveAction(null), [setActiveAction]);
+interface ToolPanelRegionRequestHandlers {
+  readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly closeActionPanel: () => void;
+  readonly beginRegionRequest: () => void;
+  readonly clearOperationRegion: () => void;
+}
+
+function buildToolPanelRegionRequestHandlers(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): ToolPanelRegionRequestHandlers {
+  return {
+    openActionPanel: (action) => openToolPanelClearingAnyRegionRequest(action, inputs),
+    closeActionPanel: () => closeToolPanelClearingAnyRegionRequest(inputs),
+    beginRegionRequest: () => beginOperationRegionRequestForActiveSource(inputs),
+    clearOperationRegion: () => clearOperationRegionOnActiveSource(inputs),
+  };
+}
+
+function openToolPanelClearingAnyRegionRequest(
+  action: RegisteredViewportAction,
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  inputs.regionRequest.endRegionRequest();
+  clearOperationRegionOnActiveSource(inputs);
+  inputs.setActiveAction(action);
+}
+
+function closeToolPanelClearingAnyRegionRequest(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  inputs.regionRequest.endRegionRequest();
+  clearOperationRegionOnActiveSource(inputs);
+  inputs.setActiveAction(null);
+}
+
+function beginOperationRegionRequestForActiveSource(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  if (inputs.activeSourceIndex === null) return;
+  inputs.regionRequest.beginRegionRequest(inputs.activeSourceIndex);
+}
+
+function clearOperationRegionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!state.operationRegion) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, operationRegion: null });
 }
 
 interface ApplyActionFlowBindingsInputs {
@@ -1430,7 +1488,7 @@ function deriveSingleSelectedSource(
     summary: {
       viewportNumber: getViewportNumberFromIndex(onlyIndex),
       fileName: content.fileName,
-      hasRoi: renderingApi.getRenderingState(onlyIndex).roi !== null,
+      operationRegion: renderingApi.getRenderingState(onlyIndex).operationRegion,
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
     },
   };
@@ -1839,8 +1897,6 @@ function deriveActionAvailabilityForActiveViewport(
 }
 
 function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
-  if (action.id === "crop-to-region") return "draw a region first";
-  if (action.id === "spectralon") return "draw a bright-target region first";
   if (action.id === "black-white-points") return "drag the histogram black/white markers first";
   return "not available for this viewport";
 }

@@ -21,6 +21,7 @@ export interface ViewportRenderingState {
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
+  readonly operationRegion: ViewportRoi | null;
   readonly blackWhitePoints: BlackWhitePointSelection | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
@@ -36,6 +37,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
+  operationRegion: null,
   blackWhitePoints: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,

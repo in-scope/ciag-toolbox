@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { SquareDashedMousePointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -16,6 +16,10 @@ import {
   DEFAULT_APPLY_SCOPE,
   type ApplyScope,
 } from "@/lib/actions/viewport-action";
+import {
+  canonicalizeViewportRoiCorners,
+  type ViewportRoi,
+} from "@/lib/image/viewport-roi";
 
 export interface ToolOptionsApplyOptions {
   readonly openInNewViewport: boolean;
@@ -26,7 +30,7 @@ export interface ToolOptionsApplyOptions {
 export interface ToolOptionsSourceViewport {
   readonly viewportNumber: number;
   readonly fileName: string;
-  readonly hasRoi: boolean;
+  readonly operationRegion: ViewportRoi | null;
   readonly sourceBandCount: number | null;
 }
 
@@ -36,6 +40,8 @@ interface ToolOptionsPanelProps {
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
+  onBeginRegionRequest?: () => void;
+  onClearOperationRegion?: () => void;
 }
 
 export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | null {
@@ -47,6 +53,8 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
       onCancel={props.onCancel}
       onApply={props.onApply}
       onParametersChange={props.onParametersChange}
+      onBeginRegionRequest={props.onBeginRegionRequest}
+      onClearOperationRegion={props.onClearOperationRegion}
     />
   );
 }
@@ -57,6 +65,8 @@ interface ToolOptionsPanelShellProps {
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
+  onBeginRegionRequest?: () => void;
+  onClearOperationRegion?: () => void;
 }
 
 function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
@@ -74,14 +84,12 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
     setApplyScope,
   );
   useReportParameterValuesToParent(parameterValues, props.onParametersChange);
-  useResetApplyScopeWhenRegionDisappears(props.sourceViewport, setApplyScope);
   const showApplyScopeSelector = shouldShowApplyScopeSelector(props.action, props.sourceViewport);
+  const effectiveApplyScope = showApplyScopeSelector ? applyScope : DEFAULT_APPLY_SCOPE;
+  const isRegionRequiredNow = doesActionRequireRegionNow(props.action, effectiveApplyScope);
+  const operationRegion = props.sourceViewport?.operationRegion ?? null;
   const handleApply = () =>
-    props.onApply({
-      openInNewViewport,
-      parameterValues,
-      applyScope: showApplyScopeSelector ? applyScope : DEFAULT_APPLY_SCOPE,
-    });
+    props.onApply({ openInNewViewport, parameterValues, applyScope: effectiveApplyScope });
   return (
     <aside aria-label={`${props.action.label} options`} className={PANEL_CLASSES}>
       <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
@@ -95,13 +103,17 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
         showApplyScopeSelector={showApplyScopeSelector}
         applyScope={applyScope}
         onChangeApplyScope={setApplyScope}
+        showRegionPicker={isRegionRequiredNow}
+        operationRegion={operationRegion}
+        onBeginRegionRequest={props.onBeginRegionRequest}
+        onClearOperationRegion={props.onClearOperationRegion}
       />
       <ToolOptionsPanelFooter
         openInNewViewport={openInNewViewport}
         onChangeOpenInNewViewport={setOpenInNewViewport}
         onCancel={props.onCancel}
         onApply={handleApply}
-        canApply={props.sourceViewport !== null}
+        canApply={computeWhetherApplyIsAllowed(props.sourceViewport, isRegionRequiredNow, operationRegion)}
       />
     </aside>
   );
@@ -112,8 +124,25 @@ function shouldShowApplyScopeSelector(
   sourceViewport: ToolOptionsSourceViewport | null,
 ): boolean {
   if (!action.supportsRoiScope) return false;
-  if (!sourceViewport) return false;
-  return sourceViewport.hasRoi;
+  return sourceViewport !== null;
+}
+
+function doesActionRequireRegionNow(
+  action: RegisteredViewportAction,
+  applyScope: ApplyScope,
+): boolean {
+  if (action.requiresOperationRegion) return true;
+  return Boolean(action.supportsRoiScope) && applyScope === "roi";
+}
+
+function computeWhetherApplyIsAllowed(
+  sourceViewport: ToolOptionsSourceViewport | null,
+  isRegionRequiredNow: boolean,
+  operationRegion: ViewportRoi | null,
+): boolean {
+  if (sourceViewport === null) return false;
+  if (isRegionRequiredNow && operationRegion === null) return false;
+  return true;
 }
 
 const PANEL_CLASSES =
@@ -146,16 +175,6 @@ function useReportParameterValuesToParent(
   useEffect(() => {
     onParametersChange?.(parameterValues);
   }, [parameterValues, onParametersChange]);
-}
-
-function useResetApplyScopeWhenRegionDisappears(
-  sourceViewport: ToolOptionsSourceViewport | null,
-  setApplyScope: (scope: ApplyScope) => void,
-): void {
-  const hasRoi = sourceViewport?.hasRoi ?? false;
-  useEffect(() => {
-    if (!hasRoi) setApplyScope(DEFAULT_APPLY_SCOPE);
-  }, [hasRoi, setApplyScope]);
 }
 
 function withParameterValueAtId(
@@ -201,6 +220,10 @@ interface PanelBodyProps {
   showApplyScopeSelector: boolean;
   applyScope: ApplyScope;
   onChangeApplyScope: (next: ApplyScope) => void;
+  showRegionPicker: boolean;
+  operationRegion: ViewportRoi | null;
+  onBeginRegionRequest?: () => void;
+  onClearOperationRegion?: () => void;
 }
 
 function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
@@ -220,6 +243,75 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
           applyScope={props.applyScope}
           onChangeApplyScope={props.onChangeApplyScope}
         />
+      ) : null}
+      {props.showRegionPicker ? (
+        <OperationRegionPickerSection
+          operationRegion={props.operationRegion}
+          onBeginRegionRequest={props.onBeginRegionRequest}
+          onClearOperationRegion={props.onClearOperationRegion}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+interface OperationRegionPickerSectionProps {
+  operationRegion: ViewportRoi | null;
+  onBeginRegionRequest?: () => void;
+  onClearOperationRegion?: () => void;
+}
+
+function OperationRegionPickerSection(props: OperationRegionPickerSectionProps): JSX.Element {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-medium text-muted-foreground">Operation region</span>
+      <OperationRegionReadout operationRegion={props.operationRegion} />
+      <OperationRegionPickerButtons
+        hasRegion={props.operationRegion !== null}
+        onBeginRegionRequest={props.onBeginRegionRequest}
+        onClearOperationRegion={props.onClearOperationRegion}
+      />
+    </div>
+  );
+}
+
+function OperationRegionReadout({
+  operationRegion,
+}: {
+  operationRegion: ViewportRoi | null;
+}): JSX.Element {
+  if (!operationRegion) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Select a region on the image for this operation.
+      </p>
+    );
+  }
+  const canonical = canonicalizeViewportRoiCorners(operationRegion);
+  return (
+    <p className="text-sm text-foreground">
+      {`(${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`}
+    </p>
+  );
+}
+
+interface OperationRegionPickerButtonsProps {
+  hasRegion: boolean;
+  onBeginRegionRequest?: () => void;
+  onClearOperationRegion?: () => void;
+}
+
+function OperationRegionPickerButtons(props: OperationRegionPickerButtonsProps): JSX.Element {
+  return (
+    <div className="flex gap-2">
+      <Button type="button" variant="outline" size="sm" onClick={props.onBeginRegionRequest}>
+        <SquareDashedMousePointer className="size-4" />
+        {props.hasRegion ? "Reselect region" : "Select region"}
+      </Button>
+      {props.hasRegion ? (
+        <Button type="button" variant="ghost" size="sm" onClick={props.onClearOperationRegion}>
+          Clear
+        </Button>
       ) : null}
     </div>
   );
