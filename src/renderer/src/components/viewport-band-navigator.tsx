@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent, type WheelEvent } from "react";
 
 import { useDebouncedBandSelection } from "@/components/use-debounced-band-selection";
@@ -17,6 +17,7 @@ interface ViewportBandNavigatorProps {
   bandCount: number;
   selectedBandIndex: number;
   onSelectBandIndex: (bandIndex: number) => void;
+  onRemoveBand?: (bandIndex: number) => void;
 }
 
 export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.Element {
@@ -56,7 +57,37 @@ export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.El
         onCommitBandIndex={selection.commitBandSelectionImmediately}
       />
       <span className="shrink-0 font-mono text-xs text-muted-foreground">/ {props.bandCount}</span>
+      {props.onRemoveBand ? (
+        <RemoveBandButton
+          bandNumber={displayedBandIndex + 1}
+          disabled={props.bandCount <= 1}
+          onRemove={() => props.onRemoveBand?.(displayedBandIndex)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+interface RemoveBandButtonProps {
+  bandNumber: number;
+  disabled: boolean;
+  onRemove: () => void;
+}
+
+function RemoveBandButton(props: RemoveBandButtonProps): JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={`Remove band ${props.bandNumber}`}
+      title={`Remove band ${props.bandNumber}`}
+      className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+      disabled={props.disabled}
+      onClick={props.onRemove}
+    >
+      <X />
+    </Button>
   );
 }
 

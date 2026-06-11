@@ -57,7 +57,10 @@ import {
   readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
-import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
+import {
+  listKeptBandIndexesFromRemoved,
+  listKeptBandOriginalNumbersAfterRemovingBand,
+} from "@/lib/image/apply-band-keep";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import { getRasterBandOriginalNumber, type RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -143,6 +146,10 @@ import {
   ViewportReimportProvider,
   type ViewportReimportApi,
 } from "@/state/reimport-context";
+import {
+  ViewportBandRemovalProvider,
+  type ViewportBandRemovalApi,
+} from "@/state/band-removal-context";
 import {
   ViewportSelectionProvider,
   useViewportSelection,
@@ -354,6 +361,7 @@ function ApplicationShell(): JSX.Element {
     setRenderingState: renderingApi.setRenderingState,
     busyRegistrar,
   });
+  const bandRemovalApi = useViewportBandRemovalApi(useLatestRef(applyActionFlowBindings));
   return (
     <div className="flex h-full flex-col">
       <Toolbar
@@ -376,17 +384,19 @@ function ApplicationShell(): JSX.Element {
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
           <ViewportReimportProvider value={reimportApi}>
-            <ApplicationStageContent
-              gridLayout={gridLayout}
-              imagesByIndex={imagesByIndex}
-              onOpenImage={handleOpenImagesRequested}
-              activeAction={activeAction}
-              sourceViewport={singleSelectedSource?.summary ?? null}
-              rightPanelActiveSource={rightPanelActiveSource}
-              onCancelAction={handleCancelAction}
-              onApplyAction={handleApplyAction}
-              onActiveActionParametersChange={setActiveActionParameterValues}
-            />
+            <ViewportBandRemovalProvider value={bandRemovalApi}>
+              <ApplicationStageContent
+                gridLayout={gridLayout}
+                imagesByIndex={imagesByIndex}
+                onOpenImage={handleOpenImagesRequested}
+                activeAction={activeAction}
+                sourceViewport={singleSelectedSource?.summary ?? null}
+                rightPanelActiveSource={rightPanelActiveSource}
+                onCancelAction={handleCancelAction}
+                onApplyAction={handleApplyAction}
+                onActiveActionParametersChange={setActiveActionParameterValues}
+              />
+            </ViewportBandRemovalProvider>
           </ViewportReimportProvider>
         </ViewportClosingProvider>
       </ViewportDuplicationProvider>
@@ -1647,6 +1657,44 @@ function invokeBandSubsetActionOnSourceViewport(
     return;
   }
   applyActionInPlaceAtSourceIndex(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
+}
+
+function useViewportBandRemovalApi(
+  bindingsRef: MutableRefObject<ApplyActionFlowBindings>,
+): ViewportBandRemovalApi {
+  return useMemo(
+    () => ({
+      removeBand: (viewportIndex: number, bandIndex: number) =>
+        removeSingleBandFromViewportInPlace(viewportIndex, bandIndex, bindingsRef.current),
+    }),
+    [bindingsRef],
+  );
+}
+
+function removeSingleBandFromViewportInPlace(
+  viewportIndex: number,
+  bandIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const raster = extractRasterFromContentOrNull(bindings.imagesByIndex.get(viewportIndex) ?? null);
+  const keptBandNumbers = pickKeptBandNumbersAfterSingleRemovalOrNull(raster, bandIndex);
+  if (keptBandNumbers === null) return;
+  invokeBandSubsetActionOnSourceViewport(viewportIndex, keptBandNumbers, false, bindings);
+}
+
+function pickKeptBandNumbersAfterSingleRemovalOrNull(
+  raster: RasterImage | null,
+  removedBandIndex: number,
+): ReadonlyArray<number> | null {
+  if (!raster) {
+    toast.error("Removing a band requires a raster source.");
+    return null;
+  }
+  if (raster.bandCount <= 1) {
+    toast.info("Cannot remove the last remaining band.");
+    return null;
+  }
+  return listKeptBandOriginalNumbersAfterRemovingBand(raster, removedBandIndex);
 }
 
 function setBandSubsetEditModeActiveAtViewport(

@@ -32,6 +32,7 @@ import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
 import { useRegionTool } from "@/state/region-tool-context";
+import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
@@ -131,6 +132,7 @@ function renderViewportCellViewport(
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       selectedBandIndex={settings.selectedBandIndex}
       onSelectBandIndex={settings.handleSelectBandIndex}
+      onRemoveBand={settings.handleRemoveBand}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
@@ -161,6 +163,7 @@ interface ViewportCellInteractionSettings {
   handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
   handleSelectBandIndex: (bandIndex: number) => void;
+  handleRemoveBand: (bandIndex: number) => void;
   lastAppliedOperationLabel: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -176,6 +179,7 @@ function useViewportCellInteractionSettings(
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
   const { getPreviewSourceForViewport } = useFalseColorPreview();
+  const { removeBand } = useViewportBandRemoval();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
@@ -223,6 +227,10 @@ function useViewportCellInteractionSettings(
       setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
     [cellIndex, renderingState, setRenderingState],
   );
+  const handleRemoveBand = useCallback(
+    (bandIndex: number) => removeBand(cellIndex, bandIndex),
+    [cellIndex, removeBand],
+  );
   return {
     isSelected,
     handleClick,
@@ -232,6 +240,7 @@ function useViewportCellInteractionSettings(
     handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,
     handleSelectBandIndex,
+    handleRemoveBand,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
     isRegionToolActive,
     roi: renderingState.roi,

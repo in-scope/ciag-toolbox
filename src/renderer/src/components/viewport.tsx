@@ -43,6 +43,7 @@ interface ViewportProps {
   onToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
   onSelectBandIndex: (bandIndex: number) => void;
+  onRemoveBand?: (bandIndex: number) => void;
   lastAppliedOperationLabel?: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
@@ -121,6 +122,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
             bandCount={getMultiBandSourceBandCount(imageSource)}
             selectedBandIndex={props.selectedBandIndex}
             onSelectBandIndex={props.onSelectBandIndex}
+            onRemoveBand={props.onRemoveBand}
           />
         ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
