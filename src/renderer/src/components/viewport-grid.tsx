@@ -25,6 +25,11 @@ import {
   type PinnedRoiMeanSpectrum,
   type PinnedSpectrum,
 } from "@/lib/image/spectrum-entry";
+import {
+  reduceInspectionRoiSelection,
+  resolveInspectionRoiAfterPlainClick,
+  type ClickedImagePixel,
+} from "@/lib/image/roi-selection-lifecycle";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -138,6 +143,7 @@ function renderViewportCellViewport(
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
       onCommitRoi={settings.handleCommitRoi}
+      onRegionToolPlainClick={settings.handleRegionToolPlainClick}
       onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
@@ -169,6 +175,7 @@ interface ViewportCellInteractionSettings {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   handleCommitRoi: (roi: ViewportRoi) => void;
+  handleRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
 }
 
@@ -193,10 +200,13 @@ function useViewportCellInteractionSettings(
     : undefined;
   const handleCommitInspectionRoi = useCallback(
     (roi: ViewportRoi) => {
-      const roiSpectrum = buildPinnedRoiSpectrumFromRegion(content, roi);
+      const committedRoi = reduceInspectionRoiSelection(renderingState.roi, { kind: "commit", roi });
+      const roiSpectrum = committedRoi
+        ? buildPinnedRoiSpectrumFromRegion(content, committedRoi)
+        : null;
       setRenderingState(cellIndex, {
         ...renderingState,
-        roi,
+        roi: committedRoi,
         pinnedRoiSpectra: roiSpectrum
           ? appendRoiSpectrumKeepingLastTwo(renderingState.pinnedRoiSpectra, roiSpectrum)
           : renderingState.pinnedRoiSpectra,
@@ -204,6 +214,15 @@ function useViewportCellInteractionSettings(
       selectViewportFromClick(cellIndex, { ctrlOrMeta: false, shift: false });
     },
     [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
+  );
+  const handleRegionToolPlainClick = useCallback(
+    (clickedImagePixel: ClickedImagePixel | null) => {
+      if (isOperationRegionRequestActive) return;
+      const nextRoi = resolveInspectionRoiAfterPlainClick(renderingState.roi, clickedImagePixel);
+      if (nextRoi === renderingState.roi) return;
+      setRenderingState(cellIndex, { ...renderingState, roi: nextRoi });
+    },
+    [cellIndex, isOperationRegionRequestActive, renderingState, setRenderingState],
   );
   const handleCommitOperationRegion = useCallback(
     (region: ViewportRoi) => {
@@ -258,6 +277,7 @@ function useViewportCellInteractionSettings(
     isRegionToolActive: isRegionToolActive || isOperationRegionRequestActive,
     roi: renderingState.operationRegion ?? renderingState.roi,
     handleCommitRoi,
+    handleRegionToolPlainClick,
     handlePinPixelSpectrum,
   };
 }

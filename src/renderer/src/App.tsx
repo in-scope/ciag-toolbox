@@ -332,6 +332,11 @@ function ApplicationShell(): JSX.Element {
     selectedIndicesRef: useLatestRef(selectedIndices),
     renderingApi,
   });
+  useRegionToolDeselectClearsInspectionRoi({
+    isRegionToolActive: regionTool.isRegionToolActive,
+    cellCount,
+    renderingApi,
+  });
   const regionRequestHandlers = buildToolPanelRegionRequestHandlers({
     activeSourceIndex: singleSelectedSource?.index ?? null,
     regionRequest,
@@ -1834,6 +1839,36 @@ function clearRoiOnEverySelectedViewport(bindings: EscapeKeyClearRoiBindings): v
     const renderingState = bindings.renderingApi.getRenderingState(index);
     if (!renderingState.roi) continue;
     bindings.renderingApi.setRenderingState(index, { ...renderingState, roi: null });
+  }
+}
+
+interface RegionToolDeselectClearRoiBindings {
+  readonly isRegionToolActive: boolean;
+  readonly cellCount: number;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+function useRegionToolDeselectClearsInspectionRoi(
+  bindings: RegionToolDeselectClearRoiBindings,
+): void {
+  const { isRegionToolActive, cellCount, renderingApi } = bindings;
+  const wasRegionToolActiveRef = useRef(isRegionToolActive);
+  useEffect(() => {
+    if (wasRegionToolActiveRef.current && !isRegionToolActive) {
+      clearInspectionRoiOnEveryViewport(cellCount, renderingApi);
+    }
+    wasRegionToolActiveRef.current = isRegionToolActive;
+  }, [isRegionToolActive, cellCount, renderingApi]);
+}
+
+function clearInspectionRoiOnEveryViewport(
+  cellCount: number,
+  renderingApi: ViewportRenderingApi,
+): void {
+  for (let index = 0; index < cellCount; index += 1) {
+    const renderingState = renderingApi.getRenderingState(index);
+    if (!renderingState.roi) continue;
+    renderingApi.setRenderingState(index, { ...renderingState, roi: null });
   }
 }
 

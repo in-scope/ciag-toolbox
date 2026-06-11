@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { readPixelReadoutBandsAtImagePointOrNull } from "@/lib/image/compute-pixel-readout";
+import type { ClickedImagePixel } from "@/lib/image/roi-selection-lifecycle";
 import {
   canonicalizeViewportRoiCorners,
   clampViewportRoiToImageBounds,
@@ -50,6 +51,7 @@ interface ViewportProps {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   onCommitRoi: (roi: ViewportRoi) => void;
+  onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
   onClose?: () => void;
@@ -80,6 +82,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
     imageSource,
     rendererRef,
     onCommitRoi: props.onCommitRoi,
+    onRegionToolPlainClick: props.onRegionToolPlainClick,
     setInProgressDragRect,
   });
   useDiscardInProgressDragWhenRegionToolDeactivates(
@@ -481,6 +484,7 @@ interface ViewportRoiDrawInputs {
   readonly imageSource: ViewportImageSource | null;
   readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
   readonly onCommitRoi: (roi: ViewportRoi) => void;
+  readonly onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   readonly setInProgressDragRect: (rect: RoiDrawCanvasRect | null) => void;
 }
 
@@ -528,10 +532,22 @@ function commitRoiFromCanvasRect(
   rect: RoiDrawCanvasRect,
   inputs: ViewportRoiDrawInputs,
 ): void {
-  if (!isCanvasDragLargerThanClickThreshold(rect)) return;
   const renderer = inputs.rendererRef.current;
   const source = inputs.imageSource;
   if (!renderer || !source) return;
+  if (isCanvasDragLargerThanClickThreshold(rect)) {
+    commitRoiFromLargeDrag(rect, renderer, source, inputs);
+    return;
+  }
+  reportRegionToolPlainClick(rect, renderer, inputs);
+}
+
+function commitRoiFromLargeDrag(
+  rect: RoiDrawCanvasRect,
+  renderer: ViewportRenderer,
+  source: ViewportImageSource,
+  inputs: ViewportRoiDrawInputs,
+): void {
   const startImagePixel = renderer.getImagePixelAtCanvasPoint(rect.start.x, rect.start.y);
   const endImagePixel = renderer.getImagePixelAtCanvasPoint(rect.current.x, rect.current.y);
   if (!startImagePixel || !endImagePixel) return;
@@ -547,6 +563,15 @@ function commitRoiFromCanvasRect(
   const canonical = canonicalizeViewportRoiCorners(candidate);
   if (!isViewportRoiLargerThanMinimumSide(canonical)) return;
   inputs.onCommitRoi(canonical);
+}
+
+function reportRegionToolPlainClick(
+  rect: RoiDrawCanvasRect,
+  renderer: ViewportRenderer,
+  inputs: ViewportRoiDrawInputs,
+): void {
+  const imagePixel = renderer.getImagePixelAtCanvasPoint(rect.start.x, rect.start.y);
+  inputs.onRegionToolPlainClick(imagePixel ?? null);
 }
 
 function isCanvasDragLargerThanClickThreshold(rect: RoiDrawCanvasRect): boolean {
