@@ -125,8 +125,44 @@ describe("applyActionInPlaceAtSourceIndex", () => {
   });
 });
 
+describe("runDuplicateAndApplyAtTargetIndex with transformSourceToSecondaryOutputs", () => {
+  it("places each secondary output in its own fresh viewport with its own label and history", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildInvertLikeActionWithSecondaryOutput(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    const secondaryWrite = harness.findLatestRenderingStateWriteAtIndex(SECONDARY_OUTPUT_INDEX);
+    expect(secondaryWrite.lastAppliedOperationLabel).toBe("Normalize to [0,1] (auto for invert)");
+    expect(secondaryWrite.operationHistory.map((entry) => entry.appliedLabel)).toEqual([
+      "Normalize to [0,1] (auto for invert)",
+    ]);
+  });
+
+  it("leaves the source viewport untouched while emitting a secondary output", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildInvertLikeActionWithSecondaryOutput(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalledWith(
+      SOURCE_INDEX,
+      expect.anything(),
+    );
+  });
+});
+
 const SOURCE_INDEX = 0;
 const TARGET_INDEX = 1;
+const SECONDARY_OUTPUT_INDEX = 2;
 
 interface DuplicateFlowHarness {
   readonly bindings: ApplyActionFlowBindings;
@@ -224,6 +260,21 @@ function buildNormalizeAction(): RegisteredViewportAction {
     successMessage: "ok",
     appliedLabel: "Normalized",
     apply: (state: ViewportRenderingState) => ({ ...state, normalizationEnabled: true }),
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildInvertLikeActionWithSecondaryOutput(): RegisteredViewportAction {
+  return {
+    id: "invert",
+    label: "Invert",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Invert",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+    transformSourceToSecondaryOutputs: () => [
+      { source: buildSinglePixelSource(), appliedLabel: "Normalize to [0,1] (auto for invert)" },
+    ],
   } as unknown as RegisteredViewportAction;
 }
 

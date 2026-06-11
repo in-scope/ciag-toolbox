@@ -1,4 +1,5 @@
 import type { RasterImage, RasterSampleFormat, RasterTypedArray } from "@/lib/image/raster-image";
+import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
 import { dataTypeValueRangeForBand } from "@/lib/image/data-type-value-range";
 import {
   mapBandValuesPreservingType,
@@ -46,4 +47,47 @@ export function assertRasterDataRangeIsBoundedForInvert(raster: RasterImage): vo
     "Invert needs a bounded data range. This float image has values outside [0, 1]; " +
       "normalize it to [0, 1] or convert it to a bounded integer data type first.",
   );
+}
+
+// CT-097: invert no longer blocks unbounded data. A bounded raster inverts
+// directly (max - value, per CT-082); an unbounded raster is auto-normalized to
+// [0, 1] first, yielding two outputs: the normalized image and the
+// normalized-then-inverted image.
+export interface DirectInvertOutcome {
+  readonly kind: "direct";
+  readonly inverted: RasterImage;
+}
+
+export interface AutoNormalizedInvertOutcome {
+  readonly kind: "auto-normalized";
+  readonly normalized: RasterImage;
+  readonly normalizedThenInverted: RasterImage;
+}
+
+export type InvertOutcome = DirectInvertOutcome | AutoNormalizedInvertOutcome;
+
+export function planInvertForRaster(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+): InvertOutcome {
+  if (isRasterDataRangeBoundedForInvert(raster)) {
+    return { kind: "direct", inverted: applyInvertToRasterBands(raster, bandIndexes) };
+  }
+  return planAutoNormalizedThenInvert(raster, bandIndexes);
+}
+
+function planAutoNormalizedThenInvert(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+): AutoNormalizedInvertOutcome {
+  const normalized = autoNormalizeUnboundedRasterToUnitRange(raster);
+  return {
+    kind: "auto-normalized",
+    normalized,
+    normalizedThenInverted: applyInvertToRasterBands(normalized, bandIndexes),
+  };
+}
+
+export function autoNormalizeUnboundedRasterToUnitRange(raster: RasterImage): RasterImage {
+  return applyNormalizeToRaster(raster, { scope: "full-cube" });
 }

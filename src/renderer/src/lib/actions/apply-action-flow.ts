@@ -5,7 +5,7 @@ import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-re
 import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
-import type { ViewportRenderingState } from "@/lib/actions/viewport-action";
+import type { ViewportActionOutput, ViewportRenderingState } from "@/lib/actions/viewport-action";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
@@ -56,6 +56,7 @@ function applyActionInPlaceWithoutBusyIndicator(
       sourceIndex,
       bindings,
     );
+    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
@@ -82,6 +83,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
       sourceIndex,
       bindings,
     );
+    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
@@ -123,12 +125,103 @@ function writeAppliedRenderingStateInheritingFromSource(
   );
 }
 
+// CT-097: after the primary result lands, place each secondary output (e.g. the
+// auto-normalized intermediate produced when inverting unbounded data) into its
+// own fresh viewport, expanding the grid if needed. The source is untouched.
+function placeSecondaryActionOutputsInFreshViewports(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  primaryTargetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!action.transformSourceToSecondaryOutputs) return;
+  const sourceContent = bindings.imagesByIndex.get(sourceIndex);
+  if (!sourceContent) return;
+  const outputs = action.transformSourceToSecondaryOutputs(sourceContent.source, parameterValues);
+  placeEachSecondaryOutputInFreshViewport(action, parameterValues, sourceContent, outputs, sourceIndex, primaryTargetIndex, bindings);
+}
+
+function placeEachSecondaryOutputInFreshViewport(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  outputs: ReadonlyArray<ViewportActionOutput>,
+  sourceIndex: number,
+  primaryTargetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const reservedIndexes = new Set<number>([sourceIndex, primaryTargetIndex]);
+  for (const output of outputs) {
+    const targetIndex = reserveFreshViewportIndexExcluding(bindings, reservedIndexes);
+    if (targetIndex === null) return;
+    reservedIndexes.add(targetIndex);
+    placeSecondaryOutputAtIndex(action, parameterValues, sourceContent, output, sourceIndex, targetIndex, bindings);
+  }
+}
+
+function placeSecondaryOutputAtIndex(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  output: ViewportActionOutput,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  bindings.setImagesByIndex((previous) =>
+    writeViewportContentAtIndex(previous, targetIndex, { ...sourceContent, source: output.source }),
+  );
+  writeAppliedRenderingStateWithExplicitLabel(action, parameterValues, output.appliedLabel, sourceIndex, targetIndex, bindings);
+}
+
+function reserveFreshViewportIndexExcluding(
+  bindings: ApplyActionFlowBindings,
+  excludedIndexes: ReadonlySet<number>,
+): number | null {
+  for (let index = 0; index < bindings.cellCount; index += 1) {
+    if (!bindings.imagesByIndex.has(index) && !excludedIndexes.has(index)) return index;
+  }
+  return expandGridForOneMoreSecondaryOutput(bindings);
+}
+
+function expandGridForOneMoreSecondaryOutput(bindings: ApplyActionFlowBindings): number | null {
+  const expanded = getNextLargerGridLayout(bindings.gridLayout);
+  if (expanded === null) return null;
+  bindings.setGridLayout(expanded);
+  return bindings.cellCount;
+}
+
+function writeAppliedRenderingStateWithExplicitLabel(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  appliedLabel: string,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const inherited = bindings.getRenderingState(sourceIndex);
+  bindings.setRenderingState(
+    targetIndex,
+    applyActionAndTagWithExplicitLabel(action, parameterValues, appliedLabel, inherited),
+  );
+}
+
 function applyActionAndTagOperationLabel(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   previous: ViewportRenderingState,
 ): ViewportRenderingState {
   const appliedLabel = resolveAppliedLabelForActionAndParameters(action, parameterValues);
+  return applyActionAndTagWithExplicitLabel(action, parameterValues, appliedLabel, previous);
+}
+
+function applyActionAndTagWithExplicitLabel(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  appliedLabel: string,
+  previous: ViewportRenderingState,
+): ViewportRenderingState {
   const applied = action.apply(previous, parameterValues);
   return {
     ...applied,
@@ -237,6 +330,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
       bindings,
     );
     clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
+    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, targetIndex, bindings);
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));

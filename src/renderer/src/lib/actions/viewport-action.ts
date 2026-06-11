@@ -50,6 +50,19 @@ export type ViewportActionSourceTransform = (
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
 
+// CT-097: an operation may emit additional outputs beyond the primary in-place /
+// duplicated result. Each secondary output is placed in its own fresh viewport
+// and carries its own applied label so the audit trail records the extra step.
+export interface ViewportActionOutput {
+  readonly source: ViewportImageSource;
+  readonly appliedLabel: string;
+}
+
+export type ViewportActionSecondaryOutputsTransform = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => ReadonlyArray<ViewportActionOutput>;
+
 export type ApplyScope = "whole-image" | "roi";
 
 export const DEFAULT_APPLY_SCOPE: ApplyScope = "whole-image";

@@ -30,8 +30,9 @@ import {
   type GeometricTransform,
 } from "@/lib/image/apply-geometric-transform";
 import {
-  applyInvertToRasterBands,
-  assertRasterDataRangeIsBoundedForInvert,
+  autoNormalizeUnboundedRasterToUnitRange,
+  isRasterDataRangeBoundedForInvert,
+  planInvertForRaster,
 } from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
 import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
@@ -76,7 +77,13 @@ import {
   injectOperationRegionCorners,
   requireOperationRegionForApply,
 } from "./operation-region";
-import type { ApplyScope, ViewportAction, ViewportActionSourceTransform } from "./viewport-action";
+import type {
+  ApplyScope,
+  ViewportAction,
+  ViewportActionOutput,
+  ViewportActionSecondaryOutputsTransform,
+  ViewportActionSourceTransform,
+} from "./viewport-action";
 import { EMPTY_REMOVED_BAND_INDEXES, type ViewportRenderingState } from "./viewport-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -107,6 +114,11 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly clearConsumedSourceStateAfterApply?: (
     sourceRenderingState: ViewportRenderingState,
   ) => ViewportRenderingState;
+  /**
+   * The operation emits extra outputs alongside its primary result; each is
+   * placed in its own fresh viewport with its own applied label (CT-097).
+   */
+  readonly transformSourceToSecondaryOutputs?: ViewportActionSecondaryOutputsTransform;
 }
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
@@ -863,6 +875,10 @@ const INVERT_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   defaultValue: false,
 };
 
+const AUTO_NORMALIZED_FOR_INVERT_LABEL = "Normalize to [0,1] (auto for invert)";
+
+const NO_SECONDARY_OUTPUTS: ReadonlyArray<ViewportActionOutput> = Object.freeze([]);
+
 export const INVERT_ACTION: RegisteredViewportAction = {
   id: "invert",
   label: "Invert",
@@ -874,6 +890,7 @@ export const INVERT_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: injectSelectedBandIndexForInvert,
   apply: (state) => state,
   transformSource: createInvertSourceTransform(),
+  transformSourceToSecondaryOutputs: createInvertSecondaryOutputsTransform(),
 };
 
 function injectSelectedBandIndexForInvert(
@@ -888,15 +905,39 @@ function injectSelectedBandIndexForInvert(
 
 function createInvertSourceTransform(): ViewportActionSourceTransform {
   return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Invert only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
-      );
-    }
-    assertRasterDataRangeIsBoundedForInvert(source.raster);
+    if (source.kind !== "raster") throw invertRequiresRasterSourceError();
     const bandIndexes = resolveInvertBandIndexes(parameterValues, source.raster);
-    return { kind: "raster", raster: applyInvertToRasterBands(source.raster, bandIndexes) };
+    return { kind: "raster", raster: resolveInvertPrimaryRaster(source.raster, bandIndexes) };
   };
+}
+
+function resolveInvertPrimaryRaster(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+): RasterImage {
+  const outcome = planInvertForRaster(raster, bandIndexes);
+  return outcome.kind === "direct" ? outcome.inverted : outcome.normalizedThenInverted;
+}
+
+function createInvertSecondaryOutputsTransform(): ViewportActionSecondaryOutputsTransform {
+  return (source) => {
+    if (source.kind !== "raster") return NO_SECONDARY_OUTPUTS;
+    return listAutoNormalizedSecondaryOutputForUnboundedRaster(source.raster);
+  };
+}
+
+function listAutoNormalizedSecondaryOutputForUnboundedRaster(
+  raster: RasterImage,
+): ReadonlyArray<ViewportActionOutput> {
+  if (isRasterDataRangeBoundedForInvert(raster)) return NO_SECONDARY_OUTPUTS;
+  const normalized = autoNormalizeUnboundedRasterToUnitRange(raster);
+  return [{ source: { kind: "raster", raster: normalized }, appliedLabel: AUTO_NORMALIZED_FOR_INVERT_LABEL }];
+}
+
+function invertRequiresRasterSourceError(): Error {
+  return new Error(
+    "Invert only applies to raster images (TIFF, ENVI, raw camera). The active viewport's source is not a raster.",
+  );
 }
 
 function resolveInvertBandIndexes(

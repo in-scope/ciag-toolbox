@@ -247,7 +247,44 @@ describe("INVERT_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([0.25, 0]);
   });
 
-  it("rejects an unbounded float raster with a user-readable error", () => {
+  it("auto-normalizes unbounded float data then inverts instead of rejecting (CT-097)", () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const result = INVERT_ACTION.transformSource!(
+      { kind: "raster", raster: makeTwoBandFloatRaster([0, 2], [0, 1]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    // cube-wide max is 2, so normalize divides by 2 then inverts: 1 - value/2.
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([1, 0]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([1, 0.5]);
+  });
+
+  it("emits the auto-normalized intermediate as a secondary output only when unbounded (CT-097)", () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const bounded = INVERT_ACTION.transformSourceToSecondaryOutputs!(
+      { kind: "raster", raster: makeTwoBandFloatRaster([0, 1], [0, 0.5]) },
+      prepared,
+    );
+    expect(bounded).toHaveLength(0);
+    const unbounded = INVERT_ACTION.transformSourceToSecondaryOutputs!(
+      { kind: "raster", raster: makeTwoBandFloatRaster([0, 2], [0, 1]) },
+      prepared,
+    );
+    expect(unbounded).toHaveLength(1);
+    expect(unbounded[0]!.appliedLabel).toMatch(/normalize/i);
+    const normalized = (unbounded[0]!.source as { raster: RasterImage }).raster;
+    expect(Array.from(normalized.bandPixels[0]!)).toEqual([0, 1]);
+  });
+
+  it("rejects a non-raster source with a user-readable error", () => {
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
@@ -255,10 +292,10 @@ describe("INVERT_ACTION", () => {
     );
     expect(() =>
       INVERT_ACTION.transformSource!(
-        { kind: "raster", raster: makeTwoBandFloatRaster([0, 1.5], [0, 0.5]) },
+        { kind: "pixels", pixels: new Uint8ClampedArray([0, 0, 0, 255]), width: 1, height: 1 },
         prepared,
       ),
-    ).toThrow(/bounded data range/i);
+    ).toThrow(/raster/i);
   });
 
   it("records the affected bands in the applied label", () => {
