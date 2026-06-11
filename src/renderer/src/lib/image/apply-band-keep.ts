@@ -68,6 +68,12 @@ export function listKeptBandOriginalNumbersAfterRemovingBand(
   return keptNumbers;
 }
 
+export function formatKeptOriginalBandsHistoryLabel(
+  keptOriginalBandNumbers: ReadonlyArray<number>,
+): string {
+  return `Kept bands ${keptOriginalBandNumbers.join(", ")} of the original cube`;
+}
+
 export function listKeptBandIndexesFromRemoved(
   totalBandCount: number,
   removedBandIndexes: ReadonlyArray<number>,

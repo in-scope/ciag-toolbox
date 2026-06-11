@@ -24,6 +24,7 @@ import {
   type ViewportOperationHistory,
   type ViewportOperationHistoryEntry,
 } from "@/lib/actions/operation-history";
+import { buildActiveBandMetadataRows } from "@/lib/image/active-band-metadata";
 import type { ViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import {
   clampBandIndexToRaster,
@@ -266,6 +267,7 @@ function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
         </span>
         <span className="font-mono text-[11px] text-muted-foreground">{timestamp}</span>
       </div>
+      <HistoryEntryAppliedLabel appliedLabel={props.entry.appliedLabel} />
       {inlineParameters ? (
         <span
           className="font-mono text-[11px] text-muted-foreground"
@@ -278,6 +280,15 @@ function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
   );
 }
 
+function HistoryEntryAppliedLabel({ appliedLabel }: { appliedLabel: string }): JSX.Element | null {
+  if (!appliedLabel) return null;
+  return (
+    <span className="text-[11px] text-foreground" title={appliedLabel}>
+      {appliedLabel}
+    </span>
+  );
+}
+
 interface MetadataSectionProps {
   activeSource: ViewportRightPanelActiveSource;
 }
@@ -286,7 +297,11 @@ function MetadataSection(props: MetadataSectionProps): JSX.Element {
   return (
     <section aria-label="Metadata" className={RIGHT_PANEL_SECTION_CLASSES}>
       <MetadataSectionHeader viewportNumber={props.activeSource.viewportNumber} />
-      <MetadataSectionBody metadata={props.activeSource.metadata} />
+      <MetadataSectionBody
+        metadata={props.activeSource.metadata}
+        raster={props.activeSource.raster}
+        selectedBandIndex={props.activeSource.selectedBandIndex}
+      />
     </section>
   );
 }
@@ -302,11 +317,21 @@ function MetadataSectionHeader({ viewportNumber }: { viewportNumber: number }): 
 
 function MetadataSectionBody({
   metadata,
+  raster,
+  selectedBandIndex,
 }: {
   metadata: ViewportImageMetadataDisplay | null;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
 }): JSX.Element {
   if (!metadata) return <MetadataEmptyState />;
-  return <MetadataKeyValueList metadata={metadata} />;
+  return (
+    <MetadataKeyValueList
+      metadata={metadata}
+      raster={raster}
+      selectedBandIndex={selectedBandIndex}
+    />
+  );
 }
 
 function MetadataEmptyState(): JSX.Element {
@@ -317,10 +342,12 @@ function MetadataEmptyState(): JSX.Element {
 
 interface MetadataKeyValueListProps {
   metadata: ViewportImageMetadataDisplay;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
 }
 
 function MetadataKeyValueList(props: MetadataKeyValueListProps): JSX.Element {
-  const rows = buildMetadataRowsFromDisplay(props.metadata);
+  const rows = buildAllMetadataRowsForActiveBand(props);
   return (
     <dl className="flex flex-col gap-1 text-xs">
       {rows.map((row) => (
@@ -328,6 +355,15 @@ function MetadataKeyValueList(props: MetadataKeyValueListProps): JSX.Element {
       ))}
     </dl>
   );
+}
+
+function buildAllMetadataRowsForActiveBand(
+  props: MetadataKeyValueListProps,
+): ReadonlyArray<MetadataDisplayRow> {
+  const fileRows = buildMetadataRowsFromDisplay(props.metadata);
+  if (!props.raster) return fileRows;
+  const bandRows = buildActiveBandMetadataRows(props.raster, props.selectedBandIndex);
+  return [...fileRows, ...bandRows];
 }
 
 interface MetadataDisplayRow {

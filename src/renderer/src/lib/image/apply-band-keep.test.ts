@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyBandKeepToRasterImage,
+  formatKeptOriginalBandsHistoryLabel,
   listKeptBandIndexesFromRemoved,
   listKeptBandOriginalNumbersAfterRemovingBand,
   mapKeptBandNumbersToCurrentPositions,
@@ -176,6 +177,20 @@ describe("listKeptBandOriginalNumbersAfterRemovingBand", () => {
     expect(result.bandCount).toBe(2);
     expect(result.bandOriginalNumbers).toEqual([1, 3]);
     expect(Array.from(result.bandPixels[1]!)).toEqual([100, 200, 300, 400]);
+  });
+});
+
+describe("formatKeptOriginalBandsHistoryLabel", () => {
+  it("describes the kept bands as a correspondence to the original cube", () => {
+    expect(formatKeptOriginalBandsHistoryLabel([3, 5])).toBe(
+      "Kept bands 3, 5 of the original cube",
+    );
+  });
+
+  it("describes a single kept band", () => {
+    expect(formatKeptOriginalBandsHistoryLabel([7])).toBe(
+      "Kept bands 7 of the original cube",
+    );
   });
 });
 

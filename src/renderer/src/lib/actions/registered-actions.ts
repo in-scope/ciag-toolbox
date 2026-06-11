@@ -7,6 +7,7 @@ import {
 } from "@/lib/image/spectrum-entry";
 import {
   applyBandKeepToRasterImage,
+  formatKeptOriginalBandsHistoryLabel,
   mapKeptBandNumbersToCurrentPositions,
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
@@ -374,7 +375,7 @@ function parseSingleBandNumberOrThrow(token: string): number {
 
 function formatBandSubsetAppliedLabel(parameterValues: ParameterValuesById): string {
   const keptBandNumbers = readKeptBandNumbersFromParameterValues(parameterValues);
-  return `Subset bands [${keptBandNumbers.join(", ")}]`;
+  return formatKeptOriginalBandsHistoryLabel(keptBandNumbers);
 }
 
 const FLAT_FIELD_LIGHT_PARAMETER_ID = "lightReferenceToken";
