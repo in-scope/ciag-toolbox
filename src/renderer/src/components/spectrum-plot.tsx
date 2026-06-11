@@ -10,6 +10,7 @@ import {
   type SpectrumPlotValueRange,
   type SpectrumPlotXRange,
 } from "@/lib/image/spectrum-plot-geometry";
+import { formatNumberStringWithSuperscriptExponent } from "@/lib/image/format-axis-number";
 import type { BandRun } from "@/lib/image/spectrum-band-gaps";
 
 const SPECTRUM_PLOT_WIDTH_PX = 268;
@@ -294,6 +295,10 @@ function SpectrumPlotYTick(props: SpectrumPlotYTickProps): JSX.Element {
 }
 
 function formatYAxisTickLabel(value: number): string {
+  return formatNumberStringWithSuperscriptExponent(formatYAxisTickMagnitude(value));
+}
+
+function formatYAxisTickMagnitude(value: number): string {
   if (!Number.isFinite(value)) return "-";
   if (Math.abs(value) >= 1000) return value.toPrecision(3);
   if (Number.isInteger(value)) return value.toString();

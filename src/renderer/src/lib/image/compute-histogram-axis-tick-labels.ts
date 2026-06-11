@@ -1,4 +1,8 @@
 import { formatSinglePixelReadoutValue } from "@/lib/image/compute-pixel-readout";
+import {
+  formatHistogramPixelCountForAxis,
+  formatNumberStringWithSuperscriptExponent,
+} from "@/lib/image/format-axis-number";
 import type { RasterSampleFormat } from "@/lib/image/raster-image";
 
 const MINIMUM_FRACTION_GAP_TO_SHOW_ZERO_TICK = 0.12;
@@ -61,8 +65,37 @@ function buildTickLabel(
 ): HistogramAxisTickLabel {
   return {
     value,
-    text: formatSinglePixelReadoutValue(value, sampleFormat),
+    text: formatNumberStringWithSuperscriptExponent(
+      formatSinglePixelReadoutValue(value, sampleFormat),
+    ),
     fraction,
     anchor,
   };
+}
+
+export interface HistogramCountAxisTickLabel {
+  readonly count: number;
+  readonly text: string;
+  readonly fraction: number;
+}
+
+export function computeHistogramCountAxisTickLabels(
+  bins: ArrayLike<number>,
+): ReadonlyArray<HistogramCountAxisTickLabel> {
+  const peakCount = findHistogramPeakBinCount(bins);
+  if (peakCount <= 0) return [buildCountTickLabel(0, 0)];
+  return [buildCountTickLabel(peakCount, 1), buildCountTickLabel(0, 0)];
+}
+
+function buildCountTickLabel(count: number, fraction: number): HistogramCountAxisTickLabel {
+  return { count, text: formatHistogramPixelCountForAxis(count), fraction };
+}
+
+function findHistogramPeakBinCount(bins: ArrayLike<number>): number {
+  let peak = 0;
+  for (let index = 0; index < bins.length; index++) {
+    const value = bins[index] ?? 0;
+    if (value > peak) peak = value;
+  }
+  return peak;
 }
