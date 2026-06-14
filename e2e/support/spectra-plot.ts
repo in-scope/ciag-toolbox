@@ -119,3 +119,20 @@ async function readFirstSpectrumLineSubpathCount(page: Page): Promise<number> {
 function countMoveCommands(pathData: string): number {
   return (pathData.match(/M/g) ?? []).length;
 }
+
+// X-POSITION ORACLE (CT-149): the plot uses a FIXED viewBox (spectrum-plot SPECTRUM_PLOT_WIDTH_PX),
+// so each spectrum point's x in the `d` attribute is a deterministic projection of that band's
+// ORIGINAL index/wavelength (projectXPositionToPixelX over the kept bands' min..max). Reading the
+// pinned line's point x-coordinates in band order proves the kept bands stay at their original
+// x-positions: removing a MIDDLE band leaves the surviving endpoints' x unchanged (the axis min/max
+// are unchanged) with the middle point dropped, and no straight bridge spans the gap.
+
+export async function readPinnedSpectrumLinePointXs(page: Page): Promise<number[]> {
+  const pathData = (await pinnedSpectrumLines(page).first().getAttribute("d")) ?? "";
+  return extractSpectrumPointXs(pathData);
+}
+
+function extractSpectrumPointXs(pathData: string): number[] {
+  const pointMatches = pathData.matchAll(/[ML]\s*(-?[\d.]+)\s+(-?[\d.]+)/g);
+  return [...pointMatches].map((match) => Number(match[1]));
+}

@@ -111,6 +111,7 @@ export {
   expectPinnedSpectrumLineCount,
   pinPixelSpectrum,
   expectSpectrumLineSubpathCount,
+  readPinnedSpectrumLinePointXs,
   regionMeanSpectrumEnvelopes,
   expectRegionSpectrumCount,
   regionMeanSpectrumLineWithColor,
