@@ -187,11 +187,17 @@ async function convertBlobToBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(arrayBuffer);
 }
 
-export async function readRgbaBytesFromBrowserSource(
+export function readRgbaBytesFromBrowserSourceSync(
   source: Exclude<ViewportImageSource, { kind: "raster" }>,
-): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
+): { rgba: Uint8ClampedArray; width: number; height: number } {
   const canvas = renderBrowserSourceToCanvas(source);
   const context = acquireTwoDeeContextOrThrow(canvas);
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
   return { rgba: imageData.data, width: canvas.width, height: canvas.height };
+}
+
+export async function readRgbaBytesFromBrowserSource(
+  source: Exclude<ViewportImageSource, { kind: "raster" }>,
+): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
+  return readRgbaBytesFromBrowserSourceSync(source);
 }

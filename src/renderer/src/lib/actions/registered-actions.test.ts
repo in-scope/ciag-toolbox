@@ -304,18 +304,19 @@ describe("INVERT_ACTION", () => {
     expect(Array.from(normalized.bandPixels[0]!)).toEqual([0, 1]);
   });
 
-  it("rejects a non-raster source with a user-readable error", () => {
+  it("promotes a browser-decoded source and inverts it instead of rejecting (CT-109)", () => {
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    expect(() =>
-      INVERT_ACTION.transformSource!(
-        { kind: "pixels", pixels: new Uint8ClampedArray([0, 0, 0, 255]), width: 1, height: 1 },
-        prepared,
-      ),
-    ).toThrow(/raster/i);
+    const result = INVERT_ACTION.transformSource!(
+      { kind: "pixels", pixels: new Uint8ClampedArray([0, 0, 0, 255]), width: 1, height: 1 },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(raster.bandCount).toBe(3);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([255]);
   });
 
   it("records the affected bands in the applied label", () => {
@@ -440,6 +441,21 @@ describe("RGB_TO_GRAYSCALE_ACTION", () => {
     expect(
       RGB_TO_GRAYSCALE_ACTION.formatAppliedLabel!({ redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 }),
     ).toBe("RGB to grayscale (R 0.299, G 0.587, B 0.114)");
+  });
+
+  it("promotes a browser-decoded image source instead of rejecting it (CT-109)", () => {
+    const result = RGB_TO_GRAYSCALE_ACTION.transformSource!(
+      {
+        kind: "pixels",
+        pixels: new Uint8ClampedArray([100, 200, 50, 255]),
+        width: 1,
+        height: 1,
+      },
+      { redWeight: 0.299, greenWeight: 0.587, blueWeight: 0.114 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(raster.bandCount).toBe(1);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([Math.round(100 * 0.299 + 200 * 0.587 + 50 * 0.114)]);
   });
 });
 

@@ -50,6 +50,7 @@ import {
 } from "@/lib/image/apply-rgb-to-grayscale";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
+import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
@@ -184,12 +185,8 @@ function prepareBitShiftParameterValuesForScope(
 }
 
 function createBitShiftSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Bit shift only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
     const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
     return {
@@ -286,12 +283,8 @@ function prepareCropParameterValuesFromOperationRegion(
 }
 
 function createCropToRegionSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Crop to Region only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const roi = readRoiFromCropParameterValues(parameterValues);
     return { kind: "raster", raster: applyCropToRasterImage(source.raster, roi) };
   };
@@ -358,12 +351,8 @@ function clearBandSubsetEditModeFromSource(
 }
 
 function createBandSubsetSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Subset Bands only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const keptBandNumbers = readKeptBandNumbersFromParameterValues(parameterValues);
     const keptPositions = mapKeptBandNumbersToCurrentPositions(source.raster, keptBandNumbers);
     return { kind: "raster", raster: applyBandKeepToRasterImage(source.raster, keptPositions) };
@@ -449,12 +438,8 @@ export const FLAT_FIELD_ACTION: RegisteredViewportAction = {
 };
 
 function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Flat-field correction only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const lightReference = resolveRequiredLightReferenceOrThrow(parameterValues);
     const darkReference = resolveOptionalDarkReferenceOrThrow(parameterValues);
     const raster = applyFlatFieldToRasterImage(source.raster, lightReference, darkReference ?? undefined);
@@ -551,12 +536,8 @@ function prepareSpectralonBrightRegionFromOperationRegion(
 }
 
 function createSpectralonSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Spectralon Calibration only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const brightRoi = readSpectralonBrightRoiOrThrow(parameterValues);
     const reflectance = readSpectralonReflectanceFromParameterValues(parameterValues);
     const raster = applySpectralonReflectanceCalibration(source.raster, { brightRoi, reflectance });
@@ -675,12 +656,8 @@ function serializeToneCurveAnchors(anchors: ReadonlyArray<ToneCurveAnchor>): str
 }
 
 function createToneCurveSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Tone Curve only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndex = readToneCurveBandIndex(parameterValues);
     const anchors = readToneCurveAnchorsOrThrow(parameterValues);
     const region = readToneCurveRegionIfPresent(parameterValues);
@@ -797,12 +774,8 @@ function injectSelectedBandIndexForBrightnessContrast(
 }
 
 function createBrightnessContrastSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Brightness & Contrast only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveBrightnessContrastBandIndexes(parameterValues, source.raster);
     return { kind: "raster", raster: adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues) };
   };
@@ -913,8 +886,8 @@ function injectSelectedBandIndexForInvert(
 }
 
 function createInvertSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") throw invertRequiresRasterSourceError();
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveInvertBandIndexes(parameterValues, source.raster);
     return { kind: "raster", raster: resolveInvertPrimaryRaster(source.raster, bandIndexes) };
   };
@@ -929,8 +902,8 @@ function resolveInvertPrimaryRaster(
 }
 
 function createInvertSecondaryOutputsTransform(): ViewportActionSecondaryOutputsTransform {
-  return (source) => {
-    if (source.kind !== "raster") return NO_SECONDARY_OUTPUTS;
+  return (rawSource) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     return listAutoNormalizedSecondaryOutputForUnboundedRaster(source.raster);
   };
 }
@@ -941,12 +914,6 @@ function listAutoNormalizedSecondaryOutputForUnboundedRaster(
   if (isRasterDataRangeBoundedForInvert(raster)) return NO_SECONDARY_OUTPUTS;
   const normalized = autoNormalizeUnboundedRasterToUnitRange(raster);
   return [{ source: { kind: "raster", raster: normalized }, appliedLabel: AUTO_NORMALIZED_FOR_INVERT_LABEL }];
-}
-
-function invertRequiresRasterSourceError(): Error {
-  return new Error(
-    "Invert only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-  );
 }
 
 function resolveInvertBandIndexes(
@@ -1058,12 +1025,8 @@ function injectSelectedBandIndexForNormalize(
 }
 
 function createNormalizeSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Normalize only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveNormalizeScopeSelection(parameterValues);
     const method = resolveNormalizeRangeMethod(parameterValues);
     return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection, method) };
@@ -1188,12 +1151,8 @@ function injectSelectedBandIndexForStandardize(
 }
 
 function createStandardizeSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Standardize only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveStandardizeScopeSelection(parameterValues);
     const target = readStandardizeTargetDistribution(parameterValues);
     return { kind: "raster", raster: applyStandardizeToRaster(source.raster, selection, target) };
@@ -1319,12 +1278,8 @@ function resetBandDependentStateAfterBandCountChange(
 }
 
 function createRgbToGrayscaleSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "RGB to Grayscale only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const weights = readRgbToGrayscaleWeights(parameterValues);
     return { kind: "raster", raster: applyRgbToGrayscale(source.raster, weights) };
   };
@@ -1411,12 +1366,8 @@ export function readFalseColorBandAssignment(
 }
 
 function createFalseColorSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "False-color Composite only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const assignment = readFalseColorBandAssignment(parameterValues);
     return { kind: "raster", raster: buildFalseColorComposite(source.raster, assignment) };
   };
@@ -1460,12 +1411,8 @@ function clearRegionAfterGeometricTransform(state: ViewportRenderingState): View
 }
 
 function createGeometricTransformSourceTransform(): ViewportActionSourceTransform {
-  return (source, parameterValues) => {
-    if (source.kind !== "raster") {
-      throw new Error(
-        "Rotate & Reflect only applies to raster images (TIFF, ENVI, raw camera). The active panel's source is not a raster.",
-      );
-    }
+  return (rawSource, parameterValues) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
     const transform = readGeometricTransformChoice(parameterValues);
     return { kind: "raster", raster: applyGeometricTransformToRasterImage(source.raster, transform) };
   };
