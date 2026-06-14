@@ -81,6 +81,11 @@ export {
   cancelReplacePicker,
 } from "./duplicate-panel";
 export {
+  normalizedViewingToggle,
+  toggleNormalizedViewing,
+  expectNormalizedViewingEnabled,
+} from "./normalized-viewing";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,
