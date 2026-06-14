@@ -128,6 +128,19 @@ export {
   type WavelengthStackFixtureFile,
 } from "./temporary-open-images-fixtures";
 export {
+  writeTemporarySingleBandUint16Tiff,
+  type SingleBandTiffRequest,
+} from "./temporary-raster-tiff-fixture";
+export {
+  FLAT_FIELD_LABEL,
+  FLAT_FIELD_LIGHT_FIELD_LABEL,
+  FLAT_FIELD_DARK_FIELD_LABEL,
+  flatFieldReferenceField,
+  chooseLoadedPanelAsFlatFieldReference,
+  chooseFlatFieldReferenceFileThroughDialog,
+  flatFieldErrorToast,
+} from "./flat-field-operation";
+export {
   saveImageFormatPicker,
   saveImageFormatRadioGroup,
   readOfferedSaveImageFormatLabels,
