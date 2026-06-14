@@ -4,14 +4,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const MAIN_PROCESS_ENTRY_PATH = resolve(
-  currentDirectory,
-  "..",
-  "..",
-  "out",
-  "main",
-  "index.js",
-);
+// Launch against the project root (not out/main/index.js directly) so Electron
+// resolves the real package.json: app.getVersion()/getName() then report the
+// production values instead of the Electron runtime version.
+const APPLICATION_ROOT_PATH = resolve(currentDirectory, "..", "..");
 const DEFAULT_RENDERER_DEV_SERVER_URL = "http://localhost:5173";
 const WINDOW_POLL_INTERVAL_MS = 250;
 const MAX_WINDOW_POLL_ATTEMPTS = 120;
@@ -53,6 +49,11 @@ function findMainApplicationWindow(app: ElectronApplication): Page | undefined {
   return app.windows().find((window) => isMainApplicationWindowUrl(window.url()));
 }
 
+export function countMainApplicationWindows(app: ElectronApplication): number {
+  return app.windows().filter((window) => isMainApplicationWindowUrl(window.url()))
+    .length;
+}
+
 function waitForMilliseconds(milliseconds: number): Promise<void> {
   return new Promise((resolveTimer) => setTimeout(resolveTimer, milliseconds));
 }
@@ -70,7 +71,7 @@ async function waitForMainApplicationWindow(
 
 export async function launchToolboxApp(): Promise<LaunchedApp> {
   const app = await electron.launch({
-    args: [MAIN_PROCESS_ENTRY_PATH],
+    args: [APPLICATION_ROOT_PATH],
     env: buildElectronLaunchEnvironment(),
   });
   const window = await waitForMainApplicationWindow(app);
