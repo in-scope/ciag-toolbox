@@ -132,6 +132,10 @@ export {
   type SingleBandTiffRequest,
 } from "./temporary-raster-tiff-fixture";
 export {
+  writeTemporaryMultiBandUint16Tiff,
+  type MultiBandTiffRequest,
+} from "./temporary-multi-band-tiff-fixture";
+export {
   writeTemporarySingleBandUint8Tiff,
   uint8FixtureValueAt,
   UINT8_FIXTURE_SIDE,
@@ -229,7 +233,9 @@ export {
 export {
   summarizeCanvasPixels,
   nonClearPixelFraction,
+  averageNonClearCanvasColor,
   type CanvasPixelSummary,
+  type CanvasAverageColor,
 } from "./canvas-pixels";
 export {
   BRIGHTNESS_CONTRAST_LABEL,

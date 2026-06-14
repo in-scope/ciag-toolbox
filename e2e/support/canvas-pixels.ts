@@ -40,6 +40,60 @@ function summarizeRgbaBuffer(data: Buffer, channels: number): CanvasPixelSummary
   return { sampledPixelCount: pixelCount, nonClearPixelCount, distinctColorCount: distinctColors.size };
 }
 
+export interface CanvasAverageColor {
+  readonly red: number;
+  readonly green: number;
+  readonly blue: number;
+  readonly sampledPixelCount: number;
+}
+
+// Averages the R/G/B channels over the pixels brighter than the clear color, so the
+// letterbox black around a fit-to-viewport image does not dilute the result. Order
+// sensitivity (CT-145): routing a band to the red vs blue channel flips which channel
+// dominates the composite, so swapping two assignments measurably swaps these averages.
+export async function averageNonClearCanvasColor(canvas: Locator): Promise<CanvasAverageColor> {
+  const screenshot = await canvas.screenshot();
+  const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
+  return averageNonClearRgbaBuffer(data, info.channels);
+}
+
+function averageNonClearRgbaBuffer(data: Buffer, channels: number): CanvasAverageColor {
+  const totals = { red: 0, green: 0, blue: 0, count: 0 };
+  const pixelCount = Math.floor(data.length / channels);
+  for (let index = 0; index < pixelCount; index += 1) {
+    accumulateNonClearPixel(totals, data, index * channels);
+  }
+  return buildAverageColorFromTotals(totals);
+}
+
+function accumulateNonClearPixel(
+  totals: { red: number; green: number; blue: number; count: number },
+  data: Buffer,
+  offset: number,
+): void {
+  const color = readPackedRgbAtPixel(data, offset);
+  if (!isBrighterThanClearColor(color)) return;
+  totals.red += (color >> 16) & 0xff;
+  totals.green += (color >> 8) & 0xff;
+  totals.blue += color & 0xff;
+  totals.count += 1;
+}
+
+function buildAverageColorFromTotals(totals: {
+  red: number;
+  green: number;
+  blue: number;
+  count: number;
+}): CanvasAverageColor {
+  if (totals.count === 0) return { red: 0, green: 0, blue: 0, sampledPixelCount: 0 };
+  return {
+    red: totals.red / totals.count,
+    green: totals.green / totals.count,
+    blue: totals.blue / totals.count,
+    sampledPixelCount: totals.count,
+  };
+}
+
 function readPackedRgbAtPixel(data: Buffer, offset: number): number {
   const red = data[offset] ?? 0;
   const green = data[offset + 1] ?? 0;
