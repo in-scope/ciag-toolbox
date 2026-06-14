@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeRasterImageAsEnviFiles } from "@/lib/image/encode-envi";
+import {
+  encodeRasterImageAsEnviFiles,
+  encodeRasterImageAsFloat32EnviFiles,
+} from "@/lib/image/encode-envi";
 import { loadEnviAsRaster } from "@/lib/image/load-envi";
 import { parseEnviHeaderText } from "@/lib/image/parse-envi-header";
 import type { RasterImage, RasterSourceInterleave } from "@/lib/image/raster-image";
@@ -101,6 +104,33 @@ describe("encodeRasterImageAsEnviFiles", () => {
     const encoded = encodeRasterImageAsEnviFiles(originalRaster);
     const reloaded = loadEnviAsRaster(encoded.headerBytes, encoded.binaryBytes);
     expect(Array.from(reloaded.bandPixels[0]!)).toEqual([1.5, 2.25, 3.5, 4.0]);
+  });
+
+  it("encodes a float32 cube including out-of-range values losslessly via the float path", () => {
+    const originalRaster: RasterImage = {
+      bandPixels: [new Float32Array([-2.5, 0, 0.5, 17.25])],
+      width: 2,
+      height: 2,
+      bandCount: 1,
+      bitsPerSample: 32,
+      sampleFormat: "float",
+      sourceInterleave: "bsq",
+    };
+    const encoded = encodeRasterImageAsFloat32EnviFiles(originalRaster);
+    const reloaded = loadEnviAsRaster(encoded.headerBytes, encoded.binaryBytes);
+    expect(reloaded.sampleFormat).toBe("float");
+    expect(Array.from(reloaded.bandPixels[0]!)).toEqual([-2.5, 0, 0.5, 17.25]);
+  });
+
+  it("coerces a uint16 raster to a float32 ENVI file via the float path", () => {
+    const originalRaster = buildRasterFixture({ sourceInterleave: "bsq" });
+    const encoded = encodeRasterImageAsFloat32EnviFiles(originalRaster);
+    const header = parseEnviHeaderText(decodeBytes(encoded.headerBytes));
+    expect(header.dataType).toBe(4);
+    const reloaded = loadEnviAsRaster(encoded.headerBytes, encoded.binaryBytes);
+    expect(reloaded.sampleFormat).toBe("float");
+    expect(reloaded.bitsPerSample).toBe(32);
+    expect(Array.from(reloaded.bandPixels[0]!)).toEqual([10, 20, 30, 40, 50, 60]);
   });
 
   it("round-trips wavelength + band-name metadata across a write/read cycle", () => {

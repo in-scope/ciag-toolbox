@@ -3,6 +3,7 @@ import { writeArrayBuffer } from "geotiff";
 import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
+  type RasterSampleFormat,
 } from "@/lib/image/raster-image";
 
 export type TargetBitDepth = 8 | 16;
@@ -10,6 +11,8 @@ export type TargetBitDepth = 8 | 16;
 const TIFF_PHOTOMETRIC_BLACK_IS_ZERO = 1;
 const TIFF_PHOTOMETRIC_RGB = 2;
 const TIFF_SAMPLE_FORMAT_UINT = 1;
+const TIFF_SAMPLE_FORMAT_FLOAT = 3;
+const FLOAT_BITS_PER_SAMPLE = 32;
 
 interface TiffWriteMetadata {
   width: number;
@@ -30,10 +33,21 @@ export function encodeRasterBandAsSingleChannelTiffBytes(
   const sourcePixels = getRasterBandPixelsOrThrow(raster, bandIndex);
   const targetPixels = convertSourcePixelsToTargetBitDepth(
     sourcePixels,
+    raster.sampleFormat,
     raster.bitsPerSample,
     targetBitDepth,
   );
   const metadata = buildSingleBandTiffMetadata(raster.width, raster.height, targetBitDepth);
+  return convertArrayBufferToBytes(writeArrayBuffer(targetPixels, metadata));
+}
+
+export function encodeRasterBandAsFloat32TiffBytes(
+  raster: RasterImage,
+  bandIndex: number,
+): Uint8Array {
+  const sourcePixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const targetPixels = copySourcePixelsToFloat32(sourcePixels);
+  const metadata = buildSingleBandFloat32TiffMetadata(raster.width, raster.height);
   return convertArrayBufferToBytes(writeArrayBuffer(targetPixels, metadata));
 }
 
@@ -50,10 +64,15 @@ export function encodeRgbaBytesAsRgbTiffBytes(
 
 function convertSourcePixelsToTargetBitDepth(
   pixels: ArrayLike<number>,
+  sourceSampleFormat: RasterSampleFormat,
   sourceBitsPerSample: number,
   targetBitDepth: TargetBitDepth,
 ): Uint8Array | Uint16Array {
-  const scaleFactor = computeBitDepthScaleFactor(sourceBitsPerSample, targetBitDepth);
+  const scaleFactor = computeBitDepthScaleFactor(
+    sourceSampleFormat,
+    sourceBitsPerSample,
+    targetBitDepth,
+  );
   if (targetBitDepth === 8) {
     return rescalePixelsToUint8(pixels, scaleFactor);
   }
@@ -61,13 +80,23 @@ function convertSourcePixelsToTargetBitDepth(
 }
 
 function computeBitDepthScaleFactor(
+  sourceSampleFormat: RasterSampleFormat,
   sourceBitsPerSample: number,
   targetBitDepth: TargetBitDepth,
 ): number {
-  const sourceMax = Math.pow(2, sourceBitsPerSample) - 1;
   const targetMax = Math.pow(2, targetBitDepth) - 1;
+  if (sourceSampleFormat === "float") return targetMax;
+  const sourceMax = Math.pow(2, sourceBitsPerSample) - 1;
   if (sourceMax <= 0) return 1;
   return targetMax / sourceMax;
+}
+
+function copySourcePixelsToFloat32(pixels: ArrayLike<number>): Float32Array {
+  const output = new Float32Array(pixels.length);
+  for (let i = 0; i < pixels.length; i += 1) {
+    output[i] = pixels[i] ?? 0;
+  }
+  return output;
 }
 
 function rescalePixelsToUint8(pixels: ArrayLike<number>, scaleFactor: number): Uint8Array {
@@ -149,6 +178,22 @@ function buildSingleBandTiffMetadata(
     ImageLength: height,
     BitsPerSample: [targetBitDepth],
     SampleFormat: [TIFF_SAMPLE_FORMAT_UINT],
+    SamplesPerPixel: 1,
+    PhotometricInterpretation: TIFF_PHOTOMETRIC_BLACK_IS_ZERO,
+  };
+}
+
+function buildSingleBandFloat32TiffMetadata(
+  width: number,
+  height: number,
+): TiffWriteMetadata {
+  return {
+    width,
+    height,
+    ImageWidth: width,
+    ImageLength: height,
+    BitsPerSample: [FLOAT_BITS_PER_SAMPLE],
+    SampleFormat: [TIFF_SAMPLE_FORMAT_FLOAT],
     SamplesPerPixel: 1,
     PhotometricInterpretation: TIFF_PHOTOMETRIC_BLACK_IS_ZERO,
   };

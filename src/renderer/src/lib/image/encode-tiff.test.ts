@@ -2,6 +2,7 @@ import { fromArrayBuffer } from "geotiff";
 import { describe, expect, it } from "vitest";
 
 import {
+  encodeRasterBandAsFloat32TiffBytes,
   encodeRasterBandAsSingleChannelTiffBytes,
   encodeRgbaBytesAsRgbTiffBytes,
 } from "@/lib/image/encode-tiff";
@@ -31,6 +32,27 @@ describe("encodeRasterBandAsSingleChannelTiffBytes", () => {
     expect(Array.from(decoded)).toEqual([0, 32896, 65535]);
   });
 
+  it("maps a float32 [0,1] band to non-zero uint16 samples (CT-102 reproduction)", async () => {
+    const raster = buildSingleBandFloat32Raster([0, 0.5, 1]);
+    const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 16);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(Array.from(decoded)).toEqual([0, 32768, 65535]);
+  });
+
+  it("maps a float32 [0,1] band to non-zero uint8 samples", async () => {
+    const raster = buildSingleBandFloat32Raster([0, 0.5, 1]);
+    const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 8);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(Array.from(decoded)).toEqual([0, 128, 255]);
+  });
+
+  it("clips out-of-range float values when exporting to uint16 (lossy path)", async () => {
+    const raster = buildSingleBandFloat32Raster([-0.5, 0, 1, 1.5]);
+    const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 16);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(Array.from(decoded)).toEqual([0, 0, 65535, 65535]);
+  });
+
   it("encodes the chosen band only when the raster has multiple bands", async () => {
     const raster: RasterImage = {
       width: 2,
@@ -43,6 +65,16 @@ describe("encodeRasterBandAsSingleChannelTiffBytes", () => {
     const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 1, 8);
     const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
     expect(Array.from(decoded)).toEqual([200, 201]);
+  });
+});
+
+describe("encodeRasterBandAsFloat32TiffBytes", () => {
+  it("round-trips a float32 band including out-of-range values losslessly", async () => {
+    const raster = buildSingleBandFloat32Raster([-1.5, 0, 0.25, 2.75]);
+    const tiffBytes = encodeRasterBandAsFloat32TiffBytes(raster, 0);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(decoded).toBeInstanceOf(Float32Array);
+    expect(Array.from(decoded)).toEqual([-1.5, 0, 0.25, 2.75]);
   });
 });
 
@@ -85,14 +117,25 @@ function buildSingleBandUint8Raster(values: ReadonlyArray<number>): RasterImage 
   };
 }
 
+function buildSingleBandFloat32Raster(values: ReadonlyArray<number>): RasterImage {
+  return {
+    width: values.length,
+    height: 1,
+    bitsPerSample: 32,
+    sampleFormat: "float",
+    bandCount: 1,
+    bandPixels: [Float32Array.from(values)],
+  };
+}
+
 async function decodeSingleBandTiffBytesAsTypedArray(
   bytes: Uint8Array,
-): Promise<Uint8Array | Uint16Array> {
+): Promise<Uint8Array | Uint16Array | Float32Array> {
   const buffer = bytes.slice().buffer;
   const tiff = await fromArrayBuffer(buffer);
   const image = await tiff.getImage(0);
   const rasters = (await image.readRasters({ interleave: false })) as ReadonlyArray<
-    Uint8Array | Uint16Array
+    Uint8Array | Uint16Array | Float32Array
   >;
   return rasters[0]!;
 }

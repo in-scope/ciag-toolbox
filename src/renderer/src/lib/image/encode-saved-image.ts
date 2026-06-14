@@ -2,8 +2,12 @@ import {
   encodeViewportSourceAsCanvasBlobBytes,
   readRgbaBytesFromBrowserSource,
 } from "@/lib/image/encode-canvas";
-import { encodeRasterImageAsEnviFiles } from "@/lib/image/encode-envi";
 import {
+  encodeRasterImageAsEnviFiles,
+  encodeRasterImageAsFloat32EnviFiles,
+} from "@/lib/image/encode-envi";
+import {
+  encodeRasterBandAsFloat32TiffBytes,
   encodeRasterBandAsSingleChannelTiffBytes,
   encodeRgbaBytesAsRgbTiffBytes,
 } from "@/lib/image/encode-tiff";
@@ -11,6 +15,7 @@ import {
   readSaveImageFormatTechnicalDetails,
   type SaveImageFormatId,
   type SaveImageFormatKind,
+  type SaveImageSampleFormat,
 } from "@/lib/image/save-image-formats";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -33,17 +38,18 @@ export interface EncodedSavedImage {
 export async function encodeViewportSourceForSaving(
   input: EncodeSavedImageInput,
 ): Promise<EncodedSavedImage> {
-  const technicalDetails = readSaveImageFormatTechnicalDetails(input.formatId);
-  return dispatchEncodingByFormatKind(input, technicalDetails.kind, technicalDetails.targetBitDepth);
+  const details = readSaveImageFormatTechnicalDetails(input.formatId);
+  return dispatchEncodingByFormatKind(input, details.kind, details.targetBitDepth, details.targetSampleFormat);
 }
 
 async function dispatchEncodingByFormatKind(
   input: EncodeSavedImageInput,
   kind: SaveImageFormatKind,
   targetBitDepth: 8 | 16,
+  targetSampleFormat: SaveImageSampleFormat,
 ): Promise<EncodedSavedImage> {
-  if (kind === "tiff") return encodeViewportSourceAsTiff(input, targetBitDepth);
-  if (kind === "envi") return encodeViewportSourceAsEnviFiles(input);
+  if (kind === "tiff") return encodeViewportSourceAsTiff(input, targetBitDepth, targetSampleFormat);
+  if (kind === "envi") return encodeViewportSourceAsEnviFiles(input, targetSampleFormat);
   return encodeViewportSourceAsCanvasBlob(input, kind);
 }
 
@@ -60,12 +66,14 @@ async function encodeViewportSourceAsCanvasBlob(
 async function encodeViewportSourceAsTiff(
   input: EncodeSavedImageInput,
   targetBitDepth: 8 | 16,
+  targetSampleFormat: SaveImageSampleFormat,
 ): Promise<EncodedSavedImage> {
   if (input.source.kind === "raster") {
-    const bytes = encodeRasterBandAsSingleChannelTiffBytes(
+    const bytes = encodeRasterBandAsTiffBytes(
       input.source.raster,
       input.selectedBandIndex,
       targetBitDepth,
+      targetSampleFormat,
     );
     return { bytes };
   }
@@ -74,15 +82,36 @@ async function encodeViewportSourceAsTiff(
   return { bytes };
 }
 
+function encodeRasterBandAsTiffBytes(
+  raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
+  selectedBandIndex: number,
+  targetBitDepth: 8 | 16,
+  targetSampleFormat: SaveImageSampleFormat,
+): Uint8Array {
+  if (targetSampleFormat === "float") {
+    return encodeRasterBandAsFloat32TiffBytes(raster, selectedBandIndex);
+  }
+  return encodeRasterBandAsSingleChannelTiffBytes(raster, selectedBandIndex, targetBitDepth);
+}
+
 function encodeViewportSourceAsEnviFiles(
   input: EncodeSavedImageInput,
+  targetSampleFormat: SaveImageSampleFormat,
 ): EncodedSavedImage {
   rejectNonRasterSourceForEnviWrite(input.source);
-  const encoded = encodeRasterImageAsEnviFiles(input.source.raster);
+  const encoded = encodeEnviFilesForSampleFormat(input.source.raster, targetSampleFormat);
   return {
     bytes: encoded.headerBytes,
     sidecar: { extension: "bin", bytes: encoded.binaryBytes },
   };
+}
+
+function encodeEnviFilesForSampleFormat(
+  raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
+  targetSampleFormat: SaveImageSampleFormat,
+): ReturnType<typeof encodeRasterImageAsEnviFiles> {
+  if (targetSampleFormat === "float") return encodeRasterImageAsFloat32EnviFiles(raster);
+  return encodeRasterImageAsEnviFiles(raster);
 }
 
 function rejectNonRasterSourceForEnviWrite(

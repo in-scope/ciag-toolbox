@@ -7,17 +7,27 @@ import {
 } from "@/lib/image/save-image-formats";
 
 describe("readSaveImageFormatTechnicalDetails", () => {
-  it("maps tiff-16-bit to a 16-bit TIFF descriptor", () => {
+  it("maps tiff-16-bit to a 16-bit uint TIFF descriptor", () => {
     expect(readSaveImageFormatTechnicalDetails("tiff-16-bit")).toEqual({
       kind: "tiff",
       targetBitDepth: 16,
+      targetSampleFormat: "uint",
     });
   });
 
-  it("maps tiff-8-bit to an 8-bit TIFF descriptor", () => {
+  it("maps tiff-8-bit to an 8-bit uint TIFF descriptor", () => {
     expect(readSaveImageFormatTechnicalDetails("tiff-8-bit")).toEqual({
       kind: "tiff",
       targetBitDepth: 8,
+      targetSampleFormat: "uint",
+    });
+  });
+
+  it("maps tiff-float-32 to a float TIFF descriptor", () => {
+    expect(readSaveImageFormatTechnicalDetails("tiff-float-32")).toEqual({
+      kind: "tiff",
+      targetBitDepth: 16,
+      targetSampleFormat: "float",
     });
   });
 
@@ -25,6 +35,7 @@ describe("readSaveImageFormatTechnicalDetails", () => {
     expect(readSaveImageFormatTechnicalDetails("png-8-bit")).toEqual({
       kind: "png",
       targetBitDepth: 8,
+      targetSampleFormat: "uint",
     });
   });
 
@@ -32,13 +43,23 @@ describe("readSaveImageFormatTechnicalDetails", () => {
     expect(readSaveImageFormatTechnicalDetails("jpeg-8-bit")).toEqual({
       kind: "jpeg",
       targetBitDepth: 8,
+      targetSampleFormat: "uint",
     });
   });
 
-  it("maps envi to a 16-bit ENVI descriptor (bit depth follows source)", () => {
+  it("maps envi to a uint ENVI descriptor (bit depth follows source)", () => {
     expect(readSaveImageFormatTechnicalDetails("envi")).toEqual({
       kind: "envi",
       targetBitDepth: 16,
+      targetSampleFormat: "uint",
+    });
+  });
+
+  it("maps envi-float to a float ENVI descriptor", () => {
+    expect(readSaveImageFormatTechnicalDetails("envi-float")).toEqual({
+      kind: "envi",
+      targetBitDepth: 16,
+      targetSampleFormat: "float",
     });
   });
 });
@@ -52,9 +73,17 @@ describe("findSaveImageFormatOptionOrThrow", () => {
 });
 
 describe("SAVE_IMAGE_FORMAT_OPTIONS", () => {
-  it("offers TIFF (8/16-bit), PNG, JPEG, and ENVI as the five save formats", () => {
+  it("offers TIFF (16/8-bit/float), PNG, JPEG, and ENVI (uint/float) save formats", () => {
     const ids = SAVE_IMAGE_FORMAT_OPTIONS.map((option) => option.id);
-    expect(ids).toEqual(["tiff-16-bit", "tiff-8-bit", "png-8-bit", "jpeg-8-bit", "envi"]);
+    expect(ids).toEqual([
+      "tiff-16-bit",
+      "tiff-8-bit",
+      "tiff-float-32",
+      "png-8-bit",
+      "jpeg-8-bit",
+      "envi",
+      "envi-float",
+    ]);
   });
 
   it("uses .hdr as the primary extension for the ENVI option", () => {
