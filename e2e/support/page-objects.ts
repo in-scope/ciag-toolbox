@@ -90,6 +90,23 @@ export {
 } from "./normalized-viewing";
 export { goToBandNumberInput, selectActiveBandNumber } from "./band-navigator";
 export {
+  removeBandButton,
+  removeDisplayedBand,
+  subsetBandsToggleButton,
+  subsetBandsEditor,
+  openSubsetBandsEditor,
+  subsetBandsKeepCheckboxes,
+  uncheckSubsetBandRow,
+  setSubsetBandsOpenInNewPanel,
+  applySubsetBands,
+} from "./band-management";
+export {
+  spectraPlot,
+  spectrumLinePaths,
+  pinPixelSpectrum,
+  expectSpectrumLineSubpathCount,
+} from "./spectra-plot";
+export {
   enqueueAndTriggerOpenImages,
   openImagesReviewModal,
   openImagesReplaceTargetPicker,
