@@ -18,5 +18,5 @@
     "isolatedModules": true,
     "outDir": "out/types-e2e"
   },
-  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+  "include": ["e2e/**/*.ts", "e2e/**/*.json", "playwright.config.ts"]
 }

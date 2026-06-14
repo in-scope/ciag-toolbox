@@ -23,6 +23,7 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:fixtures": "node e2e/fixtures/generate-fixtures.mjs",
     "format": "prettier --write .",
     "build:icons": "node scripts/build-icons.mjs"
   },
