@@ -117,6 +117,13 @@ export {
   type SaveImageExportRequest,
 } from "./save-image-flow";
 export {
+  saveProjectBundleThroughSaveDialog,
+  openProjectBundleThroughOpenDialog,
+  createTemporaryProjectBundleDirectory,
+  type SaveProjectBundleRequest,
+  type OpenProjectBundleRequest,
+} from "./project-bundle-flow";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,
