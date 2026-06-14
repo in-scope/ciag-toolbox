@@ -85,6 +85,7 @@ export {
   toggleNormalizedViewing,
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
+export { goToBandNumberInput, selectActiveBandNumber } from "./band-navigator";
 export {
   enqueueAndTriggerOpenImages,
   openImagesReviewModal,
