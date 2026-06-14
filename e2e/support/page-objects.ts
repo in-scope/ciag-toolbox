@@ -247,3 +247,11 @@ export {
   applyToAllBandsSwitch,
   setApplyToAllBands,
 } from "./brightness-contrast-controls";
+export {
+  ROTATE_REFLECT_LABEL,
+  geometricTransformSelect,
+  readOfferedGeometricTransformLabels,
+  selectGeometricTransform,
+  applyGeometricTransformInPlace,
+  type GeometricTransformChoice,
+} from "./geometric-transform-operation";
