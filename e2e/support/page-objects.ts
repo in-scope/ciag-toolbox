@@ -262,3 +262,11 @@ export {
   applyGeometricTransformInPlace,
   type GeometricTransformChoice,
 } from "./geometric-transform-operation";
+export {
+  FIXED_RIGHT_PANEL_SECTION_ORDER,
+  rightPanel,
+  rightPanelSections,
+  readRightPanelSectionLabelsInOrder,
+  expectRightPanelSectionsInFixedOrder,
+  expectNoRemovedRightPanelSections,
+} from "./right-panel-sections";
