@@ -78,6 +78,34 @@ async function canvasPagePointForImagePixel(
   return { x: box.x + point.x, y: box.y + point.y };
 }
 
+// REGION (ROI-mean) spectra (CT-147 / manual section 14): committing an inspection ROI on a
+// multi-band raster pins that region's MEAN spectrum with a +/- 1 standard-deviation envelope.
+// The envelope is a filled ribbon <path> (the only path carrying className "opacity-20"); the
+// mean line is the usual solid <path fill="none"> tinted by the region's color class. The app
+// keeps at most two region spectra (a third drops the oldest) and stores them separately from
+// pinned PIXEL spectra, so neither mechanism evicts the other. Region colors are assigned by
+// position: ROI 1 -> text-primary, ROI 2 -> text-fuchsia-400.
+
+export function regionMeanSpectrumEnvelopes(page: Page): Locator {
+  return spectraPlot(page).locator('path[class*="opacity-20"]');
+}
+
+export async function expectRegionSpectrumCount(page: Page, expected: number): Promise<void> {
+  await expect.poll(() => regionMeanSpectrumEnvelopes(page).count()).toBe(expected);
+}
+
+export function regionMeanSpectrumLineWithColor(page: Page, colorClass: string): Locator {
+  return spectraPlot(page).locator(`path[fill="none"][class*="${colorClass}"]`);
+}
+
+export function regionSpectrumLegendRows(page: Page): Locator {
+  return page.getByText(/^ROI \d+ mean \(n=\d+px\) \+\/- 1 sigma$/);
+}
+
+export function pinnedPixelSpectrumLegendRows(page: Page): Locator {
+  return page.getByText(/^Pixel \(\d+, \d+\)$/);
+}
+
 export async function expectSpectrumLineSubpathCount(page: Page, expected: number): Promise<void> {
   await expect.poll(() => readFirstSpectrumLineSubpathCount(page)).toBe(expected);
 }

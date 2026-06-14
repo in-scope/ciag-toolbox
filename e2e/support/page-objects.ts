@@ -111,6 +111,11 @@ export {
   expectPinnedSpectrumLineCount,
   pinPixelSpectrum,
   expectSpectrumLineSubpathCount,
+  regionMeanSpectrumEnvelopes,
+  expectRegionSpectrumCount,
+  regionMeanSpectrumLineWithColor,
+  regionSpectrumLegendRows,
+  pinnedPixelSpectrumLegendRows,
 } from "./spectra-plot";
 export {
   enqueueAndTriggerOpenImages,
