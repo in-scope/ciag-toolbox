@@ -142,11 +142,18 @@ export {
   openImagesReviewModal,
   openImagesReplaceTargetPicker,
   reviewModalRows,
+  reviewModalNewStackButton,
+  reviewModalGroupModeSelect,
+  readReviewModalGroupModeOptionLabels,
   readReviewModalRowFileNamesInOrder,
   confirmReviewModal,
   cancelReplaceTargetPicker,
   openImagesErrorToast,
 } from "./open-images-flow";
+export {
+  readUserFacingTextAndAccessibleNames,
+  expectNoUserFacingViewportWording,
+} from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,
   writeTemporaryCorruptImageFixture,

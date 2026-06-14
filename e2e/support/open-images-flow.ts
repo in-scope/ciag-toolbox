@@ -29,6 +29,20 @@ export function reviewModalRows(page: Page): Locator {
   return openImagesReviewModal(page).getByRole("listitem");
 }
 
+export function reviewModalNewStackButton(page: Page): Locator {
+  return openImagesReviewModal(page).getByRole("button", { name: "New stack" });
+}
+
+export function reviewModalGroupModeSelect(page: Page): Locator {
+  return openImagesReviewModal(page).getByRole("combobox", { name: "Group mode" });
+}
+
+export async function readReviewModalGroupModeOptionLabels(page: Page): Promise<string[]> {
+  return reviewModalGroupModeSelect(page)
+    .locator("option")
+    .evaluateAll((options) => options.map((option) => (option.textContent ?? "").trim()));
+}
+
 export async function readReviewModalRowFileNamesInOrder(page: Page): Promise<string[]> {
   const ariaLabels = await reviewModalRows(page).evaluateAll((rows) =>
     rows.map((row) => row.getAttribute("aria-label") ?? ""),
