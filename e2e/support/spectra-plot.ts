@@ -26,6 +26,32 @@ export function spectrumLinePaths(page: Page): Locator {
   return spectraPlot(page).locator('path[fill="none"]');
 }
 
+// LIVE vs PINNED (CT-133): the live hovered-pixel line is dashed (strokeDasharray "3 3",
+// text-muted-foreground - buildLiveHoverSpectrumLineOrNull); a PINNED line is solid (no
+// strokeDasharray). Both are <path fill="none"> spectrum lines, so the dash attribute is the
+// only visual difference, which is exactly what AC2 ("live distinct/dashed" vs "pinned solid")
+// asks the spec to prove.
+
+export function liveHoverSpectrumLine(page: Page): Locator {
+  return spectraPlot(page).locator('path[fill="none"][stroke-dasharray]');
+}
+
+export function pinnedSpectrumLines(page: Page): Locator {
+  return spectraPlot(page).locator('path[fill="none"]:not([stroke-dasharray])');
+}
+
+export async function expectLiveHoverSpectrumVisible(page: Page): Promise<void> {
+  await expect(liveHoverSpectrumLine(page).first()).toBeVisible();
+}
+
+export async function expectNoLiveHoverSpectrum(page: Page): Promise<void> {
+  await expect.poll(() => liveHoverSpectrumLine(page).count()).toBe(0);
+}
+
+export async function expectPinnedSpectrumLineCount(page: Page, expected: number): Promise<void> {
+  await expect.poll(() => pinnedSpectrumLines(page).count()).toBe(expected);
+}
+
 export async function pinPixelSpectrum(
   page: Page,
   panelNumber: number,

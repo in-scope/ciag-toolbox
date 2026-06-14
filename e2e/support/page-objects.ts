@@ -103,6 +103,11 @@ export {
 export {
   spectraPlot,
   spectrumLinePaths,
+  liveHoverSpectrumLine,
+  pinnedSpectrumLines,
+  expectLiveHoverSpectrumVisible,
+  expectNoLiveHoverSpectrum,
+  expectPinnedSpectrumLineCount,
   pinPixelSpectrum,
   expectSpectrumLineSubpathCount,
 } from "./spectra-plot";
