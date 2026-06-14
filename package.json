@@ -18,9 +18,11 @@
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web && pnpm run typecheck:e2e",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "test": "vitest run",
+    "e2e": "playwright test",
     "format": "prettier --write .",
     "build:icons": "node scripts/build-icons.mjs"
   },
@@ -51,6 +53,7 @@
     "yazl": "^3.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

@@ -78,6 +78,17 @@ That covers the full set of features in this release. The original image file on
 | Apply an action to selected cells | Click the action in the toolbar; the confirm dialog uses your current selection as the pre-checked targets |
 | Change theme | **View > Theme > System / Light / Dark** |
 
+## End-to-end tests (developers)
+
+The project ships a Playwright end-to-end suite that drives the real Electron main process and renderer. It is a local-only target; CI wiring is out of scope.
+
+To run it:
+
+1. In one terminal, start the dev server and app: `pnpm dev`. Wait until it prints `dev server running for the electron renderer process at: http://localhost:5173/`.
+2. In a second terminal, run the suite: `pnpm e2e`.
+
+Playwright launches its own Electron instance pointed at the running dev renderer, so a second app window appears alongside the one `pnpm dev` opens; that is expected. If your renderer dev server is not on the default `http://localhost:5173`, set `MSI_E2E_RENDERER_URL` before running `pnpm e2e`.
+
 ## Reporting issues
 
 Found a bug, a confusing label, or a workflow you wish was supported? Open an issue at the [Issues page](../../issues). Screenshots help.
