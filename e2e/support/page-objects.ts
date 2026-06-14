@@ -86,6 +86,21 @@ export {
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
 export {
+  enqueueAndTriggerOpenImages,
+  openImagesReviewModal,
+  openImagesReplaceTargetPicker,
+  reviewModalRows,
+  readReviewModalRowFileNamesInOrder,
+  confirmReviewModal,
+  cancelReplaceTargetPicker,
+  openImagesErrorToast,
+} from "./open-images-flow";
+export {
+  writeTemporaryWavelengthStackTiffFixtures,
+  writeTemporaryCorruptImageFixture,
+  type WavelengthStackFixtureFile,
+} from "./temporary-open-images-fixtures";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,
