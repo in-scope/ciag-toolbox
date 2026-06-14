@@ -175,3 +175,14 @@ export {
   expectNoCommittedRoiMarkers,
   plainClickImagePixel,
 } from "./roi-inspection";
+export {
+  FULL_STACK_SCOPE_LABEL,
+  BAND_WISE_SCOPE_LABEL,
+  SHARED_SCOPE_OPTION_LABELS,
+  scopeFieldset,
+  scopeOptionRadios,
+  scopeOptionRadio,
+  expectScopeControlOffersExactlyTheSharedTwoOptions,
+  selectFullStackScope,
+  selectBandWiseScopeForBands,
+} from "./cube-scope-control";
