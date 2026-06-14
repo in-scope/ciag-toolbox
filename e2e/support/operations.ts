@@ -30,6 +30,30 @@ export async function applyOperation(page: Page, operationLabel: string): Promis
   await expect(panel).toBeHidden();
 }
 
+// The operation panel defaults to "Open in a new panel" ON, so Apply places the result in a
+// FRESH panel and leaves the source untouched. An in-place spec (asserting the SOURCE panel's
+// readout/Metadata/History changed) must turn that switch off first; otherwise the source keeps
+// its pre-op values and the History entry lands on the new result panel, not the source.
+export function openInNewPanelSwitch(page: Page, operationLabel: string): Locator {
+  return operationPanel(page, operationLabel).getByRole("switch", { name: "Open in a new panel" });
+}
+
+export async function setOpenInNewPanel(
+  page: Page,
+  operationLabel: string,
+  shouldOpenInNewPanel: boolean,
+): Promise<void> {
+  const toggle = openInNewPanelSwitch(page, operationLabel);
+  const isChecked = (await toggle.getAttribute("aria-checked")) === "true";
+  if (isChecked !== shouldOpenInNewPanel) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", String(shouldOpenInNewPanel));
+}
+
+export async function applyOperationInPlace(page: Page, operationLabel: string): Promise<void> {
+  await setOpenInNewPanel(page, operationLabel, false);
+  await applyOperation(page, operationLabel);
+}
+
 export async function cancelOperation(page: Page, operationLabel: string): Promise<void> {
   const panel = operationPanel(page, operationLabel);
   await panel.getByRole("button", { name: "Cancel", exact: true }).click();
