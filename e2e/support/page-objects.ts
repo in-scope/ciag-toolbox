@@ -139,3 +139,10 @@ export {
   type ImagePixel,
   type CanvasRect,
 } from "./viewport-navigation";
+export {
+  operationRegionPlaceholder,
+  selectOperationRegionButton,
+  expectOperationAwaitsItsOwnRegion,
+  selectOperationRegionByDrag,
+  type OperationRegionDragRequest,
+} from "./operation-region-picker";
