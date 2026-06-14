@@ -38,7 +38,11 @@ import {
   planInvertForRaster,
 } from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
-import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
+import {
+  applyNormalizeToRaster,
+  MIN_MAX_NORMALIZE_METHOD,
+  type NormalizeRangeMethod,
+} from "@/lib/image/apply-normalize";
 import {
   applyRgbToGrayscale,
   LUMINANCE_GRAYSCALE_WEIGHTS,
@@ -974,6 +978,11 @@ function describeInvertAffectedBands(parameterValues: ParameterValuesById): stri
 
 const NORMALIZE_SCOPE_PARAMETER_ID = "scope";
 const NORMALIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const NORMALIZE_METHOD_PARAMETER_ID = "method";
+const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
+const NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID = "highPercentile";
+const MIN_MAX_METHOD_VALUE = "min-max";
+const ROBUST_PERCENTILE_METHOD_VALUE = "robust-percentile";
 
 const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
@@ -984,11 +993,51 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   defaultValue: FULL_CUBE_SCOPE,
 };
 
+const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
+  kind: "enum",
+  id: NORMALIZE_METHOD_PARAMETER_ID,
+  label: "Method",
+  description:
+    "Min-max uses the absolute min and max. Robust uses the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1).",
+  defaultValue: MIN_MAX_METHOD_VALUE,
+  options: [
+    { value: MIN_MAX_METHOD_VALUE, label: "Min-max (absolute)" },
+    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Robust (percentile clip)" },
+  ],
+};
+
+const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: NORMALIZE_LOW_PERCENTILE_PARAMETER_ID,
+  label: "Low percentile (robust)",
+  description: "Lower clip percentile used by the robust method.",
+  defaultValue: 2,
+  min: 0,
+  max: 100,
+  step: 0.5,
+};
+
+const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
+  kind: "number",
+  id: NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID,
+  label: "High percentile (robust)",
+  description: "Upper clip percentile used by the robust method.",
+  defaultValue: 98,
+  min: 0,
+  max: 100,
+  step: 0.5,
+};
+
 export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   id: "normalize-data",
   label: "Normalize",
   icon: Scaling,
-  parameters: [NORMALIZE_SCOPE_PARAMETER_SCHEMA],
+  parameters: [
+    NORMALIZE_SCOPE_PARAMETER_SCHEMA,
+    NORMALIZE_METHOD_PARAMETER_SCHEMA,
+    NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA,
+    NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA,
+  ],
   successMessage: "Normalize applied",
   appliedLabel: "Normalize",
   loadingMessage: "Normalizing...",
@@ -1016,7 +1065,8 @@ function createNormalizeSourceTransform(): ViewportActionSourceTransform {
       );
     }
     const selection = resolveNormalizeScopeSelection(parameterValues);
-    return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection) };
+    const method = resolveNormalizeRangeMethod(parameterValues);
+    return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection, method) };
   };
 }
 
@@ -1030,6 +1080,28 @@ function resolveNormalizeScopeSelection(
   return resolveCubeScopeSelection(choice, [readNormalizeTargetBandIndex(parameterValues)]);
 }
 
+function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
+  if (parameterValues[NORMALIZE_METHOD_PARAMETER_ID] !== ROBUST_PERCENTILE_METHOD_VALUE) {
+    return MIN_MAX_NORMALIZE_METHOD;
+  }
+  return {
+    kind: "percentile",
+    bounds: {
+      lowPercentile: readNormalizePercentile(parameterValues, NORMALIZE_LOW_PERCENTILE_PARAMETER_ID, 2),
+      highPercentile: readNormalizePercentile(parameterValues, NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID, 98),
+    },
+  };
+}
+
+function readNormalizePercentile(
+  parameterValues: ParameterValuesById,
+  parameterId: string,
+  fallback: number,
+): number {
+  const raw = parameterValues[parameterId];
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+}
+
 function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): number {
   const raw = parameterValues[NORMALIZE_BAND_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
@@ -1037,12 +1109,22 @@ function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): num
 }
 
 function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
+  return `Normalize to [0,1] (${formatNormalizeScopeLabel(parameterValues)}${formatNormalizeMethodSuffix(parameterValues)})`;
+}
+
+function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string {
   const choice = readCubeScopeChoiceOrDefault(
     parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
     FULL_CUBE_SCOPE,
   );
-  if (choice === FULL_CUBE_SCOPE) return "Normalize to [0,1] (full stack)";
-  return `Normalize to [0,1] (band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1})`;
+  if (choice === FULL_CUBE_SCOPE) return "full stack";
+  return `band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1}`;
+}
+
+function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
+  const method = resolveNormalizeRangeMethod(parameterValues);
+  if (method.kind === "min-max") return "";
+  return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 
 const STANDARDIZE_SCOPE_PARAMETER_ID = "scope";

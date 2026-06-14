@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { applyNormalizeToRaster } from "./apply-normalize";
+import { applyNormalizeToRaster, type NormalizeRangeMethod } from "./apply-normalize";
+import { DEFAULT_PERCENTILE_BOUNDS } from "./percentile-value-range";
 import type { RasterImage } from "./raster-image";
+
+const ROBUST_METHOD: NormalizeRangeMethod = { kind: "percentile", bounds: DEFAULT_PERCENTILE_BOUNDS };
+
+function makeSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage {
+  return {
+    bandPixels: [Uint16Array.from(values)],
+    width: values.length,
+    height: 1,
+    bandCount: 1,
+    sampleFormat: "uint",
+    bitsPerSample: 16,
+  };
+}
+
+// A band whose bulk sits in [0, 98] with a single sparse near-max outlier (1000).
+function makeOutlierBandValues(): number[] {
+  const bulk = Array.from({ length: 99 }, (_unused, index) => index);
+  return [...bulk, 1000];
+}
 
 function makeTwoBandUint8Raster(
   bandOne: ReadonlyArray<number>,
@@ -74,6 +94,43 @@ describe("applyNormalizeToRaster", () => {
     const raster = makeTwoBandUint8Raster([0, 100], [100, 200]);
     applyNormalizeToRaster(raster, { scope: "full-cube" });
     expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 100]);
+  });
+
+  it("leaves the bulk compressed near 0 under plain min-max with a sparse outlier (CT-107 reproduction)", () => {
+    const raster = makeSingleBandUint16Raster(makeOutlierBandValues());
+    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] });
+    const normalized = Array.from(result.bandPixels[0]!);
+    // The outlier (1000) sets the max, so every bulk value (0..98) maps below 0.1.
+    const bulkValues = normalized.slice(0, 99);
+    expect(Math.max(...bulkValues)).toBeLessThan(0.1);
+    expect(normalized[99]).toBe(1);
+  });
+
+  it("stretches the bulk across [0,1] under robust percentile normalize (CT-107)", () => {
+    const raster = makeSingleBandUint16Raster(makeOutlierBandValues());
+    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, ROBUST_METHOD);
+    const normalized = Array.from(result.bandPixels[0]!);
+    // Robust range is roughly [1.98, 97.02], so the mid value (50) lands mid-scale.
+    expect(normalized[50]).toBeGreaterThan(0.4);
+    expect(normalized[50]).toBeLessThan(0.6);
+  });
+
+  it("clips values outside the percentile range to 0 and 1 (CT-107)", () => {
+    const raster = makeSingleBandUint16Raster(makeOutlierBandValues());
+    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, ROBUST_METHOD);
+    const normalized = Array.from(result.bandPixels[0]!);
+    expect(normalized[0]).toBe(0);
+    expect(normalized[99]).toBe(1);
+  });
+
+  it("supports robust percentile normalize in full-cube scope (CT-107)", () => {
+    const raster = makeTwoBandUint8Raster([0, 50, 100], [10, 60, 200]);
+    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, ROBUST_METHOD);
+    expect(result.sampleFormat).toBe("float");
+    for (const value of Array.from(result.bandPixels[0]!).concat(Array.from(result.bandPixels[1]!))) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
   });
 
   it("reuses unchanged float bands by reference in band-wise scope (CT-103)", () => {

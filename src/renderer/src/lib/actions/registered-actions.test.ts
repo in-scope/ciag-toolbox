@@ -113,6 +113,17 @@ function makeSingleBandUint8Raster(values: ReadonlyArray<number>): RasterImage {
   };
 }
 
+function makeSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage {
+  return {
+    bandPixels: [Uint16Array.from(values)],
+    width: values.length,
+    height: 1,
+    bandCount: 1,
+    sampleFormat: "uint",
+    bitsPerSample: 16,
+  };
+}
+
 describe("TONE_CURVE_ACTION", () => {
   const linearStretchAnchors = [
     { input: 0, output: 0 },
@@ -353,6 +364,34 @@ describe("NORMALIZE_DATA_ACTION", () => {
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full stack)");
     const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "band-wise" }, state, "whole-image");
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: band 3)");
+  });
+
+  it("stretches the bulk past the sparse outlier with the robust percentile method (CT-107)", () => {
+    const bulk = Array.from({ length: 99 }, (_unused, index) => index);
+    const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+      { scope: "band-wise", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const result = NORMALIZE_DATA_ACTION.transformSource!(
+      { kind: "raster", raster: makeSingleBandUint16Raster([...bulk, 1000]) },
+      prepared,
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    const normalized = Array.from(raster.bandPixels[0]!);
+    expect(normalized[50]).toBeGreaterThan(0.4);
+    expect(normalized[99]).toBe(1);
+  });
+
+  it("records the robust variant and percentiles in the applied label (CT-107)", () => {
+    const robust = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+      { scope: "full-cube", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(robust)).toBe(
+      "Normalize to [0,1] (full stack, robust 2-98%)",
+    );
   });
 });
 
