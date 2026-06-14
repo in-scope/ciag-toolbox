@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type MouseEvent,
   type MutableRefObject,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
   type ActionAvailabilityForActiveViewport,
@@ -57,6 +59,7 @@ import {
   readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
   listKeptBandOriginalNumbersAfterRemovingBand,
@@ -410,6 +413,11 @@ function ApplicationShell(): JSX.Element {
                 onOpenImage={handleOpenImagesRequested}
                 activeAction={activeAction}
                 sourceViewport={singleSelectedSource?.summary ?? null}
+                toolOptionsEmbeddedEditor={buildActiveToneCurveEditorElementOrNull(
+                  activeAction,
+                  singleSelectedSource,
+                  imagesByIndex,
+                )}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
@@ -494,6 +502,7 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
+  toolOptionsEmbeddedEditor: ReactNode;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
@@ -527,6 +536,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       <ToolOptionsPanel
         action={props.activeAction}
         sourceViewport={props.sourceViewport}
+        embeddedEditor={props.toolOptionsEmbeddedEditor}
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
         onParametersChange={props.onActiveActionParametersChange}
@@ -536,6 +546,24 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
     );
   }
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
+}
+
+function buildActiveToneCurveEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedToneCurveEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsToneCurveEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
 }
 
 function clearSelectionWhenClickIsOutsideAnyCell(
@@ -1433,14 +1461,28 @@ function openToolPanelClearingAnyRegionRequest(
   inputs: ToolPanelRegionRequestHandlerInputs,
 ): void {
   inputs.regionRequest.endRegionRequest();
-  clearOperationRegionOnActiveSource(inputs);
+  clearTransientOperationStateOnActiveSource(inputs);
   inputs.setActiveAction(action);
 }
 
 function closeToolPanelClearingAnyRegionRequest(inputs: ToolPanelRegionRequestHandlerInputs): void {
   inputs.regionRequest.endRegionRequest();
-  clearOperationRegionOnActiveSource(inputs);
+  clearTransientOperationStateOnActiveSource(inputs);
   inputs.setActiveAction(null);
+}
+
+function clearTransientOperationStateOnActiveSource(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  clearOperationRegionOnActiveSource(inputs);
+  clearToneCurveAnchorsOnActiveSource(inputs);
+}
+
+function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (state.toneCurveAnchors === null) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, toneCurveAnchors: null });
 }
 
 function beginOperationRegionRequestForActiveSource(
@@ -1969,8 +2011,7 @@ function deriveActionAvailabilityForActiveViewport(
   };
 }
 
-function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
-  if (action.id === "tone-curve") return "adjust the histogram tone curve first";
+function describeWhyActionIsUnavailableForViewport(_action: RegisteredViewportAction): string {
   return "not available for this panel";
 }
 

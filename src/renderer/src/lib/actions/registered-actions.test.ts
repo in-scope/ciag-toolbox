@@ -119,10 +119,14 @@ describe("TONE_CURVE_ACTION", () => {
     { input: 128, output: 255 },
   ];
 
-  it("is unavailable until the tone-curve editor has produced anchors", () => {
-    expect(TONE_CURVE_ACTION.isAvailableForActiveViewport!(DEFAULT_VIEWPORT_RENDERING_STATE)).toBe(false);
-    const withAnchors = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
-    expect(TONE_CURVE_ACTION.isAvailableForActiveViewport!(withAnchors)).toBe(true);
+  it("is always available to open: the curve editor lives in its operation panel (CT-104)", () => {
+    expect(TONE_CURVE_ACTION.isAvailableForActiveViewport).toBeUndefined();
+  });
+
+  it("rejects apply when the panel editor has not produced anchors yet", () => {
+    expect(() =>
+      TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, DEFAULT_VIEWPORT_RENDERING_STATE, "whole-image"),
+    ).toThrow(/at least two anchor points/);
   });
 
   it("injects the serialized anchors and selected band index for the audit trail", () => {

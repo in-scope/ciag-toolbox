@@ -1,7 +1,6 @@
 import { ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { HistogramToneCurveEditor } from "@/components/histogram-tone-curve-editor";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
@@ -157,19 +156,13 @@ function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
     props.bandIndex,
     props.viewportIndex,
   );
-  const toneCurveBinding = useToneCurveAnchorBinding(props.viewportIndex);
   if (!histogram) return <HistogramSkeleton />;
   return (
-    <HistogramCanvas
-      histogram={histogram}
-      sampleFormat={props.raster.sampleFormat}
-      toneCurveRanges={buildToneCurveValueRanges(props.raster, props.bandIndex, histogram)}
-      toneCurveBinding={toneCurveBinding}
-    />
+    <HistogramCanvas histogram={histogram} sampleFormat={props.raster.sampleFormat} />
   );
 }
 
-function buildToneCurveValueRanges(
+export function buildToneCurveValueRanges(
   raster: RasterImage,
   bandIndex: number,
   histogram: BandHistogram,
@@ -184,12 +177,12 @@ function buildToneCurveValueRanges(
   };
 }
 
-interface ToneCurveAnchorBinding {
+export interface ToneCurveAnchorBinding {
   anchors: ReadonlyArray<ToneCurveAnchor> | null;
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void;
 }
 
-function useToneCurveAnchorBinding(viewportIndex: number): ToneCurveAnchorBinding {
+export function useToneCurveAnchorBinding(viewportIndex: number): ToneCurveAnchorBinding {
   const renderingApi = useViewportRendering();
   const anchors = renderingApi.getRenderingState(viewportIndex).toneCurveAnchors;
   const onChange = useCallback(
@@ -202,7 +195,7 @@ function useToneCurveAnchorBinding(viewportIndex: number): ToneCurveAnchorBindin
   return { anchors, onChange };
 }
 
-function HistogramSkeleton(): JSX.Element {
+export function HistogramSkeleton(): JSX.Element {
   return (
     <Skeleton
       className="w-full"
@@ -211,7 +204,7 @@ function HistogramSkeleton(): JSX.Element {
   );
 }
 
-function useBandHistogramFromCacheOrWorker(
+export function useBandHistogramFromCacheOrWorker(
   raster: RasterImage,
   bandIndex: number,
   viewportIndex: number,
@@ -294,11 +287,10 @@ function absorbBandHistogramAbandonmentOrRethrow(reason: unknown): void {
 interface HistogramCanvasProps {
   histogram: BandHistogram;
   sampleFormat: RasterSampleFormat;
-  toneCurveRanges: ToneCurveValueRanges;
-  toneCurveBinding: ToneCurveAnchorBinding;
+  canvasOverlay?: ReactNode;
 }
 
-function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
+export function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [canvasWidthPx, setCanvasWidthPx] = useState<number>(props.histogram.binCount);
   useObserveCanvasWidthInPixels(canvasRef, setCanvasWidthPx);
@@ -327,11 +319,7 @@ function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
             className="block w-full rounded-sm bg-muted text-primary"
             style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
           />
-          <HistogramToneCurveEditor
-            ranges={props.toneCurveRanges}
-            anchors={props.toneCurveBinding.anchors}
-            onChange={props.toneCurveBinding.onChange}
-          />
+          {props.canvasOverlay}
         </div>
       </div>
       <div className="flex gap-1">

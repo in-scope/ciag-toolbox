@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { SquareDashedMousePointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ interface ToolOptionsPanelProps {
   onParametersChange?: (values: ParameterValuesById) => void;
   onBeginRegionRequest?: () => void;
   onClearOperationRegion?: () => void;
+  embeddedEditor?: ReactNode;
 }
 
 export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | null {
@@ -55,6 +56,7 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
       onParametersChange={props.onParametersChange}
       onBeginRegionRequest={props.onBeginRegionRequest}
       onClearOperationRegion={props.onClearOperationRegion}
+      embeddedEditor={props.embeddedEditor}
     />
   );
 }
@@ -67,6 +69,7 @@ interface ToolOptionsPanelShellProps {
   onParametersChange?: (values: ParameterValuesById) => void;
   onBeginRegionRequest?: () => void;
   onClearOperationRegion?: () => void;
+  embeddedEditor?: ReactNode;
 }
 
 function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
@@ -95,6 +98,7 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
       <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
       <ToolOptionsPanelBody
         sourceViewport={props.sourceViewport}
+        embeddedEditor={props.embeddedEditor}
         parameterSchemas={parameterSchemas}
         parameterValues={parameterValues}
         onChangeParameterValue={(id, next) =>
@@ -214,6 +218,7 @@ function PanelCloseButton({ onCancel }: { onCancel: () => void }): JSX.Element {
 
 interface PanelBodyProps {
   sourceViewport: ToolOptionsSourceViewport | null;
+  embeddedEditor?: ReactNode;
   parameterSchemas: ReadonlyArray<ParameterSchema>;
   parameterValues: ParameterValuesById;
   onChangeParameterValue: (id: string, next: ParameterValue) => void;
@@ -230,6 +235,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
       <SourceViewportSection sourceViewport={props.sourceViewport} />
+      {props.embeddedEditor}
       {props.parameterSchemas.length > 0 ? (
         <ParameterFormSection
           schemas={props.parameterSchemas}

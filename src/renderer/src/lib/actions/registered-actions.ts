@@ -607,7 +607,6 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   supportsRoiScope: true,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
-  isAvailableForActiveViewport: (state) => state.toneCurveAnchors !== null,
   apply: clearToneCurveAfterApply,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
   transformSource: createToneCurveSourceTransform(),
