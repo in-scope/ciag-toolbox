@@ -89,7 +89,12 @@ export {
   toggleNormalizedViewing,
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
-export { goToBandNumberInput, selectActiveBandNumber } from "./band-navigator";
+export {
+  goToBandNumberInput,
+  selectActiveBandNumber,
+  bandNavigatorStrip,
+  expectNoOriginalBandAnnotationBesideBandSlider,
+} from "./band-navigator";
 export {
   removeBandButton,
   removeDisplayedBand,
