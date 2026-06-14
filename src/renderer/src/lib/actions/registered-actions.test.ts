@@ -364,7 +364,38 @@ describe("NORMALIZE_DATA_ACTION", () => {
     const fullCube = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "full-cube" }, state, "whole-image");
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(fullCube)).toBe("Normalize to [0,1] (full stack)");
     const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!({ scope: "band-wise" }, state, "whole-image");
-    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: band 3)");
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: bands 3)");
+  });
+
+  it("normalizes the explicit band set from a band-range expression (CT-110)", () => {
+    const result = NORMALIZE_DATA_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([0, 100], [0, 50], [10, 30]) },
+      { scope: "band-wise", bandRange: "1,3", targetBandIndex: 1 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 1]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 50]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([0, 1]);
+  });
+
+  it("records the explicit band set in the applied label (CT-110)", () => {
+    const bandWise = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+      { scope: "band-wise", bandRange: "1-3,5" },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe(
+      "Normalize to [0,1] (band-wise: bands 1-3,5)",
+    );
+  });
+
+  it("throws a clear error for an out-of-range band expression (CT-110)", () => {
+    expect(() =>
+      NORMALIZE_DATA_ACTION.transformSource!(
+        { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
+        { scope: "band-wise", bandRange: "5", targetBandIndex: 0 },
+      ),
+    ).toThrow(/out of range/i);
   });
 
   it("stretches the bulk past the sparse outlier with the robust percentile method (CT-107)", () => {

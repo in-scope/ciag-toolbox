@@ -1539,13 +1539,15 @@ function deriveSingleSelectedSource(
   if (onlyIndex === null) return null;
   const content = imagesByIndex.get(onlyIndex);
   if (!content) return null;
+  const renderingState = renderingApi.getRenderingState(onlyIndex);
   return {
     index: onlyIndex,
     summary: {
       viewportNumber: getViewportNumberFromIndex(onlyIndex),
       fileName: content.fileName,
-      operationRegion: renderingApi.getRenderingState(onlyIndex).operationRegion,
+      operationRegion: renderingState.operationRegion,
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
+      selectedBandNumber: renderingState.selectedBandIndex + 1,
     },
   };
 }

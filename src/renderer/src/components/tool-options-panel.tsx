@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { SquareDashedMousePointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ParameterFormSection } from "@/components/parameter-form-section";
 import {
   buildDefaultParameterValuesForSchemas,
+  describeBandScopeBlockingErrorOrNull,
+  seedBandScopeBandRangeDefaults,
   type ParameterSchema,
   type ParameterValue,
   type ParameterValuesById,
@@ -32,6 +34,7 @@ export interface ToolOptionsSourceViewport {
   readonly fileName: string;
   readonly operationRegion: ViewportRoi | null;
   readonly sourceBandCount: number | null;
+  readonly selectedBandNumber: number;
 }
 
 interface ToolOptionsPanelProps {
@@ -76,12 +79,14 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
   const [openInNewViewport, setOpenInNewViewport] = useState(true);
   const [applyScope, setApplyScope] = useState<ApplyScope>(DEFAULT_APPLY_SCOPE);
   const parameterSchemas = useStableParameterSchemas(props.action.parameters);
+  const currentBandNumberRef = useLatestCurrentBandNumberRef(props.sourceViewport);
   const [parameterValues, setParameterValues] = useState<ParameterValuesById>(() =>
-    buildDefaultParameterValuesForSchemas(parameterSchemas),
+    buildInitialParameterValuesForPanel(parameterSchemas, currentBandNumberRef.current),
   );
   useResetPanelStateWhenActionChanges(
     props.action.id,
     parameterSchemas,
+    currentBandNumberRef,
     setOpenInNewViewport,
     setParameterValues,
     setApplyScope,
@@ -91,6 +96,7 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
   const effectiveApplyScope = showApplyScopeSelector ? applyScope : DEFAULT_APPLY_SCOPE;
   const isRegionRequiredNow = doesActionRequireRegionNow(props.action, effectiveApplyScope);
   const operationRegion = props.sourceViewport?.operationRegion ?? null;
+  const hasBlockingParameterError = hasBlockingBandScopeError(parameterSchemas, parameterValues, props.sourceViewport);
   const handleApply = () =>
     props.onApply({ openInNewViewport, parameterValues, applyScope: effectiveApplyScope });
   return (
@@ -117,7 +123,12 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
         onChangeOpenInNewViewport={setOpenInNewViewport}
         onCancel={props.onCancel}
         onApply={handleApply}
-        canApply={computeWhetherApplyIsAllowed(props.sourceViewport, isRegionRequiredNow, operationRegion)}
+        canApply={computeWhetherApplyIsAllowed(
+          props.sourceViewport,
+          isRegionRequiredNow,
+          operationRegion,
+          hasBlockingParameterError,
+        )}
       />
     </aside>
   );
@@ -143,10 +154,20 @@ function computeWhetherApplyIsAllowed(
   sourceViewport: ToolOptionsSourceViewport | null,
   isRegionRequiredNow: boolean,
   operationRegion: ViewportRoi | null,
+  hasBlockingParameterError: boolean,
 ): boolean {
   if (sourceViewport === null) return false;
   if (isRegionRequiredNow && operationRegion === null) return false;
-  return true;
+  return !hasBlockingParameterError;
+}
+
+function hasBlockingBandScopeError(
+  parameterSchemas: ReadonlyArray<ParameterSchema>,
+  parameterValues: ParameterValuesById,
+  sourceViewport: ToolOptionsSourceViewport | null,
+): boolean {
+  const bandCount = sourceViewport?.sourceBandCount ?? null;
+  return describeBandScopeBlockingErrorOrNull(parameterSchemas, parameterValues, bandCount) !== null;
 }
 
 const PANEL_CLASSES =
@@ -158,18 +179,36 @@ function useStableParameterSchemas(
   return useMemo(() => parameters ?? [], [parameters]);
 }
 
+function useLatestCurrentBandNumberRef(
+  sourceViewport: ToolOptionsSourceViewport | null,
+): { readonly current: number } {
+  const currentBandNumber = sourceViewport?.selectedBandNumber ?? 1;
+  const ref = useRef(currentBandNumber);
+  ref.current = currentBandNumber;
+  return ref;
+}
+
+function buildInitialParameterValuesForPanel(
+  parameterSchemas: ReadonlyArray<ParameterSchema>,
+  currentBandNumber: number,
+): ParameterValuesById {
+  const defaults = buildDefaultParameterValuesForSchemas(parameterSchemas);
+  return seedBandScopeBandRangeDefaults(parameterSchemas, defaults, currentBandNumber);
+}
+
 function useResetPanelStateWhenActionChanges(
   actionId: string,
   parameterSchemas: ReadonlyArray<ParameterSchema>,
+  currentBandNumberRef: { readonly current: number },
   setOpenInNewViewport: (value: boolean) => void,
   setParameterValues: (values: ParameterValuesById) => void,
   setApplyScope: (scope: ApplyScope) => void,
 ): void {
   useEffect(() => {
     setOpenInNewViewport(true);
-    setParameterValues(buildDefaultParameterValuesForSchemas(parameterSchemas));
+    setParameterValues(buildInitialParameterValuesForPanel(parameterSchemas, currentBandNumberRef.current));
     setApplyScope(DEFAULT_APPLY_SCOPE);
-  }, [actionId, parameterSchemas, setOpenInNewViewport, setParameterValues, setApplyScope]);
+  }, [actionId, parameterSchemas, currentBandNumberRef, setOpenInNewViewport, setParameterValues, setApplyScope]);
 }
 
 function useReportParameterValuesToParent(

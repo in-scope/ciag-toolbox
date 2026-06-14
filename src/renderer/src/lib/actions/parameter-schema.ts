@@ -1,3 +1,5 @@
+import { describeBandRangeErrorOrNull } from "@/lib/image/parse-band-range";
+
 export interface ParameterSchemaBase {
   readonly id: string;
   readonly label: string;
@@ -52,6 +54,7 @@ export const BAND_WISE_SCOPE: CubeScopeChoice = "band-wise";
 export interface CubeScopeParameterSchema extends ParameterSchemaBase {
   readonly kind: "cube-scope";
   readonly defaultValue: CubeScopeChoice;
+  readonly bandRangeParameterId: string;
 }
 
 export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
@@ -98,6 +101,45 @@ export function readCubeScopeChoiceOrDefault(
 
 export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefined): string {
   return typeof value === "string" ? value : NO_RASTER_REFERENCE_SELECTED;
+}
+
+export function readBandRangeTextOrEmpty(value: ParameterValue | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function seedBandScopeBandRangeDefaults(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  currentBandNumber: number,
+): ParameterValuesById {
+  const seeded: Record<string, ParameterValue> = { ...values };
+  for (const schema of schemas) {
+    if (schema.kind === "cube-scope") seeded[schema.bandRangeParameterId] = String(currentBandNumber);
+  }
+  return Object.freeze(seeded);
+}
+
+export function describeBandScopeBlockingErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  bandCount: number | null,
+): string | null {
+  for (const schema of schemas) {
+    if (schema.kind !== "cube-scope") continue;
+    const error = describeBandWiseRangeErrorForSchemaOrNull(schema, values, bandCount);
+    if (error) return error;
+  }
+  return null;
+}
+
+function describeBandWiseRangeErrorForSchemaOrNull(
+  schema: CubeScopeParameterSchema,
+  values: ParameterValuesById,
+  bandCount: number | null,
+): string | null {
+  const choice = readCubeScopeChoiceOrDefault(values[schema.id] ?? schema.defaultValue, schema.defaultValue);
+  if (choice !== BAND_WISE_SCOPE) return null;
+  return describeBandRangeErrorOrNull(readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]), bandCount);
 }
 
 export function readBandNumberOrDefault(value: ParameterValue | undefined, fallback: number): number {

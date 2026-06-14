@@ -50,6 +50,10 @@ import {
 } from "@/lib/image/apply-rgb-to-grayscale";
 import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
 import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
+import {
+  formatBandNumbersAsRangeText,
+  parseBandRangeText,
+} from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
   readRememberedReferenceRasterOrNull,
@@ -66,9 +70,9 @@ import {
   FULL_CUBE_SCOPE,
   NO_RASTER_REFERENCE_SELECTED,
   readBandNumberOrDefault,
+  readBandRangeTextOrEmpty,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
-  resolveCubeScopeSelection,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
   type CubeScopeParameterSchema,
@@ -945,6 +949,7 @@ function describeInvertAffectedBands(parameterValues: ParameterValuesById): stri
 
 const NORMALIZE_SCOPE_PARAMETER_ID = "scope";
 const NORMALIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const NORMALIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const NORMALIZE_METHOD_PARAMETER_ID = "method";
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID = "highPercentile";
@@ -956,8 +961,9 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full stack scales every band by one stack-wide min and max; band-wise scales the selected band by its own min and max.",
+    "Full stack scales every band by one stack-wide min and max; band-wise scales each entered band by its own min and max (defaults to the current band).",
   defaultValue: FULL_CUBE_SCOPE,
+  bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
 };
 
 const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
@@ -1027,7 +1033,7 @@ function injectSelectedBandIndexForNormalize(
 function createNormalizeSourceTransform(): ViewportActionSourceTransform {
   return (rawSource, parameterValues) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const selection = resolveNormalizeScopeSelection(parameterValues);
+    const selection = resolveNormalizeScopeSelection(parameterValues, source.raster.bandCount);
     const method = resolveNormalizeRangeMethod(parameterValues);
     return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection, method) };
   };
@@ -1035,12 +1041,18 @@ function createNormalizeSourceTransform(): ViewportActionSourceTransform {
 
 function resolveNormalizeScopeSelection(
   parameterValues: ParameterValuesById,
+  bandCount: number,
 ): ResolvedCubeScopeSelection {
   const choice = readCubeScopeChoiceOrDefault(
     parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
     FULL_CUBE_SCOPE,
   );
-  return resolveCubeScopeSelection(choice, [readNormalizeTargetBandIndex(parameterValues)]);
+  if (choice === FULL_CUBE_SCOPE) return { scope: "full-cube" };
+  return resolveBandWiseScopeOrThrow(
+    parameterValues[NORMALIZE_BAND_RANGE_PARAMETER_ID],
+    readNormalizeTargetBandIndex(parameterValues),
+    bandCount,
+  );
 }
 
 function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
@@ -1081,7 +1093,10 @@ function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string
     FULL_CUBE_SCOPE,
   );
   if (choice === FULL_CUBE_SCOPE) return "full stack";
-  return `band-wise: band ${readNormalizeTargetBandIndex(parameterValues) + 1}`;
+  return `band-wise: bands ${describeBandWiseBandSet(
+    parameterValues[NORMALIZE_BAND_RANGE_PARAMETER_ID],
+    readNormalizeTargetBandIndex(parameterValues),
+  )}`;
 }
 
 function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
@@ -1090,8 +1105,31 @@ function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): stri
   return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 
+function resolveBandWiseScopeOrThrow(
+  bandRangeValue: ParameterValue | undefined,
+  fallbackBandIndex: number,
+  bandCount: number,
+): ResolvedCubeScopeSelection {
+  const text = readBandRangeTextOrEmpty(bandRangeValue);
+  if (text.trim() === "") return { scope: "band-wise", bandIndexes: [fallbackBandIndex] };
+  const parsed = parseBandRangeText(text, bandCount);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return { scope: "band-wise", bandIndexes: parsed.bandNumbers.map((bandNumber) => bandNumber - 1) };
+}
+
+function describeBandWiseBandSet(
+  bandRangeValue: ParameterValue | undefined,
+  fallbackBandIndex: number,
+): string {
+  const text = readBandRangeTextOrEmpty(bandRangeValue);
+  if (text.trim() === "") return String(fallbackBandIndex + 1);
+  const parsed = parseBandRangeText(text, Number.MAX_SAFE_INTEGER);
+  return parsed.ok ? formatBandNumbersAsRangeText(parsed.bandNumbers) : text.trim();
+}
+
 const STANDARDIZE_SCOPE_PARAMETER_ID = "scope";
 const STANDARDIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const STANDARDIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const STANDARDIZE_TARGET_MEAN_PARAMETER_ID = "targetMean";
 const STANDARDIZE_TARGET_STD_PARAMETER_ID = "targetStandardDeviation";
 
@@ -1100,8 +1138,9 @@ const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   id: STANDARDIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes the selected band by its own mean and std.",
+    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes each entered band by its own mean and std (defaults to the current band).",
   defaultValue: FULL_CUBE_SCOPE,
+  bandRangeParameterId: STANDARDIZE_BAND_RANGE_PARAMETER_ID,
 };
 
 const STANDARDIZE_TARGET_MEAN_PARAMETER_SCHEMA: NumberParameterSchema = {
@@ -1153,7 +1192,7 @@ function injectSelectedBandIndexForStandardize(
 function createStandardizeSourceTransform(): ViewportActionSourceTransform {
   return (rawSource, parameterValues) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const selection = resolveStandardizeScopeSelection(parameterValues);
+    const selection = resolveStandardizeScopeSelection(parameterValues, source.raster.bandCount);
     const target = readStandardizeTargetDistribution(parameterValues);
     return { kind: "raster", raster: applyStandardizeToRaster(source.raster, selection, target) };
   };
@@ -1161,12 +1200,18 @@ function createStandardizeSourceTransform(): ViewportActionSourceTransform {
 
 function resolveStandardizeScopeSelection(
   parameterValues: ParameterValuesById,
+  bandCount: number,
 ): ResolvedCubeScopeSelection {
   const choice = readCubeScopeChoiceOrDefault(
     parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
     FULL_CUBE_SCOPE,
   );
-  return resolveCubeScopeSelection(choice, [readStandardizeTargetBandIndex(parameterValues)]);
+  if (choice === FULL_CUBE_SCOPE) return { scope: "full-cube" };
+  return resolveBandWiseScopeOrThrow(
+    parameterValues[STANDARDIZE_BAND_RANGE_PARAMETER_ID],
+    readStandardizeTargetBandIndex(parameterValues),
+    bandCount,
+  );
 }
 
 function readStandardizeTargetBandIndex(parameterValues: ParameterValuesById): number {
@@ -1210,7 +1255,10 @@ function describeStandardizeScope(parameterValues: ParameterValuesById): string 
     FULL_CUBE_SCOPE,
   );
   if (choice === FULL_CUBE_SCOPE) return "full stack";
-  return `band-wise: band ${readStandardizeTargetBandIndex(parameterValues) + 1}`;
+  return `band-wise: bands ${describeBandWiseBandSet(
+    parameterValues[STANDARDIZE_BAND_RANGE_PARAMETER_ID],
+    readStandardizeTargetBandIndex(parameterValues),
+  )}`;
 }
 
 const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID = "redWeight";

@@ -6,11 +6,13 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
+import { describeBandRangeErrorOrNull } from "@/lib/image/parse-band-range";
 import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
   readBandNumberOrDefault,
+  readBandRangeTextOrEmpty,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   NO_RASTER_REFERENCE_SELECTED,
@@ -44,8 +46,10 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           key={schema.id}
           schema={schema}
           value={props.values[schema.id] ?? schema.defaultValue}
+          allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
+          onChangeValueAtId={props.onChangeValue}
         />
       ))}
     </section>
@@ -55,8 +59,10 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
 interface ParameterFieldRowProps {
   schema: ParameterSchema;
   value: ParameterValue;
+  allValues: ParameterValuesById;
   sourceBandCount: number | null;
   onChangeValue: (next: ParameterValue) => void;
+  onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
 
 function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
@@ -65,8 +71,10 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
       <ParameterFieldInput
         schema={props.schema}
         value={props.value}
+        allValues={props.allValues}
         sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
+        onChangeValueAtId={props.onChangeValueAtId}
       />
       {props.schema.description ? (
         <span className="text-xs text-muted-foreground">{props.schema.description}</span>
@@ -95,11 +103,15 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
     );
   }
   if (props.schema.kind === "cube-scope") {
+    const bandRangeParameterId = props.schema.bandRangeParameterId;
     return (
       <CubeScopeParameterField
         schema={props.schema}
         value={readCubeScopeChoiceOrDefault(props.value, props.schema.defaultValue)}
+        bandRangeText={readBandRangeTextOrEmpty(props.allValues[bandRangeParameterId])}
+        sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
+        onChangeBandRangeText={(next) => props.onChangeValueAtId(bandRangeParameterId, next)}
       />
     );
   }
@@ -304,7 +316,10 @@ const ENUM_SELECT_CLASSES =
 interface CubeScopeParameterFieldProps {
   schema: CubeScopeParameterSchema;
   value: CubeScopeChoice;
+  bandRangeText: string;
+  sourceBandCount: number | null;
   onChangeValue: (next: CubeScopeChoice) => void;
+  onChangeBandRangeText: (next: string) => void;
 }
 
 function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Element {
@@ -322,11 +337,44 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
       <CubeScopeRadioRow
         radioGroupName={radioGroupName}
         choice="band-wise"
-        label="Band-wise (selected bands)"
+        label="Band-wise (enter bands)"
         currentChoice={props.value}
         onSelect={props.onChangeValue}
       />
+      {props.value === "band-wise" ? (
+        <BandRangeTextInput
+          value={props.bandRangeText}
+          sourceBandCount={props.sourceBandCount}
+          onChangeValue={props.onChangeBandRangeText}
+        />
+      ) : null}
     </fieldset>
+  );
+}
+
+interface BandRangeTextInputProps {
+  value: string;
+  sourceBandCount: number | null;
+  onChangeValue: (next: string) => void;
+}
+
+function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
+  const id = useId();
+  const rangeError = describeBandRangeErrorOrNull(props.value, props.sourceBandCount);
+  return (
+    <div className="flex flex-col gap-1 pl-6 text-sm">
+      <input
+        id={id}
+        type="text"
+        value={props.value}
+        placeholder="1,3,5 or 1-5,10"
+        aria-label="Bands to process"
+        aria-invalid={rangeError !== null}
+        onChange={(event) => props.onChangeValue(event.target.value)}
+        className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
+      />
+      {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
+    </div>
   );
 }
 
