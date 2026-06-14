@@ -55,3 +55,19 @@ export {
   type ExpectedHistoryEntry,
   type ExpectedMetadata,
 } from "./assertions";
+export {
+  regionToolButton,
+  activateRegionTool,
+  ensureRegionToolInactive,
+  panelCanvasCenter,
+  pagePointForImagePixelCenter,
+  pixelsPerImagePixelVertically,
+  dragMouseFromTo,
+  drawInspectionRoiBetweenPixels,
+  readCommittedRoiOverlayRect,
+  wheelAtPagePoint,
+  readReadoutAtPagePoint,
+  resetViewWithDoubleClick,
+  type ImagePixel,
+  type CanvasRect,
+} from "./viewport-navigation";
