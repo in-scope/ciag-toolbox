@@ -10,6 +10,11 @@ export {
   selectPanel,
   countSelectedPanels,
   countPanels,
+  clickPanelToSelect,
+  expectPanelShowsSelectionRing,
+  expectOnlyPanelsSelected,
+  clickGridBackgroundToClearSelection,
+  type PanelSelectionClickModifiers,
 } from "./panels";
 export {
   applicationToolbar,

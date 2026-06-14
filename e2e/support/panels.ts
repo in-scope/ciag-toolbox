@@ -31,3 +31,61 @@ export async function countSelectedPanels(page: Page): Promise<number> {
 export async function countPanels(page: Page): Promise<number> {
   return panelGrid(page).getByRole("gridcell").count();
 }
+
+export interface PanelSelectionClickModifiers {
+  readonly ctrlOrMeta?: boolean;
+  readonly shift?: boolean;
+}
+
+// Click near the cell's top-left corner (its number-badge strip) so the gridcell's
+// own onClick selection fires without hitting the centred empty-state "Open image"
+// button or the canvas pixel-pin handler (which forces a plain selection on
+// multi-band rasters). Selection is a gridcell concern, so this works on empty and
+// loaded panels alike.
+const PANEL_SELECT_CLICK_POSITION = { x: 8, y: 8 } as const;
+
+type PlaywrightModifierKey = "ControlOrMeta" | "Shift";
+
+function toPlaywrightClickModifiers(
+  modifiers: PanelSelectionClickModifiers,
+): ReadonlyArray<PlaywrightModifierKey> {
+  const keys: PlaywrightModifierKey[] = [];
+  if (modifiers.ctrlOrMeta) keys.push("ControlOrMeta");
+  if (modifiers.shift) keys.push("Shift");
+  return keys;
+}
+
+export async function clickPanelToSelect(
+  page: Page,
+  panelNumber: number,
+  modifiers: PanelSelectionClickModifiers = {},
+): Promise<void> {
+  await panelCell(page, panelNumber).click({
+    position: { ...PANEL_SELECT_CLICK_POSITION },
+    modifiers: [...toPlaywrightClickModifiers(modifiers)],
+  });
+}
+
+export async function expectPanelShowsSelectionRing(
+  page: Page,
+  panelNumber: number,
+): Promise<void> {
+  await expect(panelCell(page, panelNumber)).toHaveClass(/ring-2/);
+}
+
+export async function expectOnlyPanelsSelected(
+  page: Page,
+  selectedPanelNumbers: ReadonlyArray<number>,
+): Promise<void> {
+  const panelCount = await countPanels(page);
+  for (let panelNumber = 1; panelNumber <= panelCount; panelNumber++) {
+    const expectedAriaSelected = selectedPanelNumbers.includes(panelNumber) ? "true" : "false";
+    await expect(panelCell(page, panelNumber)).toHaveAttribute("aria-selected", expectedAriaSelected);
+  }
+}
+
+export async function clickGridBackgroundToClearSelection(page: Page): Promise<void> {
+  const gridBox = await panelGrid(page).boundingBox();
+  if (!gridBox) throw new Error("Panel grid is not visible");
+  await page.mouse.click(gridBox.x - 8, gridBox.y + gridBox.height / 2);
+}
