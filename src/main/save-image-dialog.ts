@@ -1,6 +1,8 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { unlink, writeFile } from "node:fs/promises";
 import { extname } from "node:path";
+
+import { showSaveDialogOrStub } from "./e2e-dialog-stub";
 
 export interface SaveImageDialogSidecar {
   readonly extension: string;
@@ -24,7 +26,7 @@ async function showImageSaveDialog(
   window: BrowserWindow,
   request: SaveImageDialogRequest,
 ): Promise<Electron.SaveDialogReturnValue> {
-  return dialog.showSaveDialog(window, {
+  return showSaveDialogOrStub(window, {
     title: "Save Image",
     defaultPath: request.suggestedFileName,
     filters: [{ name: request.fileFilter.name, extensions: [...request.fileFilter.extensions] }],

@@ -1,8 +1,9 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
+import { showOpenDialogOrStub } from "./e2e-dialog-stub";
 import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
@@ -66,7 +67,7 @@ export type OpenImagesDialogResult =
 async function showImagesOpenDialogAllowingMultiSelect(
   window: BrowserWindow,
 ): Promise<Electron.OpenDialogReturnValue> {
-  return dialog.showOpenDialog(window, {
+  return showOpenDialogOrStub(window, {
     title: "Open Images",
     properties: ["openFile", "multiSelections"],
     filters: [SUPPORTED_IMAGE_FILTER],

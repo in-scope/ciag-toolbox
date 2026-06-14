@@ -1,6 +1,7 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 
+import { showOpenDialogOrStub } from "./e2e-dialog-stub";
 import { extractProjectBundleToFreshTempDirectory } from "./extract-project-bundle";
 import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
 
@@ -38,7 +39,7 @@ export type ReadBundleAssetResult =
 async function showOpenBundleDialog(
   window: BrowserWindow,
 ): Promise<OpenBundleDialogResult> {
-  const result = await dialog.showOpenDialog(window, {
+  const result = await showOpenDialogOrStub(window, {
     title: "Open Project",
     properties: ["openFile"],
     filters: [{ name: "Toolbox Project Bundle", extensions: [PROJECT_BUNDLE_EXTENSION] }],

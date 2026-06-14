@@ -8,6 +8,11 @@ import {
   type WindowBounds,
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
+import {
+  E2E_TEST_MODE_PRELOAD_ARGUMENT,
+  isE2eTestModeEnabled,
+  registerE2eDialogStubTestChannelsWhenEnabled,
+} from "./e2e-dialog-stub";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
@@ -73,8 +78,13 @@ function buildBrowserWindowOptionsFrom(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      additionalArguments: buildPreloadAdditionalArguments(),
     },
   };
+}
+
+function buildPreloadAdditionalArguments(): string[] {
+  return isE2eTestModeEnabled() ? [E2E_TEST_MODE_PRELOAD_ARGUMENT] : [];
 }
 
 function maximizeWindowIfPreviouslyMaximized(
@@ -138,6 +148,7 @@ app.whenReady().then(() => {
   registerSaveImageDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandler();
+  registerE2eDialogStubTestChannelsWhenEnabled();
   const splash = createSplashWindow();
   createMainWindow(splash);
   app.on("activate", reopenWindowOnMacActivate);

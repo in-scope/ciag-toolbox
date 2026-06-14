@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { unlink } from "node:fs/promises";
 import { extname } from "node:path";
 
@@ -6,6 +6,7 @@ import {
   writeProjectBundleAtPath,
   type BundleDraft,
 } from "./bundle-writer";
+import { showSaveDialogOrStub } from "./e2e-dialog-stub";
 
 const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const PROJECT_BUNDLE_EXTENSION = "ctbundle";
@@ -39,7 +40,7 @@ async function showBundleSaveAsDialog(
   window: BrowserWindow,
   currentProjectFilePath: string | null,
 ): Promise<string | null> {
-  const result = await dialog.showSaveDialog(window, {
+  const result = await showSaveDialogOrStub(window, {
     title: "Save Project As",
     defaultPath: deriveDefaultBundleSavePath(currentProjectFilePath),
     filters: [{ name: "Toolbox Project Bundle", extensions: [PROJECT_BUNDLE_EXTENSION] }],
