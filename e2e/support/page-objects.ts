@@ -161,6 +161,10 @@ export {
   type MultiBandTiffRequest,
 } from "./temporary-multi-band-tiff-fixture";
 export {
+  writeTemporaryMultiBandFloat32Tiff,
+  type MultiBandFloat32TiffRequest,
+} from "./temporary-multi-band-float32-tiff-fixture";
+export {
   writeTemporarySingleBandUint8Tiff,
   uint8FixtureValueAt,
   UINT8_FIXTURE_SIDE,
@@ -288,3 +292,20 @@ export {
   expectRightPanelSectionsInFixedOrder,
   expectNoRemovedRightPanelSections,
 } from "./right-panel-sections";
+export {
+  histogramValueAxisLabelsColumn,
+  histogramCountAxisLabelsColumn,
+  readHistogramValueAxisLabels,
+  readHistogramCountAxisLabels,
+  readSpectraPlotAxisLabels,
+  readAllChartAxisLabels,
+  expectLabelsUseSuperscriptNotMachineNotation,
+  expectLabelsCoverLargeAndSmallSuperscripts,
+  expectAxisLabelIsSuperscriptCount,
+} from "./chart-axis-labels";
+export {
+  readHistogramMidRowProfile,
+  expectHistogramBarsMeetWithoutGaps,
+  expectHistogramShowsEmptyMiddleBins,
+  type HistogramRowProfile,
+} from "./histogram-bar-canvas";

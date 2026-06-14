@@ -347,6 +347,7 @@ function HistogramCountAxisLabelsColumn(
     <div
       className={cn("relative", HISTOGRAM_Y_AXIS_COLUMN_CLASSES)}
       style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}
+      data-testid="histogram-count-axis"
       aria-hidden="true"
     >
       {ticks.map((tick) => (
@@ -388,7 +389,7 @@ function HistogramAxisTickLabelsRow(props: HistogramAxisTickLabelsRowProps): JSX
     props.sampleFormat,
   );
   return (
-    <div className="relative h-4 flex-1" aria-hidden="true">
+    <div className="relative h-4 flex-1" data-testid="histogram-value-axis" aria-hidden="true">
       {ticks.map((tick) => (
         <span
           key={tick.value}
