@@ -72,6 +72,15 @@ export {
   closedPanelsToast,
 } from "./grid-layout-controls";
 export {
+  openPanelContextMenu,
+  duplicateMenuItem,
+  duplicatePanelViaContextMenu,
+  duplicateReplacePicker,
+  chooseReplaceTargetPanel,
+  confirmReplaceWithChosenTarget,
+  cancelReplacePicker,
+} from "./duplicate-panel";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,
