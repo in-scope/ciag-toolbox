@@ -105,6 +105,18 @@ export {
   type WavelengthStackFixtureFile,
 } from "./temporary-open-images-fixtures";
 export {
+  saveImageFormatPicker,
+  saveImageFormatRadioGroup,
+  readOfferedSaveImageFormatLabels,
+  chooseSaveImageFormat,
+  confirmSaveImageFormat,
+  cancelSaveImageFormatPicker,
+  exportSelectedStackThroughSaveDialog,
+  loadImageFromAbsolutePath,
+  createTemporaryExportDirectory,
+  type SaveImageExportRequest,
+} from "./save-image-flow";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,

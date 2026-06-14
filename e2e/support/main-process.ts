@@ -60,6 +60,25 @@ export function triggerAboutMenuItem(app: ElectronApplication): Promise<void> {
   });
 }
 
+export function triggerSaveImageMenuItem(app: ElectronApplication): Promise<void> {
+  return app.evaluate(({ Menu }) => {
+    interface RawMenuNode {
+      label: string;
+      role?: string;
+      click?: () => void;
+      submenu?: { items: RawMenuNode[] };
+    }
+    const menu = Menu.getApplicationMenu() as unknown as {
+      items: RawMenuNode[];
+    } | null;
+    const file = (menu?.items ?? []).find((item) => item.label === "File");
+    const save = file?.submenu?.items.find((item) =>
+      item.label.startsWith("Save Image"),
+    );
+    save?.click?.();
+  });
+}
+
 export function readAppNameAndVersion(
   app: ElectronApplication,
 ): Promise<AppNameAndVersion> {
