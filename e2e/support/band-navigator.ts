@@ -18,6 +18,50 @@ export async function selectActiveBandNumber(page: Page, oneBasedBandNumber: num
   await input.press("Enter");
 }
 
+// The navigator's prev/next chevrons (aria-label "Previous band"/"Next band") and the
+// "Active band" slider both move the displayed band by one step through the same debounced
+// path the header label tracks (CT-094). With a single loaded multi-band panel each control
+// is unambiguous at page scope.
+
+export function previousBandButton(page: Page): Locator {
+  return page.getByRole("button", { name: "Previous band" });
+}
+
+export function nextBandButton(page: Page): Locator {
+  return page.getByRole("button", { name: "Next band" });
+}
+
+export async function stepToPreviousBand(page: Page): Promise<void> {
+  await previousBandButton(page).click();
+}
+
+export async function stepToNextBand(page: Page): Promise<void> {
+  await nextBandButton(page).click();
+}
+
+export function bandSliderThumb(page: Page): Locator {
+  return page.locator('[aria-label="Active band"]').getByRole("slider");
+}
+
+const MAXIMUM_BAND_SLIDER_STEPS = 64;
+
+export async function setActiveBandViaSlider(page: Page, oneBasedBandNumber: number): Promise<void> {
+  const targetIndex = oneBasedBandNumber - 1;
+  const thumb = bandSliderThumb(page);
+  await thumb.focus();
+  await pressBandSliderThumbTowardIndex(thumb, targetIndex);
+  await expect(thumb).toHaveAttribute("aria-valuenow", String(targetIndex));
+}
+
+async function pressBandSliderThumbTowardIndex(thumb: Locator, targetIndex: number): Promise<void> {
+  for (let attempt = 0; attempt < MAXIMUM_BAND_SLIDER_STEPS; attempt += 1) {
+    const current = Number(await thumb.getAttribute("aria-valuenow"));
+    if (current === targetIndex) return;
+    await thumb.press(current < targetIndex ? "ArrowRight" : "ArrowLeft");
+  }
+  throw new Error(`Band slider did not reach band index ${targetIndex}`);
+}
+
 // The navigator's root flex container holds the "Go to band number" input directly, so its
 // parent is the whole band-slider strip. CT-093 explicitly REJECTED annotating the slider
 // with the original band index/wavelength (that information lives in the Metadata panel), so

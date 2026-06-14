@@ -94,7 +94,20 @@ export {
   selectActiveBandNumber,
   bandNavigatorStrip,
   expectNoOriginalBandAnnotationBesideBandSlider,
+  previousBandButton,
+  nextBandButton,
+  stepToPreviousBand,
+  stepToNextBand,
+  bandSliderThumb,
+  setActiveBandViaSlider,
 } from "./band-navigator";
+export {
+  panelHeaderLabel,
+  readPanelHeaderLabel,
+  expectPanelHeaderToName,
+  expectPanelHeaderActiveBand,
+  expectPanelHeaderNotToName,
+} from "./panel-header-label";
 export {
   removeBandButton,
   removeDisplayedBand,
