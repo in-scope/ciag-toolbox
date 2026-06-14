@@ -37,6 +37,10 @@ import {
   describeSpectrumYAxisLabel,
 } from "@/lib/image/spectrum-axis";
 import {
+  buildSpectrumBandTooltipDescriptors,
+  type SpectrumBandTooltipDescriptor,
+} from "@/lib/image/spectrum-hover-tooltip";
+import {
   MAX_PINNED_SPECTRA_PER_VIEWPORT,
   type PinnedRoiMeanSpectrum,
   type PinnedRoiSpectraList,
@@ -499,6 +503,10 @@ function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
     () => (raster ? buildSpectrumXAxisFromRaster(raster) : null),
     [raster],
   );
+  const bandTooltipDescriptors = useMemo(
+    () => (raster ? buildSpectrumBandTooltipDescriptors(raster) : []),
+    [raster],
+  );
   if (!raster || !xAxis) return null;
   const yAxisLabel = describeSpectrumYAxisLabel(raster.sampleFormat);
   const hoverBandValues = readHoveredSpectrumBandValuesOrNull(
@@ -524,6 +532,7 @@ function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
           bandRuns={xAxis.bandRuns}
           tickPositions={xAxis.tickPositions}
           tickLabels={xAxis.tickLabels}
+          bandTooltipDescriptors={bandTooltipDescriptors}
         />
       ) : (
         <SpectraSectionEmptyState />
@@ -574,6 +583,7 @@ interface SpectraSectionBodyProps {
   bandRuns: ReadonlyArray<BandRun>;
   tickPositions: ReadonlyArray<number>;
   tickLabels: ReadonlyArray<string>;
+  bandTooltipDescriptors: ReadonlyArray<SpectrumBandTooltipDescriptor>;
 }
 
 function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
@@ -587,6 +597,8 @@ function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
         xAxisLabel={props.xAxisLabel}
         yAxisLabel={props.yAxisLabel}
         lines={props.lines}
+        sampleFormat={props.sampleFormat}
+        bandTooltipDescriptors={props.bandTooltipDescriptors}
       />
       <SpectraLegend
         activeSource={props.activeSource}

@@ -1,3 +1,4 @@
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useState } from "react";
 import {
   buildSpectrumLinePathFromValues,
   buildSpectrumStandardDeviationBandPath,
@@ -12,6 +13,17 @@ import {
 } from "@/lib/image/spectrum-plot-geometry";
 import { formatNumberStringWithSuperscriptExponent } from "@/lib/image/format-axis-number";
 import type { BandRun } from "@/lib/image/spectrum-band-gaps";
+import {
+  findNearestBandIndexForPointerX,
+  resolveNearestSpectrumLineAtBand,
+  type SpectrumLineValueHit,
+} from "@/lib/image/spectrum-plot-hit-test";
+import {
+  formatSpectrumHoverBandLabel,
+  formatSpectrumHoverValueLabel,
+  type SpectrumBandTooltipDescriptor,
+} from "@/lib/image/spectrum-hover-tooltip";
+import type { RasterSampleFormat } from "@/lib/image/raster-image";
 
 const SPECTRUM_PLOT_WIDTH_PX = 268;
 const SPECTRUM_PLOT_HEIGHT_PX = 160;
@@ -32,27 +44,102 @@ export interface SpectrumPlotProps {
   readonly xAxisLabel: string;
   readonly yAxisLabel: string;
   readonly lines: ReadonlyArray<SpectrumLinePlotInput>;
+  readonly sampleFormat?: RasterSampleFormat;
+  readonly bandTooltipDescriptors?: ReadonlyArray<SpectrumBandTooltipDescriptor>;
+}
+
+interface SpectrumPlotGeometry {
+  readonly dimensions: SpectrumPlotDimensions;
+  readonly xRange: SpectrumPlotXRange;
+  readonly valueRange: SpectrumPlotValueRange;
 }
 
 export function SpectrumPlot(props: SpectrumPlotProps): JSX.Element {
-  const dimensions = buildSpectrumPlotDimensions();
-  const xRange = computeSpectrumPlotXRange(props.bandPositions);
-  const valueRange = computeSpectrumPlotValueRange(extractAllValueListsFromLines(props.lines));
+  const geometry = buildSpectrumPlotGeometry(props);
   return (
     <figure className="flex flex-col gap-1">
-      <SpectrumPlotSvg
-        dimensions={dimensions}
-        xRange={xRange}
-        valueRange={valueRange}
-        bandPositions={props.bandPositions}
-        bandRuns={props.bandRuns}
-        tickPositions={props.tickPositions}
-        tickLabels={props.tickLabels}
-        lines={props.lines}
-      />
+      <SpectrumPlotInteractiveArea plot={props} geometry={geometry} />
       <SpectrumPlotAxisLabels xAxisLabel={props.xAxisLabel} yAxisLabel={props.yAxisLabel} />
     </figure>
   );
+}
+
+function buildSpectrumPlotGeometry(props: SpectrumPlotProps): SpectrumPlotGeometry {
+  return {
+    dimensions: buildSpectrumPlotDimensions(),
+    xRange: computeSpectrumPlotXRange(props.bandPositions),
+    valueRange: computeSpectrumPlotValueRange(extractAllValueListsFromLines(props.lines)),
+  };
+}
+
+interface PlotPointerPosition {
+  readonly cssX: number;
+  readonly cssY: number;
+  readonly viewBoxX: number;
+  readonly viewBoxY: number;
+  readonly containerWidth: number;
+}
+
+interface SpectrumHoverReadout {
+  readonly bandIndex: number;
+  readonly bandPixelX: number;
+  readonly lineHit: SpectrumLineValueHit | null;
+  readonly valuePixelY: number | null;
+}
+
+interface SpectrumPlotInteractiveAreaProps {
+  readonly plot: SpectrumPlotProps;
+  readonly geometry: SpectrumPlotGeometry;
+}
+
+function SpectrumPlotInteractiveArea(props: SpectrumPlotInteractiveAreaProps): JSX.Element {
+  const [pointer, setPointer] = useState<PlotPointerPosition | null>(null);
+  const readout = pointer ? computeSpectrumHoverReadoutOrNull(props.plot, props.geometry, pointer) : null;
+  return (
+    <div className="relative">
+      <SpectrumPlotSvg
+        dimensions={props.geometry.dimensions}
+        xRange={props.geometry.xRange}
+        valueRange={props.geometry.valueRange}
+        bandPositions={props.plot.bandPositions}
+        bandRuns={props.plot.bandRuns}
+        tickPositions={props.plot.tickPositions}
+        tickLabels={props.plot.tickLabels}
+        lines={props.plot.lines}
+        readout={readout}
+        onPointerMove={(event) => setPointer(readPointerPositionInPlot(event, props.geometry.dimensions))}
+        onPointerLeave={() => setPointer(null)}
+      />
+      {pointer && readout && (
+        <SpectrumHoverTooltip pointer={pointer} readout={readout} plot={props.plot} />
+      )}
+    </div>
+  );
+}
+
+function computeSpectrumHoverReadoutOrNull(
+  plot: SpectrumPlotProps,
+  geometry: SpectrumPlotGeometry,
+  pointer: PlotPointerPosition,
+): SpectrumHoverReadout | null {
+  const bandIndex = findNearestBandIndexForPointerX(pointer.viewBoxX, plot.bandPositions, geometry.xRange, geometry.dimensions);
+  if (bandIndex === null) return null;
+  const bandPixelX = projectXPositionToPixelX(plot.bandPositions[bandIndex] ?? 0, geometry.xRange, geometry.dimensions);
+  const lineHit = resolveNearestSpectrumLineAtBand(plot.lines, bandIndex, pointer.viewBoxY, geometry.valueRange, geometry.dimensions);
+  const valuePixelY = lineHit ? projectYValueToPixelY(lineHit.value, geometry.valueRange, geometry.dimensions) : null;
+  return { bandIndex, bandPixelX, lineHit, valuePixelY };
+}
+
+function readPointerPositionInPlot(
+  event: ReactPointerEvent<SVGSVGElement>,
+  dimensions: SpectrumPlotDimensions,
+): PlotPointerPosition {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const cssX = event.clientX - rect.left;
+  const cssY = event.clientY - rect.top;
+  const viewBoxX = rect.width === 0 ? 0 : (cssX / rect.width) * dimensions.width;
+  const viewBoxY = rect.height === 0 ? 0 : (cssY / rect.height) * dimensions.height;
+  return { cssX, cssY, viewBoxX, viewBoxY, containerWidth: rect.width };
 }
 
 function buildSpectrumPlotDimensions(): SpectrumPlotDimensions {
@@ -101,6 +188,9 @@ interface SpectrumPlotSvgProps {
   readonly tickPositions: ReadonlyArray<number>;
   readonly tickLabels: ReadonlyArray<string>;
   readonly lines: ReadonlyArray<SpectrumLinePlotInput>;
+  readonly readout: SpectrumHoverReadout | null;
+  readonly onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  readonly onPointerLeave: () => void;
 }
 
 function SpectrumPlotSvg(props: SpectrumPlotSvgProps): JSX.Element {
@@ -111,6 +201,8 @@ function SpectrumPlotSvg(props: SpectrumPlotSvgProps): JSX.Element {
       aria-label="Spectra plot"
       viewBox={viewBox}
       className="h-[160px] w-full text-foreground"
+      onPointerMove={props.onPointerMove}
+      onPointerLeave={props.onPointerLeave}
     >
       <SpectrumPlotAxes
         dimensions={props.dimensions}
@@ -130,7 +222,40 @@ function SpectrumPlotSvg(props: SpectrumPlotSvgProps): JSX.Element {
           dimensions={props.dimensions}
         />
       ))}
+      {props.readout && <SpectrumPlotHoverMarker readout={props.readout} dimensions={props.dimensions} />}
     </svg>
+  );
+}
+
+interface SpectrumPlotHoverMarkerProps {
+  readonly readout: SpectrumHoverReadout;
+  readonly dimensions: SpectrumPlotDimensions;
+}
+
+function SpectrumPlotHoverMarker(props: SpectrumPlotHoverMarkerProps): JSX.Element {
+  const innerTop = props.dimensions.padding.top;
+  const innerBottom = props.dimensions.height - props.dimensions.padding.bottom;
+  return (
+    <g pointerEvents="none" className="text-primary">
+      <line
+        x1={props.readout.bandPixelX}
+        x2={props.readout.bandPixelX}
+        y1={innerTop}
+        y2={innerBottom}
+        className="stroke-current"
+        strokeWidth={1}
+        strokeDasharray="3 2"
+      />
+      {props.readout.valuePixelY !== null && (
+        <circle
+          cx={props.readout.bandPixelX}
+          cy={props.readout.valuePixelY}
+          r={3}
+          className="fill-current stroke-background"
+          strokeWidth={1}
+        />
+      )}
+    </g>
   );
 }
 
@@ -351,6 +476,51 @@ function buildOptionalRibbonPath(props: SpectrumPlotLineGroupProps): string | nu
     props.valueRange,
     props.dimensions,
   );
+}
+
+interface SpectrumHoverTooltipProps {
+  readonly pointer: PlotPointerPosition;
+  readonly readout: SpectrumHoverReadout;
+  readonly plot: SpectrumPlotProps;
+}
+
+function SpectrumHoverTooltip(props: SpectrumHoverTooltipProps): JSX.Element {
+  const bandLabel = describeHoverBandLabel(props.plot.bandTooltipDescriptors, props.readout.bandIndex);
+  const valueLabel = describeHoverValueLabel(props.readout.lineHit, props.plot.sampleFormat);
+  return (
+    <div
+      className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow-md"
+      style={buildHoverTooltipPositionStyle(props.pointer)}
+    >
+      <div className="font-medium">{bandLabel}</div>
+      {valueLabel && <div className="font-mono text-muted-foreground">{valueLabel}</div>}
+    </div>
+  );
+}
+
+function buildHoverTooltipPositionStyle(pointer: PlotPointerPosition): CSSProperties {
+  const top = pointer.cssY + 8;
+  if (pointer.cssX > pointer.containerWidth / 2) {
+    return { right: pointer.containerWidth - pointer.cssX + 8, top };
+  }
+  return { left: pointer.cssX + 8, top };
+}
+
+function describeHoverBandLabel(
+  descriptors: ReadonlyArray<SpectrumBandTooltipDescriptor> | undefined,
+  bandIndex: number,
+): string {
+  const descriptor = descriptors?.[bandIndex];
+  if (descriptor) return formatSpectrumHoverBandLabel(descriptor);
+  return `Band ${bandIndex + 1}`;
+}
+
+function describeHoverValueLabel(
+  lineHit: SpectrumLineValueHit | null,
+  sampleFormat: RasterSampleFormat | undefined,
+): string | null {
+  if (lineHit === null) return null;
+  return formatSpectrumHoverValueLabel(lineHit, sampleFormat ?? "uint");
 }
 
 interface SpectrumPlotAxisLabelsProps {
