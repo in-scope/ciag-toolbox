@@ -56,6 +56,17 @@ export {
   type ExpectedMetadata,
 } from "./assertions";
 export {
+  gridLayoutDropdownTrigger,
+  gridLayoutOptions,
+  openGridLayoutDropdown,
+  readOfferedGridLayoutLabels,
+  selectGridLayout,
+  panelCloseButton,
+  expectPanelHoldsFile,
+  expectPanelIsEmpty,
+  closedPanelsToast,
+} from "./grid-layout-controls";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,
