@@ -54,6 +54,20 @@ export async function applyOperationInPlace(page: Page, operationLabel: string):
   await applyOperation(page, operationLabel);
 }
 
+// Numeric parameter fields (e.g. Standardize's "Target mean" / "Target standard deviation")
+// render as a <label> wrapping the value text and a type=number input, so the input's
+// accessible name is the label text; getByLabel(exact) targets one field unambiguously.
+export async function setOperationNumberParameter(
+  page: Page,
+  operationLabel: string,
+  parameterLabel: string,
+  value: number,
+): Promise<void> {
+  const field = operationPanel(page, operationLabel).getByLabel(parameterLabel, { exact: true });
+  await field.fill(String(value));
+  await expect(field).toHaveValue(String(value));
+}
+
 export async function cancelOperation(page: Page, operationLabel: string): Promise<void> {
   const panel = operationPanel(page, operationLabel);
   await panel.getByRole("button", { name: "Cancel", exact: true }).click();

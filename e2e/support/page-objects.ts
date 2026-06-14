@@ -24,6 +24,7 @@ export {
   applyOperationInPlace,
   setOpenInNewPanel,
   openInNewPanelSwitch,
+  setOperationNumberParameter,
   cancelOperation,
   isApplyEnabled,
 } from "./operations";
