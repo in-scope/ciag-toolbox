@@ -132,6 +132,11 @@ export {
   type SingleBandTiffRequest,
 } from "./temporary-raster-tiff-fixture";
 export {
+  writeTemporarySingleBandUint8Tiff,
+  uint8FixtureValueAt,
+  UINT8_FIXTURE_SIDE,
+} from "./temporary-uint8-raster-fixture";
+export {
   FLAT_FIELD_LABEL,
   FLAT_FIELD_LIGHT_FIELD_LABEL,
   FLAT_FIELD_DARK_FIELD_LABEL,
