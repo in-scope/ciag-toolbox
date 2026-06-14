@@ -47,3 +47,11 @@ export {
   type PixelDimensions,
   type CanvasPoint,
 } from "./image-pixel-canvas-mapping";
+export {
+  expectPixelReadoutToEqual,
+  expectHistoryToRecordOperation,
+  expectMetadataDataTypeAndDimensions,
+  type ExpectedPixelValue,
+  type ExpectedHistoryEntry,
+  type ExpectedMetadata,
+} from "./assertions";

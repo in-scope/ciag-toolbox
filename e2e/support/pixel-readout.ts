@@ -2,9 +2,28 @@ import type { Locator, Page } from "@playwright/test";
 
 import {
   computeCanvasPointForImagePixelAtFitView,
+  type CanvasPoint,
   type PixelDimensions,
 } from "./image-pixel-canvas-mapping";
 import { panelCanvas } from "./panels";
+
+// The renderer throttles pointer readout updates to ~30fps on the LEADING edge with no
+// trailing emit (pointer-readout-input.ts), so a single fast hover can be dropped when it
+// arrives within the throttle window of a previous move, leaving the readout stale. Each
+// hover therefore re-moves the cursor (nudged within the same pixel cell so a fresh
+// pointermove fires) and waits past the throttle window until the readout reports the
+// requested pixel, keeping numeric assertions repeatable instead of flaky.
+const POINTER_READOUT_THROTTLE_MS = 1000 / 30;
+const READOUT_SETTLE_DELAY_MS = Math.ceil(POINTER_READOUT_THROTTLE_MS) + 20;
+const MAX_HOVER_ATTEMPTS = 12;
+const SUB_CELL_NUDGE_CYCLE_PX = 5;
+
+interface CanvasBoundingBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 // The status bar (role="status" "Pixel readout") is the PRIMARY oracle for numeric
 // assertions: it reports the TRUE, unclipped band value under the cursor. Each field
@@ -37,9 +56,7 @@ export async function hoverImagePixel(
   imageY: number,
   imageDimensions: PixelDimensions,
 ): Promise<void> {
-  const box = await readPanelCanvasBoundingBox(page, panelNumber);
-  const point = computeCanvasPointForImagePixelAtFitView(imageX, imageY, imageDimensions, box);
-  await page.mouse.move(box.x + point.x, box.y + point.y);
+  await readPixelValueAt(page, panelNumber, imageX, imageY, imageDimensions);
 }
 
 export async function readPixelReadout(page: Page): Promise<PixelReadout> {
@@ -60,27 +77,43 @@ export async function readPixelValueAt(
   imageY: number,
   imageDimensions: PixelDimensions,
 ): Promise<PixelReadout> {
-  await hoverImagePixel(page, panelNumber, imageX, imageY, imageDimensions);
-  const readout = await readPixelReadout(page);
-  assertReadoutLandedOnRequestedPixel(readout, imageX, imageY);
-  return readout;
+  const box = await readPanelCanvasBoundingBox(page, panelNumber);
+  const point = computeCanvasPointForImagePixelAtFitView(imageX, imageY, imageDimensions, box);
+  return hoverUntilReadoutReportsRequestedPixel(page, box, point, imageX, imageY);
 }
 
-function assertReadoutLandedOnRequestedPixel(
-  readout: PixelReadout,
+async function hoverUntilReadoutReportsRequestedPixel(
+  page: Page,
+  box: CanvasBoundingBox,
+  point: CanvasPoint,
   imageX: number,
   imageY: number,
-): void {
-  if (readout.imageX === imageX && readout.imageY === imageY) return;
+): Promise<PixelReadout> {
+  for (let attempt = 0; attempt < MAX_HOVER_ATTEMPTS; attempt += 1) {
+    await moveCursorWithinPixelCellThenSettle(page, box, point, attempt);
+    const readout = await readPixelReadout(page);
+    if (readout.imageX === imageX && readout.imageY === imageY) return readout;
+  }
   throw new Error(
-    `Hover landed on pixel (${readout.imageX}, ${readout.imageY}) but expected (${imageX}, ${imageY})`,
+    `Readout never reported pixel (${imageX}, ${imageY}) after ${MAX_HOVER_ATTEMPTS} hovers`,
   );
+}
+
+async function moveCursorWithinPixelCellThenSettle(
+  page: Page,
+  box: CanvasBoundingBox,
+  point: CanvasPoint,
+  attempt: number,
+): Promise<void> {
+  const horizontalNudgePx = attempt % SUB_CELL_NUDGE_CYCLE_PX;
+  await page.mouse.move(box.x + point.x + horizontalNudgePx, box.y + point.y);
+  await page.waitForTimeout(READOUT_SETTLE_DELAY_MS);
 }
 
 async function readPanelCanvasBoundingBox(
   page: Page,
   panelNumber: number,
-): Promise<{ x: number; y: number; width: number; height: number }> {
+): Promise<CanvasBoundingBox> {
   const box = await panelCanvas(page, panelNumber).boundingBox();
   if (!box) throw new Error(`Panel ${panelNumber} canvas has no bounding box`);
   return box;
