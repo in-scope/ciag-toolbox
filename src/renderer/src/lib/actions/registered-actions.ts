@@ -58,6 +58,7 @@ import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-t
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
+import { readReferenceTokenDisplayName } from "@/lib/image/reference-token";
 import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
@@ -413,7 +414,7 @@ const FLAT_FIELD_LIGHT_PARAMETER_SCHEMA: RasterReferenceParameterSchema = {
   id: FLAT_FIELD_LIGHT_PARAMETER_ID,
   label: "Light reference (required)",
   description:
-    "A bright flat-field capture (raster stack) used to remove illumination and sensor non-uniformity. Must match the stack dimensions and band count.",
+    "A bright flat-field capture used to remove illumination and sensor non-uniformity. Choose a file or a loaded panel. Must match the stack's width and height; use the same number of bands or a single band that applies to every band.",
   optional: false,
   defaultValue: NO_RASTER_REFERENCE_SELECTED,
 };
@@ -477,17 +478,12 @@ function formatFlatFieldAppliedLabel(parameterValues: ParameterValuesById): stri
   const lightName = readReferenceFileNameForLabel(parameterValues[FLAT_FIELD_LIGHT_PARAMETER_ID]);
   const darkToken = readRasterReferenceTokenOrEmpty(parameterValues[FLAT_FIELD_DARK_PARAMETER_ID]);
   if (darkToken === NO_RASTER_REFERENCE_SELECTED) return `Flat-field (light: ${lightName})`;
-  return `Flat-field (light: ${lightName}, dark: ${readBaseFileNameFromToken(darkToken)})`;
+  return `Flat-field (light: ${lightName}, dark: ${readReferenceTokenDisplayName(darkToken)})`;
 }
 
 function readReferenceFileNameForLabel(value: ParameterValuesById[string] | undefined): string {
   const token = readRasterReferenceTokenOrEmpty(value);
-  return token === NO_RASTER_REFERENCE_SELECTED ? "none" : readBaseFileNameFromToken(token);
-}
-
-function readBaseFileNameFromToken(token: string): string {
-  const segments = token.split(/[\\/]/);
-  return segments[segments.length - 1] ?? token;
+  return token === NO_RASTER_REFERENCE_SELECTED ? "none" : readReferenceTokenDisplayName(token);
 }
 
 const SPECTRALON_REFLECTANCE_PARAMETER_ID = "reflectance";

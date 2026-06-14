@@ -22,6 +22,7 @@ import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
+import type { ReferencePickerOption } from "@/lib/image/reference-token";
 
 export interface ToolOptionsApplyOptions {
   readonly openInNewViewport: boolean;
@@ -40,6 +41,7 @@ export interface ToolOptionsSourceViewport {
 interface ToolOptionsPanelProps {
   action: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
+  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
@@ -54,6 +56,7 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
     <ToolOptionsPanelShell
       action={props.action}
       sourceViewport={props.sourceViewport}
+      loadedReferenceCandidates={props.loadedReferenceCandidates}
       onCancel={props.onCancel}
       onApply={props.onApply}
       onParametersChange={props.onParametersChange}
@@ -67,6 +70,7 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
 interface ToolOptionsPanelShellProps {
   action: RegisteredViewportAction;
   sourceViewport: ToolOptionsSourceViewport | null;
+  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
@@ -104,6 +108,7 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
       <ToolOptionsPanelHeader actionLabel={props.action.label} onCancel={props.onCancel} />
       <ToolOptionsPanelBody
         sourceViewport={props.sourceViewport}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
         embeddedEditor={props.embeddedEditor}
         parameterSchemas={parameterSchemas}
         parameterValues={parameterValues}
@@ -257,6 +262,7 @@ function PanelCloseButton({ onCancel }: { onCancel: () => void }): JSX.Element {
 
 interface PanelBodyProps {
   sourceViewport: ToolOptionsSourceViewport | null;
+  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
   embeddedEditor?: ReactNode;
   parameterSchemas: ReadonlyArray<ParameterSchema>;
   parameterValues: ParameterValuesById;
@@ -280,6 +286,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
           schemas={props.parameterSchemas}
           values={props.parameterValues}
           sourceBandCount={props.sourceViewport?.sourceBandCount ?? null}
+          loadedReferenceCandidates={props.loadedReferenceCandidates}
           onChangeValue={props.onChangeParameterValue}
         />
       ) : null}

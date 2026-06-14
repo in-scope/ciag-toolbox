@@ -9,20 +9,26 @@ import {
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
 
-// CT-078: flat-field correction. Per band C = m * (R - D) / (F - D), where R is
-// the target band, F the light reference band, D the optional dark reference band
-// (zeros when omitted), and m the per-band mean of (F - D). Results are fractional,
-// so the output is a float32 raster (CT-077): out-of-range true values survive,
-// display clips them.
+// CT-078 / CT-111: flat-field correction. Per band C = m * (R - D) / (F - D),
+// where R is the target band, F the light reference band, D the optional dark
+// reference band (zeros when omitted), and m the per-band mean of (F - D).
+// Results are fractional, so the output is a float32 raster (CT-077): out-of-range
+// true values survive, display clips them.
+//
+// CT-111 reference rules (chosen and enforced here):
+// - Spatial dimensions (width and height) MUST match the target exactly.
+// - Band count must either equal the target's band count (per-band correction),
+//   OR be a single band that is broadcast across every target band (a lone TIFF
+//   band used as a flat field). Any other band-count mismatch is rejected.
 
 export function applyFlatFieldToRasterImage(
   target: RasterImage,
   lightReference: RasterImage,
   darkReference?: RasterImage,
 ): RasterImage {
-  assertReferenceDimensionsMatchTarget(target, lightReference, "Light reference");
+  assertReferenceIsCompatibleWithTarget(target, lightReference, "Light reference");
   if (darkReference) {
-    assertReferenceDimensionsMatchTarget(target, darkReference, "Dark reference");
+    assertReferenceIsCompatibleWithTarget(target, darkReference, "Dark reference");
   }
   return makeFloatRasterFromBandComputation(target, (targetBandPixels, bandIndex) =>
     correctSingleBandWithFlatField(
@@ -44,9 +50,9 @@ function correctSingleBandWithFlatField(
   targetBandPixels: RasterTypedArray,
   bandIndex: number,
 ): Float32Array {
-  const lightBand = getRasterBandPixelsOrThrow(references.lightReference, bandIndex);
+  const lightBand = readReferenceBandForTargetBand(references.lightReference, bandIndex);
   const darkBand = references.darkReference
-    ? getRasterBandPixelsOrThrow(references.darkReference, bandIndex)
+    ? readReferenceBandForTargetBand(references.darkReference, bandIndex)
     : null;
   const denominators = computeBandDenominatorsOrThrowOnZero(references.target, lightBand, darkBand, bandIndex);
   const meanDenominator = computeMeanOfValues(denominators);
@@ -54,6 +60,14 @@ function correctSingleBandWithFlatField(
     targetBandPixels,
     (value, index) => (meanDenominator * (value - readDarkValue(darkBand, index))) / denominators[index]!,
   );
+}
+
+function readReferenceBandForTargetBand(
+  reference: RasterImage,
+  targetBandIndex: number,
+): RasterTypedArray {
+  const referenceBandIndex = reference.bandCount === 1 ? 0 : targetBandIndex;
+  return getRasterBandPixelsOrThrow(reference, referenceBandIndex);
 }
 
 function computeBandDenominatorsOrThrowOnZero(
@@ -82,26 +96,37 @@ function readDarkValue(darkBand: RasterTypedArray | null, index: number): number
   return darkBand ? (darkBand[index] ?? 0) : 0;
 }
 
-function assertReferenceDimensionsMatchTarget(
+function assertReferenceIsCompatibleWithTarget(
   target: RasterImage,
   reference: RasterImage,
   referenceName: string,
 ): void {
-  if (
-    reference.width === target.width &&
-    reference.height === target.height &&
-    reference.bandCount === target.bandCount
-  ) {
-    return;
-  }
+  assertReferenceSpatialDimensionsMatchTarget(target, reference, referenceName);
+  assertReferenceBandCountIsCompatibleWithTarget(target, reference, referenceName);
+}
+
+function assertReferenceSpatialDimensionsMatchTarget(
+  target: RasterImage,
+  reference: RasterImage,
+  referenceName: string,
+): void {
+  if (reference.width === target.width && reference.height === target.height) return;
   throw new Error(
-    `${referenceName} dimensions (${describeRasterDimensions(reference)}) do not match ` +
-      `the target image (${describeRasterDimensions(target)}).`,
+    `${referenceName} size (${reference.width}x${reference.height}) does not match the ` +
+      `stack size (${target.width}x${target.height}). Use a reference of the same width and height.`,
   );
 }
 
-function describeRasterDimensions(raster: RasterImage): string {
-  return `${raster.width}x${raster.height}, ${raster.bandCount} bands`;
+function assertReferenceBandCountIsCompatibleWithTarget(
+  target: RasterImage,
+  reference: RasterImage,
+  referenceName: string,
+): void {
+  if (reference.bandCount === target.bandCount || reference.bandCount === 1) return;
+  throw new Error(
+    `${referenceName} has ${reference.bandCount} bands, which does not match the stack's ` +
+      `${target.bandCount} bands. Use a reference with the same number of bands, or a single-band reference.`,
+  );
 }
 
 function buildZeroDivisorMessage(target: RasterImage, bandIndex: number): string {

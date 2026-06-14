@@ -2,11 +2,21 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
 import { describeBandRangeErrorOrNull } from "@/lib/image/parse-band-range";
+import {
+  readReferenceTokenDisplayName,
+  type ReferencePickerOption,
+} from "@/lib/image/reference-token";
 import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
@@ -35,6 +45,7 @@ interface ParameterFormSectionProps {
   values: ParameterValuesById;
   onChangeValue: (id: string, next: ParameterValue) => void;
   sourceBandCount?: number | null;
+  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
 }
 
 export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Element {
@@ -48,6 +59,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           value={props.values[schema.id] ?? schema.defaultValue}
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
+          loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
           onChangeValueAtId={props.onChangeValue}
         />
@@ -56,11 +68,14 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
   );
 }
 
+const EMPTY_REFERENCE_CANDIDATES: ReadonlyArray<ReferencePickerOption> = [];
+
 interface ParameterFieldRowProps {
   schema: ParameterSchema;
   value: ParameterValue;
   allValues: ParameterValuesById;
   sourceBandCount: number | null;
+  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
   onChangeValue: (next: ParameterValue) => void;
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
@@ -73,6 +88,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
         value={props.value}
         allValues={props.allValues}
         sourceBandCount={props.sourceBandCount}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
         onChangeValue={props.onChangeValue}
         onChangeValueAtId={props.onChangeValueAtId}
       />
@@ -120,6 +136,7 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       <RasterReferenceParameterField
         schema={props.schema}
         value={readRasterReferenceTokenOrEmpty(props.value)}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -404,6 +421,7 @@ function CubeScopeRadioRow(props: CubeScopeRadioRowProps): JSX.Element {
 interface RasterReferenceParameterFieldProps {
   schema: RasterReferenceParameterSchema;
   value: string;
+  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
   onChangeValue: (next: string) => void;
 }
 
@@ -421,7 +439,36 @@ function RasterReferenceParameterField(props: RasterReferenceParameterFieldProps
         onPick={() => void pickReferenceRasterIntoField(props.onChangeValue, setIsPicking)}
         onClear={() => props.onChangeValue(NO_RASTER_REFERENCE_SELECTED)}
       />
+      <LoadedPanelReferenceMenu
+        candidates={props.loadedReferenceCandidates}
+        onSelectToken={props.onChangeValue}
+      />
     </div>
+  );
+}
+
+interface LoadedPanelReferenceMenuProps {
+  candidates: ReadonlyArray<ReferencePickerOption>;
+  onSelectToken: (token: string) => void;
+}
+
+function LoadedPanelReferenceMenu(props: LoadedPanelReferenceMenuProps): JSX.Element | null {
+  if (props.candidates.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          Use a loaded panel...
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {props.candidates.map((candidate) => (
+          <DropdownMenuItem key={candidate.token} onSelect={() => props.onSelectToken(candidate.token)}>
+            {candidate.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -446,8 +493,7 @@ function describeReferencePickError(error: unknown): string {
 
 function readBaseFileNameFromTokenOrNull(token: string): string | null {
   if (token === NO_RASTER_REFERENCE_SELECTED) return null;
-  const segments = token.split(/[\\/]/);
-  return segments[segments.length - 1] ?? token;
+  return readReferenceTokenDisplayName(token);
 }
 
 interface RasterReferenceSelectedFileTextProps {

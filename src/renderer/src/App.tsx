@@ -72,6 +72,12 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
+import { rememberReferenceRaster } from "@/lib/image/reference-raster-store";
+import {
+  buildLoadedReferenceCandidates,
+  type LoadedPanelReferenceEntry,
+  type ReferencePickerOption,
+} from "@/lib/image/reference-token";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -323,6 +329,7 @@ function ApplicationShell(): JSX.Element {
     busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
+  const loadedReferenceCandidates = useLoadedReferenceCandidates(imagesByIndex);
   usePublishActiveToolPreview({
     activeAction,
     singleSelectedSource,
@@ -414,6 +421,7 @@ function ApplicationShell(): JSX.Element {
                 onOpenImage={handleOpenImagesRequested}
                 activeAction={activeAction}
                 sourceViewport={singleSelectedSource?.summary ?? null}
+                loadedReferenceCandidates={loadedReferenceCandidates}
                 toolOptionsEmbeddedEditor={buildActiveToneCurveEditorElementOrNull(
                   activeAction,
                   singleSelectedSource,
@@ -503,6 +511,7 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
+  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
   toolOptionsEmbeddedEditor: ReactNode;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
@@ -537,6 +546,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       <ToolOptionsPanel
         action={props.activeAction}
         sourceViewport={props.sourceViewport}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
         embeddedEditor={props.toolOptionsEmbeddedEditor}
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
@@ -1554,6 +1564,32 @@ function deriveSingleSelectedSource(
 
 function readRasterBandCountFromContentOrNull(content: ViewportCellContent): number | null {
   return content.source.kind === "raster" ? content.source.raster.bandCount : null;
+}
+
+function useLoadedReferenceCandidates(
+  imagesByIndex: ImagesByIndexMap,
+): ReadonlyArray<ReferencePickerOption> {
+  const candidates = useMemo(
+    () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
+    [imagesByIndex],
+  );
+  useEffect(() => {
+    for (const candidate of candidates) rememberReferenceRaster(candidate.token, candidate.raster);
+  }, [candidates]);
+  return candidates;
+}
+
+function listLoadedRasterPanelEntries(imagesByIndex: ImagesByIndexMap): LoadedPanelReferenceEntry[] {
+  const entries: LoadedPanelReferenceEntry[] = [];
+  for (const [index, content] of imagesByIndex) {
+    if (content.source.kind !== "raster") continue;
+    entries.push({
+      viewportNumber: getViewportNumberFromIndex(index),
+      fileName: content.fileName,
+      raster: content.source.raster,
+    });
+  }
+  return entries;
 }
 
 interface PublishActiveToolPreviewInputs {
