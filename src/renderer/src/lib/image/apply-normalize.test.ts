@@ -75,4 +75,28 @@ describe("applyNormalizeToRaster", () => {
     applyNormalizeToRaster(raster, { scope: "full-cube" });
     expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 100]);
   });
+
+  it("reuses unchanged float bands by reference in band-wise scope (CT-103)", () => {
+    const raster = makeThreeBandFloat32Raster();
+    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [1] });
+    expect(result.bandPixels[0]).toBe(raster.bandPixels[0]);
+    expect(result.bandPixels[2]).toBe(raster.bandPixels[2]);
+    expect(result.bandPixels[1]).not.toBe(raster.bandPixels[1]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([0, 0.5, 1]);
+  });
 });
+
+function makeThreeBandFloat32Raster(): RasterImage {
+  return {
+    bandPixels: [
+      Float32Array.from([0, 1, 2]),
+      Float32Array.from([10, 20, 30]),
+      Float32Array.from([5, 6, 7]),
+    ],
+    width: 3,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "float",
+    bitsPerSample: 32,
+  };
+}

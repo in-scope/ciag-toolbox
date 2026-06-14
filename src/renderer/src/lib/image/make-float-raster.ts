@@ -14,6 +14,16 @@ export type ComputeFloatBandFromSource = (
   bandIndex: number,
 ) => Float32Array;
 
+// CT-103: a clear, actionable typed error for a failed band allocation, so the
+// apply-action-flow toast names the memory needed instead of surfacing the raw
+// engine "Array buffer allocation failed".
+export class RasterMemoryAllocationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RasterMemoryAllocationError";
+  }
+}
+
 export function makeFloatRasterFromBandComputation(
   source: RasterImage,
   computeFloatBand: ComputeFloatBandFromSource,
@@ -24,15 +34,58 @@ export function makeFloatRasterFromBandComputation(
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
 
+// CT-103: a band-wise float op only allocates buffers for the bands it actually
+// changes; every unchanged float band is carried through BY REFERENCE, so a
+// single-band op on a large float cube no longer reallocates the whole cube.
+export function makeFloatRasterReusingUnchangedSourceBands(
+  source: RasterImage,
+  changedBandIndexes: ReadonlySet<number>,
+  computeChangedFloatBand: ComputeFloatBandFromSource,
+): RasterImage {
+  const bandPixels = source.bandPixels.map((band, index) =>
+    changedBandIndexes.has(index)
+      ? computeSingleFloatBandMatchingSourceLength(band, index, computeChangedFloatBand)
+      : carryUnchangedBandThroughAsFloat32(band),
+  );
+  return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
 export function mapBandPixelsToFloat32(
   sourceBandPixels: RasterTypedArray,
   mapValue: (value: number, pixelIndex: number) => number,
 ): Float32Array {
-  const out = new Float32Array(sourceBandPixels.length);
+  const out = allocateFloat32ArrayOrThrow(sourceBandPixels.length);
   for (let i = 0; i < sourceBandPixels.length; i += 1) {
     out[i] = mapValue(sourceBandPixels[i] ?? 0, i);
   }
   return out;
+}
+
+function carryUnchangedBandThroughAsFloat32(band: RasterTypedArray): Float32Array {
+  if (band instanceof Float32Array) return band;
+  return copyBandIntoNewFloat32Array(band);
+}
+
+function copyBandIntoNewFloat32Array(band: RasterTypedArray): Float32Array {
+  const out = allocateFloat32ArrayOrThrow(band.length);
+  out.set(band as never);
+  return out;
+}
+
+function allocateFloat32ArrayOrThrow(length: number): Float32Array {
+  try {
+    return new Float32Array(length);
+  } catch {
+    throw buildRasterMemoryAllocationErrorForLength(length);
+  }
+}
+
+function buildRasterMemoryAllocationErrorForLength(length: number): RasterMemoryAllocationError {
+  const megabytes = Math.ceil((length * Float32Array.BYTES_PER_ELEMENT) / (1024 * 1024));
+  return new RasterMemoryAllocationError(
+    `Not enough memory to allocate ${megabytes} MB for this operation. ` +
+      `Free memory or run it on fewer bands and try again.`,
+  );
 }
 
 function computeSingleFloatBandMatchingSourceLength(

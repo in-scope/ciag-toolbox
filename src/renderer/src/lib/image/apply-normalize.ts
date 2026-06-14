@@ -1,5 +1,6 @@
 import {
   makeFloatRasterFromBandComputation,
+  makeFloatRasterReusingUnchangedSourceBands,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
@@ -38,11 +39,8 @@ function normalizeSelectedBandsIndependentlyToUnitRange(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
 ): RasterImage {
-  const selectedBandIndexes = new Set(bandIndexes);
-  return makeFloatRasterFromBandComputation(raster, (bandPixels, bandIndex) =>
-    selectedBandIndexes.has(bandIndex)
-      ? normalizeSingleBandToUnitRange(bandPixels)
-      : Float32Array.from(bandPixels),
+  return makeFloatRasterReusingUnchangedSourceBands(raster, new Set(bandIndexes), (bandPixels) =>
+    normalizeSingleBandToUnitRange(bandPixels),
   );
 }
 
