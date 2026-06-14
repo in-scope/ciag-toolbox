@@ -100,6 +100,7 @@ export {
   uncheckSubsetBandRow,
   setSubsetBandsOpenInNewPanel,
   applySubsetBands,
+  closeSubsetBandsEditorWithoutApplying,
 } from "./band-management";
 export {
   spectraPlot,

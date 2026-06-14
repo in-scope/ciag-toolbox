@@ -62,3 +62,9 @@ export async function applySubsetBands(page: Page): Promise<void> {
   await editor.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(editor).toBeHidden();
 }
+
+export async function closeSubsetBandsEditorWithoutApplying(page: Page): Promise<void> {
+  const editor = subsetBandsEditor(page);
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(editor).toBeHidden();
+}
