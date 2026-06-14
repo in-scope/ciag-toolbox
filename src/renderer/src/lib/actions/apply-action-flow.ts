@@ -3,6 +3,10 @@ import { toast } from "sonner";
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
 import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
+import {
+  describeOperationLoadingMessage,
+  shouldShowOperationLoadingImmediately,
+} from "@/lib/actions/operation-loading-message";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import type { ViewportActionOutput, ViewportRenderingState } from "@/lib/actions/viewport-action";
@@ -14,7 +18,7 @@ import {
   type ViewportContentMap,
   type ViewportContentMapUpdater,
 } from "@/lib/image/place-cloned-source-content";
-import type { BusyEntryRegistrar } from "@/state/busy-state-context";
+import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
   gridLayout: GridLayout;
@@ -74,7 +78,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
 ): Promise<void> {
   const handle = bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex: sourceIndex,
-    label: `Applying ${action.label}...`,
+    label: describeOperationLoadingMessage(action),
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
@@ -307,10 +311,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
   const handle = action.transformSource
-    ? bindings.busyRegistrar.registerViewportBusyEntry({
-        viewportIndex: targetIndex,
-        label: `Applying ${action.label}...`,
-      })
+    ? registerResultPanelBusyEntry(action, targetIndex, bindings)
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
@@ -348,6 +349,22 @@ function selectResultPanelHoldingTheDuplicateOutput(
   bindings: ApplyActionFlowBindings,
 ): void {
   bindings.selectViewportIndex?.(targetIndex);
+}
+
+// CT-106: the result lands in a freshly opened panel. When that panel is empty
+// (no image to show under a delayed spinner) its loading state must paint
+// immediately; an overwrite of an existing panel keeps the anti-flash delay.
+function registerResultPanelBusyEntry(
+  action: RegisteredViewportAction,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): BusyEntryHandle {
+  const opensInNewEmptyPanel = !bindings.imagesByIndex.has(targetIndex);
+  return bindings.busyRegistrar.registerViewportBusyEntry({
+    viewportIndex: targetIndex,
+    label: describeOperationLoadingMessage(action),
+    immediate: shouldShowOperationLoadingImmediately({ opensInNewEmptyPanel }),
+  });
 }
 
 function clearConsumedSourceStateAfterDuplicateApply(

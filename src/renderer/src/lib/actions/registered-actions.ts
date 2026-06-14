@@ -96,6 +96,12 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly successMessage: string;
   readonly appliedLabel: string;
   /**
+   * CT-106: operation-specific message shown in the result panel's loading
+   * state while the transform computes. Falls back to "Applying <label>..."
+   * when omitted (see describeOperationLoadingMessage).
+   */
+  readonly loadingMessage?: string;
+  /**
    * The operation always needs an area; the operation flow makes the user select
    * one (CT-095) and Apply stays disabled until they do.
    */
@@ -432,6 +438,7 @@ export const FLAT_FIELD_ACTION: RegisteredViewportAction = {
   parameters: [FLAT_FIELD_LIGHT_PARAMETER_SCHEMA, FLAT_FIELD_DARK_PARAMETER_SCHEMA],
   successMessage: "Flat-field correction applied",
   appliedLabel: "Flat-field correction",
+  loadingMessage: "Applying flat-field correction...",
   formatAppliedLabel: formatFlatFieldAppliedLabel,
   apply: (state) => state,
   transformSource: createFlatFieldSourceTransform(),
@@ -515,6 +522,7 @@ export const SPECTRALON_ACTION: RegisteredViewportAction = {
   parameters: [SPECTRALON_REFLECTANCE_PARAMETER_SCHEMA],
   successMessage: "Spectralon reflectance calibration applied",
   appliedLabel: "Spectralon calibration",
+  loadingMessage: "Calibrating reflectance...",
   requiresOperationRegion: true,
   formatAppliedLabel: formatSpectralonAppliedLabel,
   prepareParameterValuesForApply: prepareSpectralonBrightRegionFromOperationRegion,
@@ -604,6 +612,7 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   icon: Spline,
   successMessage: "Tone curve applied",
   appliedLabel: "Tone curve",
+  loadingMessage: "Applying tone curve...",
   supportsRoiScope: true,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
@@ -982,6 +991,7 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   parameters: [NORMALIZE_SCOPE_PARAMETER_SCHEMA],
   successMessage: "Normalize applied",
   appliedLabel: "Normalize",
+  loadingMessage: "Normalizing...",
   formatAppliedLabel: formatNormalizeAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForNormalize,
   apply: (state) => state,
@@ -1078,6 +1088,7 @@ export const STANDARDIZE_ACTION: RegisteredViewportAction = {
   ],
   successMessage: "Standardize applied",
   appliedLabel: "Standardize",
+  loadingMessage: "Standardizing...",
   formatAppliedLabel: formatStandardizeAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForStandardize,
   apply: (state) => state,

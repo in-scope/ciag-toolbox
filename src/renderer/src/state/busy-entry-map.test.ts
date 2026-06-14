@@ -74,6 +74,7 @@ function buildAppEntry(id: string, registeredAtMs: number): BusyEntry {
     label: `${id}-label`,
     progress: null,
     registeredAtMs,
+    immediate: false,
   };
 }
 
@@ -85,5 +86,6 @@ function buildViewportEntry(id: string, registeredAtMs: number, viewportIndex: n
     label: `${id}-label`,
     progress: null,
     registeredAtMs,
+    immediate: false,
   };
 }

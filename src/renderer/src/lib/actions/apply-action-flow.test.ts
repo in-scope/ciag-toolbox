@@ -155,6 +155,44 @@ describe("runDuplicateAndApplyAtTargetIndex selecting the result panel (CT-105)"
   });
 });
 
+describe("runDuplicateAndApplyAtTargetIndex result-panel loading state (CT-106)", () => {
+  it("registers an immediate, operation-specific loading entry for a new empty result panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const records: RecordedBusyEntryInput[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, busyRegistrar: buildRecordingBusyEntryRegistrar(records) },
+    );
+    expect(records).toContainEqual({
+      viewportIndex: TARGET_INDEX,
+      label: "Normalizing...",
+      immediate: true,
+    });
+  });
+
+  it("defers the loading entry (not immediate) when the result overwrites an occupied panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const records: RecordedBusyEntryInput[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      { ...harness.bindings, busyRegistrar: buildRecordingBusyEntryRegistrar(records) },
+    );
+    expect(records).toContainEqual({
+      viewportIndex: SOURCE_INDEX,
+      label: "Normalizing...",
+      immediate: false,
+    });
+  });
+});
+
 describe("runDuplicateAndApplyAtTargetIndex with transformSourceToSecondaryOutputs", () => {
   it("places each secondary output in its own fresh viewport with its own label and history", async () => {
     const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
@@ -290,6 +328,42 @@ function buildNormalizeAction(): RegisteredViewportAction {
     successMessage: "ok",
     appliedLabel: "Normalized",
     apply: (state: ViewportRenderingState) => ({ ...state, normalizationEnabled: true }),
+  } as unknown as RegisteredViewportAction;
+}
+
+interface RecordedBusyEntryInput {
+  readonly viewportIndex: number;
+  readonly label: string;
+  readonly immediate: boolean;
+}
+
+function buildRecordingBusyEntryRegistrar(
+  records: RecordedBusyEntryInput[],
+): ApplyActionFlowBindings["busyRegistrar"] {
+  const noopHandle = { id: "test", update: () => undefined, clear: () => undefined };
+  return {
+    registerAppBusyEntry: () => noopHandle,
+    registerViewportBusyEntry: (input) => {
+      records.push({
+        viewportIndex: input.viewportIndex,
+        label: input.label,
+        immediate: input.immediate ?? false,
+      });
+      return noopHandle;
+    },
+  };
+}
+
+function buildNormalizeActionThatTransforms(): RegisteredViewportAction {
+  return {
+    id: "normalize-data",
+    label: "Normalize",
+    loadingMessage: "Normalizing...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Normalized",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
   } as unknown as RegisteredViewportAction;
 }
 
