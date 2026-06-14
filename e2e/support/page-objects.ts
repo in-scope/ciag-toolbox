@@ -163,3 +163,10 @@ export {
   selectOperationRegionByDrag,
   type OperationRegionDragRequest,
 } from "./operation-region-picker";
+export {
+  committedRoiBorderRects,
+  committedRoiCornerHandleRects,
+  expectExactlyOneCommittedRoi,
+  expectNoCommittedRoiMarkers,
+  plainClickImagePixel,
+} from "./roi-inspection";
