@@ -226,3 +226,13 @@ export {
   nonClearPixelFraction,
   type CanvasPixelSummary,
 } from "./canvas-pixels";
+export {
+  BRIGHTNESS_CONTRAST_LABEL,
+  BRIGHTNESS_SLIDER_LABEL,
+  CONTRAST_SLIDER_LABEL,
+  brightnessContrastSliderThumb,
+  setBrightnessContrastSlider,
+  maximizeBrightnessContrastSlider,
+  applyToAllBandsSwitch,
+  setApplyToAllBands,
+} from "./brightness-contrast-controls";
