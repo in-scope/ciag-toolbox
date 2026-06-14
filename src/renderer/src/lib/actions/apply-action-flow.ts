@@ -25,6 +25,9 @@ export interface ApplyActionFlowBindings {
   setPendingDuplicate: (pending: PendingDuplicateReplace | null) => void;
   getRenderingState: (index: number) => ViewportRenderingState;
   setRenderingState: (index: number, next: ViewportRenderingState) => void;
+  // CT-105: selects the panel that now holds an operation's result so the user's
+  // next action targets the result rather than the original source panel.
+  selectViewportIndex?: (index: number) => void;
   busyRegistrar: BusyEntryRegistrar;
 }
 
@@ -331,12 +334,20 @@ export async function runDuplicateAndApplyAtTargetIndex(
     );
     clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, targetIndex, bindings);
+    selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
     toast.success(action.successMessage);
   } catch (error) {
     toast.error(formatActionErrorMessage(action.label, error));
   } finally {
     handle?.clear();
   }
+}
+
+function selectResultPanelHoldingTheDuplicateOutput(
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  bindings.selectViewportIndex?.(targetIndex);
 }
 
 function clearConsumedSourceStateAfterDuplicateApply(

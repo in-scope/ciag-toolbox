@@ -125,6 +125,36 @@ describe("applyActionInPlaceAtSourceIndex", () => {
   });
 });
 
+describe("runDuplicateAndApplyAtTargetIndex selecting the result panel (CT-105)", () => {
+  it("selects the new target panel after placing the result", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const selectViewportIndex = vi.fn();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeAction(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, selectViewportIndex },
+    );
+    expect(selectViewportIndex).toHaveBeenCalledWith(TARGET_INDEX);
+  });
+
+  it("does not select a panel when the duplicate apply fails", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const selectViewportIndex = vi.fn();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, selectViewportIndex },
+    );
+    expect(selectViewportIndex).not.toHaveBeenCalled();
+  });
+});
+
 describe("runDuplicateAndApplyAtTargetIndex with transformSourceToSecondaryOutputs", () => {
   it("places each secondary output in its own fresh viewport with its own label and history", async () => {
     const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
@@ -275,6 +305,20 @@ function buildInvertLikeActionWithSecondaryOutput(): RegisteredViewportAction {
     transformSourceToSecondaryOutputs: () => [
       { source: buildSinglePixelSource(), appliedLabel: "Normalize to [0,1] (auto for invert)" },
     ],
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildActionThatThrowsOnTransform(): RegisteredViewportAction {
+  return {
+    id: "throws",
+    label: "Throws",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Throws",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => {
+      throw new Error("boom");
+    },
   } as unknown as RegisteredViewportAction;
 }
 

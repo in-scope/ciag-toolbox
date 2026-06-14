@@ -319,6 +319,7 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     setPendingDuplicate,
     renderingApi,
+    replaceSelection,
     busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
@@ -1507,6 +1508,7 @@ interface ApplyActionFlowBindingsInputs {
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
   renderingApi: ViewportRenderingApi;
+  replaceSelection: ViewportSelectionState["replaceSelection"];
   busyRegistrar: BusyEntryRegistrar;
 }
 
@@ -1522,6 +1524,7 @@ function buildApplyActionFlowBindings(
     setPendingDuplicate: inputs.setPendingDuplicate,
     getRenderingState: inputs.renderingApi.getRenderingState,
     setRenderingState: inputs.renderingApi.setRenderingState,
+    selectViewportIndex: (index) => inputs.replaceSelection(new Set([index])),
     busyRegistrar: inputs.busyRegistrar,
   };
 }
