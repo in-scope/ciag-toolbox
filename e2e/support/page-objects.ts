@@ -200,3 +200,29 @@ export {
   selectFullStackScope,
   selectBandWiseScopeForBands,
 } from "./cube-scope-control";
+export {
+  APPLY_SCOPE_GROUP_NAME,
+  WHOLE_STACK_SCOPE_LABEL,
+  REGION_OF_INTEREST_SCOPE_LABEL,
+  applyScopeFieldset,
+  selectRegionOfInterestScope,
+  selectWholeStackScope,
+} from "./apply-scope-control";
+export {
+  TONE_CURVE_LABEL,
+  toneCurveEditorHistogramCanvas,
+  toneCurveEndpointHandles,
+  toneCurveInteriorHandles,
+  toneCurveAllHandles,
+  expectToneCurveOpensWithTwoEndpoints,
+  addToneCurveAnchorAtFraction,
+  dragToneCurveEndpointTo,
+  readToneCurveAnchors,
+  type ToneCurveValueRanges,
+  type ToneCurveAnchorPoint,
+} from "./tone-curve-editor";
+export {
+  summarizeCanvasPixels,
+  nonClearPixelFraction,
+  type CanvasPixelSummary,
+} from "./canvas-pixels";
