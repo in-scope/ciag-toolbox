@@ -1,4 +1,4 @@
-import { _electron as electron } from "@playwright/test";
+import { _electron as electron, test } from "@playwright/test";
 import type { ElectronApplication, Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -69,16 +69,55 @@ async function waitForMainApplicationWindow(
   throw new Error("Timed out waiting for the MSI Toolbox main window");
 }
 
+function tracingIsEnabled(): boolean {
+  return process.env["MSI_E2E_TRACE"] === "1";
+}
+
+async function startTracingIfEnabled(app: ElectronApplication): Promise<void> {
+  if (!tracingIsEnabled()) return;
+  await app
+    .context()
+    .tracing.start({ screenshots: true, snapshots: true, sources: true });
+}
+
+async function stopTracingIfEnabled(app: ElectronApplication): Promise<void> {
+  if (!tracingIsEnabled()) return;
+  await app.context().tracing.stop({ path: nextTraceOutputPath() });
+}
+
+let savedTraceCount = 0;
+
+function nextTraceOutputPath(): string {
+  savedTraceCount += 1;
+  const fileName = `${currentTraceLabel(savedTraceCount)}.zip`;
+  return resolve(APPLICATION_ROOT_PATH, "test-results", "electron-traces", fileName);
+}
+
+function currentTraceLabel(sequence: number): string {
+  try {
+    const fromTitle = sanitizeForFileName(test.info().titlePath.join("-"));
+    return fromTitle.length > 0 ? fromTitle : `trace-${sequence}`;
+  } catch {
+    return `trace-${sequence}`;
+  }
+}
+
+function sanitizeForFileName(rawLabel: string): string {
+  return rawLabel.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
 export async function launchToolboxApp(): Promise<LaunchedApp> {
   const app = await electron.launch({
     args: [APPLICATION_ROOT_PATH],
     env: buildElectronLaunchEnvironment(),
   });
+  await startTracingIfEnabled(app);
   const window = await waitForMainApplicationWindow(app);
   await window.waitForLoadState("domcontentloaded");
   return { app, window };
 }
 
 export async function closeToolboxApp(launched: LaunchedApp): Promise<void> {
+  await stopTracingIfEnabled(launched.app);
   await launched.app.close();
 }
