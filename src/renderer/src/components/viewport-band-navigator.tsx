@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent, type WheelEvent } from "react";
 
 import { useDebouncedBandSelection } from "@/components/use-debounced-band-selection";
@@ -82,11 +82,11 @@ function RemoveBandButton(props: RemoveBandButtonProps): JSX.Element {
       size="icon"
       aria-label={`Remove band ${props.bandNumber}`}
       title={`Remove band ${props.bandNumber}`}
-      className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+      className="size-7 shrink-0 text-destructive hover:text-destructive"
       disabled={props.disabled}
       onClick={props.onRemove}
     >
-      <X />
+      <Trash2 />
     </Button>
   );
 }

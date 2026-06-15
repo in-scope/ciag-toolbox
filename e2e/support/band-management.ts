@@ -5,7 +5,7 @@ import { applicationToolbar } from "./operations";
 
 // CT-131 band keep/remove + subset helpers.
 //
-// REMOVE-ONE: the viewport band navigator renders a "Remove band N" button (an x) for the
+// REMOVE-ONE: the viewport band navigator renders a "Remove band N" button (a trash icon) for the
 // currently displayed band. Clicking it removes that single band IN PLACE through the same
 // engine as Subset Bands (App.removeSingleBandFromViewportInPlace -> BAND_SUBSET_ACTION),
 // so the band count drops by one and a "Subset Bands" History entry records the kept bands

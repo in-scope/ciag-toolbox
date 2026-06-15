@@ -22,7 +22,7 @@ import {
 
 // CT-150 / CT-091 / manual section 17: remove individual bands via the panel x.
 //
-// The band navigator carries a small "Remove band N" x per band. Clicking it removes just
+// The band navigator carries a small "Remove band N" trash button per band. Clicking it removes just
 // that band from the working stack through the SAME engine as Subset Bands
 // (App.removeSingleBandFromViewportInPlace -> BAND_SUBSET_ACTION), so removal is a real,
 // recorded operation: the band count drops by one, the spectrum gaps at the removed
