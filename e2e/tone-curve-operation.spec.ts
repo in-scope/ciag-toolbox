@@ -8,6 +8,8 @@ import {
   addToneCurveAnchorAtFraction,
   applicationToolbar,
   applyOperationInPlace,
+  clickToneCurveAnchorHandle,
+  clickToneCurveResetToIdentity,
   dragToneCurveEndpointTo,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
@@ -16,6 +18,7 @@ import {
   historyEntryCount,
   loadFixtureAsStack,
   nonClearPixelFraction,
+  nudgeSelectedToneCurveAnchor,
   openOperation,
   panelCanvas,
   readPixelValueAt,
@@ -23,7 +26,10 @@ import {
   selectOperationRegionByDrag,
   selectPanel,
   selectRegionOfInterestScope,
+  setToneCurveAnchorField,
   summarizeCanvasPixels,
+  toneCurveEndpointHandles,
+  toneCurveInteriorHandles,
   TONE_CURVE_LABEL,
 } from "./support/page-objects";
 
@@ -124,6 +130,51 @@ test("exposes no separate standalone black/white-marker UI", async () => {
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
   await expectNoBlackWhitePointUiOnPage();
 });
+
+// CT-169 consolidated regression: a single realistic edit chain that touches every GIMP-parity
+// control added in CT-164..168 (add an anchor, place it numerically via the Input/Output fields,
+// nudge it with the keyboard, then Reset) and asserts an APPLIED-pixel outcome - not just DOM.
+// Reset returns the curve to identity, so the resulting curve maps every pixel to itself.
+test("a realistic edit chain (add, fields, nudge, reset) applies the identity curve unchanged", async () => {
+  await openOperation(launched.window, TONE_CURVE_LABEL);
+  await expectToneCurveOpensWithTwoEndpoints(launched.window);
+  await addNumericallyPlacedAnchorThenNudgeIt();
+  await clickToneCurveResetToIdentity(launched.window);
+  await expectToneCurveOpensWithTwoEndpoints(launched.window);
+  await applyOperationInPlace(launched.window, TONE_CURVE_LABEL);
+  await expectIdentityAppliedOutcome();
+});
+
+// A numerically-placed endpoint plus a keyboard nudge produces a real (non-identity) curve, and
+// the applied pixels match the exact stretch computed from the anchors read back from the DOM.
+test("a numeric Output edit plus a keyboard nudge applies the exact resulting curve", async () => {
+  await openOperation(launched.window, TONE_CURVE_LABEL);
+  await expectToneCurveOpensWithTwoEndpoints(launched.window);
+  await setToneCurveAnchorField(launched.window, "Output", UINT16_TYPE_MAX);
+  await clickToneCurveAnchorHandle(toneCurveEndpointHandles(launched.window).first());
+  await nudgeSelectedToneCurveAnchor(launched.window, "down");
+  const [black, white] = await readToneCurveAnchors(launched.window, UINT16_RANGES);
+  await applyOperationInPlace(launched.window, TONE_CURVE_LABEL);
+  await expectStretchedReadout({ x: 0, y: 0 }, black!, white!);
+  await expectStretchedReadout({ x: 3, y: 3 }, black!, white!);
+});
+
+// Adds an interior anchor, places it with the numeric fields, then nudges it one step. Clicking
+// the handle before the nudge re-focuses the editor (a field commit leaves focus in the input).
+async function addNumericallyPlacedAnchorThenNudgeIt(): Promise<void> {
+  await addToneCurveAnchorAtFraction(launched.window, 0.5, 0.5);
+  await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
+  await setToneCurveAnchorField(launched.window, "Input", 30000);
+  await setToneCurveAnchorField(launched.window, "Output", 40000);
+  await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
+  await nudgeSelectedToneCurveAnchor(launched.window, "right");
+}
+
+async function expectIdentityAppliedOutcome(): Promise<void> {
+  await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: 4, height: 4 });
+  await expectExactReadout({ x: 0, y: 0 }, bandZeroValueAt(0, 0));
+  await expectExactReadout({ x: 3, y: 3 }, bandZeroValueAt(3, 3));
+}
 
 async function applyThreeAnchorCurveAndAssertHistory(): Promise<void> {
   await applyOperationInPlace(launched.window, TONE_CURVE_LABEL);
