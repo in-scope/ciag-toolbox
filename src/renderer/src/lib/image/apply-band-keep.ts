@@ -56,6 +56,24 @@ function pickPreservedOriginalBandNumbers(
   return sortedIndexes.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
 }
 
+export function listKeptBandOriginalNumbersAfterRemovingBand(
+  raster: RasterImage,
+  removedBandIndex: number,
+): ReadonlyArray<number> {
+  const keptNumbers: number[] = [];
+  for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
+    if (bandIndex === removedBandIndex) continue;
+    keptNumbers.push(getRasterBandOriginalNumber(raster, bandIndex));
+  }
+  return keptNumbers;
+}
+
+export function formatKeptOriginalBandsHistoryLabel(
+  keptOriginalBandNumbers: ReadonlyArray<number>,
+): string {
+  return `Kept bands ${keptOriginalBandNumbers.join(", ")} of the original stack`;
+}
+
 export function listKeptBandIndexesFromRemoved(
   totalBandCount: number,
   removedBandIndexes: ReadonlyArray<number>,

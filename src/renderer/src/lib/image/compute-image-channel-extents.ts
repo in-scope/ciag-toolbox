@@ -7,6 +7,7 @@ import {
   computeDataTypeUnitMappingForRaster,
   mapRawValueToDisplayUnit,
 } from "@/lib/image/data-type-display-range";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface RgbChannelExtents {
@@ -47,12 +48,29 @@ export function computeImageRgbChannelExtents(
   selectedBandIndex: number = 0,
 ): RgbChannelExtents {
   if (source.kind === "raster") {
-    return broadcastSingleBandExtentsAcrossRgb(
-      computeSingleBandRasterUnitExtents(source.raster, selectedBandIndex),
-    );
+    return computeRasterRgbChannelExtents(source.raster, selectedBandIndex);
   }
   const rgbaBytes = readRgbaBytesFromSource(source);
   return computeRgbChannelExtentsFromBytes(rgbaBytes);
+}
+
+function computeRasterRgbChannelExtents(
+  raster: RasterImage,
+  selectedBandIndex: number,
+): RgbChannelExtents {
+  if (shouldRenderRasterAsRgbComposite(raster)) {
+    return computeRgbCompositeRasterChannelExtents(raster);
+  }
+  return broadcastSingleBandExtentsAcrossRgb(
+    computeSingleBandRasterUnitExtents(raster, selectedBandIndex),
+  );
+}
+
+function computeRgbCompositeRasterChannelExtents(raster: RasterImage): RgbChannelExtents {
+  const red = computeSingleBandRasterUnitExtents(raster, 0);
+  const green = computeSingleBandRasterUnitExtents(raster, 1);
+  const blue = computeSingleBandRasterUnitExtents(raster, 2);
+  return { min: [red.min, green.min, blue.min], max: [red.max, green.max, blue.max] };
 }
 
 export function computeRasterBandRawValueExtents(
@@ -115,6 +133,7 @@ export function computeSingleBandRasterUnitExtents(
   const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
   const range = computeBandPixelValueRange(pixels);
   if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
+  if (raster.sampleFormat === "float") return { min: range.min, max: range.max };
   const mapping = computeDataTypeUnitMappingForRaster(raster);
   return {
     min: mapRawValueToDisplayUnit(range.min, mapping),

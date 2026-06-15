@@ -23,36 +23,68 @@ export interface CanvasRectangle {
   readonly heightPx: number;
 }
 
-export function ViewportRoiOverlay(props: ViewportRoiOverlayProps): JSX.Element | null {
-  const rectangle = useCanvasRectangleForOverlayContent(props);
-  if (!rectangle) return null;
-  return <RoiOverlaySvgRectangle rectangle={rectangle} />;
+interface RoiOverlayContent {
+  readonly rectangle: CanvasRectangle;
+  readonly showCornerHandles: boolean;
 }
 
-function useCanvasRectangleForOverlayContent(
-  props: ViewportRoiOverlayProps,
-): CanvasRectangle | null {
+export function ViewportRoiOverlay(props: ViewportRoiOverlayProps): JSX.Element | null {
+  const content = useRoiOverlayContent(props);
+  if (!content) return null;
+  return (
+    <RoiOverlaySvgRectangle
+      rectangle={content.rectangle}
+      showCornerHandles={content.showCornerHandles}
+    />
+  );
+}
+
+function useRoiOverlayContent(props: ViewportRoiOverlayProps): RoiOverlayContent | null {
   return useMemo(
-    () => pickCanvasRectangleFromRoiOverlayProps(props),
+    () => pickRoiOverlayContentFromProps(props),
     // transformVersion intentionally tracked so committed ROI re-derives on pan/zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.committedRoi, props.inProgressDragRect, props.renderer, props.transformVersion],
   );
 }
 
-function pickCanvasRectangleFromRoiOverlayProps(
+// Corner handles are drawn only for a committed ROI. While dragging we show just the
+// dashed rectangle: a plain click produces a zero-size in-progress rect, and rendering
+// four handles stacked on a single point left visible "stray points" on the canvas (CT-096).
+function pickRoiOverlayContentFromProps(
   props: ViewportRoiOverlayProps,
-): CanvasRectangle | null {
+): RoiOverlayContent | null {
   if (props.inProgressDragRect) {
-    return buildCanvasRectangleFromCanvasCorners(
-      props.inProgressDragRect.start,
-      props.inProgressDragRect.current,
-    );
+    return buildInProgressDragOverlayContent(props.inProgressDragRect);
   }
   if (props.committedRoi && props.renderer) {
-    return buildCanvasRectangleFromCommittedRoi(props.committedRoi, props.renderer);
+    return buildCommittedRoiOverlayContent(props.committedRoi, props.renderer);
   }
   return null;
+}
+
+function buildInProgressDragOverlayContent(
+  inProgressDragRect: RoiDrawCanvasRect,
+): RoiOverlayContent | null {
+  const rectangle = buildCanvasRectangleFromCanvasCorners(
+    inProgressDragRect.start,
+    inProgressDragRect.current,
+  );
+  if (isCanvasRectangleDegenerate(rectangle)) return null;
+  return { rectangle, showCornerHandles: false };
+}
+
+function buildCommittedRoiOverlayContent(
+  committedRoi: ViewportRoi,
+  renderer: ViewportRenderer,
+): RoiOverlayContent | null {
+  const rectangle = buildCanvasRectangleFromCommittedRoi(committedRoi, renderer);
+  if (!rectangle) return null;
+  return { rectangle, showCornerHandles: true };
+}
+
+export function isCanvasRectangleDegenerate(rectangle: CanvasRectangle): boolean {
+  return rectangle.widthPx < 1 && rectangle.heightPx < 1;
 }
 
 function buildCanvasRectangleFromCanvasCorners(
@@ -86,6 +118,7 @@ function buildCanvasRectangleFromCommittedRoi(
 
 interface RoiOverlaySvgRectangleProps {
   readonly rectangle: CanvasRectangle;
+  readonly showCornerHandles: boolean;
 }
 
 function RoiOverlaySvgRectangle(props: RoiOverlaySvgRectangleProps): JSX.Element {
@@ -95,12 +128,12 @@ function RoiOverlaySvgRectangle(props: RoiOverlaySvgRectangleProps): JSX.Element
       className="pointer-events-none absolute inset-0 h-full w-full"
     >
       <RoiOverlayDashedBorder rectangle={props.rectangle} />
-      <RoiOverlayCornerHandles rectangle={props.rectangle} />
+      {props.showCornerHandles ? <RoiOverlayCornerHandles rectangle={props.rectangle} /> : null}
     </svg>
   );
 }
 
-function RoiOverlayDashedBorder(props: RoiOverlaySvgRectangleProps): JSX.Element {
+function RoiOverlayDashedBorder(props: { readonly rectangle: CanvasRectangle }): JSX.Element {
   const { leftPx, topPx, widthPx, heightPx } = props.rectangle;
   return (
     <rect
@@ -116,7 +149,7 @@ function RoiOverlayDashedBorder(props: RoiOverlaySvgRectangleProps): JSX.Element
   );
 }
 
-function RoiOverlayCornerHandles(props: RoiOverlaySvgRectangleProps): JSX.Element {
+function RoiOverlayCornerHandles(props: { readonly rectangle: CanvasRectangle }): JSX.Element {
   const corners = listFourCornerCenters(props.rectangle);
   return (
     <>

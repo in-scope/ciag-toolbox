@@ -207,16 +207,16 @@ function ReplacePickerHeader({ pending }: { pending: PendingOpenImagesReplace })
 }
 
 function pickReplaceDialogTitleForCount(itemCount: number): string {
-  if (itemCount === 1) return "Replace which viewport?";
-  return `Assign replacement viewports for ${itemCount} images`;
+  if (itemCount === 1) return "Replace which panel?";
+  return `Assign replacement panels for ${itemCount} stacks`;
 }
 
 function describeReplacePickerPrompt(pending: PendingOpenImagesReplace): string {
   if (pending.items.length === 1) {
     const only = pending.items[0]!;
-    return `Every viewport in the current grid already holds an image. Choose a viewport to replace with "${only.fileName}".`;
+    return `Every panel in the current grid already holds a stack. Choose a panel to replace with "${only.fileName}".`;
   }
-  return `The current grid cannot fit all ${pending.items.length} pending images. Pick a replacement viewport for each item, or use "Replace all starting at viewport N" to fill in sequence.`;
+  return `The current grid cannot fit all ${pending.items.length} pending stacks. Pick a replacement panel for each item, or use "Replace all starting at panel N" to fill in sequence.`;
 }
 
 interface ReplaceAllStartingAtViewportControlProps {
@@ -232,7 +232,7 @@ function ReplaceAllStartingAtViewportControl(
     <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
       <span>Replace all starting at</span>
       <select
-        aria-label="Start replacement at viewport"
+        aria-label="Start replacement at panel"
         className="h-7 rounded-md border bg-card px-2 text-xs text-foreground"
         onChange={(event) => props.onApplyStartAt(Number(event.target.value))}
         defaultValue=""
@@ -333,7 +333,7 @@ function ReplacePickerItemTargetSelect(
       className="h-7 w-full rounded-md border bg-card px-2 text-xs text-foreground"
     >
       <option value="" disabled>
-        Choose viewport...
+        Choose panel...
       </option>
       {props.viewports.map((viewport) => (
         <option key={viewport.index} value={viewport.index}>
@@ -346,7 +346,7 @@ function ReplacePickerItemTargetSelect(
 
 function describeReplacePickerRowLabel(viewport: OpenImageReplaceTargetEntry): string {
   const number = getViewportNumberFromIndex(viewport.index);
-  return `Viewport ${number} (${viewport.fileName})`;
+  return `Panel ${number} (${viewport.fileName})`;
 }
 
 function ReplacePickerFooter({

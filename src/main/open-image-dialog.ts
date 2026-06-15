@@ -1,7 +1,8 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { basename } from "node:path";
 
 import { computeSha256HexFromBytes } from "./content-hash";
+import { showOpenDialogOrStub } from "./e2e-dialog-stub";
 import {
   findEnviBinarySiblingPathOrNull,
   isEnviHeaderFilePath,
@@ -49,7 +50,7 @@ const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
 async function showImageOpenDialog(
   window: BrowserWindow,
 ): Promise<Electron.OpenDialogReturnValue> {
-  return dialog.showOpenDialog(window, {
+  return showOpenDialogOrStub(window, {
     title: "Open Image",
     properties: ["openFile"],
     filters: [SUPPORTED_IMAGE_FILTER],

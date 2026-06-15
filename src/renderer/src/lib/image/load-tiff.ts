@@ -15,6 +15,15 @@ const TIFF_SAMPLE_FORMAT_FLOAT = 3;
 const TIFF_SAMPLE_FORMAT_COMPLEX_INT = 5;
 const TIFF_SAMPLE_FORMAT_COMPLEX_FLOAT = 6;
 
+// CT-160: a single-page TIFF whose PhotometricInterpretation is RGB (262 == 2) with three
+// samples per pixel is a true-colour photo, not a science stack. We load its three samples
+// as R/G/B bands tagged "rgb" so the viewport reopens it as an RGB composite, instead of
+// reading only the first sample as one grey band.
+const TIFF_PHOTOMETRIC_RGB = 2;
+const TRUE_COLOUR_BAND_COUNT = 3;
+const RGB_BAND_LABELS: ReadonlyArray<string> = ["Red", "Green", "Blue"];
+const RGB_BAND_ORIGINAL_NUMBERS: ReadonlyArray<number> = [1, 2, 3];
+
 interface TiffPageHeader {
   readonly width: number;
   readonly height: number;
@@ -29,7 +38,53 @@ export async function loadTiffAsRaster(bytes: Uint8Array): Promise<RasterImage> 
   const pageCount = await tiff.getImageCount();
   const firstPage = await tiff.getImage(0);
   const firstHeader = readTiffPageHeader(firstPage);
+  if (pageIsTrueColourRgb(firstPage)) {
+    return readSinglePageRgbCompositeRaster(firstPage, firstHeader);
+  }
   return readRasterAcrossAllPages(tiff, firstHeader, pageCount);
+}
+
+function pageIsTrueColourRgb(image: GeoTiffImage): boolean {
+  return readPhotometricInterpretationOrNull(image) === TIFF_PHOTOMETRIC_RGB
+    && image.getSamplesPerPixel() === TRUE_COLOUR_BAND_COUNT;
+}
+
+function readPhotometricInterpretationOrNull(image: GeoTiffImage): number | null {
+  const fileDirectory = (image as unknown as {
+    fileDirectory?: { getValue(tag: string): unknown };
+  }).fileDirectory;
+  const value = fileDirectory?.getValue("PhotometricInterpretation");
+  return typeof value === "number" ? value : null;
+}
+
+async function readSinglePageRgbCompositeRaster(
+  image: GeoTiffImage,
+  header: TiffPageHeader,
+): Promise<RasterImage> {
+  return buildTrueColourRgbRaster(header, await readAllBandPixels(image));
+}
+
+function buildTrueColourRgbRaster(
+  header: TiffPageHeader,
+  bandPixels: ReadonlyArray<RasterTypedArray>,
+): RasterImage {
+  return {
+    bandPixels,
+    width: header.width,
+    height: header.height,
+    bitsPerSample: header.bitsPerSample,
+    sampleFormat: header.sampleFormat,
+    bandCount: bandPixels.length,
+    bandLabels: RGB_BAND_LABELS,
+    bandOriginalNumbers: RGB_BAND_ORIGINAL_NUMBERS,
+    colorInterpretation: "rgb",
+  };
+}
+
+async function readAllBandPixels(image: GeoTiffImage): Promise<RasterTypedArray[]> {
+  const rasters = (await image.readRasters({ interleave: false })) as ReadonlyArray<RasterTypedArray>;
+  if (rasters.length === 0) throw new Error("TIFF contained no readable bands");
+  return rasters.slice(0, TRUE_COLOUR_BAND_COUNT) as RasterTypedArray[];
 }
 
 async function readRasterAcrossAllPages(

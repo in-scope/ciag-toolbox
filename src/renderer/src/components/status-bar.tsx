@@ -22,22 +22,32 @@ export function StatusBar(): JSX.Element {
 function StatusBarReadoutRow({ fields }: { fields: StatusBarReadoutFields }): JSX.Element {
   return (
     <>
-      <StatusBarLabelValue label="Viewport" value={fields.viewportNumber} />
-      <StatusBarLabelValue label="X" value={fields.imagePixelX} />
-      <StatusBarLabelValue label="Y" value={fields.imagePixelY} />
+      <StatusBarLabelValue label="Panel" value={fields.viewportNumber} testId="pixel-readout-panel" />
+      <StatusBarLabelValue label="X" value={fields.imagePixelX} testId="pixel-readout-x" />
+      <StatusBarLabelValue label="Y" value={fields.imagePixelY} testId="pixel-readout-y" />
       {fields.activeBandLabel ? (
-        <StatusBarLabelValue label="Band" value={fields.activeBandLabel} />
+        <StatusBarLabelValue label="Band" value={fields.activeBandLabel} testId="pixel-readout-band" />
       ) : null}
-      <StatusBarLabelValue label="Value" value={fields.activeBandValue} />
+      <StatusBarLabelValue label="Value" value={fields.activeBandValue} testId="pixel-readout-value" />
     </>
   );
 }
 
-function StatusBarLabelValue({ label, value }: { label: string; value: string }): JSX.Element {
+function StatusBarLabelValue({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+}): JSX.Element {
   return (
     <span className="flex items-center gap-1">
       <span>{label}</span>
-      <span className="font-mono text-foreground">{value}</span>
+      <span className="font-mono text-foreground" data-testid={testId}>
+        {value}
+      </span>
     </span>
   );
 }

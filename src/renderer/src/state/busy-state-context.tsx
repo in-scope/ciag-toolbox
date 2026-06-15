@@ -32,6 +32,9 @@ export interface BusyEntryHandle {
 export interface RegisterAppBusyEntryInput {
   readonly label: string;
   readonly progress?: number | null;
+  // CT-106: when true the indicator paints immediately, skipping the anti-flash
+  // delay (used for empty result panels that have nothing else to show).
+  readonly immediate?: boolean;
 }
 
 export interface RegisterViewportBusyEntryInput extends RegisterAppBusyEntryInput {
@@ -76,6 +79,7 @@ function useStableBusyEntryRegistrar(
         viewportIndex: null,
         label: input.label,
         progress: input.progress ?? null,
+        immediate: input.immediate ?? false,
       }),
     [setEntries, nextIdRef],
   );
@@ -86,6 +90,7 @@ function useStableBusyEntryRegistrar(
         viewportIndex: input.viewportIndex,
         label: input.label,
         progress: input.progress ?? null,
+        immediate: input.immediate ?? false,
       }),
     [setEntries, nextIdRef],
   );
@@ -100,6 +105,7 @@ interface RegisterBusyEntryArgs {
   readonly viewportIndex: number | null;
   readonly label: string;
   readonly progress: number | null;
+  readonly immediate: boolean;
 }
 
 function registerBusyEntryWithScope(
@@ -115,6 +121,7 @@ function registerBusyEntryWithScope(
     label: args.label,
     progress: args.progress,
     registeredAtMs: performance.now(),
+    immediate: args.immediate,
   };
   setEntries((previous) => addBusyEntryToMap(previous, entry));
   return {
@@ -176,20 +183,39 @@ export function waitForBusyIndicatorToClearAntiFlashThreshold(): Promise<void> {
 
 export function useShouldRenderBusyEntryAfterDelay(entry: BusyEntry | null): boolean {
   const [hasPassedThreshold, setHasPassedThreshold] = useState(false);
+  useScheduleBusyThresholdCrossing(entry, setHasPassedThreshold);
+  if (!entry) return false;
+  if (entry.immediate) return true;
+  return hasPassedThreshold;
+}
+
+function useScheduleBusyThresholdCrossing(
+  entry: BusyEntry | null,
+  setHasPassedThreshold: (value: boolean) => void,
+): void {
   useEffect(() => {
-    if (!entry) {
+    if (!entry || entry.immediate) {
       setHasPassedThreshold(false);
       return undefined;
     }
-    const elapsedSinceRegisteredMs = performance.now() - entry.registeredAtMs;
-    const remainingDelayMs = Math.max(0, BUSY_INDICATOR_PAINT_DELAY_MS - elapsedSinceRegisteredMs);
-    if (remainingDelayMs === 0) {
-      setHasPassedThreshold(true);
-      return undefined;
-    }
-    const timeoutId = window.setTimeout(() => setHasPassedThreshold(true), remainingDelayMs);
-    return () => window.clearTimeout(timeoutId);
-  }, [entry]);
-  if (!entry) return false;
-  return hasPassedThreshold;
+    return scheduleBusyThresholdTimeout(entry, setHasPassedThreshold);
+  }, [entry, setHasPassedThreshold]);
+}
+
+function scheduleBusyThresholdTimeout(
+  entry: BusyEntry,
+  setHasPassedThreshold: (value: boolean) => void,
+): (() => void) | undefined {
+  const remainingDelayMs = computeRemainingBusyPaintDelayMs(entry);
+  if (remainingDelayMs === 0) {
+    setHasPassedThreshold(true);
+    return undefined;
+  }
+  const timeoutId = window.setTimeout(() => setHasPassedThreshold(true), remainingDelayMs);
+  return () => window.clearTimeout(timeoutId);
+}
+
+function computeRemainingBusyPaintDelayMs(entry: BusyEntry): number {
+  const elapsedSinceRegisteredMs = performance.now() - entry.registeredAtMs;
+  return Math.max(0, BUSY_INDICATOR_PAINT_DELAY_MS - elapsedSinceRegisteredMs);
 }

@@ -7,6 +7,9 @@ export interface BusyEntry {
   readonly label: string;
   readonly progress: number | null;
   readonly registeredAtMs: number;
+  // CT-106: bypass the anti-flash paint delay (a fresh, empty result panel has
+  // nothing to show, so its loading state must appear immediately).
+  readonly immediate: boolean;
 }
 
 export interface BusyEntryUpdate {

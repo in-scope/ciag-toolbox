@@ -16,3 +16,15 @@ export function computeHistogramBarHorizontalSpan(
 function floorBarEdge(edgeIndex: number, barCount: number, widthPx: number): number {
   return Math.floor((edgeIndex / barCount) * widthPx);
 }
+
+export function computeHistogramBarFillSpan(
+  barIndex: number,
+  barCount: number,
+  widthPx: number,
+  shouldOverlapNextBar: boolean,
+): HistogramBarHorizontalSpan {
+  const base = computeHistogramBarHorizontalSpan(barIndex, barCount, widthPx);
+  if (!shouldOverlapNextBar) return base;
+  const overlappedRight = Math.min(widthPx, base.left + base.width + 1);
+  return { left: base.left, width: Math.max(1, overlappedRight - base.left) };
+}

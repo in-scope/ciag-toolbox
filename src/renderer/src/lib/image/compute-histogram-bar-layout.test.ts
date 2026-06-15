@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { computeHistogramBarHorizontalSpan } from "@/lib/image/compute-histogram-bar-layout";
+import {
+  computeHistogramBarFillSpan,
+  computeHistogramBarHorizontalSpan,
+} from "@/lib/image/compute-histogram-bar-layout";
 
 function collectAllBarSpans(barCount: number, widthPx: number) {
   return Array.from({ length: barCount }, (_unused, index) =>
@@ -42,5 +45,25 @@ describe("computeHistogramBarHorizontalSpan", () => {
     const spans = collectAllBarSpans(128, 256);
     expect(spans[0]).toEqual({ left: 0, width: 2 });
     expect(spans[1]).toEqual({ left: 2, width: 2 });
+  });
+});
+
+describe("computeHistogramBarFillSpan", () => {
+  it("overlaps the next bar by one pixel to seal the sub-pixel seam", () => {
+    const base = computeHistogramBarHorizontalSpan(10, 256, 400);
+    const filled = computeHistogramBarFillSpan(10, 256, 400, true);
+    expect(filled.left).toBe(base.left);
+    expect(filled.width).toBe(base.width + 1);
+  });
+
+  it("leaves the span untouched when the next bar is empty so the gap reads as empty", () => {
+    const base = computeHistogramBarHorizontalSpan(10, 256, 400);
+    const filled = computeHistogramBarFillSpan(10, 256, 400, false);
+    expect(filled).toEqual(base);
+  });
+
+  it("never overflows past the canvas width on the final bar", () => {
+    const filled = computeHistogramBarFillSpan(255, 256, 400, true);
+    expect(filled.left + filled.width).toBeLessThanOrEqual(400);
   });
 });

@@ -15,6 +15,26 @@ const DEFAULT_INTERLEAVE_FOR_NON_ENVI_SOURCE: RasterSourceInterleave = "bil";
 
 const ENVI_BYTE_ORDER_LITTLE_ENDIAN = 0;
 
+export function encodeRasterImageAsFloat32EnviFiles(raster: RasterImage): EnviEncodedFiles {
+  return encodeRasterImageAsEnviFiles(convertRasterImageToFloat32(raster));
+}
+
+function convertRasterImageToFloat32(raster: RasterImage): RasterImage {
+  if (raster.sampleFormat === "float" && raster.bitsPerSample === 32) return raster;
+  return {
+    ...raster,
+    sampleFormat: "float",
+    bitsPerSample: 32,
+    bandPixels: raster.bandPixels.map(copyBandPixelsToFloat32),
+  };
+}
+
+function copyBandPixelsToFloat32(band: RasterTypedArray): Float32Array {
+  const output = new Float32Array(band.length);
+  output.set(band as never);
+  return output;
+}
+
 export function encodeRasterImageAsEnviFiles(raster: RasterImage): EnviEncodedFiles {
   const interleave = pickEnviInterleaveFromRasterSource(raster);
   const dataType = pickEnviDataTypeForRasterOrThrow(raster);

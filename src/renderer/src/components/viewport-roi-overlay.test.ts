@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isCanvasRectangleDegenerate,
   listFourCornerCenters,
   type CanvasRectangle,
 } from "./viewport-roi-overlay";
@@ -33,6 +34,24 @@ describe("listFourCornerCenters", () => {
 
   it("gives every corner a unique key for a zero-height rectangle", () => {
     expectFourUniqueCornerKeys(buildRectangle(10, 50, 40, 0));
+  });
+});
+
+describe("isCanvasRectangleDegenerate", () => {
+  // CT-096: a plain click produces a zero-size in-progress rect; rendering it (and its
+  // stacked corner handles) left stray points on the canvas, so we skip degenerate rects.
+  it("treats a zero-size point rectangle as degenerate", () => {
+    expect(isCanvasRectangleDegenerate(buildRectangle(50, 50, 0, 0))).toBe(true);
+  });
+
+  it("treats a sub-pixel rectangle as degenerate", () => {
+    expect(isCanvasRectangleDegenerate(buildRectangle(50, 50, 0.4, 0.6))).toBe(true);
+  });
+
+  it("treats a rectangle with a real width or height as non-degenerate", () => {
+    expect(isCanvasRectangleDegenerate(buildRectangle(10, 20, 30, 0))).toBe(false);
+    expect(isCanvasRectangleDegenerate(buildRectangle(10, 20, 0, 40))).toBe(false);
+    expect(isCanvasRectangleDegenerate(buildRectangle(10, 20, 30, 40))).toBe(false);
   });
 });
 

@@ -1,15 +1,14 @@
-import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
+import { useMemo } from "react";
 
-import { BandIndexBadge } from "@/components/band-index-badge";
-import { BandThumbnail } from "@/components/band-thumbnail";
 import {
   HistogramSection,
   shouldShowHistogramSection,
 } from "@/components/histogram-section";
 import {
-  PixelInspectorSection,
-  shouldShowPixelInspectorSection,
-} from "@/components/pixel-inspector-section";
+  listVisibleRightPanelSectionKeys,
+  type RightPanelSectionKey,
+  type RightPanelSectionVisibility,
+} from "@/components/right-panel-section-keys";
 import {
   SpectrumPlot,
   type SpectrumLinePlotInput,
@@ -25,32 +24,40 @@ import {
   type ViewportOperationHistory,
   type ViewportOperationHistoryEntry,
 } from "@/lib/actions/operation-history";
-import {
-  isBandsRowKeyboardKey,
-  pickNextActiveBandIndexForKey,
-} from "@/lib/image/bands-row-keyboard";
+import { buildActiveBandMetadataRows } from "@/lib/image/active-band-metadata";
 import type { ViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import {
   clampBandIndexToRaster,
-  describeRasterBandDisplayIdentity,
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import type { BandRun } from "@/lib/image/spectrum-band-gaps";
 import {
   buildSpectrumXAxisFromRaster,
   describeSpectrumYAxisLabel,
 } from "@/lib/image/spectrum-axis";
 import {
+  buildSpectrumBandTooltipDescriptors,
+  type SpectrumBandTooltipDescriptor,
+} from "@/lib/image/spectrum-hover-tooltip";
+import {
   MAX_PINNED_SPECTRA_PER_VIEWPORT,
+  type PinnedRoiMeanSpectrum,
+  type PinnedRoiSpectraList,
   type PinnedSpectrum,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
+import { buildLiveHoverSpectrumLineOrNull } from "@/lib/image/spectrum-plot-line-set";
 import {
   formatViewportRoiCornerLabel,
   formatViewportRoiSizeLabel,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
+import {
+  useCurrentPixelReadoutSnapshot,
+  type ViewportPixelReadoutSnapshot,
+} from "@/state/pixel-readout-context";
 
 export type ViewportRightPanelImageSourceKind = "raster" | "browser-source";
 
@@ -71,8 +78,10 @@ export interface ViewportRightPanelActiveSource {
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
   readonly pinnedSpectra: PinnedSpectraList;
-  readonly roiMeanSpectrum: RoiMeanSpectrumForDisplay | null;
+  readonly pinnedRoiSpectra: PinnedRoiSpectraList;
+  readonly activeRoiMeanSpectrum: RoiMeanSpectrumForDisplay | null;
   readonly onRemovePinnedSpectrum: (spectrumId: string) => void;
+  readonly onRemovePinnedRoiSpectrum: (spectrumId: string) => void;
 }
 
 export interface RoiMeanSpectrumForDisplay {
@@ -94,31 +103,44 @@ export function ViewportRightPanel(props: ViewportRightPanelProps): JSX.Element 
 function collectVisibleRightPanelSections(
   activeSource: ViewportRightPanelActiveSource | null,
 ): JSX.Element[] {
-  const sections: JSX.Element[] = [];
-  if (activeSource) {
-    sections.push(<MetadataSection key="metadata" activeSource={activeSource} />);
+  const visibility = describeRightPanelSectionVisibility(activeSource);
+  return listVisibleRightPanelSectionKeys(visibility).map((key) =>
+    renderRightPanelSectionForKey(key, activeSource!),
+  );
+}
+
+function describeRightPanelSectionVisibility(
+  activeSource: ViewportRightPanelActiveSource | null,
+): RightPanelSectionVisibility {
+  return {
+    hasActiveSource: activeSource !== null,
+    showSubsetBandsEditor: shouldShowSubsetBandsEditor(activeSource),
+    showHistogram: activeSource !== null && shouldShowHistogramSection(activeSource),
+    showSpectra: shouldShowSpectraSection(activeSource),
+    showRegion: shouldShowRegionSection(activeSource),
+    showHistory: shouldShowHistorySection(activeSource),
+  };
+}
+
+function renderRightPanelSectionForKey(
+  key: RightPanelSectionKey,
+  activeSource: ViewportRightPanelActiveSource,
+): JSX.Element {
+  if (key === "metadata") return <MetadataSection key={key} activeSource={activeSource} />;
+  if (key === "subset-bands") {
+    return <SubsetBandsSectionForActiveSource key={key} activeSource={activeSource} raster={activeSource.raster!} />;
   }
-  if (shouldShowBandsSection(activeSource)) {
-    sections.push(<BandsSection key="bands" activeSource={activeSource!} />);
-  }
-  if (activeSource && shouldShowHistogramSection(activeSource)) {
-    sections.push(<HistogramSection key="histogram" activeSource={activeSource} />);
-  }
-  if (activeSource && shouldShowPixelInspectorSection(activeSource)) {
-    sections.push(
-      <PixelInspectorSection key="pixel-inspector" activeSource={activeSource} />,
-    );
-  }
-  if (shouldShowSpectraSection(activeSource)) {
-    sections.push(<SpectraSection key="spectra" activeSource={activeSource!} />);
-  }
-  if (shouldShowRegionSection(activeSource)) {
-    sections.push(<RegionSection key="region" activeSource={activeSource!} />);
-  }
-  if (shouldShowHistorySection(activeSource)) {
-    sections.push(<HistorySection key="history" activeSource={activeSource!} />);
-  }
-  return sections;
+  if (key === "histogram") return <HistogramSection key={key} activeSource={activeSource} />;
+  if (key === "spectra") return <SpectraSection key={key} activeSource={activeSource} />;
+  if (key === "region") return <RegionSection key={key} activeSource={activeSource} />;
+  return <HistorySection key={key} activeSource={activeSource} />;
+}
+
+function shouldShowSubsetBandsEditor(
+  activeSource: ViewportRightPanelActiveSource | null,
+): boolean {
+  if (!activeSource || !activeSource.raster) return false;
+  return activeSource.isBandSubsetEditModeActive;
 }
 
 function shouldShowSpectraSection(
@@ -135,13 +157,6 @@ function shouldShowRegionSection(
   return activeSource.roi !== null;
 }
 
-function shouldShowBandsSection(
-  activeSource: ViewportRightPanelActiveSource | null,
-): boolean {
-  if (!activeSource || !activeSource.raster) return false;
-  return activeSource.raster.bandCount > 1;
-}
-
 function shouldShowHistorySection(
   activeSource: ViewportRightPanelActiveSource | null,
 ): boolean {
@@ -151,8 +166,8 @@ function shouldShowHistorySection(
 
 function RightPanelShell(props: { children: ReadonlyArray<JSX.Element> }): JSX.Element {
   return (
-    <aside aria-label="Viewport details panel" className={RIGHT_PANEL_CLASSES}>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">{props.children}</div>
+    <aside aria-label="Panel details" className={RIGHT_PANEL_CLASSES}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">{props.children}</div>
     </aside>
   );
 }
@@ -161,28 +176,6 @@ const RIGHT_PANEL_CLASSES = "flex w-[300px] shrink-0 flex-col border-l bg-card";
 
 const RIGHT_PANEL_SECTION_CLASSES =
   "flex flex-col gap-2 light:rounded-md light:border light:border-border light:p-3";
-
-interface BandsSectionProps {
-  activeSource: ViewportRightPanelActiveSource;
-}
-
-function BandsSection(props: BandsSectionProps): JSX.Element | null {
-  if (!props.activeSource.raster) return null;
-  if (props.activeSource.isBandSubsetEditModeActive) {
-    return (
-      <SubsetBandsSectionForActiveSource
-        activeSource={props.activeSource}
-        raster={props.activeSource.raster}
-      />
-    );
-  }
-  return (
-    <BandsDisplaySection
-      activeSource={props.activeSource}
-      raster={props.activeSource.raster}
-    />
-  );
-}
 
 interface BandsSectionForActiveSourceProps {
   activeSource: ViewportRightPanelActiveSource;
@@ -208,193 +201,13 @@ function SubsetBandsSectionForActiveSource(
   );
 }
 
-function BandsDisplaySection(props: BandsSectionForActiveSourceProps): JSX.Element {
-  const items = useMemo(() => buildBandRowItemsForRaster(props.raster), [props.raster]);
-  const displayedBandIndex = clampBandIndexToRaster(
-    props.raster,
-    props.activeSource.selectedBandIndex,
-  );
-  return (
-    <section aria-label="Bands" className={RIGHT_PANEL_SECTION_CLASSES}>
-      <BandsSectionHeader viewportNumber={props.activeSource.viewportNumber} />
-      <BandsRowList
-        raster={props.raster}
-        items={items}
-        selectedBandIndex={displayedBandIndex}
-        onSelectBandIndex={props.activeSource.onSelectBandIndex}
-      />
-    </section>
-  );
-}
-
-function BandsSectionHeader({ viewportNumber }: { viewportNumber: number }): JSX.Element {
-  return (
-    <header className="flex items-baseline justify-between">
-      <h2 className="text-sm font-medium text-foreground">Bands</h2>
-      <span className="text-xs text-muted-foreground">Viewport {viewportNumber}</span>
-    </header>
-  );
-}
-
-interface BandsRowListProps {
-  raster: RasterImage;
-  items: ReadonlyArray<BandRowItem>;
-  selectedBandIndex: number;
-  onSelectBandIndex: (bandIndex: number) => void;
-}
-
-export function BandsRowList(props: BandsRowListProps): JSX.Element {
-  const rowRefs = useBandRowFocusRefs(props.items.length);
-  const handleKeyDown = useBandRowKeyboardHandler(
-    props.selectedBandIndex,
-    props.items.length,
-    rowRefs,
-    props.onSelectBandIndex,
-  );
-  return (
-    <ul
-      role="radiogroup"
-      aria-label="Bands"
-      className="flex flex-col gap-1"
-      onKeyDown={handleKeyDown}
-    >
-      {props.items.map((item, position) => (
-        <li key={item.bandIndex}>
-          <BandRow
-            setRowElement={(element) =>
-              attachBandRowElementToRefList(rowRefs, position, element)
-            }
-            raster={props.raster}
-            item={item}
-            isSelected={item.bandIndex === props.selectedBandIndex}
-            onSelect={() => props.onSelectBandIndex(item.bandIndex)}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function useBandRowFocusRefs(rowCount: number) {
-  const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  if (refs.current.length !== rowCount) refs.current = new Array(rowCount).fill(null);
-  return refs;
-}
-
-function attachBandRowElementToRefList(
-  refs: { current: Array<HTMLButtonElement | null> },
-  position: number,
-  element: HTMLButtonElement | null,
-): void {
-  refs.current[position] = element;
-}
-
-function useBandRowKeyboardHandler(
-  selectedBandIndex: number,
-  bandCount: number,
-  rowRefs: { current: Array<HTMLButtonElement | null> },
-  onSelectBandIndex: (bandIndex: number) => void,
-) {
-  return useCallback(
-    (event: KeyboardEvent<HTMLUListElement>) => {
-      if (!isBandsRowKeyboardKey(event.key)) return;
-      const nextBandIndex = pickNextActiveBandIndexForKey(
-        event.key,
-        selectedBandIndex,
-        bandCount,
-      );
-      if (nextBandIndex === null) return;
-      event.preventDefault();
-      onSelectBandIndex(nextBandIndex);
-      rowRefs.current[nextBandIndex]?.focus();
-    },
-    [bandCount, onSelectBandIndex, rowRefs, selectedBandIndex],
-  );
-}
-
-interface BandRowItem {
-  readonly bandIndex: number;
-  readonly label: string;
-  readonly originalNumber: number;
-  readonly hasExplicitLabel: boolean;
-}
-
-function buildBandRowItemsForRaster(raster: RasterImage): ReadonlyArray<BandRowItem> {
-  const items: BandRowItem[] = [];
-  for (let bandIndex = 0; bandIndex < raster.bandCount; bandIndex += 1) {
-    items.push(buildBandRowItemForBandIndex(raster, bandIndex));
-  }
-  return items;
-}
-
-function buildBandRowItemForBandIndex(raster: RasterImage, bandIndex: number): BandRowItem {
-  const identity = describeRasterBandDisplayIdentity(raster, bandIndex);
-  return {
-    bandIndex,
-    label: identity.label,
-    originalNumber: identity.originalNumber,
-    hasExplicitLabel: identity.hasExplicitLabel,
-  };
-}
-
-interface BandRowProps {
-  setRowElement?: (element: HTMLButtonElement | null) => void;
-  raster: RasterImage;
-  item: BandRowItem;
-  isSelected: boolean;
-  onSelect: () => void;
-}
-
-function BandRow(props: BandRowProps): JSX.Element {
-  return (
-    <button
-      ref={props.setRowElement}
-      type="button"
-      role="radio"
-      aria-checked={props.isSelected}
-      tabIndex={props.isSelected ? 0 : -1}
-      aria-label={`Display ${props.item.label}`}
-      onClick={props.onSelect}
-      className={getBandRowClassName(props.isSelected)}
-    >
-      <BandThumbnail raster={props.raster} bandIndex={props.item.bandIndex} />
-      {props.item.hasExplicitLabel ? (
-        <BandIndexBadge originalNumber={props.item.originalNumber} />
-      ) : null}
-      <span className="flex-1 truncate text-left text-sm" title={props.item.label}>
-        {props.item.label}
-      </span>
-      {props.isSelected ? <BandRowSelectedBar /> : null}
-    </button>
-  );
-}
-
-function BandRowSelectedBar(): JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-r-full bg-primary"
-    />
-  );
-}
-
-function getBandRowClassName(isSelected: boolean): string {
-  return cn(
-    "relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-    isSelected
-      ? "bg-accent text-foreground"
-      : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-  );
-}
-
 interface HistorySectionProps {
   activeSource: ViewportRightPanelActiveSource;
 }
 
 function HistorySection(props: HistorySectionProps): JSX.Element {
   return (
-    <section aria-label="History" className={RIGHT_PANEL_SECTION_CLASSES}>
+    <section aria-label="History" className={cn(RIGHT_PANEL_SECTION_CLASSES, "min-h-0 flex-1")}>
       <HistorySectionHeader
         viewportNumber={props.activeSource.viewportNumber}
         entryCount={props.activeSource.operationHistory.length}
@@ -431,7 +244,7 @@ interface HistoryEntryListProps {
 
 function HistoryEntryList(props: HistoryEntryListProps): JSX.Element {
   return (
-    <ol aria-label="Operation history" className="flex flex-col gap-1">
+    <ol aria-label="Operation history" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {props.history.map((entry, position) => (
         <li key={`${entry.timestampMs}-${position}`}>
           <HistoryEntryRow entry={entry} />
@@ -458,6 +271,7 @@ function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
         </span>
         <span className="font-mono text-[11px] text-muted-foreground">{timestamp}</span>
       </div>
+      <HistoryEntryAppliedLabel appliedLabel={props.entry.appliedLabel} />
       {inlineParameters ? (
         <span
           className="font-mono text-[11px] text-muted-foreground"
@@ -470,6 +284,15 @@ function HistoryEntryRow(props: HistoryEntryRowProps): JSX.Element {
   );
 }
 
+function HistoryEntryAppliedLabel({ appliedLabel }: { appliedLabel: string }): JSX.Element | null {
+  if (!appliedLabel) return null;
+  return (
+    <span className="text-[11px] text-foreground" title={appliedLabel}>
+      {appliedLabel}
+    </span>
+  );
+}
+
 interface MetadataSectionProps {
   activeSource: ViewportRightPanelActiveSource;
 }
@@ -478,7 +301,11 @@ function MetadataSection(props: MetadataSectionProps): JSX.Element {
   return (
     <section aria-label="Metadata" className={RIGHT_PANEL_SECTION_CLASSES}>
       <MetadataSectionHeader viewportNumber={props.activeSource.viewportNumber} />
-      <MetadataSectionBody metadata={props.activeSource.metadata} />
+      <MetadataSectionBody
+        metadata={props.activeSource.metadata}
+        raster={props.activeSource.raster}
+        selectedBandIndex={props.activeSource.selectedBandIndex}
+      />
     </section>
   );
 }
@@ -487,32 +314,44 @@ function MetadataSectionHeader({ viewportNumber }: { viewportNumber: number }): 
   return (
     <header className="flex items-baseline justify-between">
       <h2 className="text-sm font-medium text-foreground">Metadata</h2>
-      <span className="text-xs text-muted-foreground">Viewport {viewportNumber}</span>
+      <span className="text-xs text-muted-foreground">Panel {viewportNumber}</span>
     </header>
   );
 }
 
 function MetadataSectionBody({
   metadata,
+  raster,
+  selectedBandIndex,
 }: {
   metadata: ViewportImageMetadataDisplay | null;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
 }): JSX.Element {
   if (!metadata) return <MetadataEmptyState />;
-  return <MetadataKeyValueList metadata={metadata} />;
+  return (
+    <MetadataKeyValueList
+      metadata={metadata}
+      raster={raster}
+      selectedBandIndex={selectedBandIndex}
+    />
+  );
 }
 
 function MetadataEmptyState(): JSX.Element {
   return (
-    <p className="text-xs text-muted-foreground">No image loaded in this viewport.</p>
+    <p className="text-xs text-muted-foreground">No stack loaded in this panel.</p>
   );
 }
 
 interface MetadataKeyValueListProps {
   metadata: ViewportImageMetadataDisplay;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
 }
 
 function MetadataKeyValueList(props: MetadataKeyValueListProps): JSX.Element {
-  const rows = buildMetadataRowsFromDisplay(props.metadata);
+  const rows = buildAllMetadataRowsForActiveBand(props);
   return (
     <dl className="flex flex-col gap-1 text-xs">
       {rows.map((row) => (
@@ -520,6 +359,15 @@ function MetadataKeyValueList(props: MetadataKeyValueListProps): JSX.Element {
       ))}
     </dl>
   );
+}
+
+function buildAllMetadataRowsForActiveBand(
+  props: MetadataKeyValueListProps,
+): ReadonlyArray<MetadataDisplayRow> {
+  const fileRows = buildMetadataRowsFromDisplay(props.metadata);
+  if (!props.raster) return fileRows;
+  const bandRows = buildActiveBandMetadataRows(props.raster, props.selectedBandIndex);
+  return [...fileRows, ...bandRows];
 }
 
 interface MetadataDisplayRow {
@@ -632,7 +480,17 @@ const SPECTRUM_LINE_COLOR_CLASSES: ReadonlyArray<string> = [
   "text-violet-400",
 ];
 
-const ROI_MEAN_SPECTRUM_COLOR_CLASS = "text-primary";
+const ROI_MEAN_SPECTRUM_COLOR_CLASSES: ReadonlyArray<string> = [
+  "text-primary",
+  "text-fuchsia-400",
+];
+
+function pickRoiSpectrumColorClassForIndex(index: number): string {
+  return (
+    ROI_MEAN_SPECTRUM_COLOR_CLASSES[index % ROI_MEAN_SPECTRUM_COLOR_CLASSES.length] ??
+    "text-primary"
+  );
+}
 
 interface SpectraSectionProps {
   activeSource: ViewportRightPanelActiveSource;
@@ -640,13 +498,23 @@ interface SpectraSectionProps {
 
 function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
   const raster = props.activeSource.raster;
+  const snapshot = useCurrentPixelReadoutSnapshot();
   const xAxis = useMemo(
     () => (raster ? buildSpectrumXAxisFromRaster(raster) : null),
     [raster],
   );
+  const bandTooltipDescriptors = useMemo(
+    () => (raster ? buildSpectrumBandTooltipDescriptors(raster) : []),
+    [raster],
+  );
   if (!raster || !xAxis) return null;
   const yAxisLabel = describeSpectrumYAxisLabel(raster.sampleFormat);
-  const lines = buildSpectrumPlotLinesFromActiveSource(props.activeSource);
+  const hoverBandValues = readHoveredSpectrumBandValuesOrNull(
+    snapshot,
+    props.activeSource,
+    raster.bandCount,
+  );
+  const lines = buildSpectrumPlotLinesFromActiveSource(props.activeSource, hoverBandValues);
   return (
     <section aria-label="Spectra" className={RIGHT_PANEL_SECTION_CLASSES}>
       <SpectraSectionHeader
@@ -661,8 +529,10 @@ function SpectraSection(props: SpectraSectionProps): JSX.Element | null {
           xAxisLabel={xAxis.label}
           yAxisLabel={yAxisLabel}
           bandPositions={xAxis.bandPositions}
+          bandRuns={xAxis.bandRuns}
           tickPositions={xAxis.tickPositions}
           tickLabels={xAxis.tickLabels}
+          bandTooltipDescriptors={bandTooltipDescriptors}
         />
       ) : (
         <SpectraSectionEmptyState />
@@ -698,7 +568,7 @@ function hasAnyPlottableLines(lines: ReadonlyArray<SpectrumLinePlotInput>): bool
 function SpectraSectionEmptyState(): JSX.Element {
   return (
     <p className="text-xs text-muted-foreground">
-      Click a pixel to pin a spectrum, or draw a region to see its mean spectrum.
+      Hover a pixel to preview its spectrum, click to pin it, or draw a region for its mean.
     </p>
   );
 }
@@ -710,8 +580,10 @@ interface SpectraSectionBodyProps {
   xAxisLabel: string;
   yAxisLabel: string;
   bandPositions: ReadonlyArray<number>;
+  bandRuns: ReadonlyArray<BandRun>;
   tickPositions: ReadonlyArray<number>;
   tickLabels: ReadonlyArray<string>;
+  bandTooltipDescriptors: ReadonlyArray<SpectrumBandTooltipDescriptor>;
 }
 
 function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
@@ -719,11 +591,14 @@ function SpectraSectionBody(props: SpectraSectionBodyProps): JSX.Element {
     <div className="flex flex-col gap-2 rounded-md border bg-background p-2">
       <SpectrumPlot
         bandPositions={props.bandPositions}
+        bandRuns={props.bandRuns}
         tickPositions={props.tickPositions}
         tickLabels={props.tickLabels}
         xAxisLabel={props.xAxisLabel}
         yAxisLabel={props.yAxisLabel}
         lines={props.lines}
+        sampleFormat={props.sampleFormat}
+        bandTooltipDescriptors={props.bandTooltipDescriptors}
       />
       <SpectraLegend
         activeSource={props.activeSource}
@@ -741,11 +616,15 @@ interface SpectraLegendProps {
 function SpectraLegend(props: SpectraLegendProps): JSX.Element {
   return (
     <ul className="flex flex-col gap-1 text-[11px]">
-      {props.activeSource.roiMeanSpectrum ? (
+      {props.activeSource.pinnedRoiSpectra.map((spectrum, index) => (
         <SpectraLegendRoiMeanRow
-          spectrum={props.activeSource.roiMeanSpectrum}
+          key={spectrum.id}
+          spectrum={spectrum}
+          label={formatRoiSpectrumLabel(index)}
+          colorClass={pickRoiSpectrumColorClassForIndex(index)}
+          onRemove={() => props.activeSource.onRemovePinnedRoiSpectrum(spectrum.id)}
         />
-      ) : null}
+      ))}
       {props.activeSource.pinnedSpectra.map((spectrum, index) => (
         <SpectraLegendPinnedRow
           key={spectrum.id}
@@ -756,6 +635,10 @@ function SpectraLegend(props: SpectraLegendProps): JSX.Element {
       ))}
     </ul>
   );
+}
+
+function formatRoiSpectrumLabel(index: number): string {
+  return `ROI ${index + 1}`;
 }
 
 function pickPinnedSpectrumColorClassForIndex(index: number): string {
@@ -789,18 +672,29 @@ function SpectraLegendPinnedRow(props: SpectraLegendPinnedRowProps): JSX.Element
 }
 
 interface SpectraLegendRoiMeanRowProps {
-  spectrum: RoiMeanSpectrumForDisplay;
+  spectrum: PinnedRoiMeanSpectrum;
+  label: string;
+  colorClass: string;
+  onRemove: () => void;
 }
 
 function SpectraLegendRoiMeanRow(props: SpectraLegendRoiMeanRowProps): JSX.Element {
+  const description = `${props.label} mean (n=${props.spectrum.samplePixelCount}px) +/- 1 sigma`;
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="flex items-center gap-1.5">
-        <SpectrumColorSwatch colorClass={ROI_MEAN_SPECTRUM_COLOR_CLASS} />
-        <span className="font-mono">
-          ROI mean (n={props.spectrum.samplePixelCount}px) +/- 1 sigma
-        </span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <SpectrumColorSwatch colorClass={props.colorClass} />
+        <span className="truncate font-mono">{description}</span>
       </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-5 px-1.5 text-[11px] text-muted-foreground"
+        onClick={props.onRemove}
+        aria-label={`Remove pinned spectrum ${description}`}
+      >
+        Remove
+      </Button>
     </li>
   );
 }
@@ -823,23 +717,38 @@ function describePinnedSpectrumForLegend(spectrum: PinnedSpectrum): string {
 
 function buildSpectrumPlotLinesFromActiveSource(
   activeSource: ViewportRightPanelActiveSource,
+  hoverBandValues: ReadonlyArray<number> | null,
 ): ReadonlyArray<SpectrumLinePlotInput> {
   const lines: SpectrumLinePlotInput[] = [];
-  if (activeSource.roiMeanSpectrum) {
-    lines.push(buildRoiMeanSpectrumPlotLine(activeSource.roiMeanSpectrum));
-  }
+  activeSource.pinnedRoiSpectra.forEach((spectrum, index) => {
+    lines.push(buildRoiMeanSpectrumPlotLine(spectrum, index));
+  });
   activeSource.pinnedSpectra.forEach((spectrum, index) => {
     lines.push(buildPinnedSpectrumPlotLine(spectrum, index));
   });
+  const hoverLine = buildLiveHoverSpectrumLineOrNull(hoverBandValues);
+  if (hoverLine) lines.push(hoverLine);
   return lines;
 }
 
+function readHoveredSpectrumBandValuesOrNull(
+  snapshot: ViewportPixelReadoutSnapshot | null,
+  activeSource: ViewportRightPanelActiveSource,
+  bandCount: number,
+): ReadonlyArray<number> | null {
+  if (!snapshot || snapshot.viewportNumber !== activeSource.viewportNumber) return null;
+  const values = snapshot.bands?.values ?? null;
+  if (!values || values.length !== bandCount) return null;
+  return values;
+}
+
 function buildRoiMeanSpectrumPlotLine(
-  spectrum: RoiMeanSpectrumForDisplay,
+  spectrum: PinnedRoiMeanSpectrum,
+  index: number,
 ): SpectrumLinePlotInput {
   return {
-    id: "roi-mean",
-    colorClass: ROI_MEAN_SPECTRUM_COLOR_CLASS,
+    id: spectrum.id,
+    colorClass: pickRoiSpectrumColorClassForIndex(index),
     values: spectrum.bandMeans,
     bandStandardDeviations: spectrum.bandStandardDeviations,
   };

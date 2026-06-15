@@ -14,18 +14,31 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
-import { computePixelSpectrumOrNull } from "@/lib/image/compute-spectrum";
+import {
+  computePixelSpectrumOrNull,
+  computeRoiMeanSpectrumOrNull,
+} from "@/lib/image/compute-spectrum";
 import {
   appendPinnedSpectrumWithCapLimit,
+  appendRoiSpectrumKeepingLastTwo,
   buildPinnedSpectrumIdFromTimestamp,
+  type PinnedRoiMeanSpectrum,
   type PinnedSpectrum,
 } from "@/lib/image/spectrum-entry";
+import {
+  reduceInspectionRoiSelection,
+  resolveInspectionRoiAfterPlainClick,
+  type ClickedImagePixel,
+} from "@/lib/image/roi-selection-lifecycle";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import { cn } from "@/lib/utils";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
+import { useFalseColorPreview } from "@/state/false-color-preview-context";
+import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
+import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 import {
@@ -52,7 +65,7 @@ export function ViewportGrid(props: ViewportGridProps): JSX.Element {
   return (
     <div
       role="grid"
-      aria-label="Viewport grid"
+      aria-label="Panel grid"
       className={cn("grid h-full w-full gap-2", trackClasses)}
     >
       {renderViewportCells(cellCount, props)}
@@ -119,15 +132,18 @@ function renderViewportCellViewport(
     <Viewport
       viewportNumber={props.viewportNumber}
       imageSource={props.content?.source ?? null}
+      previewImageSource={settings.previewImageSource}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       selectedBandIndex={settings.selectedBandIndex}
       onSelectBandIndex={settings.handleSelectBandIndex}
+      onRemoveBand={settings.handleRemoveBand}
       lastAppliedOperationLabel={settings.lastAppliedOperationLabel}
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
       onCommitRoi={settings.handleCommitRoi}
+      onRegionToolPlainClick={settings.handleRegionToolPlainClick}
       onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
@@ -149,14 +165,17 @@ interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   handleClose: (() => void) | undefined;
+  previewImageSource: ViewportImageSource | null;
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
   handleSelectBandIndex: (bandIndex: number) => void;
+  handleRemoveBand: (bandIndex: number) => void;
   lastAppliedOperationLabel: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   handleCommitRoi: (roi: ViewportRoi) => void;
+  handleRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
 }
 
@@ -167,21 +186,54 @@ function useViewportCellInteractionSettings(
   const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
+  const regionRequest = useRegionRequest();
+  const { getPreviewSourceForViewport } = useFalseColorPreview();
+  const { removeBand } = useViewportBandRemoval();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
   const renderingState = getRenderingState(cellIndex);
+  const isOperationRegionRequestActive = regionRequest.isRegionRequestActiveForViewport(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
   const handleClose = closing.hasContent(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
-  const handleCommitRoi = useCallback(
+  const handleCommitInspectionRoi = useCallback(
     (roi: ViewportRoi) => {
-      setRenderingState(cellIndex, { ...renderingState, roi });
+      const committedRoi = reduceInspectionRoiSelection(renderingState.roi, { kind: "commit", roi });
+      const roiSpectrum = committedRoi
+        ? buildPinnedRoiSpectrumFromRegion(content, committedRoi)
+        : null;
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        roi: committedRoi,
+        pinnedRoiSpectra: roiSpectrum
+          ? appendRoiSpectrumKeepingLastTwo(renderingState.pinnedRoiSpectra, roiSpectrum)
+          : renderingState.pinnedRoiSpectra,
+      });
       selectViewportFromClick(cellIndex, { ctrlOrMeta: false, shift: false });
     },
-    [cellIndex, renderingState, setRenderingState, selectViewportFromClick],
+    [cellIndex, content, renderingState, setRenderingState, selectViewportFromClick],
   );
+  const handleRegionToolPlainClick = useCallback(
+    (clickedImagePixel: ClickedImagePixel | null) => {
+      if (isOperationRegionRequestActive) return;
+      const nextRoi = resolveInspectionRoiAfterPlainClick(renderingState.roi, clickedImagePixel);
+      if (nextRoi === renderingState.roi) return;
+      setRenderingState(cellIndex, { ...renderingState, roi: nextRoi });
+    },
+    [cellIndex, isOperationRegionRequestActive, renderingState, setRenderingState],
+  );
+  const handleCommitOperationRegion = useCallback(
+    (region: ViewportRoi) => {
+      setRenderingState(cellIndex, { ...renderingState, operationRegion: region });
+      regionRequest.endRegionRequest();
+    },
+    [cellIndex, renderingState, setRenderingState, regionRequest],
+  );
+  const handleCommitRoi = isOperationRegionRequestActive
+    ? handleCommitOperationRegion
+    : handleCommitInspectionRoi;
   const handlePinPixelSpectrum = useCallback(
     (imageX: number, imageY: number) => {
       const next = buildPinnedPixelSpectrumFromImagePoint(content, imageX, imageY);
@@ -207,18 +259,25 @@ function useViewportCellInteractionSettings(
       setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
     [cellIndex, renderingState, setRenderingState],
   );
+  const handleRemoveBand = useCallback(
+    (bandIndex: number) => removeBand(cellIndex, bandIndex),
+    [cellIndex, removeBand],
+  );
   return {
     isSelected,
     handleClick,
     handleClose,
+    previewImageSource: getPreviewSourceForViewport(cellIndex),
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,
     handleSelectBandIndex,
+    handleRemoveBand,
     lastAppliedOperationLabel: renderingState.lastAppliedOperationLabel,
-    isRegionToolActive,
-    roi: renderingState.roi,
+    isRegionToolActive: isRegionToolActive || isOperationRegionRequestActive,
+    roi: renderingState.operationRegion ?? renderingState.roi,
     handleCommitRoi,
+    handleRegionToolPlainClick,
     handlePinPixelSpectrum,
   };
 }
@@ -237,6 +296,22 @@ function buildPinnedPixelSpectrumFromImagePoint(
     imagePixelX: imageX,
     imagePixelY: imageY,
     bandValues: spectrum.bandValues,
+  };
+}
+
+function buildPinnedRoiSpectrumFromRegion(
+  content: ViewportCellContent | null,
+  roi: ViewportRoi,
+): PinnedRoiMeanSpectrum | null {
+  if (!content || content.source.kind !== "raster") return null;
+  const spectrum = computeRoiMeanSpectrumOrNull(content.source.raster, roi);
+  if (!spectrum) return null;
+  return {
+    kind: "roi-mean",
+    id: buildPinnedSpectrumIdFromTimestamp(Date.now(), Math.random()),
+    samplePixelCount: spectrum.samplePixelCount,
+    bandMeans: spectrum.bandMeans,
+    bandStandardDeviations: spectrum.bandStandardDeviations,
   };
 }
 

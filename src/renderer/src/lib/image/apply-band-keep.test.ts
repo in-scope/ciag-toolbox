@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyBandKeepToRasterImage,
+  formatKeptOriginalBandsHistoryLabel,
   listKeptBandIndexesFromRemoved,
+  listKeptBandOriginalNumbersAfterRemovingBand,
   mapKeptBandNumbersToCurrentPositions,
 } from "./apply-band-keep";
 import { getRasterBandLabelOrDefault, type RasterImage } from "./raster-image";
@@ -150,6 +152,45 @@ describe("listKeptBandIndexesFromRemoved", () => {
 
   it("ignores out-of-range removed indexes", () => {
     expect(listKeptBandIndexesFromRemoved(3, [5, 1])).toEqual([0, 2]);
+  });
+});
+
+describe("listKeptBandOriginalNumbersAfterRemovingBand", () => {
+  it("lists every original band number except the removed band", () => {
+    const raster = createThreeBandUint16Raster();
+    expect(listKeptBandOriginalNumbersAfterRemovingBand(raster, 1)).toEqual([1, 3]);
+  });
+
+  it("keeps the original numbers of an already-subsetted raster", () => {
+    const subset: RasterImage = {
+      ...createThreeBandUint16Raster(),
+      bandOriginalNumbers: [2, 4, 7],
+    };
+    expect(listKeptBandOriginalNumbersAfterRemovingBand(subset, 0)).toEqual([4, 7]);
+  });
+
+  it("removing a single middle band leaves a non-contiguous kept stack", () => {
+    const raster = createThreeBandUint16Raster();
+    const keptNumbers = listKeptBandOriginalNumbersAfterRemovingBand(raster, 1);
+    const keptPositions = mapKeptBandNumbersToCurrentPositions(raster, keptNumbers);
+    const result = applyBandKeepToRasterImage(raster, keptPositions);
+    expect(result.bandCount).toBe(2);
+    expect(result.bandOriginalNumbers).toEqual([1, 3]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([100, 200, 300, 400]);
+  });
+});
+
+describe("formatKeptOriginalBandsHistoryLabel", () => {
+  it("describes the kept bands as a correspondence to the original stack", () => {
+    expect(formatKeptOriginalBandsHistoryLabel([3, 5])).toBe(
+      "Kept bands 3, 5 of the original stack",
+    );
+  });
+
+  it("describes a single kept band", () => {
+    expect(formatKeptOriginalBandsHistoryLabel([7])).toBe(
+      "Kept bands 7 of the original stack",
+    );
   });
 });
 

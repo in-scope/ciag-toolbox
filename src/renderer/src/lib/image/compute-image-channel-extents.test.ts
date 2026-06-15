@@ -40,6 +40,24 @@ describe("computeSingleBandRasterUnitExtents", () => {
     expect(extents.max).toBeCloseTo(0.9, 6);
   });
 
+  // CT-161: float data outside [0,1] (e.g. an integer stack exported as 32-bit
+  // float) must report its RAW extents, not values clamped to [0,1]. Clamping
+  // collapsed the display window to {1,1}, which is why such a reopen rendered as a
+  // flat white frame instead of auto-fitting to the data.
+  it("reports the raw, unclamped extents for a float band whose values exceed [0,1]", () => {
+    const raster: RasterImage = {
+      bandPixels: [new Float32Array([100, 175, 250])],
+      width: 3,
+      height: 1,
+      bitsPerSample: 32,
+      sampleFormat: "float",
+      bandCount: 1,
+    };
+    const extents = computeSingleBandRasterUnitExtents(raster);
+    expect(extents.min).toBe(100);
+    expect(extents.max).toBe(250);
+  });
+
   it("maps signed int16 extents by the type range so the offset matches the upload mapping", () => {
     const raster: RasterImage = {
       bandPixels: [new Int16Array([-32768, 0, 32767])],
@@ -92,6 +110,14 @@ describe("computeImageRgbChannelExtents (raster path)", () => {
     const secondBandExtents = computeImageRgbChannelExtents(source, 1);
     expect(firstBandExtents.max[0]).toBeLessThan(secondBandExtents.max[0]);
   });
+
+  it("derives independent per-channel extents from the three bands of an rgb composite", () => {
+    const source: ViewportImageSource = { kind: "raster", raster: buildRgbCompositeRaster() };
+    const extents = computeImageRgbChannelExtents(source);
+    expect(extents.max[0]).toBeCloseTo(10 / UINT16_CONTAINER_MAX, 6);
+    expect(extents.max[1]).toBeCloseTo(20 / UINT16_CONTAINER_MAX, 6);
+    expect(extents.max[2]).toBeCloseTo(30 / UINT16_CONTAINER_MAX, 6);
+  });
 });
 
 describe("computeImageRgbChannelExtents (pixels path)", () => {
@@ -136,6 +162,18 @@ function buildUint16RasterFromValues(values: ReadonlyArray<number>): RasterImage
     bitsPerSample: 16,
     sampleFormat: "uint",
     bandCount: 1,
+  };
+}
+
+function buildRgbCompositeRaster(): RasterImage {
+  return {
+    bandPixels: [new Uint16Array([0, 10]), new Uint16Array([0, 20]), new Uint16Array([0, 30])],
+    width: 2,
+    height: 1,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 3,
+    colorInterpretation: "rgb",
   };
 }
 

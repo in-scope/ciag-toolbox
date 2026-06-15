@@ -1,5 +1,8 @@
+import type { ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
 import {
+  EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
+  type PinnedRoiSpectraList,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -18,7 +21,10 @@ export interface ViewportRenderingState {
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
+  readonly operationRegion: ViewportRoi | null;
+  readonly toneCurveAnchors: ReadonlyArray<ToneCurveAnchor> | null;
   readonly pinnedSpectra: PinnedSpectraList;
+  readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
   readonly isBandSubsetEditModeActive: boolean;
 }
@@ -31,7 +37,10 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
   roi: null,
+  operationRegion: null,
+  toneCurveAnchors: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
+  pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
   isBandSubsetEditModeActive: false,
 };
@@ -40,6 +49,19 @@ export type ViewportActionSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
+
+// CT-097: an operation may emit additional outputs beyond the primary in-place /
+// duplicated result. Each secondary output is placed in its own fresh viewport
+// and carries its own applied label so the audit trail records the extra step.
+export interface ViewportActionOutput {
+  readonly source: ViewportImageSource;
+  readonly appliedLabel: string;
+}
+
+export type ViewportActionSecondaryOutputsTransform = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => ReadonlyArray<ViewportActionOutput>;
 
 export type ApplyScope = "whole-image" | "roi";
 

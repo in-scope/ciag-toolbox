@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
-import { EMPTY_PINNED_SPECTRA } from "@/lib/image/spectrum-entry";
+import {
+  EMPTY_PINNED_ROI_SPECTRA,
+  EMPTY_PINNED_SPECTRA,
+} from "@/lib/image/spectrum-entry";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -122,8 +125,112 @@ describe("applyActionInPlaceAtSourceIndex", () => {
   });
 });
 
+describe("runDuplicateAndApplyAtTargetIndex selecting the result panel (CT-105)", () => {
+  it("selects the new target panel after placing the result", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const selectViewportIndex = vi.fn();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeAction(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, selectViewportIndex },
+    );
+    expect(selectViewportIndex).toHaveBeenCalledWith(TARGET_INDEX);
+  });
+
+  it("does not select a panel when the duplicate apply fails", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const selectViewportIndex = vi.fn();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, selectViewportIndex },
+    );
+    expect(selectViewportIndex).not.toHaveBeenCalled();
+  });
+});
+
+describe("runDuplicateAndApplyAtTargetIndex result-panel loading state (CT-106)", () => {
+  it("registers an immediate, operation-specific loading entry for a new empty result panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const records: RecordedBusyEntryInput[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, busyRegistrar: buildRecordingBusyEntryRegistrar(records) },
+    );
+    expect(records).toContainEqual({
+      viewportIndex: TARGET_INDEX,
+      label: "Normalizing...",
+      immediate: true,
+    });
+  });
+
+  it("defers the loading entry (not immediate) when the result overwrites an occupied panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const records: RecordedBusyEntryInput[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      { ...harness.bindings, busyRegistrar: buildRecordingBusyEntryRegistrar(records) },
+    );
+    expect(records).toContainEqual({
+      viewportIndex: SOURCE_INDEX,
+      label: "Normalizing...",
+      immediate: false,
+    });
+  });
+});
+
+describe("runDuplicateAndApplyAtTargetIndex with transformSourceToSecondaryOutputs", () => {
+  it("places each secondary output in its own fresh viewport with its own label and history", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildInvertLikeActionWithSecondaryOutput(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    const secondaryWrite = harness.findLatestRenderingStateWriteAtIndex(SECONDARY_OUTPUT_INDEX);
+    expect(secondaryWrite.lastAppliedOperationLabel).toBe("Normalize to [0,1] (auto for invert)");
+    expect(secondaryWrite.operationHistory.map((entry) => entry.appliedLabel)).toEqual([
+      "Normalize to [0,1] (auto for invert)",
+    ]);
+  });
+
+  it("leaves the source viewport untouched while emitting a secondary output", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildInvertLikeActionWithSecondaryOutput(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalledWith(
+      SOURCE_INDEX,
+      expect.anything(),
+    );
+  });
+});
+
 const SOURCE_INDEX = 0;
 const TARGET_INDEX = 1;
+const SECONDARY_OUTPUT_INDEX = 2;
 
 interface DuplicateFlowHarness {
   readonly bindings: ApplyActionFlowBindings;
@@ -194,7 +301,10 @@ function buildRenderingStateWithHistory(
     selectedBandIndex: 0,
     operationHistory: history,
     roi: null,
+    operationRegion: null,
+    toneCurveAnchors: null,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,
   };
@@ -218,6 +328,71 @@ function buildNormalizeAction(): RegisteredViewportAction {
     successMessage: "ok",
     appliedLabel: "Normalized",
     apply: (state: ViewportRenderingState) => ({ ...state, normalizationEnabled: true }),
+  } as unknown as RegisteredViewportAction;
+}
+
+interface RecordedBusyEntryInput {
+  readonly viewportIndex: number;
+  readonly label: string;
+  readonly immediate: boolean;
+}
+
+function buildRecordingBusyEntryRegistrar(
+  records: RecordedBusyEntryInput[],
+): ApplyActionFlowBindings["busyRegistrar"] {
+  const noopHandle = { id: "test", update: () => undefined, clear: () => undefined };
+  return {
+    registerAppBusyEntry: () => noopHandle,
+    registerViewportBusyEntry: (input) => {
+      records.push({
+        viewportIndex: input.viewportIndex,
+        label: input.label,
+        immediate: input.immediate ?? false,
+      });
+      return noopHandle;
+    },
+  };
+}
+
+function buildNormalizeActionThatTransforms(): RegisteredViewportAction {
+  return {
+    id: "normalize-data",
+    label: "Normalize",
+    loadingMessage: "Normalizing...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Normalized",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildInvertLikeActionWithSecondaryOutput(): RegisteredViewportAction {
+  return {
+    id: "invert",
+    label: "Invert",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Invert",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+    transformSourceToSecondaryOutputs: () => [
+      { source: buildSinglePixelSource(), appliedLabel: "Normalize to [0,1] (auto for invert)" },
+    ],
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildActionThatThrowsOnTransform(): RegisteredViewportAction {
+  return {
+    id: "throws",
+    label: "Throws",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Throws",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => {
+      throw new Error("boom");
+    },
   } as unknown as RegisteredViewportAction;
 }
 

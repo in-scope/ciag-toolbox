@@ -10,13 +10,24 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   SAVE_IMAGE_FORMAT_OPTIONS,
+  describeSaveImageFormatBandCoverageNote,
+  describeSaveImageFormatDisabledReason,
   type SaveImageFormatId,
+  type SaveImageSourceBandInfo,
 } from "@/lib/image/save-image-formats";
 import { cn } from "@/lib/utils";
 
 export interface PendingSaveImageFormatChoice {
   readonly fileName: string;
+  readonly isRasterSource: boolean;
+  readonly bandCount: number;
+  readonly selectedBandNumber: number;
 }
 
 interface SaveImageFormatPickerProps {
@@ -76,6 +87,7 @@ function FormatPickerForm(props: FormatPickerFormProps): JSX.Element {
       <FormatPickerHeader fileName={props.pending.fileName} />
       <FormatPickerOptionList
         chosenId={chosenId}
+        source={readSourceBandInfo(props.pending)}
         onChoose={setChosenId}
       />
       <FormatPickerFooter onCancel={props.onCancel} />
@@ -115,8 +127,19 @@ function describeFormatPickerPrompt(fileName: string): string {
   return `Choose a format and bit depth for "${fileName}". The next dialog will let you pick the destination on disk.`;
 }
 
+function readSourceBandInfo(
+  pending: PendingSaveImageFormatChoice,
+): SaveImageSourceBandInfo {
+  return {
+    isRasterSource: pending.isRasterSource,
+    bandCount: pending.bandCount,
+    selectedBandNumber: pending.selectedBandNumber,
+  };
+}
+
 interface FormatPickerOptionListProps {
   chosenId: SaveImageFormatId;
+  source: SaveImageSourceBandInfo;
   onChoose: (formatId: SaveImageFormatId) => void;
 }
 
@@ -130,6 +153,8 @@ function FormatPickerOptionList(props: FormatPickerOptionListProps): JSX.Element
           label={option.label}
           description={option.description}
           isChosen={props.chosenId === option.id}
+          disabledReason={describeSaveImageFormatDisabledReason(option.id, props.source.isRasterSource)}
+          bandCoverageNote={describeSaveImageFormatBandCoverageNote(option.id, props.source)}
           onChoose={() => props.onChoose(option.id)}
         />
       ))}
@@ -142,26 +167,78 @@ interface FormatPickerOptionRowProps {
   label: string;
   description: string;
   isChosen: boolean;
+  disabledReason: string | null;
+  bandCoverageNote: string | null;
   onChoose: () => void;
 }
 
-function FormatPickerOptionRow(
-  props: FormatPickerOptionRowProps,
+function FormatPickerOptionRow(props: FormatPickerOptionRowProps): JSX.Element {
+  const labelElement = buildFormatOptionLabelElement(props);
+  return wrapFormatOptionRowInTooltipWhenExplained(labelElement, explainFormatOptionRow(props));
+}
+
+// A disabled format explains why it cannot apply; an enabled single-band/ENVI format on a
+// multi-band stack discloses what it saves. They never coexist (no format is both disabled
+// and band-noted), so the disabled reason takes precedence.
+function explainFormatOptionRow(props: FormatPickerOptionRowProps): string | null {
+  return props.disabledReason ?? props.bandCoverageNote;
+}
+
+function wrapFormatOptionRowInTooltipWhenExplained(
+  row: JSX.Element,
+  explanation: string | null,
 ): JSX.Element {
-  const id = `save-format-${props.formatId}`;
+  if (explanation === null) return row;
   return (
-    <label htmlFor={id} className={getFormatOptionRowClassName(props.isChosen)}>
-      <input
+    <Tooltip>
+      <TooltipTrigger asChild>{row}</TooltipTrigger>
+      <TooltipContent>{explanation}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Returns the bare <label> host element (NOT a custom component) so that, when wrapped in a
+// shadcn TooltipTrigger asChild, Radix Slot can merge its hover handlers and ref directly onto
+// the <label>. A component boundary here would swallow those props and the tooltip never opens.
+function buildFormatOptionLabelElement(props: FormatPickerOptionRowProps): JSX.Element {
+  const id = `save-format-${props.formatId}`;
+  const isDisabled = props.disabledReason !== null;
+  return (
+    <label
+      htmlFor={id}
+      aria-disabled={isDisabled || undefined}
+      className={getFormatOptionRowClassName(props.isChosen, isDisabled)}
+    >
+      <FormatOptionRadioInput
         id={id}
-        type="radio"
-        name="save-image-format"
-        className="size-4 cursor-pointer accent-primary"
-        checked={props.isChosen}
-        onChange={props.onChoose}
-        aria-label={props.label}
+        label={props.label}
+        isChosen={props.isChosen}
+        isDisabled={isDisabled}
+        onChoose={isDisabled ? undefined : props.onChoose}
       />
       <FormatOptionRowLabel label={props.label} description={props.description} />
     </label>
+  );
+}
+
+function FormatOptionRadioInput(props: {
+  id: string;
+  label: string;
+  isChosen: boolean;
+  isDisabled: boolean;
+  onChoose?: () => void;
+}): JSX.Element {
+  return (
+    <input
+      id={props.id}
+      type="radio"
+      name="save-image-format"
+      className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+      checked={props.isChosen}
+      disabled={props.isDisabled}
+      onChange={props.onChoose}
+      aria-label={props.label}
+    />
   );
 }
 
@@ -180,9 +257,10 @@ function FormatOptionRowLabel({
   );
 }
 
-function getFormatOptionRowClassName(isChosen: boolean): string {
+function getFormatOptionRowClassName(isChosen: boolean, isDisabled: boolean): string {
   return cn(
-    "flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-accent",
+    "flex items-start gap-3 rounded-md px-2 py-2",
+    isDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-accent",
     isChosen && "bg-accent/60",
   );
 }

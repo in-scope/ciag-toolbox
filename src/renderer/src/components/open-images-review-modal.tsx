@@ -139,9 +139,9 @@ function appendEmptyStackGroup(
 function OpenImagesReviewHeader(): JSX.Element {
   return (
     <DialogHeader>
-      <DialogTitle>Review images</DialogTitle>
+      <DialogTitle>Review stacks</DialogTitle>
       <DialogDescription>
-        Drag rows to reorder within an image, or between images.
+        Drag rows to reorder within a stack, or between stacks.
       </DialogDescription>
     </DialogHeader>
   );
@@ -207,7 +207,7 @@ function rejectMultiBandDragIntoDifferentGroupOrPass(
 ): boolean {
   const isCrossGroupMove = source.groupId !== targetGroupId;
   if (!source.isMultiBandRaster || !isCrossGroupMove) return true;
-  toast.error("Multi-band image must open as its own image; it cannot be combined with other bands.", {
+  toast.error("Multi-band stack must open as its own stack; it cannot be combined with other bands.", {
     duration: 8000,
   });
   return false;
@@ -390,11 +390,11 @@ function OpenImagesReviewGroupCard(props: OpenImagesReviewGroupCardProps): JSX.E
 }
 
 function describeGroupAriaLabel(group: ReviewGroupViewModel, groupIndex: number): string {
-  const positionLabel = `Image ${groupIndex + 1}`;
+  const positionLabel = `Stack ${groupIndex + 1}`;
   if (group.mode === "stack") {
     return `Multi-band ${positionLabel} (${group.rows.length} rows)`;
   }
-  return `${positionLabel} - separate images (${group.rows.length} rows)`;
+  return `${positionLabel} - bands open separately (${group.rows.length} rows)`;
 }
 
 interface GroupValidationSummary {
@@ -528,11 +528,11 @@ function shouldShowGroupModeDropdown(group: ReviewGroupViewModel): boolean {
 }
 
 function pickGroupTitle(group: ReviewGroupViewModel, groupIndex: number): string {
-  if (group.rows.length === 0) return "Empty image";
+  if (group.rows.length === 0) return "Empty stack";
   if (group.mode === "singles" && group.rows.length === 1) {
     return group.rows[0]!.fileName;
   }
-  return `Image ${groupIndex + 1}`;
+  return `Stack ${groupIndex + 1}`;
 }
 
 interface GroupModeDropdownProps {
@@ -573,9 +573,9 @@ function GroupModeNativeSelect(props: GroupModeDropdownProps): JSX.Element {
       className="h-8 w-44 rounded-md border bg-card px-2 text-xs text-foreground"
     >
       <option value="stack" disabled={!props.canSwitchToStack}>
-        Combine into one image
+        Combine into one stack
       </option>
-      <option value="singles">Open as separate images</option>
+      <option value="singles">Open bands separately</option>
     </select>
   );
 }
@@ -586,7 +586,7 @@ function RemoveGroupButton({ onRemoveGroup }: { onRemoveGroup: () => void }): JS
       type="button"
       variant="ghost"
       size="icon"
-      aria-label="Remove image"
+      aria-label="Remove stack"
       className="size-8 text-muted-foreground"
       onClick={onRemoveGroup}
     >
@@ -725,7 +725,7 @@ function OpenImagesReviewGroupRowList(
 function EmptyGroupHint(): JSX.Element {
   return (
     <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-      Drop rows here to add them to this image.
+      Drop rows here to add them to this stack.
     </div>
   );
 }
@@ -964,7 +964,7 @@ function describeRowValidationErrorTooltip(state: RowValidationState): string {
   if (state.kind === "valid") return "";
   if (state.kind === "decode-failed") return state.message;
   if (state.kind === "already-multi-band") {
-    return `Multi-band raster (${state.bandCount} bands); will open as its own image`;
+    return `Multi-band raster (${state.bandCount} bands); will open as its own stack`;
   }
   return state.message;
 }
@@ -982,7 +982,7 @@ function AddNewImageButton(props: AddNewImageButtonProps): JSX.Element {
       className="self-start"
       onClick={props.onAdd}
     >
-      <Plus className="mr-2 size-4" /> New image
+      <Plus className="mr-2 size-4" /> New stack
     </Button>
   );
 }
@@ -1028,7 +1028,7 @@ function buildConfirmButtonLabelForGroups(
 ): string {
   const imageCount = countResultingImagesAcrossGroups(groups);
   if (imageCount === 0) return "Open";
-  return `Open ${imageCount} ${imageCount === 1 ? "image" : "images"}`;
+  return `Open ${imageCount} ${imageCount === 1 ? "stack" : "stacks"}`;
 }
 
 function countResultingImagesAcrossGroups(

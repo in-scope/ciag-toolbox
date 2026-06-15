@@ -163,6 +163,7 @@ export interface ThemeSnapshot {
 }
 
 export type MenuEventListener = () => void;
+export type MenuCommandListener = (commandId: string) => void;
 export type UnsubscribeMenuListener = () => void;
 export type ThemeChangeListener = (snapshot: ThemeSnapshot) => void;
 export type UnsubscribeThemeListener = () => void;
@@ -181,6 +182,7 @@ const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
+const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
 
@@ -287,6 +289,15 @@ function subscribeToAboutMenuEvent(
   return subscribeToMenuChannel(MENU_ABOUT_CHANNEL, listener);
 }
 
+function subscribeToInvokeCommandMenuEvent(
+  listener: MenuCommandListener,
+): UnsubscribeMenuListener {
+  const handler = (_event: IpcRendererEvent, commandId: string): void =>
+    listener(commandId);
+  ipcRenderer.on(MENU_INVOKE_COMMAND_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(MENU_INVOKE_COMMAND_CHANNEL, handler);
+}
+
 function readInitialThemeSnapshotSynchronously(): ThemeSnapshot {
   return ipcRenderer.sendSync(THEME_GET_INITIAL_SYNC_CHANNEL) as ThemeSnapshot;
 }
@@ -323,6 +334,7 @@ const apiBridge = {
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
+  onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;
@@ -330,3 +342,40 @@ const apiBridge = {
 export type ToolboxApi = typeof apiBridge;
 
 contextBridge.exposeInMainWorld("toolboxApi", apiBridge);
+
+// Keep this literal in sync with E2E_TEST_MODE_PRELOAD_ARGUMENT in src/main/e2e-dialog-stub.ts.
+const E2E_TEST_MODE_PRELOAD_ARGUMENT = "--msi-e2e-test-mode";
+const ENQUEUE_OPEN_DIALOG_PATHS_CHANNEL = "test:enqueue-open-dialog-paths";
+const ENQUEUE_SAVE_DIALOG_PATH_CHANNEL = "test:enqueue-save-dialog-path";
+const RESET_DIALOG_QUEUES_CHANNEL = "test:reset-dialog-queues";
+
+function isE2eTestModeEnabled(): boolean {
+  return process.argv.includes(E2E_TEST_MODE_PRELOAD_ARGUMENT);
+}
+
+function enqueueOpenDialogPathsForTest(filePaths: ReadonlyArray<string>): Promise<void> {
+  return ipcRenderer.invoke(ENQUEUE_OPEN_DIALOG_PATHS_CHANNEL, filePaths) as Promise<void>;
+}
+
+function enqueueSaveDialogPathForTest(filePath: string): Promise<void> {
+  return ipcRenderer.invoke(ENQUEUE_SAVE_DIALOG_PATH_CHANNEL, filePath) as Promise<void>;
+}
+
+function resetDialogQueuesForTest(): Promise<void> {
+  return ipcRenderer.invoke(RESET_DIALOG_QUEUES_CHANNEL) as Promise<void>;
+}
+
+const e2eTestBridge = {
+  enqueueOpenDialogPaths: enqueueOpenDialogPathsForTest,
+  enqueueSaveDialogPath: enqueueSaveDialogPathForTest,
+  resetDialogQueues: resetDialogQueuesForTest,
+} as const;
+
+export type ToolboxE2eBridge = typeof e2eTestBridge;
+
+function exposeE2eTestBridgeWhenEnabled(): void {
+  if (!isE2eTestModeEnabled()) return;
+  contextBridge.exposeInMainWorld("toolboxE2E", e2eTestBridge);
+}
+
+exposeE2eTestBridgeWhenEnabled();

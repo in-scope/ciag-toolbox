@@ -163,6 +163,7 @@ interface ToolboxThemeSnapshot {
 }
 
 type ToolboxMenuEventListener = () => void;
+type ToolboxMenuCommandListener = (commandId: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
 type ToolboxThemeChangeListener = (snapshot: ToolboxThemeSnapshot) => void;
 type ToolboxUnsubscribeThemeListener = () => void;
@@ -220,6 +221,9 @@ interface ToolboxApi {
   ) => ToolboxUnsubscribeMenuListener;
   onMenuAbout: (
     listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuInvokeCommand: (
+    listener: ToolboxMenuCommandListener,
   ) => ToolboxUnsubscribeMenuListener;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (

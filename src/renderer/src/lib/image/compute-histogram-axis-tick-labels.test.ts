@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { computeHistogramAxisTickLabels } from "@/lib/image/compute-histogram-axis-tick-labels";
+import {
+  computeHistogramAxisTickLabels,
+  computeHistogramCountAxisTickLabels,
+} from "@/lib/image/compute-histogram-axis-tick-labels";
 
 describe("computeHistogramAxisTickLabels", () => {
   it("labels min at the left edge and max at the right edge for unsigned data", () => {
@@ -32,5 +35,25 @@ describe("computeHistogramAxisTickLabels", () => {
   it("formats float ranges to four significant figures and shows a bare zero tick", () => {
     const ticks = computeHistogramAxisTickLabels({ min: -0.5, max: 0.25 }, "float");
     expect(ticks.map((tick) => tick.text)).toEqual(["-0.5000", "0", "0.2500"]);
+  });
+
+  it("renders a large float value magnitude with a superscript exponent", () => {
+    const ticks = computeHistogramAxisTickLabels({ min: 0, max: 70000.5 }, "float");
+    expect(ticks[1]!.text).toBe("7.000×10⁴");
+  });
+});
+
+describe("computeHistogramCountAxisTickLabels", () => {
+  it("labels the peak count at the top and zero at the baseline", () => {
+    const ticks = computeHistogramCountAxisTickLabels(Uint32Array.from([3, 250000, 12]));
+    expect(ticks).toEqual([
+      { count: 250000, text: "2.5×10⁵", fraction: 1 },
+      { count: 0, text: "0", fraction: 0 },
+    ]);
+  });
+
+  it("collapses to a single zero label for an all-empty histogram", () => {
+    const ticks = computeHistogramCountAxisTickLabels(Uint32Array.from([0, 0, 0]));
+    expect(ticks).toEqual([{ count: 0, text: "0", fraction: 0 }]);
   });
 });

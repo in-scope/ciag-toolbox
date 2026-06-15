@@ -4,11 +4,15 @@ import { Contrast, FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
+import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
+import type { RasterImage } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { readPixelReadoutBandsAtImagePointOrNull } from "@/lib/image/compute-pixel-readout";
+import type { ClickedImagePixel } from "@/lib/image/roi-selection-lifecycle";
 import {
   canonicalizeViewportRoiCorners,
   clampViewportRoiToImageBounds,
@@ -36,16 +40,19 @@ import {
 
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
+  previewImageSource?: ViewportImageSource | null;
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
   onSelectBandIndex: (bandIndex: number) => void;
+  onRemoveBand?: (bandIndex: number) => void;
   lastAppliedOperationLabel?: string | null;
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   onCommitRoi: (roi: ViewportRoi) => void;
+  onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
   onClose?: () => void;
@@ -56,12 +63,13 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
   const imageSource = props.imageSource ?? null;
+  const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
 
   useViewportRendererLifecycle(canvasRef, rendererRef);
-  useImageSourceUploadEffect(rendererRef, imageSource, props.selectedBandIndex);
-  useSelectedBandIndexEffect(rendererRef, imageSource, props.selectedBandIndex);
+  useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
+  useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
@@ -75,6 +83,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
     imageSource,
     rendererRef,
     onCommitRoi: props.onCommitRoi,
+    onRegionToolPlainClick: props.onRegionToolPlainClick,
     setInProgressDragRect,
   });
   useDiscardInProgressDragWhenRegionToolDeactivates(
@@ -95,6 +104,8 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        raster={getRasterFromSourceOrNull(imageSource)}
+        selectedBandIndex={props.selectedBandIndex}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
         normalizationEnabled={props.normalizationEnabled}
         onToggleNormalizedViewing={props.onToggleNormalizedViewing}
@@ -119,6 +130,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
             bandCount={getMultiBandSourceBandCount(imageSource)}
             selectedBandIndex={props.selectedBandIndex}
             onSelectBandIndex={props.onSelectBandIndex}
+            onRemoveBand={props.onRemoveBand}
           />
         ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
@@ -130,7 +142,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
 function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.Element {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card">
-      <p className="text-sm text-muted-foreground">No image loaded</p>
+      <p className="text-sm text-muted-foreground">No stack loaded</p>
       <Button variant="outline" size="sm" onClick={onOpenImage}>
         <FolderOpen className="size-4" />
         Open image
@@ -140,12 +152,20 @@ function ViewportEmptyState({ onOpenImage }: { onOpenImage: () => void }): JSX.E
 }
 
 function describeViewportAriaLabel(viewportNumber: number | null | undefined): string {
-  if (typeof viewportNumber === "number") return `Viewport ${viewportNumber}`;
-  return "Image viewport";
+  if (typeof viewportNumber === "number") return `Panel ${viewportNumber}`;
+  return "Image panel";
 }
 
 function shouldShowBandNavigator(source: ViewportImageSource | null): boolean {
+  if (isTrueColorImageSource(source)) return false;
   return getMultiBandSourceBandCount(source) > 1;
+}
+
+// CT-159 option B: a true-colour image is presented as one colour image, not a
+// stack of channels, so its R/G/B are never offered for per-band navigation.
+function isTrueColorImageSource(source: ViewportImageSource | null): boolean {
+  if (!source || source.kind !== "raster") return false;
+  return shouldRenderRasterAsRgbComposite(source.raster);
 }
 
 function getMultiBandSourceBandCount(source: ViewportImageSource | null): number {
@@ -153,9 +173,16 @@ function getMultiBandSourceBandCount(source: ViewportImageSource | null): number
   return source.raster.bandCount;
 }
 
+function getRasterFromSourceOrNull(source: ViewportImageSource | null): RasterImage | null {
+  if (!source || source.kind !== "raster") return null;
+  return source.raster;
+}
+
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
@@ -173,6 +200,8 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
       {props.fileName ? (
         <ViewportFileNameLabel
           fileName={props.fileName}
+          raster={props.raster}
+          selectedBandIndex={props.selectedBandIndex}
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
@@ -254,30 +283,29 @@ function ViewportCloseButton(props: ViewportCloseButtonProps): JSX.Element {
 }
 
 function formatCloseButtonLabel(viewportNumber: number | null): string {
-  if (typeof viewportNumber === "number") return `Close viewport ${viewportNumber}`;
-  return "Close viewport";
+  if (typeof viewportNumber === "number") return `Close panel ${viewportNumber}`;
+  return "Close panel";
 }
 
 interface ViewportFileNameLabelProps {
   fileName: string;
+  raster: RasterImage | null;
+  selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
 }
 
 function ViewportFileNameLabel(props: ViewportFileNameLabelProps): JSX.Element {
-  const display = formatViewportHeaderLabel(props.fileName, props.lastAppliedOperationLabel);
+  const display = formatViewportHeaderLabel({
+    fileName: props.fileName,
+    raster: props.raster,
+    selectedBandIndex: props.selectedBandIndex,
+    lastAppliedOperationLabel: props.lastAppliedOperationLabel,
+  });
   return (
     <span className="truncate font-medium text-foreground" title={display}>
       {display}
     </span>
   );
-}
-
-function formatViewportHeaderLabel(
-  fileName: string,
-  lastAppliedOperationLabel: string | null,
-): string {
-  if (!lastAppliedOperationLabel) return fileName;
-  return `${fileName} (${lastAppliedOperationLabel})`;
 }
 
 function ViewportNumberBadge({
@@ -465,6 +493,7 @@ interface ViewportRoiDrawInputs {
   readonly imageSource: ViewportImageSource | null;
   readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
   readonly onCommitRoi: (roi: ViewportRoi) => void;
+  readonly onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   readonly setInProgressDragRect: (rect: RoiDrawCanvasRect | null) => void;
 }
 
@@ -512,10 +541,22 @@ function commitRoiFromCanvasRect(
   rect: RoiDrawCanvasRect,
   inputs: ViewportRoiDrawInputs,
 ): void {
-  if (!isCanvasDragLargerThanClickThreshold(rect)) return;
   const renderer = inputs.rendererRef.current;
   const source = inputs.imageSource;
   if (!renderer || !source) return;
+  if (isCanvasDragLargerThanClickThreshold(rect)) {
+    commitRoiFromLargeDrag(rect, renderer, source, inputs);
+    return;
+  }
+  reportRegionToolPlainClick(rect, renderer, inputs);
+}
+
+function commitRoiFromLargeDrag(
+  rect: RoiDrawCanvasRect,
+  renderer: ViewportRenderer,
+  source: ViewportImageSource,
+  inputs: ViewportRoiDrawInputs,
+): void {
   const startImagePixel = renderer.getImagePixelAtCanvasPoint(rect.start.x, rect.start.y);
   const endImagePixel = renderer.getImagePixelAtCanvasPoint(rect.current.x, rect.current.y);
   if (!startImagePixel || !endImagePixel) return;
@@ -531,6 +572,15 @@ function commitRoiFromCanvasRect(
   const canonical = canonicalizeViewportRoiCorners(candidate);
   if (!isViewportRoiLargerThanMinimumSide(canonical)) return;
   inputs.onCommitRoi(canonical);
+}
+
+function reportRegionToolPlainClick(
+  rect: RoiDrawCanvasRect,
+  renderer: ViewportRenderer,
+  inputs: ViewportRoiDrawInputs,
+): void {
+  const imagePixel = renderer.getImagePixelAtCanvasPoint(rect.start.x, rect.start.y);
+  inputs.onRegionToolPlainClick(imagePixel ?? null);
 }
 
 function isCanvasDragLargerThanClickThreshold(rect: RoiDrawCanvasRect): boolean {

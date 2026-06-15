@@ -9,9 +9,16 @@ import {
   getCurrentThemeMode,
 } from "./theme-controller";
 import type { ThemeMode } from "./theme-state";
+import {
+  OPERATION_MENUS,
+  type OperationCommand,
+  type OperationGroup,
+  type OperationMenu,
+} from "../shared/operation-menu-catalog";
 
 const isRunningOnMac = process.platform === "darwin";
 const isRunningInDevMode = process.env.NODE_ENV === "development";
+const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
 
 function buildMacAppMenu(): MenuItemConstructorOptions {
   return {
@@ -103,6 +110,54 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   };
 }
 
+function sendMenuCommandToRenderer(
+  window: BrowserWindow,
+  commandId: string,
+): void {
+  if (window.isDestroyed()) return;
+  window.webContents.send(MENU_INVOKE_COMMAND_CHANNEL, commandId);
+}
+
+function buildOperationCommandMenuItem(
+  window: BrowserWindow,
+  command: OperationCommand,
+): MenuItemConstructorOptions {
+  return {
+    label: command.label,
+    click: () => sendMenuCommandToRenderer(window, command.id),
+  };
+}
+
+function buildOperationGroupMenuItems(
+  window: BrowserWindow,
+  group: OperationGroup,
+): MenuItemConstructorOptions[] {
+  return group.commands
+    .filter((command) => command.showInMenu)
+    .map((command) => buildOperationCommandMenuItem(window, command));
+}
+
+function joinMenuGroupsWithSeparators(
+  groups: ReadonlyArray<MenuItemConstructorOptions[]>,
+): MenuItemConstructorOptions[] {
+  const separator: MenuItemConstructorOptions = { type: "separator" };
+  return groups.flatMap((items, index) => (index === 0 ? items : [separator, ...items]));
+}
+
+function buildOperationMenu(
+  window: BrowserWindow,
+  menu: OperationMenu,
+): MenuItemConstructorOptions {
+  const populatedGroups = menu.groups
+    .map((group) => buildOperationGroupMenuItems(window, group))
+    .filter((items) => items.length > 0);
+  return { label: menu.menuLabel, submenu: joinMenuGroupsWithSeparators(populatedGroups) };
+}
+
+function buildOperationMenus(window: BrowserWindow): MenuItemConstructorOptions[] {
+  return OPERATION_MENUS.map((menu) => buildOperationMenu(window, menu));
+}
+
 function buildThemeRadioItem(
   label: string,
   mode: ThemeMode,
@@ -175,6 +230,7 @@ function buildMenuTemplateForPlatform(
   const template: MenuItemConstructorOptions[] = [];
   if (isRunningOnMac) template.push(buildMacAppMenu());
   template.push(buildFileMenu(window));
+  template.push(...buildOperationMenus(window));
   template.push(buildViewMenu());
   template.push(buildHelpMenu(window));
   return template;

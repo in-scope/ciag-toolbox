@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type MouseEvent,
   type MutableRefObject,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
   type ActionAvailabilityForActiveViewport,
@@ -52,12 +54,38 @@ import {
 } from "@/lib/actions/apply-action-flow";
 import {
   BAND_SUBSET_ACTION,
-  REGISTERED_VIEWPORT_ACTIONS,
+  GEOMETRIC_TRANSFORM_PARAMETER_ID,
+  ROTATE_ACTION,
   buildBandSubsetParameterValuesFromKeptNumbers,
+  findGeometricTransformActionForChoice,
+  readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
-import { listKeptBandIndexesFromRemoved } from "@/lib/image/apply-band-keep";
-import { getRasterBandOriginalNumber } from "@/lib/image/raster-image";
+import {
+  buildToolbarOperationGroups,
+  dispatchOperationCommand,
+  type OperationCommandHandlers,
+} from "@/lib/actions/operation-command-bindings";
+import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
+import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
+import {
+  listKeptBandIndexesFromRemoved,
+  listKeptBandOriginalNumbersAfterRemovingBand,
+} from "@/lib/image/apply-band-keep";
+import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
+import { applyToneCurveToRasterBand, type ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
+import {
+  clampBandIndexToRaster,
+  getRasterBandOriginalNumber,
+  type RasterImage,
+} from "@/lib/image/raster-image";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
+import { rememberReferenceRaster } from "@/lib/image/reference-raster-store";
+import {
+  buildLoadedReferenceCandidates,
+  type LoadedPanelReferenceEntry,
+  type ReferencePickerOption,
+} from "@/lib/image/reference-token";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import {
   getGridLayoutCellCount,
@@ -86,7 +114,10 @@ import type {
 } from "@/lib/image/group-opened-files";
 import { buildViewportImageMetadataDisplay } from "@/lib/image/image-metadata-display";
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
-import { removePinnedSpectrumById } from "@/lib/image/spectrum-entry";
+import {
+  removePinnedSpectrumById,
+  removeRoiSpectrumById,
+} from "@/lib/image/spectrum-entry";
 import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
@@ -128,9 +159,24 @@ import {
   useRegionTool,
 } from "@/state/region-tool-context";
 import {
+  RegionRequestProvider,
+  useRegionRequest,
+  type RegionRequestApi,
+} from "@/state/region-request-context";
+import {
+  FalseColorPreviewProvider,
+  useFalseColorPreview,
+  type FalseColorPreview,
+  type FalseColorPreviewApi,
+} from "@/state/false-color-preview-context";
+import {
   ViewportReimportProvider,
   type ViewportReimportApi,
 } from "@/state/reimport-context";
+import {
+  ViewportBandRemovalProvider,
+  type ViewportBandRemovalApi,
+} from "@/state/band-removal-context";
 import {
   ViewportSelectionProvider,
   useViewportSelection,
@@ -147,7 +193,7 @@ import {
   type ApplyScope,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
-import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
+import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -170,6 +216,9 @@ interface SingleSelectedSource {
 interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
+  readonly isRasterSource: boolean;
+  readonly bandCount: number;
+  readonly selectedBandNumber: number;
 }
 
 export function App(): JSX.Element {
@@ -179,16 +228,20 @@ export function App(): JSX.Element {
       <ViewportSelectionProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
-            <PixelReadoutProvider>
-              <BusyStateProvider>
-                <RightPanelCollapsedStateProvider>
-                  <ApplicationShell />
-                  <AboutDialog />
-                  <AppBusyModal />
-                  <Toaster />
-                </RightPanelCollapsedStateProvider>
-              </BusyStateProvider>
-            </PixelReadoutProvider>
+            <RegionRequestProvider>
+            <FalseColorPreviewProvider>
+              <PixelReadoutProvider>
+                <BusyStateProvider>
+                  <RightPanelCollapsedStateProvider>
+                    <ApplicationShell />
+                    <AboutDialog />
+                    <AppBusyModal />
+                    <Toaster />
+                  </RightPanelCollapsedStateProvider>
+                </BusyStateProvider>
+              </PixelReadoutProvider>
+            </FalseColorPreviewProvider>
+            </RegionRequestProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
       </ViewportSelectionProvider>
@@ -223,6 +276,10 @@ function ApplicationShell(): JSX.Element {
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
   const regionTool = useRegionTool();
+  const regionRequest = useRegionRequest();
+  const falseColorPreview = useFalseColorPreview();
+  const [activeActionParameterValues, setActiveActionParameterValues] =
+    useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
@@ -244,12 +301,11 @@ function ApplicationShell(): JSX.Element {
     selectViewportFromClick,
     busyRegistrar,
   });
-  const handleInvokeAction = useOpenPanelForActionHandler(setActiveAction);
-  const handleCancelAction = useCloseToolPanelHandler(setActiveAction);
   useMenuOpenImageTriggersHandler(handleOpenImagesRequested);
   const handleSaveImageRequested = useSaveImageRequestHandler({
     imagesByIndexRef,
     selectedIndicesRef: useLatestRef(selectedIndices),
+    renderingApi,
     setPendingSaveImage,
   });
   useMenuSaveImageTriggersHandler(handleSaveImageRequested);
@@ -281,9 +337,19 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     setPendingDuplicate,
     renderingApi,
+    replaceSelection,
     busyRegistrar,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
+  const loadedReferenceCandidates = useLoadedReferenceCandidates(imagesByIndex);
+  usePublishActiveToolPreview({
+    activeAction,
+    singleSelectedSource,
+    imagesByIndex,
+    parameterValues: activeActionParameterValues,
+    falseColorPreview,
+    renderingApi,
+  });
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
     selectedIndices,
     imagesByIndex,
@@ -295,14 +361,41 @@ function ApplicationShell(): JSX.Element {
     selectedIndicesRef: useLatestRef(selectedIndices),
     renderingApi,
   });
-  const handleApplyAction = (options: ToolOptionsApplyOptions) =>
-    runApplyActionFromPanel(
-      activeAction,
+  useRegionToolDeselectClearsInspectionRoi({
+    isRegionToolActive: regionTool.isRegionToolActive,
+    cellCount,
+    renderingApi,
+  });
+  const regionRequestHandlers = buildToolPanelRegionRequestHandlers({
+    activeSourceIndex: singleSelectedSource?.index ?? null,
+    regionRequest,
+    renderingApi,
+    setActiveAction,
+  });
+  const handleApplyAction = (options: ToolOptionsApplyOptions) => {
+    regionRequest.endRegionRequest();
+    runApplyActionFromPanel(activeAction, singleSelectedSource, options, applyActionFlowBindings, setActiveAction);
+  };
+  const operationCommandHandlers = buildOperationCommandHandlers({
+    regionTool,
+    bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
+    openActionPanel: regionRequestHandlers.openActionPanel,
+    singleSelectedSource,
+    applyActionFlowBindings,
+  });
+  const operationGroups = buildToolbarOperationGroups({
+    handlers: operationCommandHandlers,
+    getActionAvailability: (action) =>
+      deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi),
+    regionToolActive: regionTool.isRegionToolActive,
+    bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
+    isQuickTransformAvailable: deriveActionAvailabilityForActiveViewport(
+      ROTATE_ACTION,
       singleSelectedSource,
-      options,
-      applyActionFlowBindings,
-      setActiveAction,
-    );
+      renderingApi,
+    ).isAvailable,
+  });
+  useMenuInvokeCommandHandler(operationCommandHandlers);
   const duplicationApi = useViewportDuplicationApi({
     gridLayout,
     cellCount,
@@ -330,38 +423,39 @@ function ApplicationShell(): JSX.Element {
     setRenderingState: renderingApi.setRenderingState,
     busyRegistrar,
   });
+  const bandRemovalApi = useViewportBandRemovalApi(useLatestRef(applyActionFlowBindings));
   return (
     <div className="flex h-full flex-col">
       <Toolbar
         onOpenImage={handleOpenImagesRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
-        registeredActions={REGISTERED_VIEWPORT_ACTIONS}
-        onInvokeAction={handleInvokeAction}
-        getActionAvailability={(action) =>
-          deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi)
-        }
-        isRegionToolActive={regionTool.isRegionToolActive}
-        onToggleRegionTool={regionTool.toggleRegionTool}
-        bandSubsetToggle={deriveBandSubsetToggleStateForToolbar(
-          singleSelectedSource,
-          imagesByIndex,
-          renderingApi,
-        )}
+        operationGroups={operationGroups}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
           <ViewportReimportProvider value={reimportApi}>
-            <ApplicationStageContent
-              gridLayout={gridLayout}
-              imagesByIndex={imagesByIndex}
-              onOpenImage={handleOpenImagesRequested}
-              activeAction={activeAction}
-              sourceViewport={singleSelectedSource?.summary ?? null}
-              rightPanelActiveSource={rightPanelActiveSource}
-              onCancelAction={handleCancelAction}
-              onApplyAction={handleApplyAction}
-            />
+            <ViewportBandRemovalProvider value={bandRemovalApi}>
+              <ApplicationStageContent
+                gridLayout={gridLayout}
+                imagesByIndex={imagesByIndex}
+                onOpenImage={handleOpenImagesRequested}
+                activeAction={activeAction}
+                sourceViewport={singleSelectedSource?.summary ?? null}
+                loadedReferenceCandidates={loadedReferenceCandidates}
+                toolOptionsEmbeddedEditor={buildActiveToneCurveEditorElementOrNull(
+                  activeAction,
+                  singleSelectedSource,
+                  imagesByIndex,
+                )}
+                rightPanelActiveSource={rightPanelActiveSource}
+                onCancelAction={regionRequestHandlers.closeActionPanel}
+                onApplyAction={handleApplyAction}
+                onActiveActionParametersChange={setActiveActionParameterValues}
+                onBeginRegionRequest={regionRequestHandlers.beginRegionRequest}
+                onClearOperationRegion={regionRequestHandlers.clearOperationRegion}
+              />
+            </ViewportBandRemovalProvider>
           </ViewportReimportProvider>
         </ViewportClosingProvider>
       </ViewportDuplicationProvider>
@@ -438,9 +532,14 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
+  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
+  toolOptionsEmbeddedEditor: ReactNode;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
+  onActiveActionParametersChange: (values: ParameterValuesById) => void;
+  onBeginRegionRequest: () => void;
+  onClearOperationRegion: () => void;
 }
 
 function ApplicationStageContent(props: ApplicationStageContentProps): JSX.Element {
@@ -468,12 +567,35 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       <ToolOptionsPanel
         action={props.activeAction}
         sourceViewport={props.sourceViewport}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
+        embeddedEditor={props.toolOptionsEmbeddedEditor}
         onCancel={props.onCancelAction}
         onApply={props.onApplyAction}
+        onParametersChange={props.onActiveActionParametersChange}
+        onBeginRegionRequest={props.onBeginRegionRequest}
+        onClearOperationRegion={props.onClearOperationRegion}
       />
     );
   }
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
+}
+
+function buildActiveToneCurveEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedToneCurveEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsToneCurveEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
 }
 
 function clearSelectionWhenClickIsOutsideAnyCell(
@@ -505,9 +627,58 @@ function useMenuSaveProjectAsTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuSaveProjectAs(handler), [handler]);
 }
 
+function useMenuInvokeCommandHandler(handlers: OperationCommandHandlers): void {
+  useEffect(
+    () =>
+      window.toolboxApi.onMenuInvokeCommand((commandId) =>
+        dispatchOperationCommand(commandId, handlers),
+      ),
+    [handlers],
+  );
+}
+
+interface OperationCommandHandlerBindings {
+  readonly regionTool: { readonly toggleRegionTool: () => void };
+  readonly bandSubsetToggle: BandSubsetToolbarToggleState;
+  readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly singleSelectedSource: SingleSelectedSource | null;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
+function buildOperationCommandHandlers(
+  bindings: OperationCommandHandlerBindings,
+): OperationCommandHandlers {
+  return {
+    toggleRegionTool: bindings.regionTool.toggleRegionTool,
+    toggleBandSubset: bindings.bandSubsetToggle.onToggle,
+    openActionPanel: bindings.openActionPanel,
+    applyGeometricTransform: (transform) =>
+      applyQuickGeometricTransformToActiveSource(
+        transform,
+        bindings.singleSelectedSource,
+        bindings.applyActionFlowBindings,
+      ),
+  };
+}
+
+function applyQuickGeometricTransformToActiveSource(
+  transform: GeometricTransform,
+  source: SingleSelectedSource | null,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!source) return;
+  applyActionInPlaceAtSourceIndex(
+    findGeometricTransformActionForChoice(transform),
+    { [GEOMETRIC_TRANSFORM_PARAMETER_ID]: transform },
+    source.index,
+    bindings,
+  );
+}
+
 interface SaveImageRequestBindings {
   imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
   selectedIndicesRef: MutableRefObject<ReadonlySet<number>>;
+  renderingApi: ViewportRenderingApi;
   setPendingSaveImage: SetPendingSaveImage;
 }
 
@@ -521,23 +692,39 @@ interface ConfirmSaveImageBindings {
 function useSaveImageRequestHandler(
   bindings: SaveImageRequestBindings,
 ): () => void {
-  const { imagesByIndexRef, selectedIndicesRef, setPendingSaveImage } = bindings;
+  const { imagesByIndexRef, selectedIndicesRef, renderingApi, setPendingSaveImage } = bindings;
   return useCallback(() => {
     const candidate = pickSingleSelectedSourceWithContent(
       selectedIndicesRef.current,
       imagesByIndexRef.current,
     );
     if (!candidate) {
-      toast.info("Select a viewport with a loaded image to save");
+      toast.info("Select a panel with a loaded stack to save");
       return;
     }
-    setPendingSaveImage({ fileName: candidate.fileName, viewportIndex: candidate.index });
-  }, [imagesByIndexRef, selectedIndicesRef, setPendingSaveImage]);
+    setPendingSaveImage(buildPendingSaveImageRequest(candidate, renderingApi));
+  }, [imagesByIndexRef, selectedIndicesRef, renderingApi, setPendingSaveImage]);
+}
+
+function buildPendingSaveImageRequest(
+  candidate: SingleSelectedContentSummary,
+  renderingApi: ViewportRenderingApi,
+): PendingSaveImageRequest {
+  const selectedBandIndex = renderingApi.getRenderingState(candidate.index).selectedBandIndex;
+  return {
+    fileName: candidate.fileName,
+    viewportIndex: candidate.index,
+    isRasterSource: candidate.isRasterSource,
+    bandCount: candidate.bandCount,
+    selectedBandNumber: selectedBandIndex + 1,
+  };
 }
 
 interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
+  readonly isRasterSource: boolean;
+  readonly bandCount: number;
 }
 
 function pickSingleSelectedSourceWithContent(
@@ -549,7 +736,12 @@ function pickSingleSelectedSourceWithContent(
   if (onlyIndex === null) return null;
   const content = imagesByIndex.get(onlyIndex);
   if (!content) return null;
-  return { index: onlyIndex, fileName: content.fileName };
+  return {
+    index: onlyIndex,
+    fileName: content.fileName,
+    isRasterSource: content.source.kind === "raster",
+    bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
+  };
 }
 
 function confirmSaveImageFormatChoice(
@@ -775,7 +967,7 @@ async function confirmOpenImagesReviewGroups(
     if (pendingItems.length === 0) return;
     placePendingItemsAcrossViewports(pendingItems, bindings);
   } catch (error) {
-    toast.error(`Could not place images: ${describeUnknownError(error)}`);
+    toast.error(`Could not place stacks: ${describeUnknownError(error)}`);
   }
 }
 
@@ -960,10 +1152,10 @@ function collectClosedLoadedViewports(
 function formatClosedViewportsMessage(closed: ReadonlyArray<ClosedViewportSummary>): string {
   if (closed.length === 1) {
     const only = closed[0]!;
-    return `Closed viewport ${only.viewportNumber} (${only.fileName})`;
+    return `Closed panel ${only.viewportNumber} (${only.fileName})`;
   }
   const list = closed.map((entry) => `${entry.viewportNumber} (${entry.fileName})`).join(", ");
-  return `Closed viewports: ${list}`;
+  return `Closed panels: ${list}`;
 }
 
 function filterImagesToWithinCellCount(
@@ -1093,7 +1285,7 @@ async function applyDuplicateToTargetIndex(
 
 function formatDuplicateSuccessMessage(fileName: string, targetIndex: number): string {
   const targetNumber = getViewportNumberFromIndex(targetIndex);
-  return `Duplicated ${fileName} to viewport ${targetNumber}`;
+  return `Duplicated ${fileName} to panel ${targetNumber}`;
 }
 
 interface ConfirmDuplicateReplaceBindings {
@@ -1338,17 +1530,75 @@ function collapseGridLayoutAndRestoreSelectionAfterClose(
 }
 
 function formatClosedSingleViewportMessage(index: number, fileName: string): string {
-  return `Closed viewport ${getViewportNumberFromIndex(index)} (${fileName})`;
+  return `Closed panel ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
-function useOpenPanelForActionHandler(
-  setActiveAction: SetActiveAction,
-): (action: RegisteredViewportAction) => void {
-  return useCallback((action) => setActiveAction(action), [setActiveAction]);
+interface ToolPanelRegionRequestHandlerInputs {
+  readonly activeSourceIndex: number | null;
+  readonly regionRequest: RegionRequestApi;
+  readonly renderingApi: ViewportRenderingApi;
+  readonly setActiveAction: SetActiveAction;
 }
 
-function useCloseToolPanelHandler(setActiveAction: SetActiveAction): () => void {
-  return useCallback(() => setActiveAction(null), [setActiveAction]);
+interface ToolPanelRegionRequestHandlers {
+  readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly closeActionPanel: () => void;
+  readonly beginRegionRequest: () => void;
+  readonly clearOperationRegion: () => void;
+}
+
+function buildToolPanelRegionRequestHandlers(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): ToolPanelRegionRequestHandlers {
+  return {
+    openActionPanel: (action) => openToolPanelClearingAnyRegionRequest(action, inputs),
+    closeActionPanel: () => closeToolPanelClearingAnyRegionRequest(inputs),
+    beginRegionRequest: () => beginOperationRegionRequestForActiveSource(inputs),
+    clearOperationRegion: () => clearOperationRegionOnActiveSource(inputs),
+  };
+}
+
+function openToolPanelClearingAnyRegionRequest(
+  action: RegisteredViewportAction,
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  inputs.regionRequest.endRegionRequest();
+  clearTransientOperationStateOnActiveSource(inputs);
+  inputs.setActiveAction(action);
+}
+
+function closeToolPanelClearingAnyRegionRequest(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  inputs.regionRequest.endRegionRequest();
+  clearTransientOperationStateOnActiveSource(inputs);
+  inputs.setActiveAction(null);
+}
+
+function clearTransientOperationStateOnActiveSource(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  clearOperationRegionOnActiveSource(inputs);
+  clearToneCurveAnchorsOnActiveSource(inputs);
+}
+
+function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (state.toneCurveAnchors === null) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, toneCurveAnchors: null });
+}
+
+function beginOperationRegionRequestForActiveSource(
+  inputs: ToolPanelRegionRequestHandlerInputs,
+): void {
+  if (inputs.activeSourceIndex === null) return;
+  inputs.regionRequest.beginRegionRequest(inputs.activeSourceIndex);
+}
+
+function clearOperationRegionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!state.operationRegion) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, operationRegion: null });
 }
 
 interface ApplyActionFlowBindingsInputs {
@@ -1359,6 +1609,7 @@ interface ApplyActionFlowBindingsInputs {
   setImagesByIndex: SetImagesByIndex;
   setPendingDuplicate: SetPendingDuplicate;
   renderingApi: ViewportRenderingApi;
+  replaceSelection: ViewportSelectionState["replaceSelection"];
   busyRegistrar: BusyEntryRegistrar;
 }
 
@@ -1374,6 +1625,7 @@ function buildApplyActionFlowBindings(
     setPendingDuplicate: inputs.setPendingDuplicate,
     getRenderingState: inputs.renderingApi.getRenderingState,
     setRenderingState: inputs.renderingApi.setRenderingState,
+    selectViewportIndex: (index) => inputs.replaceSelection(new Set([index])),
     busyRegistrar: inputs.busyRegistrar,
   };
 }
@@ -1388,14 +1640,135 @@ function deriveSingleSelectedSource(
   if (onlyIndex === null) return null;
   const content = imagesByIndex.get(onlyIndex);
   if (!content) return null;
+  const renderingState = renderingApi.getRenderingState(onlyIndex);
   return {
     index: onlyIndex,
     summary: {
       viewportNumber: getViewportNumberFromIndex(onlyIndex),
       fileName: content.fileName,
-      hasRoi: renderingApi.getRenderingState(onlyIndex).roi !== null,
+      operationRegion: renderingState.operationRegion,
+      sourceBandCount: readRasterBandCountFromContentOrNull(content),
+      selectedBandNumber: renderingState.selectedBandIndex + 1,
     },
   };
+}
+
+function readRasterBandCountFromContentOrNull(content: ViewportCellContent): number | null {
+  return content.source.kind === "raster" ? content.source.raster.bandCount : null;
+}
+
+function useLoadedReferenceCandidates(
+  imagesByIndex: ImagesByIndexMap,
+): ReadonlyArray<ReferencePickerOption> {
+  const candidates = useMemo(
+    () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
+    [imagesByIndex],
+  );
+  useEffect(() => {
+    for (const candidate of candidates) rememberReferenceRaster(candidate.token, candidate.raster);
+  }, [candidates]);
+  return candidates;
+}
+
+function listLoadedRasterPanelEntries(imagesByIndex: ImagesByIndexMap): LoadedPanelReferenceEntry[] {
+  const entries: LoadedPanelReferenceEntry[] = [];
+  for (const [index, content] of imagesByIndex) {
+    if (content.source.kind !== "raster") continue;
+    entries.push({
+      viewportNumber: getViewportNumberFromIndex(index),
+      fileName: content.fileName,
+      raster: content.source.raster,
+    });
+  }
+  return entries;
+}
+
+interface PublishActiveToolPreviewInputs {
+  readonly activeAction: RegisteredViewportAction | null;
+  readonly singleSelectedSource: SingleSelectedSource | null;
+  readonly imagesByIndex: ImagesByIndexMap;
+  readonly parameterValues: ParameterValuesById;
+  readonly falseColorPreview: FalseColorPreviewApi;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
+  const falseColorSource = useFalseColorPreviewSource(inputs);
+  const toneCurveSource = useToneCurvePreviewSource(inputs);
+  const sourceIndex = inputs.singleSelectedSource?.index ?? null;
+  usePublishPreviewSourceForViewport(
+    inputs.falseColorPreview.setPreview,
+    falseColorSource ?? toneCurveSource,
+    sourceIndex,
+  );
+}
+
+function useFalseColorPreviewSource(
+  inputs: PublishActiveToolPreviewInputs,
+): ViewportImageSource | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "false-color");
+  const assignment = useMemo(
+    () => readFalseColorBandAssignment(inputs.parameterValues),
+    [inputs.parameterValues],
+  );
+  return useMemo(
+    () => (raster ? buildFalseColorPreviewSourceOrNull(raster, assignment) : null),
+    [raster, assignment],
+  );
+}
+
+function useToneCurvePreviewSource(
+  inputs: PublishActiveToolPreviewInputs,
+): ViewportImageSource | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
+  const index = inputs.singleSelectedSource?.index ?? null;
+  const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
+  const anchors = state?.toneCurveAnchors ?? null;
+  const bandIndex = state?.selectedBandIndex ?? 0;
+  return useMemo(
+    () => buildToneCurvePreviewSourceOrNull(raster, bandIndex, anchors),
+    [raster, bandIndex, anchors],
+  );
+}
+
+function buildToneCurvePreviewSourceOrNull(
+  raster: RasterImage | null,
+  bandIndex: number,
+  anchors: ReadonlyArray<ToneCurveAnchor> | null,
+): ViewportImageSource | null {
+  if (!raster || !anchors || anchors.length < 2) return null;
+  const previewRaster = applyToneCurveToRasterBand(raster, clampBandIndexToRaster(raster, bandIndex), anchors);
+  return { kind: "raster", raster: previewRaster };
+}
+
+function resolveActiveToolRasterOrNull(
+  inputs: PublishActiveToolPreviewInputs,
+  actionId: string,
+): RasterImage | null {
+  const { activeAction, singleSelectedSource, imagesByIndex } = inputs;
+  if (!activeAction || activeAction.id !== actionId || !singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return content.source.raster;
+}
+
+function usePublishPreviewSourceForViewport(
+  setPreview: FalseColorPreviewApi["setPreview"],
+  previewSource: ViewportImageSource | null,
+  sourceIndex: number | null,
+): void {
+  useEffect(() => {
+    setPreview(buildFalseColorPreviewOrNull(previewSource, sourceIndex));
+    return () => setPreview(null);
+  }, [setPreview, previewSource, sourceIndex]);
+}
+
+function buildFalseColorPreviewOrNull(
+  source: ViewportImageSource | null,
+  sourceIndex: number | null,
+): FalseColorPreview | null {
+  if (source === null || sourceIndex === null) return null;
+  return { viewportIndex: sourceIndex, source };
 }
 
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {
@@ -1493,11 +1866,17 @@ function buildRightPanelActiveSource(
     onClearRoi: () =>
       renderingApi.setRenderingState(viewportIndex, { ...renderingState, roi: null }),
     pinnedSpectra: renderingState.pinnedSpectra,
-    roiMeanSpectrum: buildRoiMeanSpectrumForDisplayOrNull(raster, renderingState.roi),
+    pinnedRoiSpectra: renderingState.pinnedRoiSpectra,
+    activeRoiMeanSpectrum: buildRoiMeanSpectrumForDisplayOrNull(raster, renderingState.roi),
     onRemovePinnedSpectrum: (spectrumId) =>
       renderingApi.setRenderingState(viewportIndex, {
         ...renderingState,
         pinnedSpectra: removePinnedSpectrumById(renderingState.pinnedSpectra, spectrumId),
+      }),
+    onRemovePinnedRoiSpectrum: (spectrumId) =>
+      renderingApi.setRenderingState(viewportIndex, {
+        ...renderingState,
+        pinnedRoiSpectra: removeRoiSpectrumById(renderingState.pinnedRoiSpectra, spectrumId),
       }),
   };
 }
@@ -1555,6 +1934,44 @@ function invokeBandSubsetActionOnSourceViewport(
   applyActionInPlaceAtSourceIndex(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
 }
 
+function useViewportBandRemovalApi(
+  bindingsRef: MutableRefObject<ApplyActionFlowBindings>,
+): ViewportBandRemovalApi {
+  return useMemo(
+    () => ({
+      removeBand: (viewportIndex: number, bandIndex: number) =>
+        removeSingleBandFromViewportInPlace(viewportIndex, bandIndex, bindingsRef.current),
+    }),
+    [bindingsRef],
+  );
+}
+
+function removeSingleBandFromViewportInPlace(
+  viewportIndex: number,
+  bandIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const raster = extractRasterFromContentOrNull(bindings.imagesByIndex.get(viewportIndex) ?? null);
+  const keptBandNumbers = pickKeptBandNumbersAfterSingleRemovalOrNull(raster, bandIndex);
+  if (keptBandNumbers === null) return;
+  invokeBandSubsetActionOnSourceViewport(viewportIndex, keptBandNumbers, false, bindings);
+}
+
+function pickKeptBandNumbersAfterSingleRemovalOrNull(
+  raster: RasterImage | null,
+  removedBandIndex: number,
+): ReadonlyArray<number> | null {
+  if (!raster) {
+    toast.error("Removing a band requires a raster source.");
+    return null;
+  }
+  if (raster.bandCount <= 1) {
+    toast.info("Cannot remove the last remaining band.");
+    return null;
+  }
+  return listKeptBandOriginalNumbersAfterRemovingBand(raster, removedBandIndex);
+}
+
 function setBandSubsetEditModeActiveAtViewport(
   viewportIndex: number,
   isActive: boolean,
@@ -1594,7 +2011,7 @@ const DISABLED_BAND_SUBSET_TOOLBAR_TOGGLE: BandSubsetToolbarToggleState = {
 function buildRoiMeanSpectrumForDisplayOrNull(
   raster: ViewportRightPanelActiveSource["raster"],
   roi: ViewportRightPanelActiveSource["roi"],
-): ViewportRightPanelActiveSource["roiMeanSpectrum"] {
+): ViewportRightPanelActiveSource["activeRoiMeanSpectrum"] {
   if (!raster || !roi) return null;
   const spectrum = computeRoiMeanSpectrumOrNull(raster, roi);
   if (!spectrum) return null;
@@ -1634,6 +2051,36 @@ function clearRoiOnEverySelectedViewport(bindings: EscapeKeyClearRoiBindings): v
     const renderingState = bindings.renderingApi.getRenderingState(index);
     if (!renderingState.roi) continue;
     bindings.renderingApi.setRenderingState(index, { ...renderingState, roi: null });
+  }
+}
+
+interface RegionToolDeselectClearRoiBindings {
+  readonly isRegionToolActive: boolean;
+  readonly cellCount: number;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+function useRegionToolDeselectClearsInspectionRoi(
+  bindings: RegionToolDeselectClearRoiBindings,
+): void {
+  const { isRegionToolActive, cellCount, renderingApi } = bindings;
+  const wasRegionToolActiveRef = useRef(isRegionToolActive);
+  useEffect(() => {
+    if (wasRegionToolActiveRef.current && !isRegionToolActive) {
+      clearInspectionRoiOnEveryViewport(cellCount, renderingApi);
+    }
+    wasRegionToolActiveRef.current = isRegionToolActive;
+  }, [isRegionToolActive, cellCount, renderingApi]);
+}
+
+function clearInspectionRoiOnEveryViewport(
+  cellCount: number,
+  renderingApi: ViewportRenderingApi,
+): void {
+  for (let index = 0; index < cellCount; index += 1) {
+    const renderingState = renderingApi.getRenderingState(index);
+    if (!renderingState.roi) continue;
+    renderingApi.setRenderingState(index, { ...renderingState, roi: null });
   }
 }
 
@@ -1696,9 +2143,8 @@ function deriveActionAvailabilityForActiveViewport(
   };
 }
 
-function describeWhyActionIsUnavailableForViewport(action: RegisteredViewportAction): string {
-  if (action.id === "crop-to-region") return "draw a region first";
-  return "not available for this viewport";
+function describeWhyActionIsUnavailableForViewport(_action: RegisteredViewportAction): string {
+  return "not available for this panel";
 }
 
 function mergeParameterValuesWithSourceRenderingState(
@@ -1756,7 +2202,7 @@ async function runSaveProjectFlowAndShowToast(
 ): Promise<void> {
   const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
   if (snapshot.viewports.length === 0) {
-    toast.info("No viewports with loaded files to save");
+    toast.info("No panels with loaded files to save");
     return;
   }
   await invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings);
