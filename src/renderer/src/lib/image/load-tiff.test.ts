@@ -33,7 +33,58 @@ describe("loadTiffAsRaster", () => {
     expect(raster.bandPixels[0]).toBeInstanceOf(Uint16Array);
     expect(raster.bandPixels[0]!.length).toBe(MAIN_PAGE_DIMENSION * MAIN_PAGE_DIMENSION);
   });
+
+  it("loads an RGB-photometric single-page TIFF as a true-colour three-band raster", async () => {
+    const bytes = buildSyntheticRgbTiffBytes();
+    const raster = await loadTiffAsRaster(bytes);
+    expect(raster.bandCount).toBe(3);
+    expect(raster.colorInterpretation).toBe("rgb");
+    expect(raster.bandPixels[0]![0]).toBe(RGB_FIRST_PIXEL_RED);
+    expect(raster.bandPixels[1]![0]).toBe(RGB_FIRST_PIXEL_GREEN);
+    expect(raster.bandPixels[2]![0]).toBe(RGB_FIRST_PIXEL_BLUE);
+  });
+
+  it("leaves a three-page BlackIsZero science stack as a grayscale stack with no rgb tag", async () => {
+    const bytes = buildThreePageScienceStackTiffBytes();
+    const raster = await loadTiffAsRaster(bytes);
+    expect(raster.bandCount).toBe(3);
+    expect(raster.colorInterpretation).toBeUndefined();
+  });
 });
+
+const RGB_TIFF_DIMENSION = 2;
+const RGB_FIRST_PIXEL_RED = 10;
+const RGB_FIRST_PIXEL_GREEN = 50;
+const RGB_FIRST_PIXEL_BLUE = 90;
+
+function buildSyntheticRgbTiffBytes(): Uint8Array {
+  const buffer = writeArrayBuffer(buildInterleavedRgbPixels(), buildRgbTiffMetadata());
+  return new Uint8Array(buffer);
+}
+
+function buildInterleavedRgbPixels(): Uint8Array {
+  const pixelCount = RGB_TIFF_DIMENSION * RGB_TIFF_DIMENSION;
+  const interleaved = new Uint8Array(pixelCount * 3);
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
+    interleaved[pixelIndex * 3] = RGB_FIRST_PIXEL_RED + pixelIndex;
+    interleaved[pixelIndex * 3 + 1] = RGB_FIRST_PIXEL_GREEN + pixelIndex;
+    interleaved[pixelIndex * 3 + 2] = RGB_FIRST_PIXEL_BLUE + pixelIndex;
+  }
+  return interleaved;
+}
+
+function buildRgbTiffMetadata(): Record<string, unknown> {
+  return {
+    width: RGB_TIFF_DIMENSION,
+    height: RGB_TIFF_DIMENSION,
+    BitsPerSample: [8, 8, 8],
+    SampleFormat: [1, 1, 1],
+    SamplesPerPixel: 3,
+    PhotometricInterpretation: 2,
+    ImageLength: RGB_TIFF_DIMENSION,
+    ImageWidth: RGB_TIFF_DIMENSION,
+  };
+}
 
 const SYNTHETIC_TIFF_WIDTH = 8;
 const SYNTHETIC_TIFF_HEIGHT = 8;
@@ -148,4 +199,38 @@ function writeUint16RampAtOffset(view: DataView, offset: number, count: number):
   for (let i = 0; i < count; i++) {
     view.setUint16(offset + i * 2, (i * 1024) & 0xffff, true);
   }
+}
+
+const SCIENCE_STACK_DIMENSION = 4;
+const SCIENCE_STACK_PAGE_PIXELS = SCIENCE_STACK_DIMENSION * SCIENCE_STACK_DIMENSION;
+const SCIENCE_STACK_PAGE_OFFSETS: ReadonlyArray<{ ifd: number; strip: number }> = [
+  { ifd: 8, strip: 134 },
+  { ifd: 166, strip: 292 },
+  { ifd: 324, strip: 450 },
+];
+
+function buildThreePageScienceStackTiffBytes(): Uint8Array {
+  const totalSize = lastSciencePageOffsets().strip + SCIENCE_STACK_PAGE_PIXELS * 2;
+  const view = new DataView(new ArrayBuffer(totalSize));
+  writeLittleEndianTiffHeader(view, SCIENCE_STACK_PAGE_OFFSETS[0]!.ifd);
+  SCIENCE_STACK_PAGE_OFFSETS.forEach((page, pageIndex) => writeSciencePage(view, page, pageIndex));
+  return new Uint8Array(view.buffer);
+}
+
+function writeSciencePage(
+  view: DataView,
+  page: { ifd: number; strip: number },
+  pageIndex: number,
+): void {
+  const entries = buildPageEntries(SCIENCE_STACK_DIMENSION, page.strip);
+  writeIfdAtOffset(view, page.ifd, entries, nextScienceIfdOffset(pageIndex));
+  writeUint16RampAtOffset(view, page.strip, SCIENCE_STACK_PAGE_PIXELS);
+}
+
+function nextScienceIfdOffset(pageIndex: number): number {
+  return SCIENCE_STACK_PAGE_OFFSETS[pageIndex + 1]?.ifd ?? 0;
+}
+
+function lastSciencePageOffsets(): { ifd: number; strip: number } {
+  return SCIENCE_STACK_PAGE_OFFSETS[SCIENCE_STACK_PAGE_OFFSETS.length - 1]!;
 }
