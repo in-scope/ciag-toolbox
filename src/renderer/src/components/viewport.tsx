@@ -7,6 +7,7 @@ import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import type { RasterImage } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -156,7 +157,15 @@ function describeViewportAriaLabel(viewportNumber: number | null | undefined): s
 }
 
 function shouldShowBandNavigator(source: ViewportImageSource | null): boolean {
+  if (isTrueColorImageSource(source)) return false;
   return getMultiBandSourceBandCount(source) > 1;
+}
+
+// CT-159 option B: a true-colour image is presented as one colour image, not a
+// stack of channels, so its R/G/B are never offered for per-band navigation.
+function isTrueColorImageSource(source: ViewportImageSource | null): boolean {
+  if (!source || source.kind !== "raster") return false;
+  return shouldRenderRasterAsRgbComposite(source.raster);
 }
 
 function getMultiBandSourceBandCount(source: ViewportImageSource | null): number {

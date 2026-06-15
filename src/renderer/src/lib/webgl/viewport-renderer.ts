@@ -326,7 +326,7 @@ export class ViewportRenderer {
   private rebuildRasterTilesForSelectedBand(): void {
     if (!this.gl || !this.currentSource || this.currentSource.kind !== "raster") return;
     deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
-    this.rasterTileTextures = createRasterTileTexturesForRasterBand(
+    this.rasterTileTextures = createRasterTileTexturesForSource(
       this.gl,
       this.currentSource.raster,
       this.selectedRasterBandIndex,

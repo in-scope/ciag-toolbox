@@ -32,6 +32,11 @@ describe("formatViewportHeaderLabel", () => {
     expect(formatViewportHeaderLabel(headerInputForBand(raster, 0))).toBe("cube.hdr");
   });
 
+  it("omits the band suffix for a true-colour image so it reads as one colour image", () => {
+    const raster: RasterImage = { ...buildThreeBandRaster(), colorInterpretation: "rgb" };
+    expect(formatViewportHeaderLabel(headerInputForBand(raster, 1))).toBe("cube.hdr");
+  });
+
   it("falls back to the file name alone when there is no raster", () => {
     const input = { fileName: "photo.png", raster: null, selectedBandIndex: 0, lastAppliedOperationLabel: null };
     expect(formatViewportHeaderLabel(input)).toBe("photo.png");

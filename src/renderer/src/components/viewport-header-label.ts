@@ -3,6 +3,7 @@ import {
   formatRasterBandIdentityText,
   type RasterImage,
 } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 
 export interface ViewportHeaderLabelInput {
   readonly fileName: string;
@@ -34,6 +35,7 @@ function describeActiveBandForHeaderOrNull(
   selectedBandIndex: number,
 ): string | null {
   if (!raster || raster.bandCount <= 1) return null;
+  if (shouldRenderRasterAsRgbComposite(raster)) return null;
   const bandIndex = clampBandIndexToRaster(raster, selectedBandIndex);
   return formatRasterBandIdentityText(raster, bandIndex);
 }

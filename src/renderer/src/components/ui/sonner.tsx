@@ -12,6 +12,7 @@ function Toaster(props: ToasterProps): JSX.Element {
   return (
     <SonnerToaster
       theme={selectSonnerThemeFromSnapshot(snapshot)}
+      position="bottom-left"
       className="toaster group"
       toastOptions={{
         classNames: {

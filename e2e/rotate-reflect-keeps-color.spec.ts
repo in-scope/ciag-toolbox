@@ -51,6 +51,27 @@ test("a reflected colour image keeps its colours instead of turning grayscale", 
   await expectPanelOneRendersInColor();
 });
 
+test("a rotated colour image is presented as one colour image, with no band navigator", async () => {
+  await loadColorImageIntoPanelOne();
+  await applyGeometricTransformInPlace(launched.app, launched.window, "rotate-90-cw");
+
+  await expectPanelOneRendersInColor();
+  await expect(bandNavigatorInput()).toHaveCount(0);
+});
+
+test("toast notifications appear at the bottom-left so they never cover the toolbar", async () => {
+  await loadColorImageIntoPanelOne();
+  await expect(toasterRegion()).toHaveAttribute("data-x-position", "left");
+});
+
+function bandNavigatorInput() {
+  return launched.window.getByRole("textbox", { name: "Go to band number" });
+}
+
+function toasterRegion() {
+  return launched.window.locator("[data-sonner-toaster]");
+}
+
 async function loadColorImageIntoPanelOne(): Promise<void> {
   await loadImageFromAbsolutePath(launched.window, fixturePath(rgbPng.fileName));
 }
