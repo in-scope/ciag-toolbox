@@ -2,6 +2,12 @@ export type RasterSampleFormat = "uint" | "int" | "float";
 
 export type RasterSourceInterleave = "bsq" | "bil" | "bip";
 
+// CT-159: a raster whose three bands are true display colour channels (a decoded
+// JPG/PNG promoted to R/G/B, or a RAW camera decode) carries "rgb" so the viewport
+// renders an RGB composite instead of one grayscale band. Multi-band scientific
+// stacks leave this undefined and keep per-band grayscale viewing with band selection.
+export type RasterColorInterpretation = "rgb";
+
 export type RasterTypedArray =
   | Uint8Array
   | Uint16Array
@@ -23,6 +29,7 @@ export interface RasterImage {
   readonly bandWavelengths?: ReadonlyArray<number>;
   readonly bandOriginalNumbers?: ReadonlyArray<number>;
   readonly sourceInterleave?: RasterSourceInterleave;
+  readonly colorInterpretation?: RasterColorInterpretation;
 }
 
 export function cloneRasterImage(raster: RasterImage): RasterImage {

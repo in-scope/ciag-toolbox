@@ -92,6 +92,14 @@ describe("computeImageRgbChannelExtents (raster path)", () => {
     const secondBandExtents = computeImageRgbChannelExtents(source, 1);
     expect(firstBandExtents.max[0]).toBeLessThan(secondBandExtents.max[0]);
   });
+
+  it("derives independent per-channel extents from the three bands of an rgb composite", () => {
+    const source: ViewportImageSource = { kind: "raster", raster: buildRgbCompositeRaster() };
+    const extents = computeImageRgbChannelExtents(source);
+    expect(extents.max[0]).toBeCloseTo(10 / UINT16_CONTAINER_MAX, 6);
+    expect(extents.max[1]).toBeCloseTo(20 / UINT16_CONTAINER_MAX, 6);
+    expect(extents.max[2]).toBeCloseTo(30 / UINT16_CONTAINER_MAX, 6);
+  });
 });
 
 describe("computeImageRgbChannelExtents (pixels path)", () => {
@@ -136,6 +144,18 @@ function buildUint16RasterFromValues(values: ReadonlyArray<number>): RasterImage
     bitsPerSample: 16,
     sampleFormat: "uint",
     bandCount: 1,
+  };
+}
+
+function buildRgbCompositeRaster(): RasterImage {
+  return {
+    bandPixels: [new Uint16Array([0, 10]), new Uint16Array([0, 20]), new Uint16Array([0, 30])],
+    width: 2,
+    height: 1,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 3,
+    colorInterpretation: "rgb",
   };
 }
 

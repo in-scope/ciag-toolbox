@@ -225,6 +225,7 @@ function buildRasterImageFromLayoutAndBands(
     sampleFormat: pickRasterSampleFormatForBitsPerSample(layout.bitsPerSample),
     bandCount: RAW_RGB_BAND_COUNT,
     bandLabels: RAW_BAND_LABELS,
+    colorInterpretation: "rgb",
   };
 }
 

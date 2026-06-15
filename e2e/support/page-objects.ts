@@ -271,6 +271,7 @@ export {
   summarizeCanvasPixels,
   nonClearPixelFraction,
   averageNonClearCanvasColor,
+  colorfulNonClearPixelFraction,
   type CanvasPixelSummary,
   type CanvasAverageColor,
 } from "./canvas-pixels";

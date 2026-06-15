@@ -49,6 +49,7 @@ export function buildRgbRasterFromRgbaBytes(
     bandCount: 3,
     bandLabels: RGB_PROMOTION_BAND_LABELS,
     bandOriginalNumbers: RGB_PROMOTION_BAND_ORIGINAL_NUMBERS,
+    colorInterpretation: "rgb",
   };
 }
 

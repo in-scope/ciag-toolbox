@@ -36,6 +36,11 @@ describe("buildRgbRasterFromRgbaBytes", () => {
     expect(raster.bandOriginalNumbers).toEqual([1, 2, 3]);
   });
 
+  it("tags the promoted raster as an rgb colour composite so the viewport shows colour", () => {
+    const raster = buildRgbRasterFromRgbaBytes(buildTwoPixelRgbaBytes(), 2, 1);
+    expect(raster.colorInterpretation).toBe("rgb");
+  });
+
   it("throws when the RGBA buffer is too short for the declared pixel count", () => {
     expect(() => buildRgbRasterFromRgbaBytes(new Uint8ClampedArray(4), 2, 1)).toThrow(
       /RGBA buffer/,

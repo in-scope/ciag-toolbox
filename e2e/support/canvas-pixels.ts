@@ -94,6 +94,37 @@ function buildAverageColorFromTotals(totals: {
   };
 }
 
+// CT-159: a grayscale render emits R==G==B per pixel (the shader replicates one
+// band), so a colour image that lost its colour reads as ~0 here. A true-colour
+// composite keeps channels apart, so a healthy fraction of pixels clear this bar.
+const GRAYSCALE_CHANNEL_SPREAD_THRESHOLD = 24;
+
+export async function colorfulNonClearPixelFraction(canvas: Locator): Promise<number> {
+  const screenshot = await canvas.screenshot();
+  const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
+  return computeColorfulNonClearPixelFraction(data, info.channels);
+}
+
+function computeColorfulNonClearPixelFraction(data: Buffer, channels: number): number {
+  let nonClearPixelCount = 0;
+  let colorfulPixelCount = 0;
+  const pixelCount = Math.floor(data.length / channels);
+  for (let index = 0; index < pixelCount; index += 1) {
+    const color = readPackedRgbAtPixel(data, index * channels);
+    if (!isBrighterThanClearColor(color)) continue;
+    nonClearPixelCount += 1;
+    if (channelSpreadExceedsGrayscaleThreshold(color)) colorfulPixelCount += 1;
+  }
+  return nonClearPixelCount === 0 ? 0 : colorfulPixelCount / nonClearPixelCount;
+}
+
+function channelSpreadExceedsGrayscaleThreshold(packedRgb: number): boolean {
+  const red = (packedRgb >> 16) & 0xff;
+  const green = (packedRgb >> 8) & 0xff;
+  const blue = packedRgb & 0xff;
+  return Math.max(red, green, blue) - Math.min(red, green, blue) > GRAYSCALE_CHANNEL_SPREAD_THRESHOLD;
+}
+
 function readPackedRgbAtPixel(data: Buffer, offset: number): number {
   const red = data[offset] ?? 0;
   const green = data[offset + 1] ?? 0;

@@ -69,6 +69,20 @@ describe("applyGeometricTransformToRasterImage", () => {
     expect(result.bandPixels[0]).toBeInstanceOf(Float32Array);
   });
 
+  it("preserves the rgb colour interpretation so a rotated colour image stays colour", () => {
+    const raster: RasterImage = {
+      bandPixels: [Uint8Array.from([1, 2, 3, 4]), Uint8Array.from([5, 6, 7, 8]), Uint8Array.from([9, 10, 11, 12])],
+      width: 2,
+      height: 2,
+      bandCount: 3,
+      sampleFormat: "uint",
+      bitsPerSample: 8,
+      colorInterpretation: "rgb",
+    };
+    const result = applyGeometricTransformToRasterImage(raster, "rotate-90-cw");
+    expect(result.colorInterpretation).toBe("rgb");
+  });
+
   it("does not mutate the source raster", () => {
     const raster = makeSingleBandRaster(THREE_BY_TWO, 3, 2);
     applyGeometricTransformToRasterImage(raster, "rotate-90-cw");

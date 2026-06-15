@@ -75,6 +75,69 @@ function uploadFloatPixelsToBoundR16FTexture(
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RED, gl.FLOAT, pixels);
 }
 
+// CT-159: an RGB-composite raster uploads three aligned band tiles into one
+// RGBA16F texture so the fragment shader samples real colour. The tiles share an
+// identical rect (same splitter, same dimensions), so band index i lines up.
+export function createRgbF16TextureForRasterTileTriple(
+  gl: WebGL2RenderingContext,
+  tiles: readonly [RasterTile, RasterTile, RasterTile],
+  raster: RasterImage,
+): RasterTileTexture {
+  const [red] = tiles;
+  const texture = createRgba16FTextureBoundForColorSampling(gl, red.width, red.height);
+  const rgba = packRasterTileTripleAsNormalizedRgbaFloat32(tiles, raster);
+  uploadFloatPixelsToBoundRgba16FTexture(gl, rgba, red.width, red.height);
+  return { texture, imageSpaceX: red.x, imageSpaceY: red.y, width: red.width, height: red.height };
+}
+
+function createRgba16FTextureBoundForColorSampling(
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+): WebGLTexture {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error("Failed to create RGBA16F WebGL texture");
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  configureR16FTextureSamplingParameters(gl);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, width, height);
+  return texture;
+}
+
+function uploadFloatPixelsToBoundRgba16FTexture(
+  gl: WebGL2RenderingContext,
+  pixels: Float32Array,
+  width: number,
+  height: number,
+): void {
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
+}
+
+function packRasterTileTripleAsNormalizedRgbaFloat32(
+  tiles: readonly [RasterTile, RasterTile, RasterTile],
+  raster: RasterImage,
+): Float32Array {
+  const red = convertRasterTilePixelsToNormalizedFloat32(tiles[0].pixels, raster);
+  const green = convertRasterTilePixelsToNormalizedFloat32(tiles[1].pixels, raster);
+  const blue = convertRasterTilePixelsToNormalizedFloat32(tiles[2].pixels, raster);
+  return interleaveRgbChannelsAsOpaqueRgbaFloat32(red, green, blue);
+}
+
+function interleaveRgbChannelsAsOpaqueRgbaFloat32(
+  red: Float32Array,
+  green: Float32Array,
+  blue: Float32Array,
+): Float32Array {
+  const rgba = new Float32Array(red.length * 4);
+  for (let pixelIndex = 0; pixelIndex < red.length; pixelIndex += 1) {
+    const offset = pixelIndex * 4;
+    rgba[offset] = red[pixelIndex] ?? 0;
+    rgba[offset + 1] = green[pixelIndex] ?? 0;
+    rgba[offset + 2] = blue[pixelIndex] ?? 0;
+    rgba[offset + 3] = 1;
+  }
+  return rgba;
+}
+
 function convertRasterTilePixelsToNormalizedFloat32(
   pixels: RasterTypedArray,
   raster: RasterImage,
