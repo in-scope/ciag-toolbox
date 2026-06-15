@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
-import { nonClearPixelFraction, summarizeCanvasPixels } from "./support/canvas-pixels";
+import {
+  averageNonClearCanvasColor,
+  nonClearPixelFraction,
+  summarizeCanvasPixels,
+} from "./support/canvas-pixels";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
@@ -20,7 +24,10 @@ import {
 // CT-136 / manual section 3 (CT-077): operation-produced float32 through the pipeline.
 // Normalize turns an integer raster into a float32 [0,1] raster whose readout reports true
 // fractional values; Standardize with a large target std drives true values above 1 / below 0
-// that the readout preserves (data does not clip) while the display clamps to white/black.
+// that the readout preserves (data does not clip). The display no longer clamps those to a
+// flat white/black frame: a float raster whose data falls outside [0,1] auto-fits its display
+// window to the data's own extents (CT-161), so each band renders a VISIBLE gradient while the
+// out-of-range true values survive in the readout.
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG, testFailureProtocol step 1): the manual uses the
 // low-contrast PNG. A PNG/JPG loads as an image-bitmap and, when an operation runs, is
@@ -45,8 +52,16 @@ const FLOAT_READOUT_TOLERANCE = 0.001;
 
 const TARGET_MEAN = 0.5;
 const LARGE_TARGET_STD = 5;
-const CLIPPED_BLACK_MAX_FRACTION = 0.05;
-const CLIPPED_WHITE_MIN_FRACTION = 0.2;
+// Auto-fit (CT-161) stretches the band's own min..max across black..white, so each band
+// renders as a broadly-visible mid-tone gradient. The two thresholds below each reject one
+// pre-CT-161 clip regime (RED measurements captured by forcing the old fixed-[0,1] window):
+//   - below-zero band clipped to a near-black frame: non-clear fraction ~0.014, so > 0.2 rejects it
+//   - above-one band clipped to a saturated-white frame: average luminance ~252, so < 200 rejects it
+// Auto-fit lands at non-clear ~0.81 and luminance ~132 for both bands, clear of both bounds.
+// (distinctColorCount is NOT used: edge anti-aliasing yields ~230-260 distinct colors even on a
+// flat clipped frame, so it cannot tell a gradient from a clip.)
+const AUTO_FIT_VISIBLE_MIN_FRACTION = 0.2;
+const AUTO_FIT_MAX_LUMINANCE = 200;
 
 let launched: LaunchedApp;
 
@@ -75,7 +90,7 @@ test("Normalize changes the data type to float32 and the readout shows fractiona
   await expectFractionalReadoutAt(0, 0, NORMALIZED_BAND1_TOP_LEFT);
 });
 
-test("Standardize with a large target std keeps out-of-range true values while the display clips", async () => {
+test("Standardize with a large target std keeps out-of-range true values while the display auto-fits", async () => {
   await applyStandardizeWithLargeTargetStandardDeviation();
 
   await expectMetadataDataTypeAndDimensions(launched.window, {
@@ -85,11 +100,11 @@ test("Standardize with a large target std keeps out-of-range true values while t
   });
 
   await expectActiveBandReadoutBelowZero(0, 0);
-  await expectActiveBandDisplayClipsToBlack();
+  await expectActiveBandDisplayAutoFitsToVisibleGradient();
 
   await selectActiveBandNumber(launched.window, 3);
   await expectActiveBandReadoutAboveOne(3, 3);
-  await expectActiveBandDisplayClipsToWhite();
+  await expectActiveBandDisplayAutoFitsToVisibleGradient();
 });
 
 async function applyStandardizeWithLargeTargetStandardDeviation(): Promise<void> {
@@ -135,14 +150,16 @@ async function readActiveBandValueAt(imageX: number, imageY: number): Promise<nu
   return Number.parseFloat(readout.value);
 }
 
-async function expectActiveBandDisplayClipsToBlack(): Promise<void> {
-  await expect.poll(activeBandNonClearFraction).toBeLessThan(CLIPPED_BLACK_MAX_FRACTION);
-}
-
-async function expectActiveBandDisplayClipsToWhite(): Promise<void> {
-  await expect.poll(activeBandNonClearFraction).toBeGreaterThan(CLIPPED_WHITE_MIN_FRACTION);
+async function expectActiveBandDisplayAutoFitsToVisibleGradient(): Promise<void> {
+  await expect.poll(activeBandNonClearFraction).toBeGreaterThan(AUTO_FIT_VISIBLE_MIN_FRACTION);
+  expect(await activeBandAverageLuminance()).toBeLessThan(AUTO_FIT_MAX_LUMINANCE);
 }
 
 async function activeBandNonClearFraction(): Promise<number> {
   return nonClearPixelFraction(await summarizeCanvasPixels(panelCanvas(launched.window, PANEL)));
+}
+
+async function activeBandAverageLuminance(): Promise<number> {
+  const color = await averageNonClearCanvasColor(panelCanvas(launched.window, PANEL));
+  return (color.red + color.green + color.blue) / 3;
 }
