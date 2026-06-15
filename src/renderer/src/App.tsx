@@ -217,6 +217,8 @@ interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
   readonly isRasterSource: boolean;
+  readonly bandCount: number;
+  readonly selectedBandNumber: number;
 }
 
 export function App(): JSX.Element {
@@ -303,6 +305,7 @@ function ApplicationShell(): JSX.Element {
   const handleSaveImageRequested = useSaveImageRequestHandler({
     imagesByIndexRef,
     selectedIndicesRef: useLatestRef(selectedIndices),
+    renderingApi,
     setPendingSaveImage,
   });
   useMenuSaveImageTriggersHandler(handleSaveImageRequested);
@@ -675,6 +678,7 @@ function applyQuickGeometricTransformToActiveSource(
 interface SaveImageRequestBindings {
   imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
   selectedIndicesRef: MutableRefObject<ReadonlySet<number>>;
+  renderingApi: ViewportRenderingApi;
   setPendingSaveImage: SetPendingSaveImage;
 }
 
@@ -688,7 +692,7 @@ interface ConfirmSaveImageBindings {
 function useSaveImageRequestHandler(
   bindings: SaveImageRequestBindings,
 ): () => void {
-  const { imagesByIndexRef, selectedIndicesRef, setPendingSaveImage } = bindings;
+  const { imagesByIndexRef, selectedIndicesRef, renderingApi, setPendingSaveImage } = bindings;
   return useCallback(() => {
     const candidate = pickSingleSelectedSourceWithContent(
       selectedIndicesRef.current,
@@ -698,18 +702,29 @@ function useSaveImageRequestHandler(
       toast.info("Select a panel with a loaded stack to save");
       return;
     }
-    setPendingSaveImage({
-      fileName: candidate.fileName,
-      viewportIndex: candidate.index,
-      isRasterSource: candidate.isRasterSource,
-    });
-  }, [imagesByIndexRef, selectedIndicesRef, setPendingSaveImage]);
+    setPendingSaveImage(buildPendingSaveImageRequest(candidate, renderingApi));
+  }, [imagesByIndexRef, selectedIndicesRef, renderingApi, setPendingSaveImage]);
+}
+
+function buildPendingSaveImageRequest(
+  candidate: SingleSelectedContentSummary,
+  renderingApi: ViewportRenderingApi,
+): PendingSaveImageRequest {
+  const selectedBandIndex = renderingApi.getRenderingState(candidate.index).selectedBandIndex;
+  return {
+    fileName: candidate.fileName,
+    viewportIndex: candidate.index,
+    isRasterSource: candidate.isRasterSource,
+    bandCount: candidate.bandCount,
+    selectedBandNumber: selectedBandIndex + 1,
+  };
 }
 
 interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
   readonly isRasterSource: boolean;
+  readonly bandCount: number;
 }
 
 function pickSingleSelectedSourceWithContent(
@@ -725,6 +740,7 @@ function pickSingleSelectedSourceWithContent(
     index: onlyIndex,
     fileName: content.fileName,
     isRasterSource: content.source.kind === "raster",
+    bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
   };
 }
 

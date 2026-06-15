@@ -192,6 +192,8 @@ export {
   readOfferedSaveImageFormatLabels,
   chooseSaveImageFormat,
   expectSaveImageFormatOptionDisabledWithTooltip,
+  expectSaveImageFormatOptionDisclosesNote,
+  expectSaveImageFormatOptionHasNoBandDisclosure,
   confirmSaveImageFormat,
   cancelSaveImageFormatPicker,
   exportSelectedStackThroughSaveDialog,

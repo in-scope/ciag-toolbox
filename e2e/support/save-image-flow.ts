@@ -51,6 +51,47 @@ export async function expectSaveImageFormatOptionDisabledWithTooltip(
   await expect(page.getByRole("tooltip").filter({ hasText: reasonSubstring })).toBeVisible();
 }
 
+function saveImageFormatOptionLabel(page: Page, formatLabel: string): Locator {
+  return saveImageFormatOption(page, formatLabel).locator("xpath=ancestor::label[1]");
+}
+
+// A multi-band stack loses bands silently when saved to a single-band format, so the picker
+// discloses what each option saves via a per-option tooltip ("current band only" / "all N
+// bands"). The option stays enabled and selectable; this is disclosure, not a block. Every
+// single-band option carries the SAME note text, so the assertion follows the hovered
+// trigger's own aria-describedby rather than matching the shared text (which the pointer can
+// leave open on several options at once while crossing the list).
+export async function expectSaveImageFormatOptionDisclosesNote(
+  page: Page,
+  formatLabel: string,
+  noteSubstring: string,
+): Promise<void> {
+  await expect(saveImageFormatOption(page, formatLabel)).toBeEnabled();
+  const tooltip = await revealOptionTooltipForHoveredLabel(page, formatLabel);
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText(noteSubstring);
+}
+
+async function revealOptionTooltipForHoveredLabel(page: Page, formatLabel: string): Promise<Locator> {
+  const label = saveImageFormatOptionLabel(page, formatLabel);
+  await label.hover();
+  await expect(label).toHaveAttribute("aria-describedby", /.+/);
+  const tooltipId = await label.getAttribute("aria-describedby");
+  return page.locator(`[id="${tooltipId}"]`);
+}
+
+// Single-band stacks and photo sources lose no bands, so their options carry no band-coverage
+// tooltip at all (an unwrapped <label> never becomes a Radix tooltip trigger).
+export async function expectSaveImageFormatOptionHasNoBandDisclosure(
+  page: Page,
+  formatLabel: string,
+): Promise<void> {
+  await expect(saveImageFormatOptionLabel(page, formatLabel)).not.toHaveAttribute(
+    "data-state",
+    /.*/,
+  );
+}
+
 export async function confirmSaveImageFormat(page: Page): Promise<void> {
   await saveImageFormatPicker(page).getByRole("button", { name: "Save...", exact: true }).click();
 }

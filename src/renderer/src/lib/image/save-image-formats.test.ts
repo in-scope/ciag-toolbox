@@ -2,10 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   SAVE_IMAGE_FORMAT_OPTIONS,
+  describeSaveImageFormatBandCoverageNote,
   describeSaveImageFormatDisabledReason,
   findSaveImageFormatOptionOrThrow,
   readSaveImageFormatTechnicalDetails,
 } from "@/lib/image/save-image-formats";
+
+const MULTI_BAND_STACK = { isRasterSource: true, bandCount: 3, selectedBandNumber: 1 };
+const SINGLE_BAND_FORMAT_IDS = [
+  "tiff-16-bit",
+  "tiff-8-bit",
+  "tiff-float-32",
+  "png-8-bit",
+  "jpeg-8-bit",
+] as const;
 
 describe("readSaveImageFormatTechnicalDetails", () => {
   it("maps tiff-16-bit to a 16-bit uint TIFF descriptor", () => {
@@ -86,6 +96,43 @@ describe("describeSaveImageFormatDisabledReason", () => {
     expect(describeSaveImageFormatDisabledReason("tiff-8-bit", false)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("png-8-bit", false)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", false)).toBeNull();
+  });
+});
+
+describe("describeSaveImageFormatBandCoverageNote", () => {
+  it("warns that single-band formats save only the current band of a multi-band stack", () => {
+    for (const formatId of SINGLE_BAND_FORMAT_IDS) {
+      expect(describeSaveImageFormatBandCoverageNote(formatId, MULTI_BAND_STACK)).toBe(
+        "Saves the current band only (band 1 of 3). Use ENVI to save all bands.",
+      );
+    }
+  });
+
+  it("names the displayed band number in the warning", () => {
+    const note = describeSaveImageFormatBandCoverageNote("tiff-16-bit", {
+      ...MULTI_BAND_STACK,
+      selectedBandNumber: 2,
+    });
+    expect(note).toBe("Saves the current band only (band 2 of 3). Use ENVI to save all bands.");
+  });
+
+  it("tells ENVI saves all bands of a multi-band stack", () => {
+    expect(describeSaveImageFormatBandCoverageNote("envi", MULTI_BAND_STACK)).toBe("Saves all 3 bands.");
+    expect(describeSaveImageFormatBandCoverageNote("envi-float", MULTI_BAND_STACK)).toBe("Saves all 3 bands.");
+  });
+
+  it("discloses nothing for a single-band stack (no bands are lost)", () => {
+    const singleBandStack = { isRasterSource: true, bandCount: 1, selectedBandNumber: 1 };
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      expect(describeSaveImageFormatBandCoverageNote(option.id, singleBandStack)).toBeNull();
+    }
+  });
+
+  it("discloses nothing for a photo (non-raster) source", () => {
+    const photoSource = { isRasterSource: false, bandCount: 3, selectedBandNumber: 1 };
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      expect(describeSaveImageFormatBandCoverageNote(option.id, photoSource)).toBeNull();
+    }
   });
 });
 

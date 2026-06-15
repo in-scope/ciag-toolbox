@@ -117,6 +117,40 @@ export function describeSaveImageFormatDisabledReason(
   return null;
 }
 
+export interface SaveImageSourceBandInfo {
+  readonly isRasterSource: boolean;
+  readonly bandCount: number;
+  readonly selectedBandNumber: number;
+}
+
+// A multi-band stack loses bands silently when saved to a single-band format (TIFF/PNG/JPEG
+// keep only the displayed band; ENVI writes the whole cube). This note discloses that before
+// the user confirms. Single-band stacks and photo sources lose nothing, so they get null.
+export function describeSaveImageFormatBandCoverageNote(
+  formatId: SaveImageFormatId,
+  source: SaveImageSourceBandInfo,
+): string | null {
+  if (!sourceIsMultiBandStack(source)) return null;
+  if (formatSavesEveryBand(formatId)) return describeSavesAllBandsNote(source.bandCount);
+  return describeCurrentBandOnlyWarning(source.selectedBandNumber, source.bandCount);
+}
+
+function sourceIsMultiBandStack(source: SaveImageSourceBandInfo): boolean {
+  return source.isRasterSource && source.bandCount > 1;
+}
+
+function formatSavesEveryBand(formatId: SaveImageFormatId): boolean {
+  return readSaveImageFormatTechnicalDetails(formatId).kind === "envi";
+}
+
+function describeCurrentBandOnlyWarning(bandNumber: number, bandCount: number): string {
+  return `Saves the current band only (band ${bandNumber} of ${bandCount}). Use ENVI to save all bands.`;
+}
+
+function describeSavesAllBandsNote(bandCount: number): string {
+  return `Saves all ${bandCount} bands.`;
+}
+
 export function findSaveImageFormatOptionOrThrow(
   formatId: SaveImageFormatId,
 ): SaveImageFormatOption {

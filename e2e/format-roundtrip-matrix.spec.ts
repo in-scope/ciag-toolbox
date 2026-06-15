@@ -23,6 +23,8 @@ import {
   confirmSaveImageFormat,
   createTemporaryExportDirectory,
   expectSaveImageFormatOptionDisabledWithTooltip,
+  expectSaveImageFormatOptionDisclosesNote,
+  expectSaveImageFormatOptionHasNoBandDisclosure,
   loadFixtureAsStack,
   loadImageFromAbsolutePath,
   panelCanvas,
@@ -117,6 +119,15 @@ interface CellExpectation {
 const ENVI_DISABLED_REASON = "ENVI is for raster/scientific stacks";
 const FLOAT_DISABLED_REASON = "Float export needs raster data";
 
+// CT-163: a multi-band stack loses bands silently when saved to a single-band format
+// (TIFF/PNG/JPEG keep only the displayed band; ENVI writes the whole cube), so the picker
+// discloses what each option saves before the user confirms. Single-band stacks and photos
+// lose nothing, so their options carry no such note.
+const CURRENT_BAND_ONLY_NOTE = "current band only";
+const SAVES_ALL_BANDS_NOTE = "Saves all";
+
+type BandDisclosureExpectation = { readonly noteSubstring: string } | "none";
+
 const INPUT_FIXTURES: ReadonlyArray<InputFixture> = [
   { label: "grayscale PNG", committedFileName: lowContrastGrayPng.fileName, kind: "trueColour" },
   { label: "true-colour RGB PNG", committedFileName: rgbPng.fileName, kind: "trueColour" },
@@ -206,8 +217,31 @@ async function runRoundTripCell(
   }
   const source = await captureSourceSignature(launched.window, fixture, format);
   const exportPath = await buildTemporaryExportPath(format);
-  await exportSelectedSourceThroughSaveDialog(launched, format, exportPath);
+  const disclosure = expectedBandDisclosure(fixture, format, source.bandCount);
+  await exportSelectedSourceThroughSaveDialog(launched, format, exportPath, disclosure);
   await completeAndAssertReopen(launched, fixture, format, exportPath, source, expectation);
+}
+
+// A multi-band raster stack discloses "current band only" on single-band formats and
+// "Saves all N bands" on ENVI; single-band stacks and photos disclose nothing.
+function expectedBandDisclosure(
+  fixture: InputFixture,
+  format: ExportFormat,
+  sourceBandCount: string,
+): BandDisclosureExpectation {
+  if (fixture.kind !== "raster" || Number(sourceBandCount) <= 1) return "none";
+  return { noteSubstring: isEnviKind(format.kind) ? SAVES_ALL_BANDS_NOTE : CURRENT_BAND_ONLY_NOTE };
+}
+
+async function assertBandDisclosureInPicker(
+  page: Page,
+  format: ExportFormat,
+  disclosure: BandDisclosureExpectation,
+): Promise<void> {
+  if (disclosure === "none") {
+    return expectSaveImageFormatOptionHasNoBandDisclosure(page, format.pickerLabel);
+  }
+  await expectSaveImageFormatOptionDisclosesNote(page, format.pickerLabel, disclosure.noteSubstring);
 }
 
 // CT-162: a format that cannot apply to this source is offered but disabled, with a tooltip
@@ -259,10 +293,12 @@ async function exportSelectedSourceThroughSaveDialog(
   launched: LaunchedApp,
   format: ExportFormat,
   exportPath: string,
+  disclosure: BandDisclosureExpectation,
 ): Promise<void> {
   await enqueueSaveDialogPath(launched.window, exportPath);
   await triggerSaveImageMenuItem(launched.app);
   await expect(saveImageFormatPicker(launched.window)).toBeVisible();
+  await assertBandDisclosureInPicker(launched.window, format, disclosure);
   await chooseSaveImageFormat(launched.window, format.pickerLabel);
   await confirmSaveImageFormat(launched.window);
   await expect(launched.window.getByText("Saved to", { exact: false }).first()).toBeVisible();
