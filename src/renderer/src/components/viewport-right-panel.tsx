@@ -167,7 +167,7 @@ function shouldShowHistorySection(
 function RightPanelShell(props: { children: ReadonlyArray<JSX.Element> }): JSX.Element {
   return (
     <aside aria-label="Panel details" className={RIGHT_PANEL_CLASSES}>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">{props.children}</div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">{props.children}</div>
     </aside>
   );
 }
@@ -207,7 +207,7 @@ interface HistorySectionProps {
 
 function HistorySection(props: HistorySectionProps): JSX.Element {
   return (
-    <section aria-label="History" className={RIGHT_PANEL_SECTION_CLASSES}>
+    <section aria-label="History" className={cn(RIGHT_PANEL_SECTION_CLASSES, "min-h-0 flex-1")}>
       <HistorySectionHeader
         viewportNumber={props.activeSource.viewportNumber}
         entryCount={props.activeSource.operationHistory.length}
@@ -244,7 +244,7 @@ interface HistoryEntryListProps {
 
 function HistoryEntryList(props: HistoryEntryListProps): JSX.Element {
   return (
-    <ol aria-label="Operation history" className="flex flex-col gap-1">
+    <ol aria-label="Operation history" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {props.history.map((entry, position) => (
         <li key={`${entry.timestampMs}-${position}`}>
           <HistoryEntryRow entry={entry} />
