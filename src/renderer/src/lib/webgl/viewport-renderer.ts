@@ -34,6 +34,7 @@ import {
   createIdentityToneCurveLutTexture,
   uploadNormalizedValuesToToneCurveLutTexture,
 } from "./tone-curve-lut-texture";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import { recordImageTextureUpload } from "@/lib/instrumentation/render-instrumentation";
 import {
   IDENTITY_PAN,
@@ -99,6 +100,7 @@ interface BandModeUniformLocations {
 
 interface ToneCurveUniformLocations {
   enabled: WebGLUniformLocation | null;
+  multiChannel: WebGLUniformLocation | null;
 }
 
 interface ProgramUniformLocations {
@@ -122,7 +124,20 @@ interface NormalizationState {
 
 interface ToneCurvePassState {
   readonly enabled: boolean;
-  readonly lutTexture: WebGLTexture | null;
+  readonly multiChannel: boolean;
+  readonly redOrValueLutTexture: WebGLTexture | null;
+  readonly greenLutTexture: WebGLTexture | null;
+  readonly blueLutTexture: WebGLTexture | null;
+}
+
+// CT-177: tracks the last values uploaded to each tone-curve LUT texture by
+// reference, so editing ONE channel re-uploads only that channel's small table
+// (App memoizes each channel's LUT independently). Reset on context loss so the
+// recreated textures are repopulated.
+interface ToneCurveLutUploadRefs {
+  unitOne: ReadonlyArray<number> | null;
+  green: ReadonlyArray<number> | null;
+  blue: ReadonlyArray<number> | null;
 }
 
 interface RenderPassState {
@@ -153,7 +168,11 @@ export class ViewportRenderer {
   };
   private autoFitsFloatDisplayWindow = false;
   private toneCurveLutTexture: WebGLTexture | null = null;
+  private toneCurveGreenLutTexture: WebGLTexture | null = null;
+  private toneCurveBlueLutTexture: WebGLTexture | null = null;
   private toneCurveLookupTable: ReadonlyArray<number> | null = null;
+  private toneCurveChannelLookupTables: ToneCurveChannelPreviewLuts | null = null;
+  private toneCurveLutUploads: ToneCurveLutUploadRefs = { unitOne: null, green: null, blue: null };
   private readonly viewTransformChangeListeners = new Set<() => void>();
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
@@ -195,18 +214,44 @@ export class ViewportRenderer {
     this.draw();
   }
 
-  // CT-170: install a display-only tone-curve preview built in the
+  // CT-170: install a display-only single-band tone-curve preview built in the
   // display-normalized domain. Passing null clears it; the shader branch is then
-  // fully bypassed and output is byte-for-byte identical to no curve.
+  // fully bypassed and output is byte-for-byte identical to no curve. The
+  // composite (multi-channel) preview lives on setToneCurveChannelLookupTables;
+  // the two fields are independent and the caller publishes only one at a time.
   setToneCurveLookupTable(lookupTable: ReadonlyArray<number> | null): void {
     this.toneCurveLookupTable = lookupTable;
-    this.uploadToneCurveLookupTableToTexture();
+    this.uploadToneCurveLutTextures();
     this.draw();
   }
 
-  private uploadToneCurveLookupTableToTexture(): void {
-    if (!this.gl || !this.toneCurveLutTexture || !this.toneCurveLookupTable) return;
-    uploadNormalizedValuesToToneCurveLutTexture(this.gl, this.toneCurveLutTexture, this.toneCurveLookupTable);
+  // CT-177: install a display-only per-channel tone-curve preview for a composite.
+  // Each table already folds the channel curve and the rgb/Value curve together;
+  // null reverts to the single-LUT (or no) preview.
+  setToneCurveChannelLookupTables(channelLookupTables: ToneCurveChannelPreviewLuts | null): void {
+    this.toneCurveChannelLookupTables = channelLookupTables;
+    this.uploadToneCurveLutTextures();
+    this.draw();
+  }
+
+  private uploadToneCurveLutTextures(): void {
+    this.uploadToneCurveLutTextureWhenChanged(this.toneCurveLutTexture, this.resolveUnitOneLutValues(), "unitOne");
+    this.uploadToneCurveLutTextureWhenChanged(this.toneCurveGreenLutTexture, this.toneCurveChannelLookupTables?.green ?? null, "green");
+    this.uploadToneCurveLutTextureWhenChanged(this.toneCurveBlueLutTexture, this.toneCurveChannelLookupTables?.blue ?? null, "blue");
+  }
+
+  private resolveUnitOneLutValues(): ReadonlyArray<number> | null {
+    return this.toneCurveChannelLookupTables?.red ?? this.toneCurveLookupTable;
+  }
+
+  private uploadToneCurveLutTextureWhenChanged(
+    texture: WebGLTexture | null,
+    values: ReadonlyArray<number> | null,
+    slot: keyof ToneCurveLutUploadRefs,
+  ): void {
+    if (!this.gl || !texture || !values || this.toneCurveLutUploads[slot] === values) return;
+    uploadNormalizedValuesToToneCurveLutTexture(this.gl, texture, values);
+    this.toneCurveLutUploads[slot] = values;
   }
 
   private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
@@ -322,15 +367,18 @@ export class ViewportRenderer {
     this.gl = gl;
     reportHalfFloatExtensionMissingOnce(gl, this.options.onError);
     this.programResources = createViewportRendererProgram(gl);
-    this.createAndRestoreToneCurveLutTexture(gl);
+    this.createAndRestoreToneCurveLutTextures(gl);
     this.applyViewportToCanvasSize();
     this.uploadCurrentSourceIfReady();
     this.draw();
   }
 
-  private createAndRestoreToneCurveLutTexture(gl: WebGL2RenderingContext): void {
+  private createAndRestoreToneCurveLutTextures(gl: WebGL2RenderingContext): void {
     this.toneCurveLutTexture = createIdentityToneCurveLutTexture(gl);
-    this.uploadToneCurveLookupTableToTexture();
+    this.toneCurveGreenLutTexture = createIdentityToneCurveLutTexture(gl);
+    this.toneCurveBlueLutTexture = createIdentityToneCurveLutTexture(gl);
+    this.toneCurveLutUploads = { unitOne: null, green: null, blue: null };
+    this.uploadToneCurveLutTextures();
   }
 
   private respondToContextLost(event: Event): void {
@@ -339,6 +387,8 @@ export class ViewportRenderer {
     this.singleTexture = null;
     this.rasterTileTextures = [];
     this.toneCurveLutTexture = null;
+    this.toneCurveGreenLutTexture = null;
+    this.toneCurveBlueLutTexture = null;
     this.gl = null;
     console.warn("[viewport] WebGL context lost");
   }
@@ -417,9 +467,14 @@ export class ViewportRenderer {
   }
 
   private snapshotToneCurvePassState(): ToneCurvePassState {
+    const multiChannel = this.toneCurveChannelLookupTables !== null;
+    const hasPreview = this.toneCurveLookupTable !== null || multiChannel;
     return {
-      enabled: this.toneCurveLookupTable !== null && this.toneCurveLutTexture !== null,
-      lutTexture: this.toneCurveLutTexture,
+      enabled: hasPreview && this.toneCurveLutTexture !== null,
+      multiChannel,
+      redOrValueLutTexture: this.toneCurveLutTexture,
+      greenLutTexture: this.toneCurveGreenLutTexture,
+      blueLutTexture: this.toneCurveBlueLutTexture,
     };
   }
 
@@ -462,7 +517,11 @@ export class ViewportRenderer {
     if (!this.gl) return;
     this.releaseCurrentSourceTextures();
     deleteTextureSafely(this.gl, this.toneCurveLutTexture);
+    deleteTextureSafely(this.gl, this.toneCurveGreenLutTexture);
+    deleteTextureSafely(this.gl, this.toneCurveBlueLutTexture);
     this.toneCurveLutTexture = null;
+    this.toneCurveGreenLutTexture = null;
+    this.toneCurveBlueLutTexture = null;
     deleteRendererProgramResources(this.gl, this.programResources);
     this.programResources = null;
     this.gl = null;
@@ -580,7 +639,7 @@ function drawSingleTextureWithTransform(
   applyBandModeUniforms(gl, resources.uniforms.bandMode, renderState.isSingleBand);
   applyToneCurveUniforms(gl, resources.uniforms.toneCurve, renderState.toneCurve);
   gl.bindVertexArray(resources.vao);
-  bindToneCurveLutToUnitOne(gl, renderState.toneCurve.lutTexture);
+  bindToneCurveLutsToUnits(gl, renderState.toneCurve);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -592,17 +651,24 @@ function applyToneCurveUniforms(
   uniforms: ToneCurveUniformLocations,
   toneCurve: ToneCurvePassState,
 ): void {
-  if (uniforms.enabled === null) return;
-  const enabled = toneCurve.enabled && toneCurve.lutTexture !== null;
-  gl.uniform1i(uniforms.enabled, enabled ? 1 : 0);
+  if (uniforms.enabled !== null) {
+    gl.uniform1i(uniforms.enabled, toneCurve.enabled ? 1 : 0);
+  }
+  if (uniforms.multiChannel !== null) {
+    gl.uniform1i(uniforms.multiChannel, toneCurve.multiChannel ? 1 : 0);
+  }
 }
 
-function bindToneCurveLutToUnitOne(
+function bindToneCurveLutsToUnits(
   gl: WebGL2RenderingContext,
-  lutTexture: WebGLTexture | null,
+  toneCurve: ToneCurvePassState,
 ): void {
   gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, lutTexture);
+  gl.bindTexture(gl.TEXTURE_2D, toneCurve.redOrValueLutTexture);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, toneCurve.greenLutTexture);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, toneCurve.blueLutTexture);
 }
 
 function applyBandModeUniforms(
@@ -659,7 +725,7 @@ function createViewportRendererProgram(
   const vertexBuffer = createFullscreenQuadVertexBuffer(gl);
   const vao = createFullscreenQuadVertexArray(gl, vertexBuffer);
   bindTextureSamplerToUnitZero(gl, program);
-  bindToneCurveLutSamplerToUnitOne(gl, program);
+  bindToneCurveLutSamplersToUnits(gl, program);
   const uniforms = lookUpProgramUniformLocations(gl, program);
   return { program, vao, vertexBuffer, uniforms };
 }
@@ -682,6 +748,7 @@ function lookUpToneCurveUniformLocations(
 ): ToneCurveUniformLocations {
   return {
     enabled: gl.getUniformLocation(program, "u_toneCurveEnabled"),
+    multiChannel: gl.getUniformLocation(program, "u_toneCurveMultiChannel"),
   };
 }
 
@@ -799,15 +866,26 @@ function bindTextureSamplerToUnitZero(
   gl.useProgram(null);
 }
 
-function bindToneCurveLutSamplerToUnitOne(
+function bindToneCurveLutSamplersToUnits(
   gl: WebGL2RenderingContext,
   program: WebGLProgram,
 ): void {
-  const samplerLocation = gl.getUniformLocation(program, "u_toneCurveLut");
-  if (!samplerLocation) return;
   gl.useProgram(program);
-  gl.uniform1i(samplerLocation, 1);
+  bindSamplerUniformToUnit(gl, program, "u_toneCurveLut", 1);
+  bindSamplerUniformToUnit(gl, program, "u_toneCurveLutGreen", 2);
+  bindSamplerUniformToUnit(gl, program, "u_toneCurveLutBlue", 3);
   gl.useProgram(null);
+}
+
+function bindSamplerUniformToUnit(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  samplerName: string,
+  unit: number,
+): void {
+  const samplerLocation = gl.getUniformLocation(program, samplerName);
+  if (!samplerLocation) return;
+  gl.uniform1i(samplerLocation, unit);
 }
 
 function deleteRendererProgramResources(

@@ -75,6 +75,35 @@ export function buildDisplayNormalizedToneCurveLookupTable(
   return dataDomainOutputs.map((output) => normalizeOutputIntoDisplayUnit(output, range));
 }
 
+// CT-177: a composite channel's display LUT folds the per-channel curve and the
+// rgb/Value curve into one sampling table. Entry i answers "for the value at
+// display coordinate i/(N-1), what does the rgb/Value curve output after the
+// per-channel curve has remapped it?", renormalized into the display unit. The
+// per-channel curve is the inner map; the rgb/Value curve is applied on top.
+export function buildDisplayNormalizedComposedToneCurveLookupTable(
+  perChannelCurve: ToneCurve,
+  valueCurve: ToneCurve,
+  range: DataTypeValueRange,
+  entryCount: number,
+): ReadonlyArray<number> {
+  const lastEntryIndex = entryCount - 1;
+  return Array.from({ length: entryCount }, (_unused, index) =>
+    composedDisplayOutputForLookupTableEntry(perChannelCurve, valueCurve, range, index, lastEntryIndex),
+  );
+}
+
+function composedDisplayOutputForLookupTableEntry(
+  perChannelCurve: ToneCurve,
+  valueCurve: ToneCurve,
+  range: DataTypeValueRange,
+  index: number,
+  lastEntryIndex: number,
+): number {
+  const input = inputForLookupTableEntry(range, index, lastEntryIndex);
+  const channelOutput = evaluateToneCurveAtInput(perChannelCurve, input);
+  return normalizeOutputIntoDisplayUnit(evaluateToneCurveAtInput(valueCurve, channelOutput), range);
+}
+
 function normalizeOutputIntoDisplayUnit(output: number, range: DataTypeValueRange): number {
   const span = range.max - range.min;
   if (span <= 0) return 0;

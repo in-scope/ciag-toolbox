@@ -75,6 +75,17 @@ import {
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
+import {
+  buildComposedChannelPreviewLutOrNull,
+  isCompositeToneCurvePreviewActive,
+  type ColorToneCurveChannel,
+} from "@/lib/image/tone-curve-composite-preview";
+import {
+  DEFAULT_TONE_CURVE_CHANNEL,
+  setToneCurveChannelAnchors,
+  type ToneCurveChannelAnchors,
+} from "@/lib/image/tone-curve-channels";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import { recordPreviewRasterAllocation } from "@/lib/instrumentation/render-instrumentation";
 import {
   getRasterBandOriginalNumber,
@@ -200,6 +211,7 @@ import {
 import {
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
+  EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   hasToneCurveEditingState,
   type ApplyScope,
   type ViewportRenderingState,
@@ -1721,10 +1733,10 @@ interface PublishActiveToolPreviewInputs {
 
 function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
   const falseColorSource = useFalseColorPreviewSource(inputs);
-  const toneCurveLut = useToneCurvePreviewLut(inputs);
+  const toneCurveParts = useToneCurvePreviewParts(inputs);
   const sourceIndex = inputs.singleSelectedSource?.index ?? null;
   usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, falseColorSource, sourceIndex);
-  usePublishToneCurveLutForViewport(inputs.toneCurvePreview.setPreview, toneCurveLut, sourceIndex);
+  usePublishToneCurvePreviewForViewport(inputs.toneCurvePreview.setPreview, toneCurveParts, sourceIndex);
 }
 
 function useFalseColorPreviewSource(
@@ -1751,20 +1763,79 @@ function buildFalseColorPreviewSourceRecordingAllocation(
   return source;
 }
 
-// CT-171: the tone-curve preview is display-only - it publishes a GPU lookup
-// table rather than a baked preview raster, so editing anchors never re-uploads
-// the image texture (proven by the render-instrumentation counters).
-function useToneCurvePreviewLut(
-  inputs: PublishActiveToolPreviewInputs,
-): ReadonlyArray<number> | null {
+// CT-171/CT-177: the tone-curve preview is display-only - it publishes GPU lookup
+// table(s) rather than a baked preview raster, so editing anchors never re-uploads
+// the image texture (proven by the render-instrumentation counters). A scientific
+// stack / single-band photo publishes ONE LUT; a true-colour composite publishes a
+// per-channel triple (each channel's curve folded with the rgb/Value curve).
+interface ToneCurvePreviewParts {
+  readonly lookupTable: ReadonlyArray<number> | null;
+  readonly channelLookupTables: ToneCurveChannelPreviewLuts | null;
+}
+
+function useToneCurvePreviewParts(inputs: PublishActiveToolPreviewInputs): ToneCurvePreviewParts {
   const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
   const index = inputs.singleSelectedSource?.index ?? null;
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
+  const lookupTable = useSingleBandToneCurvePreviewLut(raster, state);
+  const channelLookupTables = useCompositeToneCurvePreviewLuts(raster, state);
+  return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
+}
+
+function useSingleBandToneCurvePreviewLut(
+  raster: RasterImage | null,
+  state: ViewportRenderingState | null,
+): ReadonlyArray<number> | null {
+  const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
   const anchors = state?.toneCurveAnchors ?? null;
   const bandIndex = state?.selectedBandIndex ?? 0;
   return useMemo(
-    () => buildToneCurvePreviewLutOrNull(raster, bandIndex, anchors),
-    [raster, bandIndex, anchors],
+    () => (isComposite ? null : buildToneCurvePreviewLutOrNull(raster, bandIndex, anchors)),
+    [isComposite, raster, bandIndex, anchors],
+  );
+}
+
+function useCompositeToneCurvePreviewLuts(
+  raster: RasterImage | null,
+  state: ViewportRenderingState | null,
+): ToneCurveChannelPreviewLuts | null {
+  const channelAnchors = useMergedToneCurveChannelAnchors(state);
+  const red = useComposedChannelPreviewLut(raster, "red", channelAnchors);
+  const green = useComposedChannelPreviewLut(raster, "green", channelAnchors);
+  const blue = useComposedChannelPreviewLut(raster, "blue", channelAnchors);
+  const isActive = useMemo(
+    () => isCompositeToneCurvePreviewActive(raster, channelAnchors),
+    [raster, channelAnchors],
+  );
+  return useMemo(
+    () => (isActive && red && green && blue ? { red, green, blue } : null),
+    [isActive, red, green, blue],
+  );
+}
+
+function useComposedChannelPreviewLut(
+  raster: RasterImage | null,
+  channel: ColorToneCurveChannel,
+  channelAnchors: ToneCurveChannelAnchors,
+): ReadonlyArray<number> | null {
+  const channelCurveAnchors = channelAnchors[channel];
+  const valueAnchors = channelAnchors.rgb;
+  return useMemo(
+    () => buildComposedChannelPreviewLutOrNull(raster, channel, channelCurveAnchors, valueAnchors),
+    [raster, channel, channelCurveAnchors, valueAnchors],
+  );
+}
+
+function useMergedToneCurveChannelAnchors(
+  state: ViewportRenderingState | null,
+): ToneCurveChannelAnchors {
+  const channelAnchors = state?.toneCurveChannelAnchors ?? EMPTY_TONE_CURVE_CHANNEL_ANCHORS;
+  const activeChannel = state?.toneCurveActiveChannel ?? DEFAULT_TONE_CURVE_CHANNEL;
+  const activeAnchors = state?.toneCurveAnchors ?? null;
+  return useMemo(
+    () =>
+      activeAnchors ? setToneCurveChannelAnchors(channelAnchors, activeChannel, activeAnchors) : channelAnchors,
+    [channelAnchors, activeChannel, activeAnchors],
   );
 }
 
@@ -1798,23 +1869,28 @@ function buildFalseColorPreviewOrNull(
   return { viewportIndex: sourceIndex, source };
 }
 
-function usePublishToneCurveLutForViewport(
+function usePublishToneCurvePreviewForViewport(
   setPreview: ToneCurvePreviewApi["setPreview"],
-  lookupTable: ReadonlyArray<number> | null,
+  parts: ToneCurvePreviewParts,
   sourceIndex: number | null,
 ): void {
   useEffect(() => {
-    setPreview(buildToneCurvePreviewOrNull(lookupTable, sourceIndex));
+    setPreview(buildToneCurvePreviewOrNull(parts, sourceIndex));
     return () => setPreview(null);
-  }, [setPreview, lookupTable, sourceIndex]);
+  }, [setPreview, parts, sourceIndex]);
 }
 
 function buildToneCurvePreviewOrNull(
-  lookupTable: ReadonlyArray<number> | null,
+  parts: ToneCurvePreviewParts,
   sourceIndex: number | null,
 ): ToneCurveLutPreview | null {
-  if (lookupTable === null || sourceIndex === null) return null;
-  return { viewportIndex: sourceIndex, lookupTable };
+  if (sourceIndex === null) return null;
+  if (parts.lookupTable === null && parts.channelLookupTables === null) return null;
+  return {
+    viewportIndex: sourceIndex,
+    lookupTable: parts.lookupTable,
+    channelLookupTables: parts.channelLookupTables,
+  };
 }
 
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {

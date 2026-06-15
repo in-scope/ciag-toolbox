@@ -7,21 +7,29 @@ import {
   type ReactNode,
 } from "react";
 
-// CT-171: holds the transient display-only tone-curve LUT preview for a single
-// viewport. App computes the display-normalized lookup table from the active
-// tool's live anchors and publishes it here; each viewport cell reads back its
-// own LUT and uploads it to the GPU (ViewportRenderer.setToneCurveLookupTable)
-// instead of re-baking the band into a new raster. The preview never touches the
-// committed image, so apply/cancel simply clears it (LUT -> null -> shader bypass).
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
+
+// CT-171/CT-177: holds the transient display-only tone-curve LUT preview for a
+// single viewport. App computes the display-normalized lookup table(s) from the
+// active tool's live anchors and publishes them here; each viewport cell reads
+// back its own LUT and uploads it to the GPU instead of re-baking the band into a
+// new raster. A scientific stack / single-band photo publishes a single LUT
+// (ViewportRenderer.setToneCurveLookupTable); a true-colour composite publishes
+// per-channel LUTs (setToneCurveChannelLookupTables). The preview never touches
+// the committed image, so apply/cancel simply clears it (-> shader bypass).
 
 export interface ToneCurveLutPreview {
   readonly viewportIndex: number;
-  readonly lookupTable: ReadonlyArray<number>;
+  readonly lookupTable: ReadonlyArray<number> | null;
+  readonly channelLookupTables: ToneCurveChannelPreviewLuts | null;
 }
 
 export interface ToneCurvePreviewApi {
   readonly setPreview: (preview: ToneCurveLutPreview | null) => void;
   readonly getLookupTableForViewport: (viewportIndex: number) => ReadonlyArray<number> | null;
+  readonly getChannelLookupTablesForViewport: (
+    viewportIndex: number,
+  ) => ToneCurveChannelPreviewLuts | null;
 }
 
 const ToneCurvePreviewContext = createContext<ToneCurvePreviewApi | null>(null);
@@ -49,11 +57,23 @@ function useToneCurvePreviewInternalState(): ToneCurvePreviewApi {
   const [preview, setPreview] = useState<ToneCurveLutPreview | null>(null);
   const getLookupTableForViewport = useCallback(
     (viewportIndex: number) =>
-      preview && preview.viewportIndex === viewportIndex ? preview.lookupTable : null,
+      previewForViewportOrNull(preview, viewportIndex)?.lookupTable ?? null,
+    [preview],
+  );
+  const getChannelLookupTablesForViewport = useCallback(
+    (viewportIndex: number) =>
+      previewForViewportOrNull(preview, viewportIndex)?.channelLookupTables ?? null,
     [preview],
   );
   return useMemo(
-    () => ({ setPreview, getLookupTableForViewport }),
-    [setPreview, getLookupTableForViewport],
+    () => ({ setPreview, getLookupTableForViewport, getChannelLookupTablesForViewport }),
+    [setPreview, getLookupTableForViewport, getChannelLookupTablesForViewport],
   );
+}
+
+function previewForViewportOrNull(
+  preview: ToneCurveLutPreview | null,
+  viewportIndex: number,
+): ToneCurveLutPreview | null {
+  return preview && preview.viewportIndex === viewportIndex ? preview : null;
 }

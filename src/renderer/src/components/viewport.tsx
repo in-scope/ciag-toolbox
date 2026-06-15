@@ -32,6 +32,7 @@ import {
 } from "@/lib/webgl/roi-draw-input";
 import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import {
   usePixelReadoutPublisher,
   type PixelReadoutPublisher,
@@ -42,6 +43,7 @@ interface ViewportProps {
   imageSource?: ViewportImageSource | null;
   previewImageSource?: ViewportImageSource | null;
   toneCurvePreviewLookupTable?: ReadonlyArray<number> | null;
+  toneCurvePreviewChannelLookupTables?: ToneCurveChannelPreviewLuts | null;
   fileName?: string | null;
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
@@ -73,6 +75,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
   useToneCurvePreviewLutEffect(rendererRef, props.toneCurvePreviewLookupTable ?? null);
+  useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
   useViewportPixelReadoutPublisher(canvasRef, rendererRef, {
@@ -390,6 +393,18 @@ function useToneCurvePreviewLutEffect(
   useEffect(() => {
     rendererRef.current?.setToneCurveLookupTable(lookupTable);
   }, [rendererRef, lookupTable]);
+}
+
+// CT-177: drive the composite per-channel tone-curve preview. A non-null triple
+// puts the shader into multi-channel mode (each R/G/B samples its own LUT); null
+// reverts to the single-LUT (or no) preview from CT-171.
+function useToneCurvePreviewChannelLutsEffect(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  channelLookupTables: ToneCurveChannelPreviewLuts | null,
+): void {
+  useEffect(() => {
+    rendererRef.current?.setToneCurveChannelLookupTables(channelLookupTables);
+  }, [rendererRef, channelLookupTables]);
 }
 
 function useCanvasResizeObserverEffect(
