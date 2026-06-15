@@ -40,6 +40,24 @@ describe("computeSingleBandRasterUnitExtents", () => {
     expect(extents.max).toBeCloseTo(0.9, 6);
   });
 
+  // CT-161: float data outside [0,1] (e.g. an integer stack exported as 32-bit
+  // float) must report its RAW extents, not values clamped to [0,1]. Clamping
+  // collapsed the display window to {1,1}, which is why such a reopen rendered as a
+  // flat white frame instead of auto-fitting to the data.
+  it("reports the raw, unclamped extents for a float band whose values exceed [0,1]", () => {
+    const raster: RasterImage = {
+      bandPixels: [new Float32Array([100, 175, 250])],
+      width: 3,
+      height: 1,
+      bitsPerSample: 32,
+      sampleFormat: "float",
+      bandCount: 1,
+    };
+    const extents = computeSingleBandRasterUnitExtents(raster);
+    expect(extents.min).toBe(100);
+    expect(extents.max).toBe(250);
+  });
+
   it("maps signed int16 extents by the type range so the offset matches the upload mapping", () => {
     const raster: RasterImage = {
       bandPixels: [new Int16Array([-32768, 0, 32767])],

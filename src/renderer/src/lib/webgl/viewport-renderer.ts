@@ -135,6 +135,7 @@ export class ViewportRenderer {
     enabled: false,
     extents: IDENTITY_RGB_CHANNEL_EXTENTS,
   };
+  private autoFitsFloatDisplayWindow = false;
   private readonly viewTransformChangeListeners = new Set<() => void>();
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
@@ -177,10 +178,9 @@ export class ViewportRenderer {
   }
 
   private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
-    this.normalization = {
-      enabled: this.normalization.enabled,
-      extents: computeImageRgbChannelExtents(source, this.selectedRasterBandIndex),
-    };
+    const extents = computeImageRgbChannelExtents(source, this.selectedRasterBandIndex);
+    this.normalization = { enabled: this.normalization.enabled, extents };
+    this.autoFitsFloatDisplayWindow = floatSourceDataFallsOutsideUnitDisplayWindow(source, extents);
   }
 
   resizeToDisplaySize(displayWidthPx: number, displayHeightPx: number): void {
@@ -368,7 +368,16 @@ export class ViewportRenderer {
   }
 
   private snapshotCurrentRenderState(): RenderPassState {
-    return { normalization: this.normalization, isSingleBand: this.isSingleBandSource };
+    return { normalization: this.resolveEffectiveNormalization(), isSingleBand: this.isSingleBandSource };
+  }
+
+  // A float raster whose data lies outside [0, 1] would saturate to a flat white
+  // frame under the fixed [0, 1] default window, so auto-fit its display window to
+  // the data's own extents on open. This is display-only: the user toggle, pixel
+  // data, and History are untouched (CT-161).
+  private resolveEffectiveNormalization(): NormalizationState {
+    if (this.normalization.enabled || !this.autoFitsFloatDisplayWindow) return this.normalization;
+    return { enabled: true, extents: this.normalization.extents };
   }
 
   private drawRasterTilesWithPerTileTransforms(
@@ -427,6 +436,20 @@ function clampBandIndexForSource(source: ViewportImageSource, bandIndex: number)
 function isSingleBandSourceWithSelectedBand(source: ViewportImageSource): boolean {
   if (source.kind !== "raster") return false;
   return !shouldRenderRasterAsRgbComposite(source.raster);
+}
+
+function floatSourceDataFallsOutsideUnitDisplayWindow(
+  source: ViewportImageSource,
+  extents: RgbChannelExtents,
+): boolean {
+  if (source.kind !== "raster" || source.raster.sampleFormat !== "float") return false;
+  return anyChannelExtentExceedsUnitWindow(extents);
+}
+
+function anyChannelExtentExceedsUnitWindow(extents: RgbChannelExtents): boolean {
+  const exceedsBelow = extents.min.some((minValue) => minValue < 0);
+  const exceedsAbove = extents.max.some((maxValue) => maxValue > 1);
+  return exceedsBelow || exceedsAbove;
 }
 
 function createRasterTileTexturesForSource(

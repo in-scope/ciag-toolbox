@@ -28,6 +28,10 @@ import {
   saveImageFormatPicker,
   selectGridLayout,
 } from "./support/page-objects";
+import {
+  expectNormalizedViewingEnabled,
+  toggleNormalizedViewing,
+} from "./support/normalized-viewing";
 
 // Input-format x export-format round-trip matrix. This suite is deliberately NOT in CI:
 // it leans on GPU-composited canvas readback (not pixel-identical across machines) to verify
@@ -47,6 +51,11 @@ import {
 //   2. A raster (TIFF/ENVI) science source exports the selected band to TIFF, the whole cube
 //      to ENVI, and a single rendered band to PNG/JPEG; those TIFF/ENVI reopen as grayscale
 //      stacks because the science source carries no true-colour tag to write.
+//   3. CT-161: a 32-bit FLOAT reopen now auto-fits its display window to the data's extents
+//      on open (load-tiff/ENVI float data lies outside [0,1]), so it renders the data
+//      VISIBLY instead of the old saturated white frame. The reopen therefore tracks the
+//      source's appearance shown fit-to-window (Normalized viewing) for varied data, or the
+//      source's default view for degenerate/uniform data - never the white frame.
 
 const SOURCE_PANEL = 1;
 const RELOADED_PANEL = 2;
@@ -58,6 +67,9 @@ const GRAYSCALE_FRACTION_CEILING = 0.08;
 const TRUE_COLOUR_FRACTION_FLOOR = 0.25;
 const LUMINANCE_TOLERANCE = 28;
 const LOSSY_LUMINANCE_TOLERANCE = 48;
+// The WebGL redraw after toggling Normalized viewing runs in a post-commit effect,
+// so let it settle before screenshotting the data-fit render.
+const NORMALIZED_REDRAW_SETTLE_MS = 300;
 
 type InputKind = "trueColour" | "raster";
 type ExportKind = "tiff-uint" | "tiff-float" | "canvas" | "envi-uint" | "envi-float";
@@ -84,6 +96,10 @@ interface RenderedSignature {
   readonly width: string;
   readonly height: string;
   readonly bandCount: string;
+  // The source's luminance under Normalized viewing (data fit to the display
+  // window). Captured only for raster sources of a float export, because a float
+  // reopen auto-fits the same way (CT-161); undefined otherwise.
+  readonly dataFitLuminance?: number;
 }
 
 interface CellExpectation {
@@ -160,7 +176,7 @@ async function runRoundTripCell(
 ): Promise<void> {
   const expectation = expectedCellOutcome(fixture, format);
   await loadSourceIntoFirstPanelOfTwo(launched.window, fixture);
-  const source = await captureRenderedSignature(launched.window, SOURCE_PANEL);
+  const source = await captureSourceSignature(launched.window, fixture, format);
   const exportPath = await buildTemporaryExportPath(format);
   const outcome = await exportSelectedSourceThroughSaveDialog(launched, format, exportPath);
   if (expectation.saveRejected) return assertSaveWasRejected(outcome, fixture, format, source);
@@ -225,6 +241,31 @@ async function waitForSaveSuccessOrRejection(window: Page): Promise<SaveOutcome>
   return (await rejected.isVisible()) ? "rejected" : "saved";
 }
 
+// Adds the source's data-fit (Normalized viewing) luminance for raster float
+// exports, the apples-to-apples target for a float reopen that now auto-fits its
+// own display window on open (CT-161).
+async function captureSourceSignature(
+  window: Page,
+  fixture: InputFixture,
+  format: ExportFormat,
+): Promise<RenderedSignature> {
+  const signature = await captureRenderedSignature(window, SOURCE_PANEL);
+  if (!isFloatKind(format.kind) || fixture.kind !== "raster") return signature;
+  return { ...signature, dataFitLuminance: await measureNormalizedViewLuminance(window, SOURCE_PANEL) };
+}
+
+// Reads a panel's luminance under Normalized viewing (data stretched to fill the
+// display window), then restores the toggle so the export proceeds from the
+// default state.
+async function measureNormalizedViewLuminance(window: Page, panel: number): Promise<number> {
+  await toggleNormalizedViewing(window, panel);
+  await expectNormalizedViewingEnabled(window, panel, true);
+  await window.waitForTimeout(NORMALIZED_REDRAW_SETTLE_MS);
+  const color = await averageNonClearCanvasColor(panelCanvas(window, panel));
+  await toggleNormalizedViewing(window, panel);
+  return (color.red + color.green + color.blue) / 3;
+}
+
 async function captureRenderedSignature(window: Page, panel: number): Promise<RenderedSignature> {
   const canvas = panelCanvas(window, panel);
   const averageColour = await averageNonClearCanvasColor(canvas);
@@ -277,7 +318,7 @@ function assertColourCharacterTracksSource(
   } else {
     expect(reloaded.colourfulFraction).toBeLessThanOrEqual(GRAYSCALE_FRACTION_CEILING);
   }
-  expectLuminanceWithinTolerance(source, reloaded, format);
+  expectLuminanceWithinTolerance(source.luminance, reloaded, format);
 }
 
 // A science-stack source (TIFF/ENVI) carries no true-colour tag, so its TIFF/ENVI reopen is
@@ -290,24 +331,46 @@ function assertReopenedAsGrayscale(
   format: ExportFormat,
 ): void {
   expect(reloaded.colourfulFraction).toBeLessThanOrEqual(GRAYSCALE_FRACTION_CEILING);
+  if (reloaded.sampleFormat === "float") {
+    return expectFloatReopenStaysVisibleAndTracksSource(source, reloaded, format);
+  }
   if (source.colourfulFraction < TRUE_COLOUR_FRACTION_FLOOR) {
-    expectLuminanceWithinTolerance(source, reloaded, format);
+    expectLuminanceWithinTolerance(source.luminance, reloaded, format);
   }
 }
 
-// Luminance is only comparable when the display regime survives. A float reopen renders
-// against the fixed [0,1] float window, so un-normalised integer data (values far above 1)
-// legitimately saturates to white and its on-screen luminance is not expected to match the
-// integer-normalised source. We skip the luminance check there; geometry, sample format and
-// colour character still pin the cell down.
-function expectLuminanceWithinTolerance(
+// CT-161: a 32-bit float reopen auto-fits its display window to the data on open,
+// so it renders the data VISIBLY (the pre-fix bug rendered a saturated white frame
+// at luminance ~255). It therefore matches the source shown EITHER as-is (default)
+// or fit-to-window (Normalized viewing) - both represent the same round-tripped
+// data - and the white frame lies far above both, so this rejects the old bug.
+function expectFloatReopenStaysVisibleAndTracksSource(
   source: RenderedSignature,
   reloaded: RenderedSignature,
   format: ExportFormat,
 ): void {
-  if (reloaded.sampleFormat === "float") return;
-  const tolerance = format.isLossyCompressed ? LOSSY_LUMINANCE_TOLERANCE : LUMINANCE_TOLERANCE;
-  expect(Math.abs(reloaded.luminance - source.luminance)).toBeLessThanOrEqual(tolerance);
+  const tolerance = luminanceToleranceForFormat(format);
+  const dataFitLuminance = source.dataFitLuminance ?? source.luminance;
+  const matchesDefaultView = Math.abs(reloaded.luminance - source.luminance) <= tolerance;
+  const matchesDataFitView = Math.abs(reloaded.luminance - dataFitLuminance) <= tolerance;
+  expect(matchesDefaultView || matchesDataFitView).toBe(true);
+}
+
+// Compares a reopened render's luminance against an expected source luminance.
+// Float reopens are no longer exempt (CT-161): they auto-fit on open and are
+// asserted via expectFloatReopenStaysVisibleAndTracksSource instead.
+function expectLuminanceWithinTolerance(
+  sourceLuminance: number,
+  reloaded: RenderedSignature,
+  format: ExportFormat,
+): void {
+  expect(Math.abs(reloaded.luminance - sourceLuminance)).toBeLessThanOrEqual(
+    luminanceToleranceForFormat(format),
+  );
+}
+
+function luminanceToleranceForFormat(format: ExportFormat): number {
+  return format.isLossyCompressed ? LOSSY_LUMINANCE_TOLERANCE : LUMINANCE_TOLERANCE;
 }
 
 async function expectWrittenFilesAreNonEmpty(exportPath: string, format: ExportFormat): Promise<void> {

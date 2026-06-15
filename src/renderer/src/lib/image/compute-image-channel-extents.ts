@@ -133,6 +133,7 @@ export function computeSingleBandRasterUnitExtents(
   const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
   const range = computeBandPixelValueRange(pixels);
   if (!Number.isFinite(range.min)) return IDENTITY_SINGLE_BAND_EXTENTS;
+  if (raster.sampleFormat === "float") return { min: range.min, max: range.max };
   const mapping = computeDataTypeUnitMappingForRaster(raster);
   return {
     min: mapRawValueToDisplayUnit(range.min, mapping),
