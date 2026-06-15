@@ -285,11 +285,13 @@ export {
   setApplyToAllBands,
 } from "./brightness-contrast-controls";
 export {
-  ROTATE_REFLECT_LABEL,
+  ROTATE_LABEL,
+  REFLECT_LABEL,
+  geometricTransformOperationLabel,
   geometricTransformSelect,
   readOfferedGeometricTransformLabels,
   selectGeometricTransform,
-  openRotateReflectFromMenu,
+  openGeometricTransformFromMenu,
   applyGeometricTransformInPlace,
   quickTransformToolbarButton,
   applyQuickGeometricTransform,

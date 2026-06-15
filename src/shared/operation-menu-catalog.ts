@@ -98,10 +98,11 @@ const COLOR_GROUP: OperationGroup = {
 const TRANSFORM_GROUP: OperationGroup = {
   key: "transform",
   commands: [
-    // The broad operation lives in the menu (its panel offers all five transforms,
-    // including the rotate-180 that has no one-click button); the toolbar carries
-    // only the narrow direct-apply variants to avoid a redundant duplicate button.
-    buildMenuOnlyActionCommand("rotate-reflect", "Rotate & Reflect"),
+    // Rotate and Reflect are separate operations: each opens its own panel (Rotate
+    // also offers the rotate-180 that has no one-click button). The toolbar carries
+    // only the narrow direct-apply variants to avoid redundant duplicate buttons.
+    buildMenuOnlyActionCommand("rotate", "Rotate"),
+    buildMenuOnlyActionCommand("reflect", "Reflect"),
     buildToolbarOnlyTransformCommand("rotate-90-cw", "Rotate 90° clockwise"),
     buildToolbarOnlyTransformCommand("rotate-270-cw", "Rotate 90° counterclockwise"),
     buildToolbarOnlyTransformCommand("flip-horizontal", "Reflect horizontally"),

@@ -6,12 +6,21 @@ import {
   FALSE_COLOR_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
+  REFLECT_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
   RGB_TO_GRAYSCALE_ACTION,
-  ROTATE_REFLECT_ACTION,
+  ROTATE_ACTION,
   SPECTRALON_ACTION,
   TONE_CURVE_ACTION,
+  findGeometricTransformActionForChoice,
+  type RegisteredViewportAction,
 } from "./registered-actions";
+
+function readEnumParameterOptionValues(action: RegisteredViewportAction): string[] {
+  const parameter = action.parameters?.[0];
+  if (!parameter || parameter.kind !== "enum") return [];
+  return parameter.options.map((option) => option.value);
+}
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { RasterImage } from "@/lib/image/raster-image";
 
@@ -35,7 +44,8 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "standardize",
       "rgb-to-grayscale",
       "false-color",
-      "rotate-reflect",
+      "rotate",
+      "reflect",
     ]);
   });
 
@@ -525,9 +535,13 @@ describe("FALSE_COLOR_ACTION", () => {
   });
 });
 
-describe("ROTATE_REFLECT_ACTION", () => {
+describe("ROTATE_ACTION", () => {
+  it("offers only the rotation choices in its panel", () => {
+    expect(readEnumParameterOptionValues(ROTATE_ACTION)).toEqual(["rotate-90-cw", "rotate-180", "rotate-270-cw"]);
+  });
+
   it("rotates the whole cube and swaps the reported dimensions for a 90 degree rotation", () => {
-    const result = ROTATE_REFLECT_ACTION.transformSource!(
+    const result = ROTATE_ACTION.transformSource!(
       { kind: "raster", raster: makeThreeBandUint8Raster([1, 2], [3, 4], [5, 6]) },
       { transform: "rotate-90-cw" },
     );
@@ -536,14 +550,32 @@ describe("ROTATE_REFLECT_ACTION", () => {
     expect(Array.from(raster.bandPixels[0]!)).toEqual([1, 2]);
   });
 
-  it("clears any active region after a geometric transform so the stale ROI is dropped", () => {
+  it("clears any active region after a rotation so the stale ROI is dropped", () => {
     const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi };
-    expect(ROTATE_REFLECT_ACTION.apply(state, { transform: "rotate-90-cw" }).roi).toBeNull();
+    expect(ROTATE_ACTION.apply(state, { transform: "rotate-90-cw" }).roi).toBeNull();
   });
 
-  it("records the chosen transform in the applied label", () => {
-    expect(ROTATE_REFLECT_ACTION.formatAppliedLabel!({ transform: "flip-vertical" })).toBe("Flip vertical");
-    expect(ROTATE_REFLECT_ACTION.formatAppliedLabel!({ transform: "rotate-270-cw" })).toBe("Rotate 270 clockwise");
+  it("records the chosen rotation in the applied label", () => {
+    expect(ROTATE_ACTION.formatAppliedLabel!({ transform: "rotate-270-cw" })).toBe("Rotate 270 clockwise");
+  });
+});
+
+describe("REFLECT_ACTION", () => {
+  it("offers only the reflection choices in its panel", () => {
+    expect(readEnumParameterOptionValues(REFLECT_ACTION)).toEqual(["flip-horizontal", "flip-vertical"]);
+  });
+
+  it("records the chosen reflection in the applied label", () => {
+    expect(REFLECT_ACTION.formatAppliedLabel!({ transform: "flip-vertical" })).toBe("Flip vertical");
+  });
+});
+
+describe("findGeometricTransformActionForChoice", () => {
+  it("routes rotations to Rotate and reflections to Reflect", () => {
+    expect(findGeometricTransformActionForChoice("rotate-90-cw")).toBe(ROTATE_ACTION);
+    expect(findGeometricTransformActionForChoice("rotate-270-cw")).toBe(ROTATE_ACTION);
+    expect(findGeometricTransformActionForChoice("flip-horizontal")).toBe(REFLECT_ACTION);
+    expect(findGeometricTransformActionForChoice("flip-vertical")).toBe(REFLECT_ACTION);
   });
 });

@@ -15,13 +15,29 @@ export type GeometricTransform =
   | "flip-horizontal"
   | "flip-vertical";
 
-export const GEOMETRIC_TRANSFORMS: ReadonlyArray<GeometricTransform> = [
+// Rotations and reflections are distinct families: rotations turn the whole
+// cube about its centre, reflections mirror it across an axis. They each get
+// their own menu entry and side panel, so the catalog and the registered
+// actions build their option lists from these two lists rather than the union.
+export const ROTATION_TRANSFORMS: ReadonlyArray<GeometricTransform> = [
   "rotate-90-cw",
   "rotate-180",
   "rotate-270-cw",
+];
+
+export const REFLECTION_TRANSFORMS: ReadonlyArray<GeometricTransform> = [
   "flip-horizontal",
   "flip-vertical",
 ];
+
+export const GEOMETRIC_TRANSFORMS: ReadonlyArray<GeometricTransform> = [
+  ...ROTATION_TRANSFORMS,
+  ...REFLECTION_TRANSFORMS,
+];
+
+export function isReflectionTransform(transform: GeometricTransform): boolean {
+  return REFLECTION_TRANSFORMS.includes(transform);
+}
 
 export const GEOMETRIC_TRANSFORM_LABELS: Record<GeometricTransform, string> = {
   "rotate-90-cw": "Rotate 90 clockwise",

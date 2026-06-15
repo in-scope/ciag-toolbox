@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Crop, Eclipse, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
 import {
   EMPTY_PINNED_ROI_SPECTRA,
@@ -28,8 +28,10 @@ import {
 import {
   applyGeometricTransformToRasterImage,
   GEOMETRIC_TRANSFORM_LABELS,
-  GEOMETRIC_TRANSFORMS,
   isGeometricTransform,
+  isReflectionTransform,
+  REFLECTION_TRANSFORMS,
+  ROTATION_TRANSFORMS,
   type GeometricTransform,
 } from "@/lib/image/apply-geometric-transform";
 import {
@@ -1424,31 +1426,67 @@ function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): str
 
 export const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";
 
-const GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA: EnumParameterSchema = {
-  kind: "enum",
-  id: GEOMETRIC_TRANSFORM_PARAMETER_ID,
-  label: "Transform",
-  description:
-    "Rotate the whole stack clockwise or flip it. Rotations of 90 and 270 degrees swap the reported width and height.",
-  defaultValue: "rotate-90-cw",
-  options: GEOMETRIC_TRANSFORMS.map((transform) => ({
-    value: transform,
-    label: GEOMETRIC_TRANSFORM_LABELS[transform],
-  })),
-};
+function buildGeometricTransformParameterSchema(
+  transforms: ReadonlyArray<GeometricTransform>,
+  label: string,
+  description: string,
+): EnumParameterSchema {
+  return {
+    kind: "enum",
+    id: GEOMETRIC_TRANSFORM_PARAMETER_ID,
+    label,
+    description,
+    defaultValue: transforms[0]!,
+    options: transforms.map((transform) => ({
+      value: transform,
+      label: GEOMETRIC_TRANSFORM_LABELS[transform],
+    })),
+  };
+}
 
-export const ROTATE_REFLECT_ACTION: RegisteredViewportAction = {
-  id: "rotate-reflect",
-  label: "Rotate & Reflect",
+const ROTATION_PARAMETER_SCHEMA: EnumParameterSchema = buildGeometricTransformParameterSchema(
+  ROTATION_TRANSFORMS,
+  "Rotation",
+  "Rotate the whole stack clockwise. Rotations of 90 and 270 degrees swap the reported width and height.",
+);
+
+const REFLECTION_PARAMETER_SCHEMA: EnumParameterSchema = buildGeometricTransformParameterSchema(
+  REFLECTION_TRANSFORMS,
+  "Direction",
+  "Mirror the whole stack across an axis. The reported width and height are unchanged.",
+);
+
+export const ROTATE_ACTION: RegisteredViewportAction = {
+  id: "rotate",
+  label: "Rotate",
   icon: RotateCw,
-  parameters: [GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA],
-  successMessage: "Geometric transform applied",
-  appliedLabel: "Rotate / reflect",
+  parameters: [ROTATION_PARAMETER_SCHEMA],
+  successMessage: "Rotation applied",
+  appliedLabel: "Rotate",
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
   transformSource: createGeometricTransformSourceTransform(),
 };
+
+export const REFLECT_ACTION: RegisteredViewportAction = {
+  id: "reflect",
+  label: "Reflect",
+  icon: FlipHorizontal,
+  parameters: [REFLECTION_PARAMETER_SCHEMA],
+  successMessage: "Reflection applied",
+  appliedLabel: "Reflect",
+  formatAppliedLabel: formatGeometricTransformAppliedLabel,
+  apply: clearRegionAfterGeometricTransform,
+  clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  transformSource: createGeometricTransformSourceTransform(),
+};
+
+export function findGeometricTransformActionForChoice(
+  transform: GeometricTransform,
+): RegisteredViewportAction {
+  return isReflectionTransform(transform) ? REFLECT_ACTION : ROTATE_ACTION;
+}
 
 function clearRegionAfterGeometricTransform(state: ViewportRenderingState): ViewportRenderingState {
   return { ...state, roi: null };
@@ -1465,7 +1503,7 @@ function createGeometricTransformSourceTransform(): ViewportActionSourceTransfor
 function readGeometricTransformChoice(parameterValues: ParameterValuesById): GeometricTransform {
   const raw = parameterValues[GEOMETRIC_TRANSFORM_PARAMETER_ID];
   if (isGeometricTransform(raw)) return raw;
-  return GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA.defaultValue as GeometricTransform;
+  return ROTATION_TRANSFORMS[0]!;
 }
 
 function formatGeometricTransformAppliedLabel(parameterValues: ParameterValuesById): string {
@@ -1484,5 +1522,6 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   STANDARDIZE_ACTION,
   RGB_TO_GRAYSCALE_ACTION,
   FALSE_COLOR_ACTION,
-  ROTATE_REFLECT_ACTION,
+  ROTATE_ACTION,
+  REFLECT_ACTION,
 ];

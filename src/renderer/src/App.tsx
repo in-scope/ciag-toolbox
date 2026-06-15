@@ -55,8 +55,9 @@ import {
 import {
   BAND_SUBSET_ACTION,
   GEOMETRIC_TRANSFORM_PARAMETER_ID,
-  ROTATE_REFLECT_ACTION,
+  ROTATE_ACTION,
   buildBandSubsetParameterValuesFromKeptNumbers,
+  findGeometricTransformActionForChoice,
   readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
@@ -385,7 +386,7 @@ function ApplicationShell(): JSX.Element {
     regionToolActive: regionTool.isRegionToolActive,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     isQuickTransformAvailable: deriveActionAvailabilityForActiveViewport(
-      ROTATE_REFLECT_ACTION,
+      ROTATE_ACTION,
       singleSelectedSource,
       renderingApi,
     ).isAvailable,
@@ -663,7 +664,7 @@ function applyQuickGeometricTransformToActiveSource(
 ): void {
   if (!source) return;
   applyActionInPlaceAtSourceIndex(
-    ROTATE_REFLECT_ACTION,
+    findGeometricTransformActionForChoice(transform),
     { [GEOMETRIC_TRANSFORM_PARAMETER_ID]: transform },
     source.index,
     bindings,

@@ -26,8 +26,8 @@ export async function openOperation(page: Page, operationLabel: string): Promise
   return panel;
 }
 
-// Menu-only operations (e.g. the broad "Rotate & Reflect", whose toolbar slot is occupied by
-// narrow one-click variants) are launched from the native Image menu rather than the toolbar.
+// Menu-only operations (e.g. the broad "Rotate" and "Reflect", whose toolbar slots are occupied
+// by narrow one-click variants) are launched from the native Image menu rather than the toolbar.
 export async function openOperationFromImageMenu(
   app: ElectronApplication,
   page: Page,

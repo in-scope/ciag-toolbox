@@ -10,7 +10,8 @@ import {
   loadImageFromAbsolutePath,
   operationPanel,
   quickTransformToolbarButton,
-  ROTATE_REFLECT_LABEL,
+  REFLECT_LABEL,
+  ROTATE_LABEL,
   selectActiveBandNumber,
   writeTemporaryMultiBandUint16Tiff,
   type ImagePixel,
@@ -18,10 +19,11 @@ import {
 } from "./support/page-objects";
 
 // The toolbar's Transform group carries one-click variants of the rotate/reflect presets
-// (Rotate 90° CW / CCW, Reflect H / V). Unlike the broad "Rotate & Reflect" operation (now
-// menu-only, opens a panel), each quick button applies its transform IN PLACE immediately and
-// never opens the operation panel. They reuse the same ROTATE_REFLECT action, so each records a
-// History entry whose action label is "Rotate & Reflect" and whose detail is the preset's label.
+// (Rotate 90° CW / CCW, Reflect H / V). Unlike the broad "Rotate" and "Reflect" operations (now
+// menu-only, each opens a panel), every quick button applies its transform IN PLACE immediately
+// and never opens an operation panel. The rotate presets reuse the Rotate action and the reflect
+// presets reuse the Reflect action, so each records a History entry whose action label is the
+// matching operation name ("Rotate" or "Reflect") and whose detail is the preset's label.
 //
 // FIXTURE: a non-square 4x3 three-band uint16 stack makes the 90° width/height swap observable,
 // with each pixel value (base + y*WIDTH + x) distinct so its landing spot has an exact oracle.
@@ -59,7 +61,7 @@ test("the quick transform buttons disable on a fresh launch and enable once a st
 test("Rotate 90° clockwise applies in place, swaps width/height, and never opens the panel", async () => {
   await loadNonSquareStackIntoPanelOne();
   await applyQuickGeometricTransform(launched.window, "rotate-90-cw");
-  await expect(operationPanel(launched.window, ROTATE_REFLECT_LABEL)).toHaveCount(0);
+  await expect(operationPanel(launched.window, ROTATE_LABEL)).toHaveCount(0);
   await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: HEIGHT, height: WIDTH });
   await expectBandPixelReadout(1, ROTATED_LANDING_OF_TOP_LEFT, sourceValue(1, SOURCE_TOP_LEFT), ROTATED_DIMENSIONS);
 });
@@ -79,12 +81,21 @@ test("two horizontal reflects restore the original pixels and dimensions exactly
   await expectBandPixelReadout(1, SOURCE_TOP_LEFT, sourceValue(1, SOURCE_TOP_LEFT), ORIGINAL_DIMENSIONS);
 });
 
-test("a quick transform records the same History entry as the broad operation", async () => {
+test("a quick rotate records a Rotate History entry like the broad operation", async () => {
   await loadNonSquareStackIntoPanelOne();
   await applyQuickGeometricTransform(launched.window, "rotate-90-cw");
   await expectHistoryToRecordOperation(launched.window, {
-    actionLabel: ROTATE_REFLECT_LABEL,
+    actionLabel: ROTATE_LABEL,
     detailSubstrings: ["Rotate 90 clockwise"],
+  });
+});
+
+test("a quick reflect records a Reflect History entry like the broad operation", async () => {
+  await loadNonSquareStackIntoPanelOne();
+  await applyQuickGeometricTransform(launched.window, "flip-horizontal");
+  await expectHistoryToRecordOperation(launched.window, {
+    actionLabel: REFLECT_LABEL,
+    detailSubstrings: ["Flip horizontal"],
   });
 });
 
