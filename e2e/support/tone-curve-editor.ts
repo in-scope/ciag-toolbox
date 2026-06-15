@@ -110,6 +110,30 @@ export async function stepToneCurveAnchorField(
   await operationPanel(page, TONE_CURVE_LABEL).getByRole("button", { name: `${verb} ${label}` }).click();
 }
 
+// CT-166: with an anchor selected and the editor focused, arrow keys nudge the selected
+// anchor (Left/Right = Input, Up/Down = Output) by one data-type step and Delete/Backspace
+// removes the selected interior anchor. Clicking a handle focuses it (the keydown bubbles to
+// the editor surface), so callers select a handle before pressing keys.
+export type ToneCurveNudgeDirection = "left" | "right" | "up" | "down";
+
+const NUDGE_KEY_BY_DIRECTION: Record<ToneCurveNudgeDirection, string> = {
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  up: "ArrowUp",
+  down: "ArrowDown",
+};
+
+export async function nudgeSelectedToneCurveAnchor(
+  page: Page,
+  direction: ToneCurveNudgeDirection,
+): Promise<void> {
+  await page.keyboard.press(NUDGE_KEY_BY_DIRECTION[direction]);
+}
+
+export async function deleteSelectedToneCurveAnchor(page: Page): Promise<void> {
+  await page.keyboard.press("Delete");
+}
+
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
   await expect(toneCurveEndpointHandles(page)).toHaveCount(2);
   await expect(toneCurveInteriorHandles(page)).toHaveCount(0);

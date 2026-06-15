@@ -275,9 +275,12 @@ export {
   readToneCurveAnchorFieldValue,
   setToneCurveAnchorField,
   stepToneCurveAnchorField,
+  nudgeSelectedToneCurveAnchor,
+  deleteSelectedToneCurveAnchor,
   type ToneCurveValueRanges,
   type ToneCurveAnchorPoint,
   type ToneCurveAnchorFieldLabel,
+  type ToneCurveNudgeDirection,
 } from "./tone-curve-editor";
 export {
   summarizeCanvasPixels,

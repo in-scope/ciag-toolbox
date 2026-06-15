@@ -104,6 +104,7 @@ function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
             onChange={props.binding.onChange}
             selectedAnchorIndex={selection.selectedAnchorIndex}
             onSelectAnchor={selection.selectAnchor}
+            isIntegerBand={props.raster.sampleFormat !== "float"}
           />
         }
       />

@@ -1,10 +1,19 @@
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   buildMonotoneToneCurve,
   evaluateToneCurveAtInput,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
+import { toneCurveFieldStepForBand } from "@/lib/image/tone-curve-anchor-fields";
+import {
+  applyToneCurveAnchorKeyboardAction,
+  isToneCurveEditorKey,
+} from "@/lib/image/tone-curve-anchor-keyboard";
 import {
   addToneCurveAnchor,
   indexOfToneCurveAnchorByInput,
@@ -24,6 +33,7 @@ interface HistogramToneCurveEditorProps {
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void;
   selectedAnchorIndex: number;
   onSelectAnchor: (index: number) => void;
+  isIntegerBand: boolean;
 }
 
 export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): JSX.Element {
@@ -31,7 +41,9 @@ export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): 
   const drag = useToneCurveAnchorDrag(props.ranges, anchors, props.onChange, props.onSelectAnchor);
   return (
     <div
-      className="absolute inset-0 touch-none"
+      className="absolute inset-0 touch-none rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      tabIndex={0}
+      onKeyDown={(event) => nudgeOrDeleteSelectedAnchorFromKey(event, props, anchors)}
       onPointerDown={drag.onBackgroundPointerDown}
       onPointerMove={drag.onPointerMove}
       onPointerUp={drag.endDrag}
@@ -40,7 +52,7 @@ export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): 
       <ToneCurveSvgPath ranges={props.ranges} anchors={anchors} />
       {anchors.map((anchor, index) => (
         <ToneCurveAnchorHandle
-          key={`${anchor.input}-${index}`}
+          key={index}
           point={projectAnchorToFractionPoint(anchor, props.ranges)}
           isInterior={isRemovableInteriorAnchorIndex(anchors, index)}
           isSelected={index === props.selectedAnchorIndex}
@@ -50,6 +62,19 @@ export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): 
       ))}
     </div>
   );
+}
+
+function nudgeOrDeleteSelectedAnchorFromKey(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  props: HistogramToneCurveEditorProps,
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+): void {
+  if (!isToneCurveEditorKey(event.key)) return;
+  event.preventDefault();
+  const step = toneCurveFieldStepForBand(props.isIntegerBand);
+  const next = applyToneCurveAnchorKeyboardAction(event.key, anchors, props.selectedAnchorIndex, props.ranges, step);
+  if (next.anchors !== anchors) props.onChange(next.anchors);
+  if (next.selectedAnchorIndex !== props.selectedAnchorIndex) props.onSelectAnchor(next.selectedAnchorIndex);
 }
 
 interface FractionPoint {
