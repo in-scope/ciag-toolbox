@@ -11,6 +11,7 @@ import {
   moveToneCurveAnchor,
   removeToneCurveAnchor,
   resolveToneCurveAnchorsOrDefault,
+  toneCurveAnchorsMatchDefaultIdentity,
   type ToneCurveValueRanges,
 } from "@/lib/image/tone-curve-editor-state";
 
@@ -127,6 +128,25 @@ describe("anchor index helpers", () => {
     expect(isRemovableInteriorAnchorIndex(anchors, 0)).toBe(false);
     expect(isRemovableInteriorAnchorIndex(anchors, 1)).toBe(true);
     expect(isRemovableInteriorAnchorIndex(anchors, 2)).toBe(false);
+  });
+});
+
+describe("toneCurveAnchorsMatchDefaultIdentity", () => {
+  it("is true for the freshly built default diagonal", () => {
+    expect(toneCurveAnchorsMatchDefaultIdentity(buildDefaultToneCurveAnchors(RANGES), RANGES)).toBe(true);
+  });
+
+  it("is false once an interior anchor has been added", () => {
+    const anchors = addToneCurveAnchor(buildDefaultToneCurveAnchors(RANGES), { input: 64, output: 100 }, RANGES);
+    expect(toneCurveAnchorsMatchDefaultIdentity(anchors, RANGES)).toBe(false);
+  });
+
+  it("is false when an endpoint output has been moved off the diagonal", () => {
+    const anchors = [
+      { input: 0, output: 255 },
+      { input: 128, output: 255 },
+    ];
+    expect(toneCurveAnchorsMatchDefaultIdentity(anchors, RANGES)).toBe(false);
   });
 });
 

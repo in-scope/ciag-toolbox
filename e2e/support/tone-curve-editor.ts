@@ -134,6 +134,19 @@ export async function deleteSelectedToneCurveAnchor(page: Page): Promise<void> {
   await page.keyboard.press("Delete");
 }
 
+// CT-167: the editor exposes a Reset control that returns the curve to the default two-endpoint
+// identity diagonal. It is disabled while the curve already equals identity (idempotency made
+// observable) and enabled once any anchor has been added/moved off the diagonal.
+const RESET_BUTTON_NAME = "Reset";
+
+export function toneCurveResetButton(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByRole("button", { name: RESET_BUTTON_NAME });
+}
+
+export async function clickToneCurveResetToIdentity(page: Page): Promise<void> {
+  await toneCurveResetButton(page).click();
+}
+
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
   await expect(toneCurveEndpointHandles(page)).toHaveCount(2);
   await expect(toneCurveInteriorHandles(page)).toHaveCount(0);

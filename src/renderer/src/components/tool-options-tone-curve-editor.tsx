@@ -29,6 +29,7 @@ import { clampBandIndexToRaster, type RasterImage } from "@/lib/image/raster-ima
 import {
   buildDefaultToneCurveAnchors,
   resolveToneCurveAnchorsOrDefault,
+  toneCurveAnchorsMatchDefaultIdentity,
   type ToneCurveValueRanges,
 } from "@/lib/image/tone-curve-editor-state";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
@@ -93,7 +94,10 @@ function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
   const selection = useSelectedToneCurveAnchorIndex(anchors.length);
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-muted-foreground">Tone curve</span>
+      <ToneCurveEditorHeader
+        isAtIdentity={toneCurveAnchorsMatchDefaultIdentity(anchors, props.ranges)}
+        onReset={() => resetToneCurveToIdentityDiagonal(props.ranges, props.binding.onChange, selection.selectAnchor)}
+      />
       <HistogramCanvas
         histogram={props.histogram}
         sampleFormat={props.raster.sampleFormat}
@@ -120,6 +124,37 @@ function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
       </p>
     </div>
   );
+}
+
+interface ToneCurveEditorHeaderProps {
+  isAtIdentity: boolean;
+  onReset: () => void;
+}
+
+function ToneCurveEditorHeader(props: ToneCurveEditorHeaderProps): JSX.Element {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs font-medium text-muted-foreground">Tone curve</span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={props.isAtIdentity}
+        onClick={props.onReset}
+      >
+        Reset
+      </Button>
+    </div>
+  );
+}
+
+function resetToneCurveToIdentityDiagonal(
+  ranges: ToneCurveValueRanges,
+  onChange: (next: ToneCurveAnchors) => void,
+  selectAnchor: (index: number) => void,
+): void {
+  onChange(buildDefaultToneCurveAnchors(ranges));
+  selectAnchor(DEFAULT_SELECTED_TONE_CURVE_ANCHOR_INDEX);
 }
 
 interface SelectedToneCurveAnchorFieldsProps {

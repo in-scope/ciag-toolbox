@@ -277,6 +277,8 @@ export {
   stepToneCurveAnchorField,
   nudgeSelectedToneCurveAnchor,
   deleteSelectedToneCurveAnchor,
+  toneCurveResetButton,
+  clickToneCurveResetToIdentity,
   type ToneCurveValueRanges,
   type ToneCurveAnchorPoint,
   type ToneCurveAnchorFieldLabel,
