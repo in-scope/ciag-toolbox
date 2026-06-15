@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   buildToneCurveValueRanges,
@@ -9,9 +9,14 @@ import {
   type ToneCurveAnchorBinding,
 } from "@/components/histogram-section";
 import { HistogramToneCurveEditor } from "@/components/histogram-tone-curve-editor";
+import {
+  clampSelectedToneCurveAnchorIndex,
+  DEFAULT_SELECTED_TONE_CURVE_ANCHOR_INDEX,
+} from "@/lib/image/tone-curve-anchor-selection";
 import { clampBandIndexToRaster, type RasterImage } from "@/lib/image/raster-image";
 import {
   buildDefaultToneCurveAnchors,
+  resolveToneCurveAnchorsOrDefault,
   type ToneCurveValueRanges,
 } from "@/lib/image/tone-curve-editor-state";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
@@ -70,6 +75,8 @@ interface LoadedToneCurveEditorProps {
 }
 
 function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
+  const anchorCount = resolveToneCurveAnchorsOrDefault(props.binding.anchors, props.ranges).length;
+  const selection = useSelectedToneCurveAnchorIndex(anchorCount);
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-medium text-muted-foreground">Tone curve</span>
@@ -81,6 +88,8 @@ function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
             ranges={props.ranges}
             anchors={props.binding.anchors}
             onChange={props.binding.onChange}
+            selectedAnchorIndex={selection.selectedAnchorIndex}
+            onSelectAnchor={selection.selectAnchor}
           />
         }
       />
@@ -89,6 +98,19 @@ function LoadedToneCurveEditor(props: LoadedToneCurveEditorProps): JSX.Element {
       </p>
     </div>
   );
+}
+
+interface SelectedToneCurveAnchor {
+  readonly selectedAnchorIndex: number;
+  readonly selectAnchor: (index: number) => void;
+}
+
+function useSelectedToneCurveAnchorIndex(anchorCount: number): SelectedToneCurveAnchor {
+  const [requestedIndex, setRequestedIndex] = useState(DEFAULT_SELECTED_TONE_CURVE_ANCHOR_INDEX);
+  return {
+    selectedAnchorIndex: clampSelectedToneCurveAnchorIndex(requestedIndex, anchorCount),
+    selectAnchor: setRequestedIndex,
+  };
 }
 
 function ToneCurveEditorLoading(): JSX.Element {

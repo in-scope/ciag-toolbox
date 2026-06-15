@@ -22,11 +22,13 @@ interface HistogramToneCurveEditorProps {
   ranges: ToneCurveValueRanges;
   anchors: ReadonlyArray<ToneCurveAnchor> | null;
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void;
+  selectedAnchorIndex: number;
+  onSelectAnchor: (index: number) => void;
 }
 
 export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): JSX.Element {
   const anchors = resolveToneCurveAnchorsOrDefault(props.anchors, props.ranges);
-  const drag = useToneCurveAnchorDrag(props.ranges, anchors, props.onChange);
+  const drag = useToneCurveAnchorDrag(props.ranges, anchors, props.onChange, props.onSelectAnchor);
   return (
     <div
       className="absolute inset-0 touch-none"
@@ -41,6 +43,7 @@ export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): 
           key={`${anchor.input}-${index}`}
           point={projectAnchorToFractionPoint(anchor, props.ranges)}
           isInterior={isRemovableInteriorAnchorIndex(anchors, index)}
+          isSelected={index === props.selectedAnchorIndex}
           onPointerDown={(event) => drag.beginDrag(event, index)}
           onRemove={() => drag.removeAnchorAt(index)}
         />
@@ -66,11 +69,13 @@ function useToneCurveAnchorDrag(
   ranges: ToneCurveValueRanges,
   anchors: ReadonlyArray<ToneCurveAnchor>,
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void,
+  onSelectAnchor: (index: number) => void,
 ): ToneCurveAnchorDrag {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   return {
-    beginDrag: (event, index) => beginAnchorDrag(event, index, setActiveIndex),
-    onBackgroundPointerDown: (event) => addAnchorFromBackgroundClick(event, ranges, anchors, onChange, setActiveIndex),
+    beginDrag: (event, index) => beginAnchorDrag(event, index, setActiveIndex, onSelectAnchor),
+    onBackgroundPointerDown: (event) =>
+      addAnchorFromBackgroundClick(event, ranges, anchors, onChange, setActiveIndex, onSelectAnchor),
     onPointerMove: (event) => continueAnchorDrag(event, activeIndex, ranges, anchors, onChange),
     endDrag: () => setActiveIndex(null),
     removeAnchorAt: (index) => onChange(removeToneCurveAnchor(anchors, index)),
@@ -81,9 +86,11 @@ function beginAnchorDrag(
   event: ReactPointerEvent<HTMLElement>,
   index: number,
   setActiveIndex: (next: number | null) => void,
+  onSelectAnchor: (index: number) => void,
 ): void {
   event.stopPropagation();
   event.currentTarget.setPointerCapture?.(event.pointerId);
+  onSelectAnchor(index);
   setActiveIndex(index);
 }
 
@@ -93,12 +100,15 @@ function addAnchorFromBackgroundClick(
   anchors: ReadonlyArray<ToneCurveAnchor>,
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void,
   setActiveIndex: (next: number | null) => void,
+  onSelectAnchor: (index: number) => void,
 ): void {
   const anchor = anchorFromPointerEvent(event, ranges);
   const next = addToneCurveAnchor(anchors, anchor, ranges);
   onChange(next);
   event.currentTarget.setPointerCapture?.(event.pointerId);
-  setActiveIndex(indexOfToneCurveAnchorByInput(next, anchor.input));
+  const addedIndex = indexOfToneCurveAnchorByInput(next, anchor.input);
+  onSelectAnchor(addedIndex);
+  setActiveIndex(addedIndex);
 }
 
 function continueAnchorDrag(
@@ -185,6 +195,7 @@ function projectAnchorToFractionPoint(anchor: ToneCurveAnchor, ranges: ToneCurve
 interface ToneCurveAnchorHandleProps {
   point: FractionPoint;
   isInterior: boolean;
+  isSelected: boolean;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onRemove: () => void;
 }
@@ -194,9 +205,11 @@ function ToneCurveAnchorHandle(props: ToneCurveAnchorHandleProps): JSX.Element {
     <button
       type="button"
       aria-label={props.isInterior ? "Curve anchor (right-click to remove)" : "Curve endpoint"}
+      data-selected={props.isSelected ? "true" : "false"}
       className={cn(
-        "absolute size-3 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full border border-background bg-primary",
+        "absolute -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full border border-background bg-primary",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        props.isSelected ? "size-4 ring-2 ring-ring ring-offset-1 ring-offset-background" : "size-3",
       )}
       style={{ left: `${props.point.x * 100}%`, top: `${props.point.y * 100}%` }}
       onPointerDown={props.onPointerDown}

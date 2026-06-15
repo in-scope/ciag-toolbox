@@ -25,6 +25,9 @@ const INTERIOR_HANDLE_NAME = "Curve anchor (right-click to remove)";
 const HISTOGRAM_CANVAS_NAME = "Active band intensity histogram";
 const ANY_HANDLE_SELECTOR =
   `button[aria-label="${ENDPOINT_HANDLE_NAME}"], button[aria-label^="Curve anchor"]`;
+const SELECTED_HANDLE_SELECTOR =
+  `button[aria-label="${ENDPOINT_HANDLE_NAME}"][data-selected="true"], ` +
+  `button[aria-label^="Curve anchor"][data-selected="true"]`;
 
 export interface ToneCurveValueRanges {
   readonly inputMin: number;
@@ -52,6 +55,24 @@ export function toneCurveInteriorHandles(page: Page): Locator {
 
 export function toneCurveAllHandles(page: Page): Locator {
   return operationPanel(page, TONE_CURVE_LABEL).locator(ANY_HANDLE_SELECTOR);
+}
+
+// CT-164: exactly one anchor handle is selected at a time, exposed via the stable
+// data-selected="true" attribute (used by the CT-165 numeric fields and these specs).
+export function selectedToneCurveAnchorHandles(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(SELECTED_HANDLE_SELECTOR);
+}
+
+export async function expectExactlyOneToneCurveAnchorSelected(page: Page): Promise<void> {
+  await expect(selectedToneCurveAnchorHandles(page)).toHaveCount(1);
+}
+
+export async function expectToneCurveHandleIsSelected(handle: Locator): Promise<void> {
+  await expect(handle).toHaveAttribute("data-selected", "true");
+}
+
+export async function clickToneCurveAnchorHandle(handle: Locator): Promise<void> {
+  await handle.click();
 }
 
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
