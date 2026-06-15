@@ -163,6 +163,7 @@ export interface ThemeSnapshot {
 }
 
 export type MenuEventListener = () => void;
+export type MenuCommandListener = (commandId: string) => void;
 export type UnsubscribeMenuListener = () => void;
 export type ThemeChangeListener = (snapshot: ThemeSnapshot) => void;
 export type UnsubscribeThemeListener = () => void;
@@ -181,6 +182,7 @@ const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
+const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
 
@@ -287,6 +289,15 @@ function subscribeToAboutMenuEvent(
   return subscribeToMenuChannel(MENU_ABOUT_CHANNEL, listener);
 }
 
+function subscribeToInvokeCommandMenuEvent(
+  listener: MenuCommandListener,
+): UnsubscribeMenuListener {
+  const handler = (_event: IpcRendererEvent, commandId: string): void =>
+    listener(commandId);
+  ipcRenderer.on(MENU_INVOKE_COMMAND_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(MENU_INVOKE_COMMAND_CHANNEL, handler);
+}
+
 function readInitialThemeSnapshotSynchronously(): ThemeSnapshot {
   return ipcRenderer.sendSync(THEME_GET_INITIAL_SYNC_CHANNEL) as ThemeSnapshot;
 }
@@ -323,6 +334,7 @@ const apiBridge = {
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
+  onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

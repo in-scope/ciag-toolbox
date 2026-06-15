@@ -13,7 +13,7 @@ import {
   expectPixelReadoutToEqual,
   historyEntryCount,
   loadImageFromAbsolutePath,
-  openOperation,
+  openRotateReflectFromMenu,
   readOfferedGeometricTransformLabels,
   regionSection,
   ROTATE_REFLECT_LABEL,
@@ -72,10 +72,10 @@ test.afterEach(async () => {
 
 test("Rotate 90 offers the transform choices, swaps width/height, and lands a pixel at (H-1-y, x)", async () => {
   await loadNonSquareStackIntoPanelOne();
-  await openOperation(launched.window, ROTATE_REFLECT_LABEL);
+  await openRotateReflectFromMenu(launched.app, launched.window);
   expect(await readOfferedGeometricTransformLabels(launched.window)).toEqual(EXPECTED_TRANSFORM_LABELS);
 
-  await applyGeometricTransformInPlace(launched.window, "rotate-90-cw");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"rotate-90-cw");
   await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: HEIGHT, height: WIDTH });
   await expectBandPixelReadout(1, ROTATED_LANDING_OF_TOP_LEFT, sourceValue(1, SOURCE_TOP_LEFT), ROTATED_DIMENSIONS);
   await expectBandPixelReadout(1, ROTATED_LANDING_OF_BOTTOM_LEFT, sourceValue(1, { x: 0, y: HEIGHT - 1 }), ROTATED_DIMENSIONS);
@@ -84,28 +84,28 @@ test("Rotate 90 offers the transform choices, swaps width/height, and lands a pi
 test("four 90 rotations restore the original pixels and dimensions exactly", async () => {
   await loadNonSquareStackIntoPanelOne();
   for (let rotation = 0; rotation < 4; rotation += 1) {
-    await applyGeometricTransformInPlace(launched.window, "rotate-90-cw");
+    await applyGeometricTransformInPlace(launched.app, launched.window,"rotate-90-cw");
   }
   await expectStackMatchesUntouchedOriginal();
 });
 
 test("two horizontal flips restore the original pixels and dimensions exactly", async () => {
   await loadNonSquareStackIntoPanelOne();
-  await applyGeometricTransformInPlace(launched.window, "flip-horizontal");
-  await applyGeometricTransformInPlace(launched.window, "flip-horizontal");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"flip-horizontal");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"flip-horizontal");
   await expectStackMatchesUntouchedOriginal();
 });
 
 test("a 90 rotation transforms the whole cube keeping bands aligned and records each transform", async () => {
   await loadNonSquareStackIntoPanelOne();
-  await applyGeometricTransformInPlace(launched.window, "rotate-90-cw");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"rotate-90-cw");
   await expectEveryBandRotatedTogetherAt(ROTATED_LANDING_OF_TOP_LEFT, SOURCE_TOP_LEFT);
   await expectHistoryToRecordOperation(launched.window, {
     actionLabel: ROTATE_REFLECT_LABEL,
     detailSubstrings: ["Rotate 90 clockwise"],
   });
 
-  await applyGeometricTransformInPlace(launched.window, "flip-horizontal");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"flip-horizontal");
   await expectHistoryToRecordOperation(launched.window, {
     actionLabel: ROTATE_REFLECT_LABEL,
     detailSubstrings: ["Flip horizontal"],
@@ -119,7 +119,7 @@ test("an active inspection region is cleared after a geometric transform, never 
   await drawInspectionRoiBetweenPixels(launched.window, PANEL, { x: 0, y: 0 }, { x: 1, y: 1 }, ORIGINAL_DIMENSIONS);
   await expectExactlyOneCommittedRoi(launched.window, PANEL);
 
-  await applyGeometricTransformInPlace(launched.window, "rotate-90-cw");
+  await applyGeometricTransformInPlace(launched.app, launched.window,"rotate-90-cw");
   await expectNoCommittedRoiMarkers(launched.window, PANEL);
   await expect(regionSection(launched.window)).toHaveCount(0);
 });

@@ -20,6 +20,7 @@ export {
   applicationToolbar,
   operationPanel,
   openOperation,
+  openOperationFromImageMenu,
   applyOperation,
   applyOperationInPlace,
   setOpenInNewPanel,
@@ -288,8 +289,12 @@ export {
   geometricTransformSelect,
   readOfferedGeometricTransformLabels,
   selectGeometricTransform,
+  openRotateReflectFromMenu,
   applyGeometricTransformInPlace,
+  quickTransformToolbarButton,
+  applyQuickGeometricTransform,
   type GeometricTransformChoice,
+  type QuickGeometricTransformChoice,
 } from "./geometric-transform-operation";
 export {
   FIXED_RIGHT_PANEL_SECTION_ORDER,

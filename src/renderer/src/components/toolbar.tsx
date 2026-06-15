@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { BoxSelect, FolderOpen, Grid2x2, Layers } from "lucide-react";
+import { Fragment, type ReactNode } from "react";
+import { FolderOpen, Grid2x2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
+import type {
+  ToolbarOperationGroup,
+  ToolbarOperationItem,
+} from "@/lib/actions/operation-command-bindings";
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
 import { cn } from "@/lib/utils";
 
@@ -36,12 +40,7 @@ interface ToolbarProps {
   onOpenImage: () => void;
   gridLayout: GridLayout;
   onGridLayoutChange: (layout: GridLayout) => void;
-  registeredActions: ReadonlyArray<RegisteredViewportAction>;
-  onInvokeAction: (action: RegisteredViewportAction) => void;
-  getActionAvailability: GetActionAvailabilityForActiveViewport;
-  isRegionToolActive: boolean;
-  onToggleRegionTool: () => void;
-  bandSubsetToggle: BandSubsetToolbarToggleState;
+  operationGroups: ReadonlyArray<ToolbarOperationGroup>;
 }
 
 export function Toolbar(props: ToolbarProps): JSX.Element {
@@ -53,29 +52,52 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
           gridLayout={props.gridLayout}
           onGridLayoutChange={props.onGridLayoutChange}
         />
-        <ToolbarSeparator />
-        <RegionToolToggleButton
-          isRegionToolActive={props.isRegionToolActive}
-          onToggleRegionTool={props.onToggleRegionTool}
-        />
-        <SubsetBandsToggleButton toggleState={props.bandSubsetToggle} />
-        <ToolbarSeparator />
-        <RegisteredActionButtons
-          registeredActions={props.registeredActions}
-          onInvokeAction={props.onInvokeAction}
-          getActionAvailability={props.getActionAvailability}
-        />
+        <ToolbarOperationGroups groups={props.operationGroups} />
       </div>
     </TooltipProvider>
   );
 }
 
-interface SubsetBandsToggleButtonProps {
-  readonly toggleState: BandSubsetToolbarToggleState;
+const TOOLBAR_CLASSES = "flex w-full flex-wrap items-center gap-2 border-b bg-card px-2 py-1.5";
+const ACTIVE_TOGGLE_CLASSES =
+  "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary";
+
+function ToolbarOperationGroups({
+  groups,
+}: {
+  groups: ReadonlyArray<ToolbarOperationGroup>;
+}): JSX.Element {
+  return (
+    <>
+      {groups.map((group) => (
+        <Fragment key={group.key}>
+          <ToolbarSeparator />
+          {group.items.map((item) => (
+            <ToolbarOperationItemButton key={item.id} item={item} />
+          ))}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
-function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Element {
-  const label = pickSubsetBandsToggleLabel(props.toggleState);
+function ToolbarOperationItemButton({ item }: { item: ToolbarOperationItem }): JSX.Element {
+  if (item.kind === "toggle") return <ToggleToolbarButton item={item} />;
+  if (item.kind === "quick") return <QuickToolbarButton item={item} />;
+  return (
+    <ActionToolbarButton
+      action={item.action}
+      availability={item.availability}
+      onInvoke={item.onInvoke}
+    />
+  );
+}
+
+type ToggleToolbarItem = Extract<ToolbarOperationItem, { kind: "toggle" }>;
+
+function ToggleToolbarButton({ item }: { item: ToggleToolbarItem }): JSX.Element {
+  const label = formatToggleToolbarLabel(item);
+  const Icon = item.icon;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -84,15 +106,12 @@ function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Eleme
             variant="ghost"
             size="icon"
             aria-label={label}
-            aria-pressed={props.toggleState.isActive}
-            disabled={!props.toggleState.isAvailable}
-            className={cn(
-              props.toggleState.isActive &&
-                "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
-            )}
-            onClick={props.toggleState.onToggle}
+            aria-pressed={item.isActive}
+            disabled={!item.isAvailable}
+            className={cn(item.isActive && ACTIVE_TOGGLE_CLASSES)}
+            onClick={item.onToggle}
           >
-            <Layers className="size-5" />
+            <Icon className="size-5" />
           </Button>
         </span>
       </TooltipTrigger>
@@ -101,44 +120,22 @@ function SubsetBandsToggleButton(props: SubsetBandsToggleButtonProps): JSX.Eleme
   );
 }
 
-function pickSubsetBandsToggleLabel(state: BandSubsetToolbarToggleState): string {
-  if (!state.isAvailable) return "Subset Bands (select a multi-band stack)";
-  if (state.isActive) return "Subset Bands (active)";
-  return "Subset Bands";
+function formatToggleToolbarLabel(item: ToggleToolbarItem): string {
+  if (!item.isAvailable && item.unavailableHint) return `${item.label} (${item.unavailableHint})`;
+  if (item.isActive) return `${item.label} (active)`;
+  return item.label;
 }
 
-interface RegionToolToggleButtonProps {
-  readonly isRegionToolActive: boolean;
-  readonly onToggleRegionTool: () => void;
-}
+type QuickToolbarItem = Extract<ToolbarOperationItem, { kind: "quick" }>;
 
-function RegionToolToggleButton(props: RegionToolToggleButtonProps): JSX.Element {
-  const label = props.isRegionToolActive
-    ? "Select Region (active)"
-    : "Select Region";
+function QuickToolbarButton({ item }: { item: QuickToolbarItem }): JSX.Element {
+  const Icon = item.icon;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={label}
-          aria-pressed={props.isRegionToolActive}
-          className={cn(
-            props.isRegionToolActive &&
-              "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
-          )}
-          onClick={props.onToggleRegionTool}
-        >
-          <BoxSelect className="size-5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <IconButtonWithTooltip label={item.label} onClick={item.onInvoke} disabled={!item.isAvailable}>
+      <Icon className="size-5" />
+    </IconButtonWithTooltip>
   );
 }
-
-const TOOLBAR_CLASSES = "flex w-full flex-wrap items-center gap-2 border-b bg-card px-2 py-1.5";
 
 function OpenImageButton({ onOpenImage }: { onOpenImage: () => void }): JSX.Element {
   return (
@@ -199,27 +196,6 @@ function GridLayoutRadioOptions(props: GridLayoutDropdownProps): JSX.Element {
 function ToolbarSeparator(): JSX.Element {
   return (
     <div role="separator" aria-orientation="vertical" className="mx-1 h-6 w-px bg-border" />
-  );
-}
-
-interface RegisteredActionButtonsProps {
-  registeredActions: ReadonlyArray<RegisteredViewportAction>;
-  onInvokeAction: (action: RegisteredViewportAction) => void;
-  getActionAvailability: GetActionAvailabilityForActiveViewport;
-}
-
-function RegisteredActionButtons(props: RegisteredActionButtonsProps): JSX.Element {
-  return (
-    <>
-      {props.registeredActions.map((action) => (
-        <ActionToolbarButton
-          key={action.id}
-          action={action}
-          availability={props.getActionAvailability(action)}
-          onInvoke={() => props.onInvokeAction(action)}
-        />
-      ))}
-    </>
   );
 }
 

@@ -58,7 +58,7 @@ interface ChainSnapshot {
 test("runs a normalize, tone-curve, rotate, band-removal chain that survives a project save/reload", async () => {
   await withFreshApp(async ({ app, window }) => {
     await loadFixtureAsStack(window, multiBandTiff.fileName);
-    await applyStageThreeChain(window);
+    await applyStageThreeChain(app, window);
     const before = await readChainSnapshot(window);
     expect(before.history).toHaveLength(EXPECTED_CHAIN_HISTORY_LENGTH);
     expect(before.metadata.bandCount).toBe(EXPECTED_BAND_COUNT_AFTER_REMOVAL);
@@ -77,10 +77,10 @@ async function withFreshApp(run: (launched: LaunchedApp) => Promise<void>): Prom
   }
 }
 
-async function applyStageThreeChain(window: Page): Promise<void> {
+async function applyStageThreeChain(app: ElectronApplication, window: Page): Promise<void> {
   await applyFullStackNormalize(window);
   await applyDefaultToneCurve(window);
-  await applyGeometricTransformInPlace(window, "rotate-90-cw");
+  await applyGeometricTransformInPlace(app, window, "rotate-90-cw");
   await removeMiddleBand(window);
 }
 

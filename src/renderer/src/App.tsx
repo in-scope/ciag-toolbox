@@ -54,11 +54,18 @@ import {
 } from "@/lib/actions/apply-action-flow";
 import {
   BAND_SUBSET_ACTION,
-  REGISTERED_VIEWPORT_ACTIONS,
+  GEOMETRIC_TRANSFORM_PARAMETER_ID,
+  ROTATE_REFLECT_ACTION,
   buildBandSubsetParameterValuesFromKeptNumbers,
   readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import {
+  buildToolbarOperationGroups,
+  dispatchOperationCommand,
+  type OperationCommandHandlers,
+} from "@/lib/actions/operation-command-bindings";
+import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -364,6 +371,26 @@ function ApplicationShell(): JSX.Element {
     regionRequest.endRegionRequest();
     runApplyActionFromPanel(activeAction, singleSelectedSource, options, applyActionFlowBindings, setActiveAction);
   };
+  const operationCommandHandlers = buildOperationCommandHandlers({
+    regionTool,
+    bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
+    openActionPanel: regionRequestHandlers.openActionPanel,
+    singleSelectedSource,
+    applyActionFlowBindings,
+  });
+  const operationGroups = buildToolbarOperationGroups({
+    handlers: operationCommandHandlers,
+    getActionAvailability: (action) =>
+      deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi),
+    regionToolActive: regionTool.isRegionToolActive,
+    bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
+    isQuickTransformAvailable: deriveActionAvailabilityForActiveViewport(
+      ROTATE_REFLECT_ACTION,
+      singleSelectedSource,
+      renderingApi,
+    ).isAvailable,
+  });
+  useMenuInvokeCommandHandler(operationCommandHandlers);
   const duplicationApi = useViewportDuplicationApi({
     gridLayout,
     cellCount,
@@ -398,18 +425,7 @@ function ApplicationShell(): JSX.Element {
         onOpenImage={handleOpenImagesRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
-        registeredActions={REGISTERED_VIEWPORT_ACTIONS}
-        onInvokeAction={regionRequestHandlers.openActionPanel}
-        getActionAvailability={(action) =>
-          deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi)
-        }
-        isRegionToolActive={regionTool.isRegionToolActive}
-        onToggleRegionTool={regionTool.toggleRegionTool}
-        bandSubsetToggle={deriveBandSubsetToggleStateForToolbar(
-          singleSelectedSource,
-          imagesByIndex,
-          renderingApi,
-        )}
+        operationGroups={operationGroups}
       />
       <ViewportDuplicationProvider value={duplicationApi}>
         <ViewportClosingProvider value={closingApi}>
@@ -604,6 +620,54 @@ function useMenuSaveProjectTriggersHandler(handler: () => void): void {
 
 function useMenuSaveProjectAsTriggersHandler(handler: () => void): void {
   useEffect(() => window.toolboxApi.onMenuSaveProjectAs(handler), [handler]);
+}
+
+function useMenuInvokeCommandHandler(handlers: OperationCommandHandlers): void {
+  useEffect(
+    () =>
+      window.toolboxApi.onMenuInvokeCommand((commandId) =>
+        dispatchOperationCommand(commandId, handlers),
+      ),
+    [handlers],
+  );
+}
+
+interface OperationCommandHandlerBindings {
+  readonly regionTool: { readonly toggleRegionTool: () => void };
+  readonly bandSubsetToggle: BandSubsetToolbarToggleState;
+  readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly singleSelectedSource: SingleSelectedSource | null;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
+function buildOperationCommandHandlers(
+  bindings: OperationCommandHandlerBindings,
+): OperationCommandHandlers {
+  return {
+    toggleRegionTool: bindings.regionTool.toggleRegionTool,
+    toggleBandSubset: bindings.bandSubsetToggle.onToggle,
+    openActionPanel: bindings.openActionPanel,
+    applyGeometricTransform: (transform) =>
+      applyQuickGeometricTransformToActiveSource(
+        transform,
+        bindings.singleSelectedSource,
+        bindings.applyActionFlowBindings,
+      ),
+  };
+}
+
+function applyQuickGeometricTransformToActiveSource(
+  transform: GeometricTransform,
+  source: SingleSelectedSource | null,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!source) return;
+  applyActionInPlaceAtSourceIndex(
+    ROTATE_REFLECT_ACTION,
+    { [GEOMETRIC_TRANSFORM_PARAMETER_ID]: transform },
+    source.index,
+    bindings,
+  );
 }
 
 interface SaveImageRequestBindings {

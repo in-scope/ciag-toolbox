@@ -1,6 +1,11 @@
-import type { Locator, Page } from "@playwright/test";
+import type { ElectronApplication, Locator, Page } from "@playwright/test";
 
-import { applyOperationInPlace, openOperation, operationPanel } from "./operations";
+import {
+  applicationToolbar,
+  applyOperationInPlace,
+  openOperationFromImageMenu,
+  operationPanel,
+} from "./operations";
 
 // CT-146 / manual section 13 (CT-087): "Rotate & Reflect" is a single enum operation. Its
 // "Transform" parameter renders as a native <select> (EnumParameterField) whose option
@@ -35,11 +40,47 @@ export async function selectGeometricTransform(
   await geometricTransformSelect(page).selectOption(choice);
 }
 
+export function openRotateReflectFromMenu(
+  app: ElectronApplication,
+  page: Page,
+): Promise<Locator> {
+  return openOperationFromImageMenu(app, page, ROTATE_REFLECT_LABEL);
+}
+
 export async function applyGeometricTransformInPlace(
+  app: ElectronApplication,
   page: Page,
   choice: GeometricTransformChoice,
 ): Promise<void> {
-  await openOperation(page, ROTATE_REFLECT_LABEL);
+  await openRotateReflectFromMenu(app, page);
   await selectGeometricTransform(page, choice);
   await applyOperationInPlace(page, ROTATE_REFLECT_LABEL);
+}
+
+// The toolbar carries one-click variants of the four rotate/reflect presets (no rotate-180);
+// each applies the transform IN PLACE directly, never opening the operation panel.
+export type QuickGeometricTransformChoice = Exclude<GeometricTransformChoice, "rotate-180">;
+
+const QUICK_TRANSFORM_BUTTON_LABELS: Record<QuickGeometricTransformChoice, string> = {
+  "rotate-90-cw": "Rotate 90° clockwise",
+  "rotate-270-cw": "Rotate 90° counterclockwise",
+  "flip-horizontal": "Reflect horizontally",
+  "flip-vertical": "Reflect vertically",
+};
+
+export function quickTransformToolbarButton(
+  page: Page,
+  choice: QuickGeometricTransformChoice,
+): Locator {
+  return applicationToolbar(page).getByRole("button", {
+    name: QUICK_TRANSFORM_BUTTON_LABELS[choice],
+    exact: true,
+  });
+}
+
+export async function applyQuickGeometricTransform(
+  page: Page,
+  choice: QuickGeometricTransformChoice,
+): Promise<void> {
+  await quickTransformToolbarButton(page, choice).click();
 }

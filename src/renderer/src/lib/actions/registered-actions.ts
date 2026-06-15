@@ -1422,7 +1422,7 @@ function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): str
   return `False-color (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
 }
 
-const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";
+export const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";
 
 const GEOMETRIC_TRANSFORM_PARAMETER_SCHEMA: EnumParameterSchema = {
   kind: "enum",

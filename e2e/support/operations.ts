@@ -1,5 +1,7 @@
 import { expect } from "@playwright/test";
-import type { Locator, Page } from "@playwright/test";
+import type { ElectronApplication, Locator, Page } from "@playwright/test";
+
+import { triggerImageMenuOperation } from "./main-process";
 
 // Operations are launched from the application toolbar by their accessible name
 // (the action label, e.g. "Normalize", "Bit Shift", "Flat-field Correction").
@@ -19,6 +21,19 @@ export function operationPanel(page: Page, operationLabel: string): Locator {
 
 export async function openOperation(page: Page, operationLabel: string): Promise<Locator> {
   await applicationToolbar(page).getByRole("button", { name: operationLabel, exact: true }).click();
+  const panel = operationPanel(page, operationLabel);
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+// Menu-only operations (e.g. the broad "Rotate & Reflect", whose toolbar slot is occupied by
+// narrow one-click variants) are launched from the native Image menu rather than the toolbar.
+export async function openOperationFromImageMenu(
+  app: ElectronApplication,
+  page: Page,
+  operationLabel: string,
+): Promise<Locator> {
+  await triggerImageMenuOperation(app, operationLabel);
   const panel = operationPanel(page, operationLabel);
   await expect(panel).toBeVisible();
   return panel;

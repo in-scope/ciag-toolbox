@@ -96,6 +96,23 @@ function clickFileMenuItemWhoseLabelStartsWith(
   }, labelPrefix);
 }
 
+export function triggerImageMenuOperation(
+  app: ElectronApplication,
+  operationLabel: string,
+): Promise<void> {
+  return app.evaluate(({ Menu }, label) => {
+    interface RawMenuNode {
+      label: string;
+      click?: () => void;
+      submenu?: { items: RawMenuNode[] };
+    }
+    const menu = Menu.getApplicationMenu() as unknown as { items: RawMenuNode[] } | null;
+    const image = (menu?.items ?? []).find((item) => item.label === "Image");
+    const target = image?.submenu?.items.find((item) => item.label === label);
+    target?.click?.();
+  }, operationLabel);
+}
+
 export function triggerSaveProjectMenuItem(app: ElectronApplication): Promise<void> {
   return clickFileMenuItemWhoseLabelStartsWith(app, "Save Project");
 }
