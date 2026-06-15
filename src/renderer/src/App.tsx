@@ -105,6 +105,7 @@ import {
 } from "@/lib/grid/plan-open-images";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
@@ -224,7 +225,7 @@ interface SingleSelectedSource {
 interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
-  readonly isRasterSource: boolean;
+  readonly isTrueColorPhoto: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
@@ -726,7 +727,7 @@ function buildPendingSaveImageRequest(
   return {
     fileName: candidate.fileName,
     viewportIndex: candidate.index,
-    isRasterSource: candidate.isRasterSource,
+    isTrueColorPhoto: candidate.isTrueColorPhoto,
     bandCount: candidate.bandCount,
     selectedBandNumber: selectedBandIndex + 1,
   };
@@ -735,7 +736,7 @@ function buildPendingSaveImageRequest(
 interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
-  readonly isRasterSource: boolean;
+  readonly isTrueColorPhoto: boolean;
   readonly bandCount: number;
 }
 
@@ -751,9 +752,14 @@ function pickSingleSelectedSourceWithContent(
   return {
     index: onlyIndex,
     fileName: content.fileName,
-    isRasterSource: content.source.kind === "raster",
+    isTrueColorPhoto: readIsTrueColorPhotoFromContent(content),
     bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
   };
+}
+
+function readIsTrueColorPhotoFromContent(content: ViewportCellContent): boolean {
+  if (content.source.kind !== "raster") return false;
+  return shouldRenderRasterAsRgbComposite(content.source.raster);
 }
 
 function confirmSaveImageFormatChoice(

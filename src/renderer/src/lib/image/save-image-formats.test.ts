@@ -8,7 +8,7 @@ import {
   readSaveImageFormatTechnicalDetails,
 } from "@/lib/image/save-image-formats";
 
-const MULTI_BAND_STACK = { isRasterSource: true, bandCount: 3, selectedBandNumber: 1 };
+const MULTI_BAND_STACK = { isTrueColorPhoto: false, bandCount: 3, selectedBandNumber: 1 };
 const SINGLE_BAND_FORMAT_IDS = [
   "tiff-16-bit",
   "tiff-8-bit",
@@ -76,26 +76,36 @@ describe("readSaveImageFormatTechnicalDetails", () => {
 });
 
 describe("describeSaveImageFormatDisabledReason", () => {
-  it("enables every format for a raster source (no reason)", () => {
+  // CT-173: photos are rasters now, so the gate is the true-colour flag, NOT source.kind.
+  const TRUE_COLOR_PHOTO = true;
+  const SCIENTIFIC_OR_SINGLE_BAND_RASTER = false;
+
+  it("disables ENVI and ENVI float for a true-colour photo with a raster/scientific reason", () => {
+    expect(describeSaveImageFormatDisabledReason("envi", TRUE_COLOR_PHOTO)).toMatch(/ENVI is for raster/);
+    expect(describeSaveImageFormatDisabledReason("envi-float", TRUE_COLOR_PHOTO)).toMatch(/ENVI is for raster/);
+  });
+
+  it("disables 32-bit float TIFF for a true-colour photo because an 8-bit photo has no float data", () => {
+    expect(describeSaveImageFormatDisabledReason("tiff-float-32", TRUE_COLOR_PHOTO)).toMatch(/Float export needs raster/);
+  });
+
+  it("keeps TIFF 16/8-bit, PNG and JPEG enabled for a true-colour photo", () => {
+    expect(describeSaveImageFormatDisabledReason("tiff-16-bit", TRUE_COLOR_PHOTO)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("tiff-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("png-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
+  });
+
+  it("enables every format for a scientific stack (it is not a photo)", () => {
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatDisabledReason(option.id, true)).toBeNull();
+      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
     }
   });
 
-  it("disables ENVI and ENVI float for a photo source with a raster/scientific reason", () => {
-    expect(describeSaveImageFormatDisabledReason("envi", false)).toMatch(/ENVI is for raster/);
-    expect(describeSaveImageFormatDisabledReason("envi-float", false)).toMatch(/ENVI is for raster/);
-  });
-
-  it("disables 32-bit float TIFF for a photo source because an 8-bit photo has no float data", () => {
-    expect(describeSaveImageFormatDisabledReason("tiff-float-32", false)).toMatch(/Float export needs raster/);
-  });
-
-  it("keeps TIFF 16/8-bit, PNG and JPEG enabled for a photo source", () => {
-    expect(describeSaveImageFormatDisabledReason("tiff-16-bit", false)).toBeNull();
-    expect(describeSaveImageFormatDisabledReason("tiff-8-bit", false)).toBeNull();
-    expect(describeSaveImageFormatDisabledReason("png-8-bit", false)).toBeNull();
-    expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", false)).toBeNull();
+  it("enables every format for a single-band raster, including a promoted grayscale photo", () => {
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
+    }
   });
 });
 
@@ -122,16 +132,18 @@ describe("describeSaveImageFormatBandCoverageNote", () => {
   });
 
   it("discloses nothing for a single-band stack (no bands are lost)", () => {
-    const singleBandStack = { isRasterSource: true, bandCount: 1, selectedBandNumber: 1 };
+    const singleBandStack = { isTrueColorPhoto: false, bandCount: 1, selectedBandNumber: 1 };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
       expect(describeSaveImageFormatBandCoverageNote(option.id, singleBandStack)).toBeNull();
     }
   });
 
-  it("discloses nothing for a photo (non-raster) source", () => {
-    const photoSource = { isRasterSource: false, bandCount: 3, selectedBandNumber: 1 };
+  // CT-173: a true-colour photo is a 3-band raster, but it is shown as one colour image, not a
+  // browsable band stack, so it must not warn about "saving band 1 of 3" like a scientific stack.
+  it("discloses nothing for a true-colour photo even though it has three bands", () => {
+    const trueColorPhoto = { isTrueColorPhoto: true, bandCount: 3, selectedBandNumber: 1 };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatBandCoverageNote(option.id, photoSource)).toBeNull();
+      expect(describeSaveImageFormatBandCoverageNote(option.id, trueColorPhoto)).toBeNull();
     }
   });
 });

@@ -5,6 +5,7 @@ import {
   type RasterImage,
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
+import { buildRgbaBytesFromRgbRaster } from "@/lib/image/rgb-raster-to-rgba";
 
 export type TargetBitDepth = 8 | 16;
 
@@ -60,6 +61,16 @@ export function encodeRgbaBytesAsRgbTiffBytes(
   const rgbPixels = convertRgbaBytesToRgbAtTargetBitDepth(rgbaBytes, targetBitDepth);
   const metadata = buildRgbTiffMetadata(width, height, targetBitDepth);
   return convertArrayBufferToBytes(writeArrayBuffer(rgbPixels, metadata));
+}
+
+// CT-173: a true-colour raster (a promoted photo) writes a 3-sample RGB TIFF carrying
+// PhotometricInterpretation RGB, so it reopens (CT-160) as a colour composite, not a grey band.
+export function encodeRgbRasterAsRgbTiffBytes(
+  raster: RasterImage,
+  targetBitDepth: TargetBitDepth,
+): Uint8Array {
+  const rgba = buildRgbaBytesFromRgbRaster(raster);
+  return encodeRgbaBytesAsRgbTiffBytes(rgba, raster.width, raster.height, targetBitDepth);
 }
 
 function convertSourcePixelsToTargetBitDepth(
