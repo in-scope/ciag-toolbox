@@ -16,11 +16,13 @@ import type { LaunchedApp } from "./support/launch-app";
 import { triggerSaveImageMenuItem } from "./support/main-process";
 import {
   averageNonClearCanvasColor,
+  cancelSaveImageFormatPicker,
   chooseSaveImageFormat,
   clickGridBackgroundToClearSelection,
   colorfulNonClearPixelFraction,
   confirmSaveImageFormat,
   createTemporaryExportDirectory,
+  expectSaveImageFormatOptionDisabledWithTooltip,
   loadFixtureAsStack,
   loadImageFromAbsolutePath,
   panelCanvas,
@@ -44,10 +46,12 @@ import {
 // The expected outcome of every cell is DERIVED from two facts about the app (see
 // encode-saved-image.ts):
 //   1. A plain-opened PNG/JPG is a BROWSER-IMAGE source promoted to a true-colour R/G/B
-//      raster. ENVI export rejects it outright, a float TIFF silently writes uint (no float
-//      data exists in an 8-bit photo), and PNG/JPEG/TIFF keep it true-colour on reopen: a
-//      TIFF written from a true-colour source carries PhotometricInterpretation RGB, so the
-//      loader (CT-160) reopens it as a 3-band RGB composite, not a grey band.
+//      raster. CT-162: ENVI, ENVI (32-bit float) and TIFF (32-bit float) are DISABLED in the
+//      Save-image picker for such a photo source (each with an explaining tooltip) and cannot
+//      be chosen - replacing the old offer-then-reject (ENVI) and silent float->uint
+//      downgrade (TIFF float). The remaining uint TIFF/PNG/JPEG keep it true-colour on
+//      reopen: a TIFF written from a true-colour source carries PhotometricInterpretation
+//      RGB, so the loader (CT-160) reopens it as a 3-band RGB composite, not a grey band.
 //   2. A raster (TIFF/ENVI) science source exports the selected band to TIFF, the whole cube
 //      to ENVI, and a single rendered band to PNG/JPEG; those TIFF/ENVI reopen as grayscale
 //      stacks because the science source carries no true-colour tag to write.
@@ -73,7 +77,6 @@ const NORMALIZED_REDRAW_SETTLE_MS = 300;
 
 type InputKind = "trueColour" | "raster";
 type ExportKind = "tiff-uint" | "tiff-float" | "canvas" | "envi-uint" | "envi-float";
-type SaveOutcome = "saved" | "rejected";
 type ReloadedSampleFormat = "-" | "uint" | "float";
 
 interface InputFixture {
@@ -103,10 +106,16 @@ interface RenderedSignature {
 }
 
 interface CellExpectation {
-  readonly saveRejected: boolean;
+  readonly disabledInPicker: boolean;
+  readonly disabledReason: string | null;
   readonly reloadedSampleFormat: ReloadedSampleFormat;
   readonly reopenTracksSourceColour: boolean;
 }
+
+// CT-162: ENVI/float export cannot apply to a browser-image (photo) source, so the picker
+// disables those options with an explaining tooltip rather than offering then rejecting them.
+const ENVI_DISABLED_REASON = "ENVI is for raster/scientific stacks";
+const FLOAT_DISABLED_REASON = "Float export needs raster data";
 
 const INPUT_FIXTURES: ReadonlyArray<InputFixture> = [
   { label: "grayscale PNG", committedFileName: lowContrastGrayPng.fileName, kind: "trueColour" },
@@ -135,20 +144,36 @@ for (const fixture of INPUT_FIXTURES) {
 }
 
 function expectedCellOutcome(fixture: InputFixture, format: ExportFormat): CellExpectation {
-  if (isEnviKind(format.kind) && fixture.kind === "trueColour") {
-    return { saveRejected: true, reloadedSampleFormat: "-", reopenTracksSourceColour: false };
+  if (fixture.kind === "trueColour" && isDisabledForPhotoSource(format)) {
+    return {
+      disabledInPicker: true,
+      disabledReason: disabledReasonForPhotoSource(format),
+      reloadedSampleFormat: "-",
+      reopenTracksSourceColour: false,
+    };
   }
   if (format.kind === "canvas") {
-    return { saveRejected: false, reloadedSampleFormat: "-", reopenTracksSourceColour: true };
+    return enabledCell("-", true);
   }
   if (fixture.kind === "trueColour" && isTiffKind(format.kind)) {
-    return { saveRejected: false, reloadedSampleFormat: "uint", reopenTracksSourceColour: true };
+    return enabledCell("uint", true);
   }
-  return {
-    saveRejected: false,
-    reloadedSampleFormat: reloadedRasterSampleFormat(fixture, format),
-    reopenTracksSourceColour: false,
-  };
+  return enabledCell(reloadedRasterSampleFormat(fixture, format), false);
+}
+
+function enabledCell(
+  reloadedSampleFormat: ReloadedSampleFormat,
+  reopenTracksSourceColour: boolean,
+): CellExpectation {
+  return { disabledInPicker: false, disabledReason: null, reloadedSampleFormat, reopenTracksSourceColour };
+}
+
+function isDisabledForPhotoSource(format: ExportFormat): boolean {
+  return isEnviKind(format.kind) || format.kind === "tiff-float";
+}
+
+function disabledReasonForPhotoSource(format: ExportFormat): string {
+  return isEnviKind(format.kind) ? ENVI_DISABLED_REASON : FLOAT_DISABLED_REASON;
 }
 
 function isEnviKind(kind: ExportKind): boolean {
@@ -176,21 +201,30 @@ async function runRoundTripCell(
 ): Promise<void> {
   const expectation = expectedCellOutcome(fixture, format);
   await loadSourceIntoFirstPanelOfTwo(launched.window, fixture);
+  if (expectation.disabledInPicker) {
+    return assertFormatOptionDisabledInPicker(launched, format, expectation);
+  }
   const source = await captureSourceSignature(launched.window, fixture, format);
   const exportPath = await buildTemporaryExportPath(format);
-  const outcome = await exportSelectedSourceThroughSaveDialog(launched, format, exportPath);
-  if (expectation.saveRejected) return assertSaveWasRejected(outcome, fixture, format, source);
+  await exportSelectedSourceThroughSaveDialog(launched, format, exportPath);
   await completeAndAssertReopen(launched, fixture, format, exportPath, source, expectation);
 }
 
-function assertSaveWasRejected(
-  outcome: SaveOutcome,
-  fixture: InputFixture,
+// CT-162: a format that cannot apply to this source is offered but disabled, with a tooltip
+// explaining why; the option cannot be chosen, so the picker is cancelled without a save.
+async function assertFormatOptionDisabledInPicker(
+  launched: LaunchedApp,
   format: ExportFormat,
-  source: RenderedSignature,
-): void {
-  logCalibrationRow(fixture, format, source, undefined);
-  expect(outcome).toBe("rejected");
+  expectation: CellExpectation,
+): Promise<void> {
+  await triggerSaveImageMenuItem(launched.app);
+  await expect(saveImageFormatPicker(launched.window)).toBeVisible();
+  await expectSaveImageFormatOptionDisabledWithTooltip(
+    launched.window,
+    format.pickerLabel,
+    expectation.disabledReason ?? "",
+  );
+  await cancelSaveImageFormatPicker(launched.window);
 }
 
 async function completeAndAssertReopen(
@@ -225,20 +259,13 @@ async function exportSelectedSourceThroughSaveDialog(
   launched: LaunchedApp,
   format: ExportFormat,
   exportPath: string,
-): Promise<SaveOutcome> {
+): Promise<void> {
   await enqueueSaveDialogPath(launched.window, exportPath);
   await triggerSaveImageMenuItem(launched.app);
   await expect(saveImageFormatPicker(launched.window)).toBeVisible();
   await chooseSaveImageFormat(launched.window, format.pickerLabel);
   await confirmSaveImageFormat(launched.window);
-  return waitForSaveSuccessOrRejection(launched.window);
-}
-
-async function waitForSaveSuccessOrRejection(window: Page): Promise<SaveOutcome> {
-  const saved = window.getByText("Saved to", { exact: false }).first();
-  const rejected = window.getByText("Could not save", { exact: false }).first();
-  await expect(saved.or(rejected)).toBeVisible();
-  return (await rejected.isVisible()) ? "rejected" : "saved";
+  await expect(launched.window.getByText("Saved to", { exact: false }).first()).toBeVisible();
 }
 
 // Adds the source's data-fit (Normalized viewing) luminance for raster float

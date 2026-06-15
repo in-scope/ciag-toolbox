@@ -216,6 +216,7 @@ interface SingleSelectedSource {
 interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
+  readonly isRasterSource: boolean;
 }
 
 export function App(): JSX.Element {
@@ -697,13 +698,18 @@ function useSaveImageRequestHandler(
       toast.info("Select a panel with a loaded stack to save");
       return;
     }
-    setPendingSaveImage({ fileName: candidate.fileName, viewportIndex: candidate.index });
+    setPendingSaveImage({
+      fileName: candidate.fileName,
+      viewportIndex: candidate.index,
+      isRasterSource: candidate.isRasterSource,
+    });
   }, [imagesByIndexRef, selectedIndicesRef, setPendingSaveImage]);
 }
 
 interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
+  readonly isRasterSource: boolean;
 }
 
 function pickSingleSelectedSourceWithContent(
@@ -715,7 +721,11 @@ function pickSingleSelectedSourceWithContent(
   if (onlyIndex === null) return null;
   const content = imagesByIndex.get(onlyIndex);
   if (!content) return null;
-  return { index: onlyIndex, fileName: content.fileName };
+  return {
+    index: onlyIndex,
+    fileName: content.fileName,
+    isRasterSource: content.source.kind === "raster",
+  };
 }
 
 function confirmSaveImageFormatChoice(

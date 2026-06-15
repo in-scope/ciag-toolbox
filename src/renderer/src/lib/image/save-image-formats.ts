@@ -100,6 +100,23 @@ export function readSaveImageFormatTechnicalDetails(
   }
 }
 
+const ENVI_NEEDS_RASTER_REASON =
+  "ENVI is for raster/scientific stacks; not available for photo (PNG/JPG) sources.";
+const FLOAT_NEEDS_RASTER_REASON =
+  "Float export needs raster data; an 8-bit photo has none.";
+
+// A browser-image (PNG/JPG photo) source has no per-band raster, so ENVI and float
+// exports cannot apply to it. Raster sources can use every format (null = enabled).
+export function describeSaveImageFormatDisabledReason(
+  formatId: SaveImageFormatId,
+  isRasterSource: boolean,
+): string | null {
+  if (isRasterSource) return null;
+  if (formatId === "envi" || formatId === "envi-float") return ENVI_NEEDS_RASTER_REASON;
+  if (formatId === "tiff-float-32") return FLOAT_NEEDS_RASTER_REASON;
+  return null;
+}
+
 export function findSaveImageFormatOptionOrThrow(
   formatId: SaveImageFormatId,
 ): SaveImageFormatOption {

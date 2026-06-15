@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SAVE_IMAGE_FORMAT_OPTIONS,
+  describeSaveImageFormatDisabledReason,
   findSaveImageFormatOptionOrThrow,
   readSaveImageFormatTechnicalDetails,
 } from "@/lib/image/save-image-formats";
@@ -61,6 +62,30 @@ describe("readSaveImageFormatTechnicalDetails", () => {
       targetBitDepth: 16,
       targetSampleFormat: "float",
     });
+  });
+});
+
+describe("describeSaveImageFormatDisabledReason", () => {
+  it("enables every format for a raster source (no reason)", () => {
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      expect(describeSaveImageFormatDisabledReason(option.id, true)).toBeNull();
+    }
+  });
+
+  it("disables ENVI and ENVI float for a photo source with a raster/scientific reason", () => {
+    expect(describeSaveImageFormatDisabledReason("envi", false)).toMatch(/ENVI is for raster/);
+    expect(describeSaveImageFormatDisabledReason("envi-float", false)).toMatch(/ENVI is for raster/);
+  });
+
+  it("disables 32-bit float TIFF for a photo source because an 8-bit photo has no float data", () => {
+    expect(describeSaveImageFormatDisabledReason("tiff-float-32", false)).toMatch(/Float export needs raster/);
+  });
+
+  it("keeps TIFF 16/8-bit, PNG and JPEG enabled for a photo source", () => {
+    expect(describeSaveImageFormatDisabledReason("tiff-16-bit", false)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("tiff-8-bit", false)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("png-8-bit", false)).toBeNull();
+    expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", false)).toBeNull();
   });
 });
 

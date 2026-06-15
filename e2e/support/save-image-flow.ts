@@ -33,6 +33,24 @@ export async function chooseSaveImageFormat(page: Page, formatLabel: string): Pr
   await saveImageFormatRadioGroup(page).getByRole("radio", { name: formatLabel, exact: true }).check();
 }
 
+function saveImageFormatOption(page: Page, formatLabel: string): Locator {
+  return saveImageFormatRadioGroup(page).getByRole("radio", { name: formatLabel, exact: true });
+}
+
+// A format that cannot apply to the selected source is disabled in the picker and carries
+// a shadcn tooltip naming the reason. Hovering the option's label (the tooltip trigger,
+// since a disabled input swallows pointer events) reveals the role="tooltip" content.
+export async function expectSaveImageFormatOptionDisabledWithTooltip(
+  page: Page,
+  formatLabel: string,
+  reasonSubstring: string,
+): Promise<void> {
+  const option = saveImageFormatOption(page, formatLabel);
+  await expect(option).toBeDisabled();
+  await option.locator("xpath=ancestor::label[1]").hover();
+  await expect(page.getByRole("tooltip").filter({ hasText: reasonSubstring })).toBeVisible();
+}
+
 export async function confirmSaveImageFormat(page: Page): Promise<void> {
   await saveImageFormatPicker(page).getByRole("button", { name: "Save...", exact: true }).click();
 }

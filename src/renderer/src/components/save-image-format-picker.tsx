@@ -10,13 +10,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   SAVE_IMAGE_FORMAT_OPTIONS,
+  describeSaveImageFormatDisabledReason,
   type SaveImageFormatId,
 } from "@/lib/image/save-image-formats";
 import { cn } from "@/lib/utils";
 
 export interface PendingSaveImageFormatChoice {
   readonly fileName: string;
+  readonly isRasterSource: boolean;
 }
 
 interface SaveImageFormatPickerProps {
@@ -76,6 +83,7 @@ function FormatPickerForm(props: FormatPickerFormProps): JSX.Element {
       <FormatPickerHeader fileName={props.pending.fileName} />
       <FormatPickerOptionList
         chosenId={chosenId}
+        isRasterSource={props.pending.isRasterSource}
         onChoose={setChosenId}
       />
       <FormatPickerFooter onCancel={props.onCancel} />
@@ -117,6 +125,7 @@ function describeFormatPickerPrompt(fileName: string): string {
 
 interface FormatPickerOptionListProps {
   chosenId: SaveImageFormatId;
+  isRasterSource: boolean;
   onChoose: (formatId: SaveImageFormatId) => void;
 }
 
@@ -130,6 +139,7 @@ function FormatPickerOptionList(props: FormatPickerOptionListProps): JSX.Element
           label={option.label}
           description={option.description}
           isChosen={props.chosenId === option.id}
+          disabledReason={describeSaveImageFormatDisabledReason(option.id, props.isRasterSource)}
           onChoose={() => props.onChoose(option.id)}
         />
       ))}
@@ -142,26 +152,68 @@ interface FormatPickerOptionRowProps {
   label: string;
   description: string;
   isChosen: boolean;
+  disabledReason: string | null;
   onChoose: () => void;
 }
 
-function FormatPickerOptionRow(
-  props: FormatPickerOptionRowProps,
-): JSX.Element {
+function FormatPickerOptionRow(props: FormatPickerOptionRowProps): JSX.Element {
+  if (props.disabledReason !== null) {
+    return <DisabledFormatOptionRow {...props} reason={props.disabledReason} />;
+  }
+  return <SelectableFormatOptionRow {...props} />;
+}
+
+function SelectableFormatOptionRow(props: FormatPickerOptionRowProps): JSX.Element {
   const id = `save-format-${props.formatId}`;
   return (
-    <label htmlFor={id} className={getFormatOptionRowClassName(props.isChosen)}>
-      <input
+    <label htmlFor={id} className={getFormatOptionRowClassName(props.isChosen, false)}>
+      <FormatOptionRadioInput
         id={id}
-        type="radio"
-        name="save-image-format"
-        className="size-4 cursor-pointer accent-primary"
-        checked={props.isChosen}
-        onChange={props.onChoose}
-        aria-label={props.label}
+        label={props.label}
+        isChosen={props.isChosen}
+        isDisabled={false}
+        onChoose={props.onChoose}
       />
       <FormatOptionRowLabel label={props.label} description={props.description} />
     </label>
+  );
+}
+
+function DisabledFormatOptionRow(
+  props: FormatPickerOptionRowProps & { reason: string },
+): JSX.Element {
+  const id = `save-format-${props.formatId}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <label htmlFor={id} aria-disabled className={getFormatOptionRowClassName(false, true)}>
+          <FormatOptionRadioInput id={id} label={props.label} isChosen={false} isDisabled />
+          <FormatOptionRowLabel label={props.label} description={props.description} />
+        </label>
+      </TooltipTrigger>
+      <TooltipContent>{props.reason}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function FormatOptionRadioInput(props: {
+  id: string;
+  label: string;
+  isChosen: boolean;
+  isDisabled: boolean;
+  onChoose?: () => void;
+}): JSX.Element {
+  return (
+    <input
+      id={props.id}
+      type="radio"
+      name="save-image-format"
+      className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+      checked={props.isChosen}
+      disabled={props.isDisabled}
+      onChange={props.onChoose}
+      aria-label={props.label}
+    />
   );
 }
 
@@ -180,9 +232,10 @@ function FormatOptionRowLabel({
   );
 }
 
-function getFormatOptionRowClassName(isChosen: boolean): string {
+function getFormatOptionRowClassName(isChosen: boolean, isDisabled: boolean): string {
   return cn(
-    "flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-accent",
+    "flex items-start gap-3 rounded-md px-2 py-2",
+    isDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-accent",
     isChosen && "bg-accent/60",
   );
 }

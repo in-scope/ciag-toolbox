@@ -191,6 +191,7 @@ export {
   saveImageFormatRadioGroup,
   readOfferedSaveImageFormatLabels,
   chooseSaveImageFormat,
+  expectSaveImageFormatOptionDisabledWithTooltip,
   confirmSaveImageFormat,
   cancelSaveImageFormatPicker,
   exportSelectedStackThroughSaveDialog,
