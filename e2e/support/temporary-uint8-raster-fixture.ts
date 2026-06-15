@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // A throwaway single-band 8-bit (uint8) TIFF written under os.tmpdir. No committed
-// fixture is an 8-bit raster (the PNGs load as image-bitmap with no transformable
-// raster), so the Invert "out = 255 - v" / its-own-inverse oracle (CT-141, manual 8.1)
-// needs a real uint8 stack. The pixel value at (x, y) follows a documented gradient so
+// fixture is a single-band uint8 raster: a PNG loads as an image-bitmap and, when an
+// operation runs, is auto-promoted (CT-109) to a 3-band RGB decode, not a single-band uint8
+// stack with controlled values, so the Invert "out = 255 - v" / its-own-inverse oracle
+// (CT-141, manual 8.1) needs a real uint8 stack. The pixel value at (x, y) follows a
+// documented gradient so
 // the spec asserts EXACT 255 - v on distinct values. The encoder mirrors the single-page
 // classic TIFF in generate-fixtures.mjs but with 8-bit samples.
 

@@ -23,10 +23,11 @@ import {
 // that the readout preserves (data does not clip) while the display clamps to white/black.
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG, testFailureProtocol step 1): the manual uses the
-// low-contrast PNG, but PNG/JPG load through the browser decode path as an image-bitmap with
-// no per-band raster (image-metadata-display.test.ts), so the operations have nothing to
-// transform. The committed multi-band uint16 raster (multiband-12bit.tif) is the float-pipeline
-// oracle: its documented integer values normalize/standardize to exact float results.
+// low-contrast PNG. A PNG/JPG loads as an image-bitmap and, when an operation runs, is
+// auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be transformed; but its values
+// are then an 8-bit RGB decode, not a controlled oracle. The committed multi-band uint16 raster
+// (multiband-12bit.tif) is the float-pipeline oracle: its documented integer values
+// normalize/standardize to exact float results.
 
 const PANEL = 1;
 const NORMALIZE = "Normalize";

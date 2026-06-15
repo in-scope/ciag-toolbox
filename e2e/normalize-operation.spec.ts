@@ -26,9 +26,11 @@ import {
 // the data operation never touches and that records no History.
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG, testFailureProtocol step 1): the manual normalizes the
-// low-contrast PNG, but PNG/JPG load as an image-bitmap with no per-band raster, so operations
-// have nothing to transform. The committed multi-band uint16 raster (multiband-12bit.tif) is the
-// oracle: documented per-band values 100..250 / 800..950 / 1600..1750 (cube min 100, max 1750).
+// low-contrast PNG. A PNG/JPG loads as an image-bitmap and, when an operation runs, is
+// auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be normalized; but its values
+// are then an 8-bit RGB decode, not a controlled multi-band integer oracle. The committed
+// multi-band uint16 raster (multiband-12bit.tif) is used instead for deterministic numbers:
+// documented per-band values 100..250 / 800..950 / 1600..1750 (cube min 100, max 1750).
 
 const PANEL = 1;
 const NORMALIZE = "Normalize";

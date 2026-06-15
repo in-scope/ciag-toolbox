@@ -23,9 +23,10 @@ import {
 // [0,1] that the readout preserves (data never clips) while the display clamps to black/white.
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG, testFailureProtocol step 1): the manual standardizes the
-// low-contrast PNG, but PNG/JPG load through the browser decode path as an image-bitmap with no
-// per-band raster, so the operation has nothing to transform. The committed multi-band uint16
-// raster (multiband-12bit.tif) is the deterministic oracle.
+// low-contrast PNG. A PNG/JPG loads as an image-bitmap and, when an operation runs, is
+// auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be standardized; but its values
+// are then an 8-bit RGB decode, not a controlled multi-band oracle. The committed multi-band
+// uint16 raster (multiband-12bit.tif) is used instead as the deterministic oracle.
 //
 // STATS ORACLE (no E2E-BUG, testFailureProtocol step 1): AC1/AC3 suggest reading the cube/band
 // mean+std from the Region/Histogram panels, but CT-092 removed every numeric min/max/mean from

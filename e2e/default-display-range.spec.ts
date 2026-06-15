@@ -28,8 +28,9 @@ import {
 // magnitudes rendered dark under the data-type window.
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG, testFailureProtocol step 1): the manual brightens the
-// low-contrast PNG, but PNG/JPG load through the browser decode path as an image-bitmap with no
-// per-band raster, so operations cannot transform them. The committed multi-band uint16 raster
+// low-contrast PNG. A PNG/JPG loads as an image-bitmap and, when an operation runs, is
+// auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be transformed; but its values
+// are then an 8-bit RGB decode, not a controlled oracle. The committed multi-band uint16 raster
 // (multiband-12bit.tif) is the display-convention oracle: its documented integer band values map
 // to known, near-black-or-visible canvas brightness under each display window.
 

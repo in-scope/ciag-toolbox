@@ -22,9 +22,10 @@ import {
 // weights are the luminance weights (0.299/0.587/0.114); custom 1/3 weights give the plain
 // average. A non-RGB source is rejected with a clear toast, never a silent wrong result.
 //
-// FIXTURE SUBSTITUTION (no E2E-BUG): the committed rgb.png loads as an image-bitmap with no
-// per-band raster (PNG/JPG cannot be transformed), so the 3-band uint16 multiband-12bit.tif
-// (bands treated as R/G/B) is the deterministic oracle, exactly like the other op specs.
+// FIXTURE SUBSTITUTION (no E2E-BUG): the committed rgb.png loads as an image-bitmap and, when an
+// operation runs, is auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be converted;
+// but its values are then an 8-bit decode, not controlled numbers. The 3-band uint16
+// multiband-12bit.tif (bands treated as R/G/B) is the deterministic oracle, like the other specs.
 
 const RGB_TO_GRAYSCALE_LABEL = "RGB to Grayscale";
 const PANEL = 1;

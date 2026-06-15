@@ -34,9 +34,10 @@ import {
 // updates the viewport preview live before Apply; Apply commits data + a History entry. With
 // "Region of interest" scope the remap touches only the requested region.
 //
-// FIXTURE SUBSTITUTION (no E2E-BUG): the manual uses low-contrast-sample.png, but PNG loads
-// as image-bitmap with no per-band raster, so operations cannot transform it (CT-136). The
-// raster fixture multiband-12bit.tif is used instead (band 0 = 100 + (y*4 + x)*10).
+// FIXTURE SUBSTITUTION (no E2E-BUG): the manual uses low-contrast-sample.png. A PNG loads as an
+// image-bitmap and, when an operation runs, is auto-promoted (CT-109) to an 8-bit 3-band RGB
+// raster, so it CAN be tone-curved; but its values are then an 8-bit RGB decode, not a controlled
+// oracle. The raster fixture multiband-12bit.tif is used instead (band 0 = 100 + (y*4 + x)*10).
 //
 // IDENTITY DEFAULT (no E2E-BUG): for an integer band the histogram X axis spans the data-TYPE
 // range (uint16 0..65535, compute-band-histogram.ts), so the default endpoints (0,0)-(65535,
