@@ -75,6 +75,41 @@ export async function clickToneCurveAnchorHandle(handle: Locator): Promise<void>
   await handle.click();
 }
 
+// CT-165: the selected anchor's Input/Output numeric fields with +/- steppers. Each field
+// is an <input aria-label="Input"|"Output"> flanked by "Decrease <label>"/"Increase <label>"
+// stepper buttons inside the Tone Curve tool-options panel.
+export type ToneCurveAnchorFieldLabel = "Input" | "Output";
+
+export function toneCurveAnchorField(page: Page, label: ToneCurveAnchorFieldLabel): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByLabel(label, { exact: true });
+}
+
+export function readToneCurveAnchorFieldValue(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+): Promise<string> {
+  return toneCurveAnchorField(page, label).inputValue();
+}
+
+export async function setToneCurveAnchorField(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+  value: number,
+): Promise<void> {
+  const field = toneCurveAnchorField(page, label);
+  await field.fill(String(value));
+  await field.press("Enter");
+}
+
+export async function stepToneCurveAnchorField(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+  direction: "increase" | "decrease",
+): Promise<void> {
+  const verb = direction === "increase" ? "Increase" : "Decrease";
+  await operationPanel(page, TONE_CURVE_LABEL).getByRole("button", { name: `${verb} ${label}` }).click();
+}
+
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
   await expect(toneCurveEndpointHandles(page)).toHaveCount(2);
   await expect(toneCurveInteriorHandles(page)).toHaveCount(0);

@@ -271,8 +271,13 @@ export {
   addToneCurveAnchorAtFraction,
   dragToneCurveEndpointTo,
   readToneCurveAnchors,
+  toneCurveAnchorField,
+  readToneCurveAnchorFieldValue,
+  setToneCurveAnchorField,
+  stepToneCurveAnchorField,
   type ToneCurveValueRanges,
   type ToneCurveAnchorPoint,
+  type ToneCurveAnchorFieldLabel,
 } from "./tone-curve-editor";
 export {
   summarizeCanvasPixels,
