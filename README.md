@@ -89,6 +89,28 @@ To run it:
 
 Playwright launches its own Electron instance pointed at the running dev renderer, so a second app window appears alongside the one `pnpm dev` opens; that is expected. If your renderer dev server is not on the default `http://localhost:5173`, set `MSI_E2E_RENDERER_URL` before running `pnpm e2e`.
 
+### Inspecting a test visually
+
+The suite runs too fast to watch live. To see what a test actually did step by step, capture a Playwright trace and open it in the trace viewer. Set `MSI_E2E_TRACE=1` and the launcher records a trace per spec into `test-results/electron-traces/`, named after the spec.
+
+Because the app renders into a WebGL canvas, the trace viewer's DOM-snapshot pane stays blank. Use the **screenshot filmstrip across the top** instead: those are real window captures (canvas included), and clicking any action in the list jumps the filmstrip to that moment and highlights the element the step targeted.
+
+With `pnpm dev` already running, in Git Bash:
+
+```bash
+pnpm e2e:clean                                    # wipe previous artifacts (optional)
+MSI_E2E_TRACE=1 pnpm e2e e2e/crop-to-region.spec.ts
+npx playwright show-trace "$(ls -t test-results/electron-traces/*.zip | head -1)"
+```
+
+In PowerShell the env var is set inline differently:
+
+```powershell
+$env:MSI_E2E_TRACE=1; pnpm e2e e2e/crop-to-region.spec.ts; Remove-Item Env:MSI_E2E_TRACE
+```
+
+`pnpm e2e:clean` removes the `test-results/` directory (cross-platform). Normal `pnpm e2e` runs record nothing unless `MSI_E2E_TRACE` is set, so the suite stays fast by default.
+
 ## Reporting issues
 
 Found a bug, a confusing label, or a workflow you wish was supported? Open an issue at the [Issues page](../../issues). Screenshots help.
