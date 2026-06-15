@@ -31,6 +31,10 @@ import {
   type QuadTransform,
 } from "./tile-quad-transform";
 import {
+  createIdentityToneCurveLutTexture,
+  uploadNormalizedValuesToToneCurveLutTexture,
+} from "./tone-curve-lut-texture";
+import {
   IDENTITY_PAN,
   clampUserZoom,
   computeFitToViewportScale,
@@ -92,10 +96,15 @@ interface BandModeUniformLocations {
   isSingleBand: WebGLUniformLocation | null;
 }
 
+interface ToneCurveUniformLocations {
+  enabled: WebGLUniformLocation | null;
+}
+
 interface ProgramUniformLocations {
   quadTransform: QuadTransformUniformLocations;
   normalization: NormalizationUniformLocations;
   bandMode: BandModeUniformLocations;
+  toneCurve: ToneCurveUniformLocations;
 }
 
 interface RendererProgramResources {
@@ -110,9 +119,15 @@ interface NormalizationState {
   extents: RgbChannelExtents;
 }
 
+interface ToneCurvePassState {
+  readonly enabled: boolean;
+  readonly lutTexture: WebGLTexture | null;
+}
+
 interface RenderPassState {
   readonly normalization: NormalizationState;
   readonly isSingleBand: boolean;
+  readonly toneCurve: ToneCurvePassState;
 }
 
 export interface ViewportRendererOptions {
@@ -136,6 +151,8 @@ export class ViewportRenderer {
     extents: IDENTITY_RGB_CHANNEL_EXTENTS,
   };
   private autoFitsFloatDisplayWindow = false;
+  private toneCurveLutTexture: WebGLTexture | null = null;
+  private toneCurveLookupTable: ReadonlyArray<number> | null = null;
   private readonly viewTransformChangeListeners = new Set<() => void>();
   private readonly handleContextLost = (event: Event): void =>
     this.respondToContextLost(event);
@@ -175,6 +192,20 @@ export class ViewportRenderer {
     if (this.normalization.enabled === enabled) return;
     this.normalization = { ...this.normalization, enabled };
     this.draw();
+  }
+
+  // CT-170: install a display-only tone-curve preview built in the
+  // display-normalized domain. Passing null clears it; the shader branch is then
+  // fully bypassed and output is byte-for-byte identical to no curve.
+  setToneCurveLookupTable(lookupTable: ReadonlyArray<number> | null): void {
+    this.toneCurveLookupTable = lookupTable;
+    this.uploadToneCurveLookupTableToTexture();
+    this.draw();
+  }
+
+  private uploadToneCurveLookupTableToTexture(): void {
+    if (!this.gl || !this.toneCurveLutTexture || !this.toneCurveLookupTable) return;
+    uploadNormalizedValuesToToneCurveLutTexture(this.gl, this.toneCurveLutTexture, this.toneCurveLookupTable);
   }
 
   private cacheNormalizationExtentsForSource(source: ViewportImageSource): void {
@@ -290,9 +321,15 @@ export class ViewportRenderer {
     this.gl = gl;
     reportHalfFloatExtensionMissingOnce(gl, this.options.onError);
     this.programResources = createViewportRendererProgram(gl);
+    this.createAndRestoreToneCurveLutTexture(gl);
     this.applyViewportToCanvasSize();
     this.uploadCurrentSourceIfReady();
     this.draw();
+  }
+
+  private createAndRestoreToneCurveLutTexture(gl: WebGL2RenderingContext): void {
+    this.toneCurveLutTexture = createIdentityToneCurveLutTexture(gl);
+    this.uploadToneCurveLookupTableToTexture();
   }
 
   private respondToContextLost(event: Event): void {
@@ -300,6 +337,7 @@ export class ViewportRenderer {
     this.programResources = null;
     this.singleTexture = null;
     this.rasterTileTextures = [];
+    this.toneCurveLutTexture = null;
     this.gl = null;
     console.warn("[viewport] WebGL context lost");
   }
@@ -368,7 +406,18 @@ export class ViewportRenderer {
   }
 
   private snapshotCurrentRenderState(): RenderPassState {
-    return { normalization: this.resolveEffectiveNormalization(), isSingleBand: this.isSingleBandSource };
+    return {
+      normalization: this.resolveEffectiveNormalization(),
+      isSingleBand: this.isSingleBandSource,
+      toneCurve: this.snapshotToneCurvePassState(),
+    };
+  }
+
+  private snapshotToneCurvePassState(): ToneCurvePassState {
+    return {
+      enabled: this.toneCurveLookupTable !== null && this.toneCurveLutTexture !== null,
+      lutTexture: this.toneCurveLutTexture,
+    };
   }
 
   // A float raster whose data lies outside [0, 1] would saturate to a flat white
@@ -409,6 +458,8 @@ export class ViewportRenderer {
   private releaseAllWebGlResources(): void {
     if (!this.gl) return;
     this.releaseCurrentSourceTextures();
+    deleteTextureSafely(this.gl, this.toneCurveLutTexture);
+    this.toneCurveLutTexture = null;
     deleteRendererProgramResources(this.gl, this.programResources);
     this.programResources = null;
     this.gl = null;
@@ -524,11 +575,31 @@ function drawSingleTextureWithTransform(
   applyQuadTransformUniforms(gl, resources.uniforms.quadTransform, transform);
   applyNormalizationUniforms(gl, resources.uniforms.normalization, renderState.normalization);
   applyBandModeUniforms(gl, resources.uniforms.bandMode, renderState.isSingleBand);
+  applyToneCurveUniforms(gl, resources.uniforms.toneCurve, renderState.toneCurve);
   gl.bindVertexArray(resources.vao);
+  bindToneCurveLutToUnitOne(gl, renderState.toneCurve.lutTexture);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
+}
+
+function applyToneCurveUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: ToneCurveUniformLocations,
+  toneCurve: ToneCurvePassState,
+): void {
+  if (uniforms.enabled === null) return;
+  const enabled = toneCurve.enabled && toneCurve.lutTexture !== null;
+  gl.uniform1i(uniforms.enabled, enabled ? 1 : 0);
+}
+
+function bindToneCurveLutToUnitOne(
+  gl: WebGL2RenderingContext,
+  lutTexture: WebGLTexture | null,
+): void {
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, lutTexture);
 }
 
 function applyBandModeUniforms(
@@ -585,6 +656,7 @@ function createViewportRendererProgram(
   const vertexBuffer = createFullscreenQuadVertexBuffer(gl);
   const vao = createFullscreenQuadVertexArray(gl, vertexBuffer);
   bindTextureSamplerToUnitZero(gl, program);
+  bindToneCurveLutSamplerToUnitOne(gl, program);
   const uniforms = lookUpProgramUniformLocations(gl, program);
   return { program, vao, vertexBuffer, uniforms };
 }
@@ -597,6 +669,16 @@ function lookUpProgramUniformLocations(
     quadTransform: lookUpQuadTransformUniformLocations(gl, program),
     normalization: lookUpNormalizationUniformLocations(gl, program),
     bandMode: lookUpBandModeUniformLocations(gl, program),
+    toneCurve: lookUpToneCurveUniformLocations(gl, program),
+  };
+}
+
+function lookUpToneCurveUniformLocations(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): ToneCurveUniformLocations {
+  return {
+    enabled: gl.getUniformLocation(program, "u_toneCurveEnabled"),
   };
 }
 
@@ -711,6 +793,17 @@ function bindTextureSamplerToUnitZero(
   if (!samplerLocation) return;
   gl.useProgram(program);
   gl.uniform1i(samplerLocation, 0);
+  gl.useProgram(null);
+}
+
+function bindToneCurveLutSamplerToUnitOne(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+): void {
+  const samplerLocation = gl.getUniformLocation(program, "u_toneCurveLut");
+  if (!samplerLocation) return;
+  gl.useProgram(program);
+  gl.uniform1i(samplerLocation, 1);
   gl.useProgram(null);
 }
 

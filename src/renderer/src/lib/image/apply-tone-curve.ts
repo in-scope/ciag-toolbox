@@ -60,6 +60,33 @@ export function buildToneCurveLookupTable(
   );
 }
 
+// CT-170: the WebGL display shader samples a band value that has already been
+// mapped into the [0, 1] display unit (data-type range -> 0..1). This builds the
+// matching LUT in that same display-normalized domain: entry i answers "what does
+// the curve output for the value whose display-unit coordinate is i/(N-1)?", with
+// the output renormalized back into the display unit. The shader can then remap a
+// sampled value by texturing this LUT directly, without touching pixel data.
+export function buildDisplayNormalizedToneCurveLookupTable(
+  curve: ToneCurve,
+  range: DataTypeValueRange,
+  entryCount: number,
+): ReadonlyArray<number> {
+  const dataDomainOutputs = buildToneCurveLookupTable(curve, range, entryCount);
+  return dataDomainOutputs.map((output) => normalizeOutputIntoDisplayUnit(output, range));
+}
+
+function normalizeOutputIntoDisplayUnit(output: number, range: DataTypeValueRange): number {
+  const span = range.max - range.min;
+  if (span <= 0) return 0;
+  return clampToUnitInterval((output - range.min) / span);
+}
+
+function clampToUnitInterval(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 export function applyToneCurveToRasterBand(
   raster: RasterImage,
   bandIndex: number,
