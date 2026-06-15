@@ -1,4 +1,5 @@
 import type { GridLayout } from "@/lib/grid/grid-layout";
+import type { RasterColorInterpretation } from "@/lib/image/raster-image";
 
 export const PROJECT_FILE_FORMAT_VERSION = 2;
 export const PROJECT_BUNDLE_EXTENSION = "ctbundle";
@@ -40,6 +41,11 @@ export interface ProjectViewportEntry {
   readonly viewTransform: ProjectViewportViewTransform;
   readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
   readonly roi: null;
+  // CT-174: a baked true-colour photo is re-encoded as a 3-band ENVI/TIFF asset,
+  // which has nowhere to record that its bands are display R/G/B. The flag is
+  // persisted here in the manifest instead and re-applied on open so a saved
+  // colour photo reopens as an RGB composite rather than reverting to grayscale.
+  readonly colorInterpretation?: RasterColorInterpretation;
 }
 
 export interface ProjectFile {

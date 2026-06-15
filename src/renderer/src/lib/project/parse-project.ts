@@ -1,4 +1,5 @@
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
+import type { RasterColorInterpretation } from "@/lib/image/raster-image";
 
 import {
   IDENTITY_PROJECT_VIEWPORT_VIEW_TRANSFORM,
@@ -71,7 +72,16 @@ function parseViewportEntryOrThrow(value: unknown): ProjectViewportEntry {
     viewTransform: parseViewTransformOrIdentity(entry["viewTransform"]),
     operationHistory: parseOperationHistoryOrEmpty(entry["operationHistory"]),
     roi: null,
+    ...parseColorInterpretationFieldOrOmit(entry["colorInterpretation"]),
   };
+}
+
+// CT-174: only the "rgb" tag is recognised; anything else (or its absence) leaves
+// the field off entirely so a scientific stack keeps per-band grayscale viewing.
+function parseColorInterpretationFieldOrOmit(
+  value: unknown,
+): { colorInterpretation?: RasterColorInterpretation } {
+  return value === "rgb" ? { colorInterpretation: "rgb" } : {};
 }
 
 function parseSourceReferenceOrThrow(value: unknown): ProjectViewportSourceReference {

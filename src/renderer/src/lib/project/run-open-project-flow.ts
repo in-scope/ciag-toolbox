@@ -1,4 +1,5 @@
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { restoreSourceColorInterpretation } from "@/lib/image/restore-source-color-interpretation";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { parseProjectFileFromJsonString } from "./parse-project";
@@ -86,7 +87,7 @@ async function readSingleViewportAssetOrThrow(
   return {
     index: entry.index,
     fileName: entry.source.fileName,
-    source: decoded,
+    source: restoreSourceColorInterpretation(decoded, entry.colorInterpretation),
     originalFilePath: result.absolutePath,
     fileSizeBytes: result.bytes.length,
     entry,

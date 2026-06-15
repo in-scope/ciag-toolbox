@@ -1,15 +1,19 @@
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 
-import { multiBandTiff } from "./fixtures/fixture-manifest";
+import { multiBandTiff, rgbPng } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
   applyOperationInPlace,
+  applyQuickGeometricTransform,
+  colorfulNonClearPixelFraction,
   createTemporaryProjectBundleDirectory,
+  goToBandNumberInput,
   loadFixtureAsStack,
   openOperation,
   openProjectBundleThroughOpenDialog,
+  panelCanvas,
   readHistoryEntries,
   readMetadata,
   readPixelValueAt,
@@ -28,10 +32,20 @@ import type { ElectronApplication, Page } from "@playwright/test";
 // and the values stay integer for exact comparison. "Before" values are captured live and compared
 // after the reopen, so a fixture change does not require editing hardcoded numbers.
 
+// CT-174: a true-colour photo's "rgb" colour interpretation is persisted in the project manifest
+// (the baked ENVI/TIFF asset cannot carry it) and re-applied on open, so a saved colour photo
+// reopens as an RGB composite rather than reverting to grayscale. The photo is flipped IN PLACE
+// first so the raster is operation-produced (forcing a bake into the bundle, the path that loses
+// the tag without this fix); a reflect keeps all three colour bands and their distinct colours.
+// A scientific stack leaves the flag absent, so it reopens with per-band grayscale viewing.
+
 const MULTIBAND_DIMENSIONS: PixelDimensions = {
   width: multiBandTiff.width,
   height: multiBandTiff.height,
 };
+
+const COLOUR_PANEL = 1;
+const COLORFUL_FRACTION_FLOOR = 0.3;
 
 const BIT_SHIFT_OPERATION_LABEL = "Bit Shift";
 
@@ -53,6 +67,33 @@ test("saves a project after a chain of operations and reopens it with identical 
     expectSnapshotsMatch(before, after);
   });
 });
+
+test("a saved colour photo reopens as an RGB composite instead of reverting to grayscale", async () => {
+  await withFreshApp(async ({ app, window }) => {
+    await loadFixtureAsStack(window, rgbPng.fileName);
+    await expectColourPanelRendersInColor(window);
+    await applyQuickGeometricTransform(window, "flip-horizontal");
+    await expectColourPanelRendersInColor(window);
+    await saveThenReopenProjectBundle(app, window);
+    await expectColourPanelRendersInColor(window);
+    await expect(goToBandNumberInput(window)).toHaveCount(0);
+  });
+});
+
+test("a saved scientific stack reopens with per-band viewing and no colour composite", async () => {
+  await withFreshApp(async ({ app, window }) => {
+    await loadFixtureAsStack(window, multiBandTiff.fileName);
+    await applyOneInPlaceBitShift(window);
+    await saveThenReopenProjectBundle(app, window);
+    await expect(goToBandNumberInput(window)).toBeVisible();
+  });
+});
+
+async function expectColourPanelRendersInColor(window: Page): Promise<void> {
+  await expect
+    .poll(() => colorfulNonClearPixelFraction(panelCanvas(window, COLOUR_PANEL)))
+    .toBeGreaterThan(COLORFUL_FRACTION_FLOOR);
+}
 
 async function withFreshApp(run: (launched: LaunchedApp) => Promise<void>): Promise<void> {
   const launched = await launchToolboxApp();

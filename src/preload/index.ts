@@ -112,6 +112,7 @@ export interface SaveBundleDraftViewportEntry {
   asset: SaveBundleDraftAsset;
   renderingState: SaveBundleDraftRenderingState;
   operationHistory: ReadonlyArray<SaveBundleDraftOperationHistoryEntry>;
+  colorInterpretation?: "rgb";
 }
 
 export interface SaveBundleDraft {

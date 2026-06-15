@@ -3,6 +3,8 @@ import {
   encodeBakedBundleAssetForRasterSource,
   type BundleAssetBakedSidecar,
 } from "@/lib/image/encode-bundle-asset";
+import type { RasterColorInterpretation } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -33,6 +35,7 @@ export interface DraftBundleViewportEntry {
   readonly asset: DraftBundleAsset;
   readonly renderingState: ProjectViewportRenderingState;
   readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
+  readonly colorInterpretation?: RasterColorInterpretation;
 }
 
 export interface DraftBundleFile {
@@ -77,7 +80,18 @@ export function buildDraftBundleViewportEntryOrThrow(
     asset: buildDraftBundleAssetForViewportOrThrow(viewport),
     renderingState: viewport.renderingState,
     operationHistory: viewport.operationHistory,
+    colorInterpretation: readPersistableColorInterpretationFromSource(viewport.source),
   };
+}
+
+// Persist the colour flag only for a genuine RGB composite (exactly three
+// display channels). A scientific multi-band stack leaves it undefined, so the
+// manifest stays free of the tag and the stack reopens with per-band viewing.
+function readPersistableColorInterpretationFromSource(
+  source: ViewportImageSource,
+): RasterColorInterpretation | undefined {
+  if (source.kind !== "raster") return undefined;
+  return shouldRenderRasterAsRgbComposite(source.raster) ? "rgb" : undefined;
 }
 
 function buildDraftBundleAssetForViewportOrThrow(

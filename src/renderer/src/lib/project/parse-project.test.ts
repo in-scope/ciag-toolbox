@@ -80,6 +80,25 @@ describe("parseProjectFileFromJsonString", () => {
     expect(entry?.timestampMs).toBe(1_700_000_000_000);
   });
 
+  it("restores the rgb colour interpretation flag from a manifest viewport entry", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonWithColorInterpretation("rgb"),
+    );
+    expect(project.viewports[0]?.colorInterpretation).toBe("rgb");
+  });
+
+  it("leaves the colour interpretation flag absent for a scientific stack entry", () => {
+    const project = parseProjectFileFromJsonString(buildValidProjectJsonWithSingleViewport());
+    expect(project.viewports[0]?.colorInterpretation).toBeUndefined();
+  });
+
+  it("ignores an unrecognised colour interpretation value", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonWithColorInterpretation("cmyk"),
+    );
+    expect(project.viewports[0]?.colorInterpretation).toBeUndefined();
+  });
+
   it("rejects an operationHistory entry that has a nested-object parameter value", () => {
     const project = {
       formatVersion: PROJECT_FILE_FORMAT_VERSION,
@@ -137,6 +156,28 @@ function buildProjectJsonWithSingleHistoryEntry(): string {
           },
         ],
         roi: null,
+      },
+    ],
+  });
+}
+
+function buildProjectJsonWithColorInterpretation(colorInterpretation: string): string {
+  return JSON.stringify({
+    formatVersion: PROJECT_FILE_FORMAT_VERSION,
+    gridLayout: "1x1",
+    selectedViewportIndices: [0],
+    viewports: [
+      {
+        index: 0,
+        source: { relativePath: "assets/photo.hdr", fileName: "photo.png" },
+        renderingState: {
+          normalizationEnabled: false,
+          selectedBandIndex: 0,
+          lastAppliedOperationLabel: null,
+        },
+        operationHistory: [],
+        roi: null,
+        colorInterpretation,
       },
     ],
   });
