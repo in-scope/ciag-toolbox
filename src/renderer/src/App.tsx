@@ -73,9 +73,10 @@ import {
   listKeptBandOriginalNumbersAfterRemovingBand,
 } from "@/lib/image/apply-band-keep";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
-import { applyToneCurveToRasterBand, type ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
+import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
+import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
+import { recordPreviewRasterAllocation } from "@/lib/instrumentation/render-instrumentation";
 import {
-  clampBandIndexToRaster,
   getRasterBandOriginalNumber,
   type RasterImage,
 } from "@/lib/image/raster-image";
@@ -170,6 +171,12 @@ import {
   type FalseColorPreviewApi,
 } from "@/state/false-color-preview-context";
 import {
+  ToneCurvePreviewProvider,
+  useToneCurvePreview,
+  type ToneCurveLutPreview,
+  type ToneCurvePreviewApi,
+} from "@/state/tone-curve-preview-context";
+import {
   ViewportReimportProvider,
   type ViewportReimportApi,
 } from "@/state/reimport-context";
@@ -230,16 +237,18 @@ export function App(): JSX.Element {
           <RegionToolProvider>
             <RegionRequestProvider>
             <FalseColorPreviewProvider>
-              <PixelReadoutProvider>
-                <BusyStateProvider>
-                  <RightPanelCollapsedStateProvider>
-                    <ApplicationShell />
-                    <AboutDialog />
-                    <AppBusyModal />
-                    <Toaster />
-                  </RightPanelCollapsedStateProvider>
-                </BusyStateProvider>
-              </PixelReadoutProvider>
+              <ToneCurvePreviewProvider>
+                <PixelReadoutProvider>
+                  <BusyStateProvider>
+                    <RightPanelCollapsedStateProvider>
+                      <ApplicationShell />
+                      <AboutDialog />
+                      <AppBusyModal />
+                      <Toaster />
+                    </RightPanelCollapsedStateProvider>
+                  </BusyStateProvider>
+                </PixelReadoutProvider>
+              </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>
             </RegionRequestProvider>
           </RegionToolProvider>
@@ -278,6 +287,7 @@ function ApplicationShell(): JSX.Element {
   const regionTool = useRegionTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
+  const toneCurvePreview = useToneCurvePreview();
   const [activeActionParameterValues, setActiveActionParameterValues] =
     useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
@@ -348,6 +358,7 @@ function ApplicationShell(): JSX.Element {
     imagesByIndex,
     parameterValues: activeActionParameterValues,
     falseColorPreview,
+    toneCurvePreview,
     renderingApi,
   });
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
@@ -1689,18 +1700,16 @@ interface PublishActiveToolPreviewInputs {
   readonly imagesByIndex: ImagesByIndexMap;
   readonly parameterValues: ParameterValuesById;
   readonly falseColorPreview: FalseColorPreviewApi;
+  readonly toneCurvePreview: ToneCurvePreviewApi;
   readonly renderingApi: ViewportRenderingApi;
 }
 
 function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
   const falseColorSource = useFalseColorPreviewSource(inputs);
-  const toneCurveSource = useToneCurvePreviewSource(inputs);
+  const toneCurveLut = useToneCurvePreviewLut(inputs);
   const sourceIndex = inputs.singleSelectedSource?.index ?? null;
-  usePublishPreviewSourceForViewport(
-    inputs.falseColorPreview.setPreview,
-    falseColorSource ?? toneCurveSource,
-    sourceIndex,
-  );
+  usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, falseColorSource, sourceIndex);
+  usePublishToneCurveLutForViewport(inputs.toneCurvePreview.setPreview, toneCurveLut, sourceIndex);
 }
 
 function useFalseColorPreviewSource(
@@ -1712,33 +1721,36 @@ function useFalseColorPreviewSource(
     [inputs.parameterValues],
   );
   return useMemo(
-    () => (raster ? buildFalseColorPreviewSourceOrNull(raster, assignment) : null),
+    () => buildFalseColorPreviewSourceRecordingAllocation(raster, assignment),
     [raster, assignment],
   );
 }
 
-function useToneCurvePreviewSource(
-  inputs: PublishActiveToolPreviewInputs,
+function buildFalseColorPreviewSourceRecordingAllocation(
+  raster: RasterImage | null,
+  assignment: FalseColorBandAssignment,
 ): ViewportImageSource | null {
+  if (!raster) return null;
+  const source = buildFalseColorPreviewSourceOrNull(raster, assignment);
+  if (source) recordPreviewRasterAllocation();
+  return source;
+}
+
+// CT-171: the tone-curve preview is display-only - it publishes a GPU lookup
+// table rather than a baked preview raster, so editing anchors never re-uploads
+// the image texture (proven by the render-instrumentation counters).
+function useToneCurvePreviewLut(
+  inputs: PublishActiveToolPreviewInputs,
+): ReadonlyArray<number> | null {
   const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
   const index = inputs.singleSelectedSource?.index ?? null;
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
   const anchors = state?.toneCurveAnchors ?? null;
   const bandIndex = state?.selectedBandIndex ?? 0;
   return useMemo(
-    () => buildToneCurvePreviewSourceOrNull(raster, bandIndex, anchors),
+    () => buildToneCurvePreviewLutOrNull(raster, bandIndex, anchors),
     [raster, bandIndex, anchors],
   );
-}
-
-function buildToneCurvePreviewSourceOrNull(
-  raster: RasterImage | null,
-  bandIndex: number,
-  anchors: ReadonlyArray<ToneCurveAnchor> | null,
-): ViewportImageSource | null {
-  if (!raster || !anchors || anchors.length < 2) return null;
-  const previewRaster = applyToneCurveToRasterBand(raster, clampBandIndexToRaster(raster, bandIndex), anchors);
-  return { kind: "raster", raster: previewRaster };
 }
 
 function resolveActiveToolRasterOrNull(
@@ -1769,6 +1781,25 @@ function buildFalseColorPreviewOrNull(
 ): FalseColorPreview | null {
   if (source === null || sourceIndex === null) return null;
   return { viewportIndex: sourceIndex, source };
+}
+
+function usePublishToneCurveLutForViewport(
+  setPreview: ToneCurvePreviewApi["setPreview"],
+  lookupTable: ReadonlyArray<number> | null,
+  sourceIndex: number | null,
+): void {
+  useEffect(() => {
+    setPreview(buildToneCurvePreviewOrNull(lookupTable, sourceIndex));
+    return () => setPreview(null);
+  }, [setPreview, lookupTable, sourceIndex]);
+}
+
+function buildToneCurvePreviewOrNull(
+  lookupTable: ReadonlyArray<number> | null,
+  sourceIndex: number | null,
+): ToneCurveLutPreview | null {
+  if (lookupTable === null || sourceIndex === null) return null;
+  return { viewportIndex: sourceIndex, lookupTable };
 }
 
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {

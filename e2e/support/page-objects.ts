@@ -296,6 +296,10 @@ export {
   type CanvasAverageColor,
 } from "./canvas-pixels";
 export {
+  readImageTextureUploadCount,
+  readPreviewRasterAllocationCount,
+} from "./render-instrumentation";
+export {
   BRIGHTNESS_CONTRAST_LABEL,
   BRIGHTNESS_SLIDER_LABEL,
   CONTRAST_SLIDER_LABEL,

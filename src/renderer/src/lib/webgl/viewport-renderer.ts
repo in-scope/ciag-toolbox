@@ -34,6 +34,7 @@ import {
   createIdentityToneCurveLutTexture,
   uploadNormalizedValuesToToneCurveLutTexture,
 } from "./tone-curve-lut-texture";
+import { recordImageTextureUpload } from "@/lib/instrumentation/render-instrumentation";
 import {
   IDENTITY_PAN,
   clampUserZoom,
@@ -350,6 +351,7 @@ export class ViewportRenderer {
   private uploadCurrentSourceIfReady(): void {
     if (!this.gl || !this.currentSource) return;
     this.releaseCurrentSourceTextures();
+    recordImageTextureUpload();
     if (this.currentSource.kind === "raster") {
       this.rasterTileTextures = createRasterTileTexturesForSource(
         this.gl,
@@ -364,6 +366,7 @@ export class ViewportRenderer {
   private rebuildRasterTilesForSelectedBand(): void {
     if (!this.gl || !this.currentSource || this.currentSource.kind !== "raster") return;
     deleteRasterTileTexturesSafely(this.gl, this.rasterTileTextures);
+    recordImageTextureUpload();
     this.rasterTileTextures = createRasterTileTexturesForSource(
       this.gl,
       this.currentSource.raster,
