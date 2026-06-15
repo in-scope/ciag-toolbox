@@ -104,6 +104,7 @@ import {
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
@@ -934,10 +935,14 @@ function applyLoadedImageAtIndex(
   pending: PendingOpenImageReplaceItem,
   bindings: ApplyLoadedImageBindings,
 ): void {
+  // CT-172: promote a browser-decoded photo to a raster on the way into the viewport so the
+  // panel behaves like any other image (raster operations, histogram, tone curve). A source
+  // that is already a raster (TIFF/ENVI/stack) is returned unchanged.
+  const rasterSource = coerceViewportSourceToRasterSource(pending.source);
   bindings.setImagesByIndex((previous) =>
     assignViewportContentAtIndex(previous, index, {
       fileName: pending.fileName,
-      source: pending.source,
+      source: rasterSource,
       originalFilePath: pending.originalFilePath,
       fileSizeBytes: pending.fileSizeBytes,
     }),
@@ -1453,11 +1458,13 @@ async function replaceViewportSourceWithReimportedFile(
     label: `Re-importing ${result.fileName}...`,
   });
   try {
-    const source = await decodeImageBytesToViewportSource({
-      fileName: result.fileName,
-      bytes: result.bytes,
-      sidecarBytes: result.sidecar?.bytes,
-    });
+    const source = coerceViewportSourceToRasterSource(
+      await decodeImageBytesToViewportSource({
+        fileName: result.fileName,
+        bytes: result.bytes,
+        sidecarBytes: result.sidecar?.bytes,
+      }),
+    );
     bindings.setImagesByIndex((previous) =>
       assignViewportContentAtIndex(previous, viewportIndex, {
         fileName: result.fileName,

@@ -16,18 +16,17 @@ import {
   readMetadata,
   selectActiveBandNumber,
 } from "./support/page-objects";
-import type { MetadataReadout } from "./support/page-objects";
 
 // Stage 2 CT-023..CT-028: every supported format loads through the CT-113 dialog stub and
 // the Metadata panel reports the expected dimensions, band count, and data type; ENVI also
 // reports per-band wavelengths. Each test relaunches into a clean single panel so the
 // loaded stack auto-selects and its metadata is what the Metadata panel shows.
 //
-// REAL-APP NOTE (not an E2E-BUG, STALE AC): PNG/JPG load through the browser decode path as
-// image-bitmap sources with no per-channel raster, so the Metadata panel reports dimensions
-// but shows "-" for band count and data type. This is intended, unit-test-documented
-// behaviour (image-metadata-display.test.ts "uses placeholders for fields unavailable on
-// browser sources"), so the PNG cases assert the placeholder rather than a count/type.
+// CT-172: PNG/JPG are now PROMOTED to rasters at load (App.applyLoadedImageAtIndex runs the
+// decoded browser source through coerceViewportSourceToRasterSource), so the Metadata panel
+// reports a sensible raster: a colour PNG is a 3-band uint8 rgb raster and a grayscale PNG is a
+// single-band uint8 raster. (Before CT-172 a browser source showed "-" for band count/type.)
+// The "format" field still comes from the file extension, so it stays "PNG".
 //
 // RAW-FORMAT (deferred, see progress.txt): a raw case is explicitly out of scope here - raw
 // camera files are large real captures, not kilobyte fixtures, and raw import needs a
@@ -45,15 +44,15 @@ test("loads a multi-band TIFF stack and reports dimensions, band count, and data
   });
 });
 
-test("loads a grayscale PNG and reports dimensions with placeholder band count/data type", async () => {
+test("loads a grayscale PNG promoted to a single-band uint8 raster", async () => {
   await withFixtureLoadedInFreshApp(lowContrastGrayPng.fileName, async (window) => {
-    await expectBrowserImageMetadataMatchesFixture(window, lowContrastGrayPng, "PNG");
+    await expectRasterMetadataMatchesFixture(window, lowContrastGrayPng, "PNG");
   });
 });
 
-test("loads an RGB PNG and reports dimensions with placeholder band count/data type", async () => {
+test("loads an RGB PNG promoted to a 3-band uint8 raster", async () => {
   await withFixtureLoadedInFreshApp(rgbPng.fileName, async (window) => {
-    await expectBrowserImageMetadataMatchesFixture(window, rgbPng, "PNG");
+    await expectRasterMetadataMatchesFixture(window, rgbPng, "PNG");
   });
 });
 
@@ -89,24 +88,6 @@ async function expectRasterMetadataMatchesFixture(
   const metadata = await readMetadata(window);
   expect(metadata.format).toBe(expectedFormat);
   expect(metadata.bandCount).toBe(String(fixture.bandCount));
-}
-
-async function expectBrowserImageMetadataMatchesFixture(
-  window: LaunchedApp["window"],
-  fixture: SingleFileFixture,
-  expectedFormat: string,
-): Promise<void> {
-  const metadata = await readMetadata(window);
-  expect(metadata.format).toBe(expectedFormat);
-  expect(metadata.width).toBe(String(fixture.width));
-  expect(metadata.height).toBe(String(fixture.height));
-  expectBrowserSourcePlaceholdersForBandCountAndDataType(metadata);
-}
-
-function expectBrowserSourcePlaceholdersForBandCountAndDataType(metadata: MetadataReadout): void {
-  expect(metadata.bandCount).toBe("-");
-  expect(metadata.sampleFormat).toBe("-");
-  expect(metadata.bitsPerSample).toBe("-");
 }
 
 async function expectEnviStackMetadataAndWavelengths(

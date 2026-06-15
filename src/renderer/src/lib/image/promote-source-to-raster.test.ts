@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildRasterFromRgbaBytesDetectingColor,
   buildRgbRasterFromRgbaBytes,
   coerceViewportSourceToRasterSource,
 } from "@/lib/image/promote-source-to-raster";
@@ -10,6 +11,13 @@ function buildTwoPixelRgbaBytes(): Uint8ClampedArray {
   return new Uint8ClampedArray([
     10, 20, 30, 255, // pixel 0: R=10 G=20 B=30 (alpha dropped)
     40, 50, 60, 128, // pixel 1: R=40 G=50 B=60 (alpha dropped)
+  ]);
+}
+
+function buildTwoPixelGrayscaleRgbaBytes(): Uint8ClampedArray {
+  return new Uint8ClampedArray([
+    100, 100, 100, 255, // pixel 0: R==G==B (grayscale)
+    130, 130, 130, 255, // pixel 1: R==G==B (grayscale)
   ]);
 }
 
@@ -48,6 +56,24 @@ describe("buildRgbRasterFromRgbaBytes", () => {
   });
 });
 
+describe("buildRasterFromRgbaBytesDetectingColor", () => {
+  it("promotes colour RGBA bytes to a 3-band rgb composite raster", () => {
+    const raster = buildRasterFromRgbaBytesDetectingColor(buildTwoPixelRgbaBytes(), 2, 1);
+    expect(raster.bandCount).toBe(3);
+    expect(raster.colorInterpretation).toBe("rgb");
+    expect(raster.bandLabels).toEqual(["Red", "Green", "Blue"]);
+  });
+
+  it("promotes grayscale RGBA bytes (R==G==B) to a single-band raster with no rgb tag", () => {
+    const raster = buildRasterFromRgbaBytesDetectingColor(buildTwoPixelGrayscaleRgbaBytes(), 2, 1);
+    expect(raster.bandCount).toBe(1);
+    expect(raster.colorInterpretation).toBeUndefined();
+    expect(raster.sampleFormat).toBe("uint");
+    expect(raster.bitsPerSample).toBe(8);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([100, 130]);
+  });
+});
+
 describe("coerceViewportSourceToRasterSource", () => {
   it("returns a raster source unchanged", () => {
     const raster: RasterImage = {
@@ -73,5 +99,17 @@ describe("coerceViewportSourceToRasterSource", () => {
     expect(coerced.kind).toBe("raster");
     expect(coerced.raster.bandCount).toBe(3);
     expect(Array.from(coerced.raster.bandPixels[0]!)).toEqual([10, 40]);
+  });
+
+  it("promotes a grayscale browser-decoded pixels source to a single-band raster", () => {
+    const source: ViewportImageSource = {
+      kind: "pixels",
+      pixels: buildTwoPixelGrayscaleRgbaBytes(),
+      width: 2,
+      height: 1,
+    };
+    const coerced = coerceViewportSourceToRasterSource(source);
+    expect(coerced.raster.bandCount).toBe(1);
+    expect(coerced.raster.colorInterpretation).toBeUndefined();
   });
 });
