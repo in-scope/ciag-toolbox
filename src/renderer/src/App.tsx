@@ -198,7 +198,9 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
+  hasToneCurveEditingState,
   type ApplyScope,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
@@ -1607,8 +1609,8 @@ function clearTransientOperationStateOnActiveSource(
 function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
   if (inputs.activeSourceIndex === null) return;
   const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
-  if (state.toneCurveAnchors === null) return;
-  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, toneCurveAnchors: null });
+  if (!hasToneCurveEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearToneCurveEditingState(state));
 }
 
 function beginOperationRegionRequestForActiveSource(

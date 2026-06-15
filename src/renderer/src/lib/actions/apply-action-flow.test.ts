@@ -21,6 +21,7 @@ import type { RegisteredViewportAction } from "./registered-actions";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_REMOVED_BAND_INDEXES,
+  EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   type ViewportRenderingState,
 } from "./viewport-action";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -303,6 +304,8 @@ function buildRenderingStateWithHistory(
     roi: null,
     operationRegion: null,
     toneCurveAnchors: null,
+    toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+    toneCurveActiveChannel: "rgb",
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
     pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,

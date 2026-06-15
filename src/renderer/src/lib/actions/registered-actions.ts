@@ -99,7 +99,11 @@ import type {
   ViewportActionSecondaryOutputsTransform,
   ViewportActionSourceTransform,
 } from "./viewport-action";
-import { EMPTY_REMOVED_BAND_INDEXES, type ViewportRenderingState } from "./viewport-action";
+import {
+  clearToneCurveEditingState,
+  EMPTY_REMOVED_BAND_INDEXES,
+  type ViewportRenderingState,
+} from "./viewport-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -609,7 +613,7 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
 };
 
 function clearToneCurveAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, toneCurveAnchors: null, operationRegion: null };
+  return clearToneCurveEditingState({ ...state, operationRegion: null });
 }
 
 function prepareToneCurveParameterValues(

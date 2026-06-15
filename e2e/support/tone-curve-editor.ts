@@ -22,7 +22,10 @@ export const TONE_CURVE_LABEL = "Tone Curve";
 
 const ENDPOINT_HANDLE_NAME = "Curve endpoint";
 const INTERIOR_HANDLE_NAME = "Curve anchor (right-click to remove)";
-const HISTOGRAM_CANVAS_NAME = "Active band intensity histogram";
+// The editor histogram backdrop is named "Active band intensity histogram" for a scientific
+// stack but "<Channel> channel intensity histogram" for a CT-176 composite channel; match
+// either so a single helper locates the one histogram canvas inside the Tone Curve panel.
+const HISTOGRAM_CANVAS_NAME = /intensity histogram$/;
 const ANY_HANDLE_SELECTOR =
   `button[aria-label="${ENDPOINT_HANDLE_NAME}"], button[aria-label^="Curve anchor"]`;
 const SELECTED_HANDLE_SELECTOR =
@@ -164,6 +167,65 @@ export function toneCurveReferenceGridLines(page: Page): Locator {
 export async function expectToneCurveReferenceGridIsPresent(page: Page): Promise<void> {
   await expect(toneCurveReferenceGrid(page)).toBeVisible();
   await expect(toneCurveReferenceGridLines(page)).toHaveCount(REFERENCE_GRID_INTERIOR_LINE_COUNT);
+}
+
+// CT-176: a true-colour composite shows a channel selector (RGB/R/G/B) above the histogram;
+// each option re-targets the editor at that channel's own curve + histogram backdrop. The
+// selector is a role="group" of toggle buttons whose accessible names are RGB/Red/Green/Blue.
+const CHANNEL_SELECTOR_GROUP_NAME = "Tone curve channel";
+
+export type ToneCurveChannelButtonName = "RGB" | "Red" | "Green" | "Blue";
+export type ToneCurveChannelBackdropName = "Value" | "Red" | "Green" | "Blue";
+
+export function toneCurveChannelSelector(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByRole("group", { name: CHANNEL_SELECTOR_GROUP_NAME });
+}
+
+export function toneCurveChannelButton(page: Page, name: ToneCurveChannelButtonName): Locator {
+  return toneCurveChannelSelector(page).getByRole("button", { name, exact: true });
+}
+
+export async function selectToneCurveChannel(page: Page, name: ToneCurveChannelButtonName): Promise<void> {
+  await toneCurveChannelButton(page, name).click();
+}
+
+export async function expectToneCurveChannelSelectorPresent(page: Page): Promise<void> {
+  await expect(toneCurveChannelSelector(page)).toBeVisible();
+}
+
+export async function expectToneCurveChannelSelectorAbsent(page: Page): Promise<void> {
+  await expect(toneCurveChannelSelector(page)).toHaveCount(0);
+}
+
+export async function expectToneCurveChannelIsActive(
+  page: Page,
+  name: ToneCurveChannelButtonName,
+): Promise<void> {
+  await expect(toneCurveChannelButton(page, name)).toHaveAttribute("aria-pressed", "true");
+}
+
+// The single histogram canvas inside the panel is re-labelled to the channel it bins, so its
+// accessible name is the observable proof the backdrop switched when the channel switches.
+export async function expectToneCurveHistogramBackdrop(
+  page: Page,
+  backdrop: ToneCurveChannelBackdropName,
+): Promise<void> {
+  await expect(toneCurveEditorHistogramCanvas(page)).toHaveAttribute(
+    "aria-label",
+    `${backdrop} channel intensity histogram`,
+  );
+}
+
+// CT-176: a scientific multi-band stack has no selector; it shows a read-only label naming the
+// band the curve targets, which tracks the band navigator's selection.
+const EDITING_BAND_LABEL_TESTID = "tone-curve-editing-band";
+
+export function toneCurveEditingBandLabel(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(`[data-testid="${EDITING_BAND_LABEL_TESTID}"]`);
+}
+
+export function readToneCurveEditingBandLabel(page: Page): Promise<string> {
+  return toneCurveEditingBandLabel(page).innerText();
 }
 
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
