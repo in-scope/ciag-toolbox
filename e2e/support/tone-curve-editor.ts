@@ -147,6 +147,25 @@ export async function clickToneCurveResetToIdentity(page: Page): Promise<void> {
   await toneCurveResetButton(page).click();
 }
 
+// CT-168: a decorative 8x8 reference grid is drawn behind the curve. It is exposed via the
+// stable data-testid hook and uses pointer-events-none so clicking a gridline still adds an
+// anchor. Eight divisions yield 7 interior vertical + 7 interior horizontal lines = 14 lines.
+const REFERENCE_GRID_TESTID = "tone-curve-reference-grid";
+const REFERENCE_GRID_INTERIOR_LINE_COUNT = 14;
+
+export function toneCurveReferenceGrid(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(`[data-testid="${REFERENCE_GRID_TESTID}"]`);
+}
+
+export function toneCurveReferenceGridLines(page: Page): Locator {
+  return toneCurveReferenceGrid(page).locator("line");
+}
+
+export async function expectToneCurveReferenceGridIsPresent(page: Page): Promise<void> {
+  await expect(toneCurveReferenceGrid(page)).toBeVisible();
+  await expect(toneCurveReferenceGridLines(page)).toHaveCount(REFERENCE_GRID_INTERIOR_LINE_COUNT);
+}
+
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {
   await expect(toneCurveEndpointHandles(page)).toHaveCount(2);
   await expect(toneCurveInteriorHandles(page)).toHaveCount(0);

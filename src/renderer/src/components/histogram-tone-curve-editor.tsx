@@ -27,6 +27,10 @@ import { cn } from "@/lib/utils";
 
 const TONE_CURVE_SAMPLE_COUNT = 48;
 
+// CT-168: GIMP Curves draws an 8x8 reference grid behind the curve so anchor positions can be
+// judged against eighths of the input/output range.
+const TONE_CURVE_GRID_DIVISION_COUNT = 8;
+
 interface HistogramToneCurveEditorProps {
   ranges: ToneCurveValueRanges;
   anchors: ReadonlyArray<ToneCurveAnchor> | null;
@@ -49,6 +53,7 @@ export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): 
       onPointerUp={drag.endDrag}
       onPointerCancel={drag.endDrag}
     >
+      <ToneCurveReferenceGrid />
       <ToneCurveSvgPath ranges={props.ranges} anchors={anchors} />
       {anchors.map((anchor, index) => (
         <ToneCurveAnchorHandle
@@ -164,6 +169,56 @@ function pointerFractionWithinElement(element: HTMLElement, clientX: number, cli
     x: rect.width <= 0 ? 0 : clampUnit((clientX - rect.left) / rect.width),
     y: rect.height <= 0 ? 0 : clampUnit((clientY - rect.top) / rect.height),
   };
+}
+
+// Decorative only: pointer-events-none lets background clicks reach the editor div so a click
+// on a gridline still adds/selects an anchor. The 0..1 viewBox + non-scaling-stroke keeps the
+// lines crisp at any editor size and on high-DPI displays.
+function ToneCurveReferenceGrid(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      data-testid="tone-curve-reference-grid"
+      className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+      viewBox="0 0 1 1"
+      preserveAspectRatio="none"
+    >
+      {listInteriorGridLineFractions().map((fraction) => (
+        <ToneCurveReferenceGridLines key={fraction} fraction={fraction} />
+      ))}
+    </svg>
+  );
+}
+
+function listInteriorGridLineFractions(): number[] {
+  return Array.from(
+    { length: TONE_CURVE_GRID_DIVISION_COUNT - 1 },
+    (_unused, index) => (index + 1) / TONE_CURVE_GRID_DIVISION_COUNT,
+  );
+}
+
+function ToneCurveReferenceGridLines(props: { fraction: number }): JSX.Element {
+  const fraction = props.fraction;
+  return (
+    <>
+      <line
+        x1={fraction}
+        y1={0}
+        x2={fraction}
+        y2={1}
+        className="stroke-border"
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        x1={0}
+        y1={fraction}
+        x2={1}
+        y2={fraction}
+        className="stroke-border"
+        vectorEffect="non-scaling-stroke"
+      />
+    </>
+  );
 }
 
 interface ToneCurveSvgPathProps {
