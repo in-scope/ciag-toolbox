@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.1](https://github.com/in-scope/ciag-toolbox/compare/v0.3.0...v0.3.1) (2026-06-16)
+
+
+### Features
+
+* **CT-164:** track and highlight the selected tone-curve anchor ([ad61c4a](https://github.com/in-scope/ciag-toolbox/commit/ad61c4a830a4fffe0551a24d0e4bbfe9e301b8b4))
+* **CT-165:** add numeric input/output fields with steppers for the selected tone-curve anchor ([8e87016](https://github.com/in-scope/ciag-toolbox/commit/8e870160437a6eb2dfa12ec7f8929e217a25c3a3))
+* **CT-166:** add keyboard nudge and delete for the selected tone-curve anchor ([79a0259](https://github.com/in-scope/ciag-toolbox/commit/79a02598eaf43c22cc3c780eb982f4d305b2e858))
+* **CT-167:** reset tone curve to the identity diagonal ([909beca](https://github.com/in-scope/ciag-toolbox/commit/909becafd5527252ffe1bafd1a9b8952db154046))
+* **CT-168:** add an 8x8 reference grid behind the tone curve ([8a849e3](https://github.com/in-scope/ciag-toolbox/commit/8a849e3283f6431b67a9fe72bb7303193be3db60))
+* **CT-169:** add consolidated tone-curve behaviour regression and reconcile e2e coverage ([597ad15](https://github.com/in-scope/ciag-toolbox/commit/597ad15e74850694d6a06098b2e511853fe499a0))
+* **CT-170:** add tone-curve LUT texture and shader sampling ([86cb890](https://github.com/in-scope/ciag-toolbox/commit/86cb89027b51f79874028272ec15835de355916d))
+* **CT-171:** switch tone-curve preview to the GPU LUT (display-only) ([d9a9b0d](https://github.com/in-scope/ciag-toolbox/commit/d9a9b0da403b7f7fbd505bb10060a245496d4797))
+* **CT-172:** promote browser-decoded photos to rasters at load ([9983690](https://github.com/in-scope/ciag-toolbox/commit/9983690131745400840e0ab3e19647a828e988d5))
+* **CT-173:** re-gate photo export rules on colour interpretation ([ef695b4](https://github.com/in-scope/ciag-toolbox/commit/ef695b46766f75e6e2c607da50efedeffb923833))
+* **CT-174:** persist colour interpretation through project bundles ([0ed21c0](https://github.com/in-scope/ciag-toolbox/commit/0ed21c0e989345dc7e832e06357f25b65f730120))
+* **CT-175:** add per-channel tone-curve model and backward-compatible apply serialization ([b026bbd](https://github.com/in-scope/ciag-toolbox/commit/b026bbd798560e1fe69c5c2a415d8f7c7d11eb14))
+* **CT-176:** add in-panel RGB/R/G/B tone-curve channel selector for composites ([2eddf5f](https://github.com/in-scope/ciag-toolbox/commit/2eddf5faa4d18c4adb21755e93cdeae6bd408305))
+* **CT-177:** preview per-channel tone curves on the gpu for composites ([597d0f8](https://github.com/in-scope/ciag-toolbox/commit/597d0f879f440264351479b37f095517ea118442))
+* **CT-178:** bake per-channel tone curves into a composite in one operation ([09c29d1](https://github.com/in-scope/ciag-toolbox/commit/09c29d1b6094f18301bcc8f5da2c0a746825380f))
+* **CT-179:** reconcile tone-curve specs and add a consolidated photo regression ([9968e2f](https://github.com/in-scope/ciag-toolbox/commit/9968e2f42d2d3b6f00c32844cb7f41500c7002d8))
+* stage-3 toolbox - per-channel tone curves, true-colour images, float auto-fit ([b0c44a5](https://github.com/in-scope/ciag-toolbox/commit/b0c44a596ea6d7606a0ad045265fbf2d831822ba))
+
+
+### Miscellaneous
+
+* release 0.3.1 ([476dcaf](https://github.com/in-scope/ciag-toolbox/commit/476dcaf46dd080af33251e279d91d5ec5e1db18f))
+
 ## [0.3.0](https://github.com/in-scope/ciag-toolbox/compare/v0.2.1...v0.3.0) (2026-06-15)
 
 
