@@ -36,6 +36,8 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
+import { useToneCurvePreview } from "@/state/tone-curve-preview-context";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
@@ -133,6 +135,8 @@ function renderViewportCellViewport(
       viewportNumber={props.viewportNumber}
       imageSource={props.content?.source ?? null}
       previewImageSource={settings.previewImageSource}
+      toneCurvePreviewLookupTable={settings.toneCurvePreviewLookupTable}
+      toneCurvePreviewChannelLookupTables={settings.toneCurvePreviewChannelLookupTables}
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
@@ -166,6 +170,8 @@ interface ViewportCellInteractionSettings {
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
   handleClose: (() => void) | undefined;
   previewImageSource: ViewportImageSource | null;
+  toneCurvePreviewLookupTable: ReadonlyArray<number> | null;
+  toneCurvePreviewChannelLookupTables: ToneCurveChannelPreviewLuts | null;
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
   selectedBandIndex: number;
@@ -188,6 +194,7 @@ function useViewportCellInteractionSettings(
   const { isRegionToolActive } = useRegionTool();
   const regionRequest = useRegionRequest();
   const { getPreviewSourceForViewport } = useFalseColorPreview();
+  const { getLookupTableForViewport, getChannelLookupTablesForViewport } = useToneCurvePreview();
   const { removeBand } = useViewportBandRemoval();
   const closing = useViewportClosing();
   const isSelected = isViewportSelected(cellIndex);
@@ -268,6 +275,8 @@ function useViewportCellInteractionSettings(
     handleClick,
     handleClose,
     previewImageSource: getPreviewSourceForViewport(cellIndex),
+    toneCurvePreviewLookupTable: getLookupTableForViewport(cellIndex),
+    toneCurvePreviewChannelLookupTables: getChannelLookupTablesForViewport(cellIndex),
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
     selectedBandIndex: renderingState.selectedBandIndex,

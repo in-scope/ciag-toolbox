@@ -5,6 +5,7 @@ import {
   encodeRasterBandAsFloat32TiffBytes,
   encodeRasterBandAsSingleChannelTiffBytes,
   encodeRgbaBytesAsRgbTiffBytes,
+  encodeRgbRasterAsRgbTiffBytes,
 } from "@/lib/image/encode-tiff";
 import type { RasterImage } from "@/lib/image/raster-image";
 
@@ -94,6 +95,41 @@ describe("encodeRgbaBytesAsRgbTiffBytes", () => {
     expect(Array.from(samples)).toEqual([0, 32896, 65535]);
   });
 });
+
+describe("encodeRgbRasterAsRgbTiffBytes", () => {
+  // CT-173: a promoted colour photo (3 uint8 bands tagged "rgb") must export as a 3-sample RGB
+  // TIFF so it reopens in colour, not as the single grey band a scientific stack would write.
+  it("interleaves the three bands into an 8-bit RGB TIFF", async () => {
+    const raster = buildThreeBandRgbUint8Raster([200, 10], [100, 20], [50, 30]);
+    const tiffBytes = encodeRgbRasterAsRgbTiffBytes(raster, 8);
+    const samples = await decodeRgbTiffBytesAsInterleavedTypedArray(tiffBytes);
+    expect(Array.from(samples)).toEqual([200, 100, 50, 10, 20, 30]);
+  });
+
+  it("scales the bands up to 16-bit when the chosen bit depth is 16", async () => {
+    const raster = buildThreeBandRgbUint8Raster([0], [128], [255]);
+    const tiffBytes = encodeRgbRasterAsRgbTiffBytes(raster, 16);
+    const samples = await decodeRgbTiffBytesAsInterleavedTypedArray(tiffBytes);
+    expect(samples).toBeInstanceOf(Uint16Array);
+    expect(Array.from(samples)).toEqual([0, 32896, 65535]);
+  });
+});
+
+function buildThreeBandRgbUint8Raster(
+  red: ReadonlyArray<number>,
+  green: ReadonlyArray<number>,
+  blue: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    width: red.length,
+    height: 1,
+    bitsPerSample: 8,
+    sampleFormat: "uint",
+    bandCount: 3,
+    bandPixels: [Uint8Array.from(red), Uint8Array.from(green), Uint8Array.from(blue)],
+    colorInterpretation: "rgb",
+  };
+}
 
 function buildSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage {
   return {

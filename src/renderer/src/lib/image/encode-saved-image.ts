@@ -10,7 +10,9 @@ import {
   encodeRasterBandAsFloat32TiffBytes,
   encodeRasterBandAsSingleChannelTiffBytes,
   encodeRgbaBytesAsRgbTiffBytes,
+  encodeRgbRasterAsRgbTiffBytes,
 } from "@/lib/image/encode-tiff";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
   readSaveImageFormatTechnicalDetails,
   type SaveImageFormatId,
@@ -90,6 +92,9 @@ function encodeRasterBandAsTiffBytes(
 ): Uint8Array {
   if (targetSampleFormat === "float") {
     return encodeRasterBandAsFloat32TiffBytes(raster, selectedBandIndex);
+  }
+  if (shouldRenderRasterAsRgbComposite(raster)) {
+    return encodeRgbRasterAsRgbTiffBytes(raster, targetBitDepth);
   }
   return encodeRasterBandAsSingleChannelTiffBytes(raster, selectedBandIndex, targetBitDepth);
 }

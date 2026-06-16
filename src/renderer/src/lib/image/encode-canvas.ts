@@ -3,6 +3,8 @@ import {
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import { buildRgbaBytesFromRgbRaster } from "@/lib/image/rgb-raster-to-rgba";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export type CanvasImageMimeType = "image/png" | "image/jpeg";
@@ -29,9 +31,29 @@ function renderViewportSourceToOffscreenCanvas(
   selectedBandIndex: number,
 ): HTMLCanvasElement {
   if (source.kind === "raster") {
-    return renderRasterBandAsGrayscaleCanvas(source.raster, selectedBandIndex);
+    return renderRasterSourceToCanvas(source.raster, selectedBandIndex);
   }
   return renderBrowserSourceToCanvas(source);
+}
+
+// CT-173: a true-colour raster (a promoted photo) renders as a colour composite so PNG/JPEG keep
+// its colour; every other raster renders the selected band as grayscale (a scientific stack).
+function renderRasterSourceToCanvas(
+  raster: RasterImage,
+  selectedBandIndex: number,
+): HTMLCanvasElement {
+  if (shouldRenderRasterAsRgbComposite(raster)) {
+    return renderRgbRasterAsColorCanvas(raster);
+  }
+  return renderRasterBandAsGrayscaleCanvas(raster, selectedBandIndex);
+}
+
+function renderRgbRasterAsColorCanvas(raster: RasterImage): HTMLCanvasElement {
+  const canvas = createCanvasAtSize(raster.width, raster.height);
+  const context = acquireTwoDeeContextOrThrow(canvas);
+  const rgba = buildRgbaBytesFromRgbRaster(raster);
+  context.putImageData(createImageDataFromClampedRgbaBytes(rgba, raster.width, raster.height), 0, 0);
+  return canvas;
 }
 
 function renderRasterBandAsGrayscaleCanvas(

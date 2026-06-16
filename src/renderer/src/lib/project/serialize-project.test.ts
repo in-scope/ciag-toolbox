@@ -77,6 +77,23 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(first?.renderingState.lastAppliedOperationLabel).toBeNull();
   });
 
+  it("tags a true-colour composite viewport with the rgb colour interpretation", () => {
+    const draft = buildDraftBundleFromSnapshot(
+      withAppliedOperation(buildRgbCompositeRasterSnapshot()),
+    );
+    expect(draft.viewports[0]?.colorInterpretation).toBe("rgb");
+  });
+
+  it("leaves the colour interpretation absent for a scientific multi-band stack", () => {
+    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
+    expect(draft.viewports[0]?.colorInterpretation).toBeUndefined();
+  });
+
+  it("leaves the colour interpretation absent for a single-band raster", () => {
+    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
+    expect(draft.viewports[0]?.colorInterpretation).toBeUndefined();
+  });
+
   it("forwards each viewport's operationHistory entries unchanged", () => {
     const snapshot: SaveableProjectSnapshot = {
       ...buildSingleViewportSnapshot(),
@@ -234,4 +251,20 @@ function buildMultiBandRasterSource(): ViewportImageSource {
     sourceInterleave: "bil",
   };
   return { kind: "raster", raster };
+}
+
+function buildRgbCompositeRasterSnapshot(): SaveableProjectSnapshot {
+  const base = buildMultiBandRasterSnapshot();
+  const viewport = base.viewports[0]!;
+  const source = viewport.source as Extract<ViewportImageSource, { kind: "raster" }>;
+  return {
+    ...base,
+    viewports: [
+      {
+        ...viewport,
+        fileName: "photo.png",
+        source: { kind: "raster", raster: { ...source.raster, colorInterpretation: "rgb" } },
+      },
+    ],
+  };
 }

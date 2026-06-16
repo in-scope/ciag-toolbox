@@ -1,5 +1,10 @@
 import type { ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
 import {
+  DEFAULT_TONE_CURVE_CHANNEL,
+  type ToneCurveChannel,
+  type ToneCurveChannelAnchors,
+} from "@/lib/image/tone-curve-channels";
+import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
   type PinnedRoiSpectraList,
@@ -23,6 +28,8 @@ export interface ViewportRenderingState {
   readonly roi: ViewportRoi | null;
   readonly operationRegion: ViewportRoi | null;
   readonly toneCurveAnchors: ReadonlyArray<ToneCurveAnchor> | null;
+  readonly toneCurveChannelAnchors: ToneCurveChannelAnchors;
+  readonly toneCurveActiveChannel: ToneCurveChannel;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -30,6 +37,8 @@ export interface ViewportRenderingState {
 }
 
 export const EMPTY_REMOVED_BAND_INDEXES: ReadonlyArray<number> = Object.freeze([]);
+
+export const EMPTY_TONE_CURVE_CHANNEL_ANCHORS: ToneCurveChannelAnchors = Object.freeze({});
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
@@ -39,11 +48,30 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   roi: null,
   operationRegion: null,
   toneCurveAnchors: null,
+  toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
   isBandSubsetEditModeActive: false,
 };
+
+export function hasToneCurveEditingState(state: ViewportRenderingState): boolean {
+  return (
+    state.toneCurveAnchors !== null ||
+    state.toneCurveActiveChannel !== DEFAULT_TONE_CURVE_CHANNEL ||
+    Object.keys(state.toneCurveChannelAnchors).length > 0
+  );
+}
+
+export function clearToneCurveEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return {
+    ...state,
+    toneCurveAnchors: null,
+    toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+    toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
+  };
+}
 
 export type ViewportActionSourceTransform = (
   source: ViewportImageSource,

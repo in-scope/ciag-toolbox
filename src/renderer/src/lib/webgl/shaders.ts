@@ -19,10 +19,39 @@ uniform bool u_isSingleBand;
 uniform bool u_normalizeEnabled;
 uniform vec3 u_normalizeMinColor;
 uniform vec3 u_normalizeMaxColor;
+uniform bool u_toneCurveEnabled;
+uniform bool u_toneCurveMultiChannel;
+uniform sampler2D u_toneCurveLut;
+uniform sampler2D u_toneCurveLutGreen;
+uniform sampler2D u_toneCurveLutBlue;
 out vec4 outColor;
+vec3 remapThroughToneCurveLut(vec3 rgb) {
+  // Each component is a display-unit value in [0, 1], so it doubles as the LUT
+  // texture coordinate. The LUTs were built over the same display-normalized
+  // domain (CT-170/CT-177). For a true-colour composite each channel samples its
+  // OWN table (R/G/B), with the rgb/Value curve already folded into each on the
+  // CPU; otherwise all three components share the single CT-171 LUT.
+  if (u_toneCurveMultiChannel) {
+    return vec3(
+      texture(u_toneCurveLut, vec2(rgb.r, 0.5)).r,
+      texture(u_toneCurveLutGreen, vec2(rgb.g, 0.5)).r,
+      texture(u_toneCurveLutBlue, vec2(rgb.b, 0.5)).r
+    );
+  }
+  return vec3(
+    texture(u_toneCurveLut, vec2(rgb.r, 0.5)).r,
+    texture(u_toneCurveLut, vec2(rgb.g, 0.5)).r,
+    texture(u_toneCurveLut, vec2(rgb.b, 0.5)).r
+  );
+}
 void main() {
   vec4 sampled = texture(u_texture, v_texCoord);
   vec3 rgb = u_isSingleBand ? vec3(sampled.r) : sampled.rgb;
+  // Tone-curve remap happens BEFORE the normalize/display-stretch block so the
+  // curve operates on raw display-unit values; the blocks below clamp as today.
+  if (u_toneCurveEnabled) {
+    rgb = remapThroughToneCurveLut(rgb);
+  }
   if (u_normalizeEnabled) {
     // Per-band stretch to [0, 1]. For flat bands (max == min) we substitute
     // a divisor of 1; the numerator is also 0 in that case, so the result is 0.

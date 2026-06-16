@@ -52,6 +52,9 @@ export interface BundleDraftViewportEntry {
   readonly asset: BundleDraftAsset;
   readonly renderingState: BundleDraftViewportRenderingState;
   readonly operationHistory: ReadonlyArray<BundleDraftOperationHistoryEntry>;
+  // CT-174: preserved in the manifest so a baked true-colour photo reopens as a
+  // colour composite (the baked ENVI/TIFF asset cannot carry this itself).
+  readonly colorInterpretation?: "rgb";
 }
 
 export interface BundleDraft {
@@ -225,5 +228,8 @@ function buildBundleViewportEntryWithRewrittenPath(
     viewTransform: { zoom: 1, panX: 0, panY: 0 },
     operationHistory: viewport.operationHistory,
     roi: null,
+    // Dropped from the JSON by JSON.stringify when undefined, so a scientific
+    // stack leaves no colour tag in the manifest.
+    colorInterpretation: viewport.colorInterpretation,
   };
 }

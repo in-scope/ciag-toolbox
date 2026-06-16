@@ -112,6 +112,7 @@ interface ToolboxSaveBundleDraftViewportEntry {
   asset: ToolboxSaveBundleDraftAsset;
   renderingState: ToolboxSaveBundleDraftRenderingState;
   operationHistory: ReadonlyArray<ToolboxSaveBundleDraftOperationHistoryEntry>;
+  colorInterpretation?: "rgb";
 }
 
 interface ToolboxSaveBundleDraft {

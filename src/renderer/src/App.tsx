@@ -73,9 +73,21 @@ import {
   listKeptBandOriginalNumbersAfterRemovingBand,
 } from "@/lib/image/apply-band-keep";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
-import { applyToneCurveToRasterBand, type ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
+import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
+import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
 import {
-  clampBandIndexToRaster,
+  buildComposedChannelPreviewLutOrNull,
+  isCompositeToneCurvePreviewActive,
+  type ColorToneCurveChannel,
+} from "@/lib/image/tone-curve-composite-preview";
+import {
+  DEFAULT_TONE_CURVE_CHANNEL,
+  mergeActiveToneCurveChannelAnchors,
+  type ToneCurveChannelAnchors,
+} from "@/lib/image/tone-curve-channels";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
+import { recordPreviewRasterAllocation } from "@/lib/instrumentation/render-instrumentation";
+import {
   getRasterBandOriginalNumber,
   type RasterImage,
 } from "@/lib/image/raster-image";
@@ -103,6 +115,8 @@ import {
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
@@ -170,6 +184,12 @@ import {
   type FalseColorPreviewApi,
 } from "@/state/false-color-preview-context";
 import {
+  ToneCurvePreviewProvider,
+  useToneCurvePreview,
+  type ToneCurveLutPreview,
+  type ToneCurvePreviewApi,
+} from "@/state/tone-curve-preview-context";
+import {
   ViewportReimportProvider,
   type ViewportReimportApi,
 } from "@/state/reimport-context";
@@ -189,7 +209,10 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
+  EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  hasToneCurveEditingState,
   type ApplyScope,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
@@ -216,7 +239,7 @@ interface SingleSelectedSource {
 interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
-  readonly isRasterSource: boolean;
+  readonly isTrueColorPhoto: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
@@ -230,16 +253,18 @@ export function App(): JSX.Element {
           <RegionToolProvider>
             <RegionRequestProvider>
             <FalseColorPreviewProvider>
-              <PixelReadoutProvider>
-                <BusyStateProvider>
-                  <RightPanelCollapsedStateProvider>
-                    <ApplicationShell />
-                    <AboutDialog />
-                    <AppBusyModal />
-                    <Toaster />
-                  </RightPanelCollapsedStateProvider>
-                </BusyStateProvider>
-              </PixelReadoutProvider>
+              <ToneCurvePreviewProvider>
+                <PixelReadoutProvider>
+                  <BusyStateProvider>
+                    <RightPanelCollapsedStateProvider>
+                      <ApplicationShell />
+                      <AboutDialog />
+                      <AppBusyModal />
+                      <Toaster />
+                    </RightPanelCollapsedStateProvider>
+                  </BusyStateProvider>
+                </PixelReadoutProvider>
+              </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>
             </RegionRequestProvider>
           </RegionToolProvider>
@@ -278,6 +303,7 @@ function ApplicationShell(): JSX.Element {
   const regionTool = useRegionTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
+  const toneCurvePreview = useToneCurvePreview();
   const [activeActionParameterValues, setActiveActionParameterValues] =
     useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
@@ -348,6 +374,7 @@ function ApplicationShell(): JSX.Element {
     imagesByIndex,
     parameterValues: activeActionParameterValues,
     falseColorPreview,
+    toneCurvePreview,
     renderingApi,
   });
   const rightPanelActiveSource = deriveRightPanelActiveSourceFromSelection({
@@ -714,7 +741,7 @@ function buildPendingSaveImageRequest(
   return {
     fileName: candidate.fileName,
     viewportIndex: candidate.index,
-    isRasterSource: candidate.isRasterSource,
+    isTrueColorPhoto: candidate.isTrueColorPhoto,
     bandCount: candidate.bandCount,
     selectedBandNumber: selectedBandIndex + 1,
   };
@@ -723,7 +750,7 @@ function buildPendingSaveImageRequest(
 interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
-  readonly isRasterSource: boolean;
+  readonly isTrueColorPhoto: boolean;
   readonly bandCount: number;
 }
 
@@ -739,9 +766,14 @@ function pickSingleSelectedSourceWithContent(
   return {
     index: onlyIndex,
     fileName: content.fileName,
-    isRasterSource: content.source.kind === "raster",
+    isTrueColorPhoto: readIsTrueColorPhotoFromContent(content),
     bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
   };
+}
+
+function readIsTrueColorPhotoFromContent(content: ViewportCellContent): boolean {
+  if (content.source.kind !== "raster") return false;
+  return shouldRenderRasterAsRgbComposite(content.source.raster);
 }
 
 function confirmSaveImageFormatChoice(
@@ -923,10 +955,14 @@ function applyLoadedImageAtIndex(
   pending: PendingOpenImageReplaceItem,
   bindings: ApplyLoadedImageBindings,
 ): void {
+  // CT-172: promote a browser-decoded photo to a raster on the way into the viewport so the
+  // panel behaves like any other image (raster operations, histogram, tone curve). A source
+  // that is already a raster (TIFF/ENVI/stack) is returned unchanged.
+  const rasterSource = coerceViewportSourceToRasterSource(pending.source);
   bindings.setImagesByIndex((previous) =>
     assignViewportContentAtIndex(previous, index, {
       fileName: pending.fileName,
-      source: pending.source,
+      source: rasterSource,
       originalFilePath: pending.originalFilePath,
       fileSizeBytes: pending.fileSizeBytes,
     }),
@@ -1442,11 +1478,13 @@ async function replaceViewportSourceWithReimportedFile(
     label: `Re-importing ${result.fileName}...`,
   });
   try {
-    const source = await decodeImageBytesToViewportSource({
-      fileName: result.fileName,
-      bytes: result.bytes,
-      sidecarBytes: result.sidecar?.bytes,
-    });
+    const source = coerceViewportSourceToRasterSource(
+      await decodeImageBytesToViewportSource({
+        fileName: result.fileName,
+        bytes: result.bytes,
+        sidecarBytes: result.sidecar?.bytes,
+      }),
+    );
     bindings.setImagesByIndex((previous) =>
       assignViewportContentAtIndex(previous, viewportIndex, {
         fileName: result.fileName,
@@ -1583,8 +1621,8 @@ function clearTransientOperationStateOnActiveSource(
 function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
   if (inputs.activeSourceIndex === null) return;
   const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
-  if (state.toneCurveAnchors === null) return;
-  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, toneCurveAnchors: null });
+  if (!hasToneCurveEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearToneCurveEditingState(state));
 }
 
 function beginOperationRegionRequestForActiveSource(
@@ -1689,18 +1727,16 @@ interface PublishActiveToolPreviewInputs {
   readonly imagesByIndex: ImagesByIndexMap;
   readonly parameterValues: ParameterValuesById;
   readonly falseColorPreview: FalseColorPreviewApi;
+  readonly toneCurvePreview: ToneCurvePreviewApi;
   readonly renderingApi: ViewportRenderingApi;
 }
 
 function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
   const falseColorSource = useFalseColorPreviewSource(inputs);
-  const toneCurveSource = useToneCurvePreviewSource(inputs);
+  const toneCurveParts = useToneCurvePreviewParts(inputs);
   const sourceIndex = inputs.singleSelectedSource?.index ?? null;
-  usePublishPreviewSourceForViewport(
-    inputs.falseColorPreview.setPreview,
-    falseColorSource ?? toneCurveSource,
-    sourceIndex,
-  );
+  usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, falseColorSource, sourceIndex);
+  usePublishToneCurvePreviewForViewport(inputs.toneCurvePreview.setPreview, toneCurveParts, sourceIndex);
 }
 
 function useFalseColorPreviewSource(
@@ -1712,33 +1748,94 @@ function useFalseColorPreviewSource(
     [inputs.parameterValues],
   );
   return useMemo(
-    () => (raster ? buildFalseColorPreviewSourceOrNull(raster, assignment) : null),
+    () => buildFalseColorPreviewSourceRecordingAllocation(raster, assignment),
     [raster, assignment],
   );
 }
 
-function useToneCurvePreviewSource(
-  inputs: PublishActiveToolPreviewInputs,
+function buildFalseColorPreviewSourceRecordingAllocation(
+  raster: RasterImage | null,
+  assignment: FalseColorBandAssignment,
 ): ViewportImageSource | null {
+  if (!raster) return null;
+  const source = buildFalseColorPreviewSourceOrNull(raster, assignment);
+  if (source) recordPreviewRasterAllocation();
+  return source;
+}
+
+// CT-171/CT-177: the tone-curve preview is display-only - it publishes GPU lookup
+// table(s) rather than a baked preview raster, so editing anchors never re-uploads
+// the image texture (proven by the render-instrumentation counters). A scientific
+// stack / single-band photo publishes ONE LUT; a true-colour composite publishes a
+// per-channel triple (each channel's curve folded with the rgb/Value curve).
+interface ToneCurvePreviewParts {
+  readonly lookupTable: ReadonlyArray<number> | null;
+  readonly channelLookupTables: ToneCurveChannelPreviewLuts | null;
+}
+
+function useToneCurvePreviewParts(inputs: PublishActiveToolPreviewInputs): ToneCurvePreviewParts {
   const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
   const index = inputs.singleSelectedSource?.index ?? null;
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
+  const lookupTable = useSingleBandToneCurvePreviewLut(raster, state);
+  const channelLookupTables = useCompositeToneCurvePreviewLuts(raster, state);
+  return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
+}
+
+function useSingleBandToneCurvePreviewLut(
+  raster: RasterImage | null,
+  state: ViewportRenderingState | null,
+): ReadonlyArray<number> | null {
+  const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
   const anchors = state?.toneCurveAnchors ?? null;
   const bandIndex = state?.selectedBandIndex ?? 0;
   return useMemo(
-    () => buildToneCurvePreviewSourceOrNull(raster, bandIndex, anchors),
-    [raster, bandIndex, anchors],
+    () => (isComposite ? null : buildToneCurvePreviewLutOrNull(raster, bandIndex, anchors)),
+    [isComposite, raster, bandIndex, anchors],
   );
 }
 
-function buildToneCurvePreviewSourceOrNull(
+function useCompositeToneCurvePreviewLuts(
   raster: RasterImage | null,
-  bandIndex: number,
-  anchors: ReadonlyArray<ToneCurveAnchor> | null,
-): ViewportImageSource | null {
-  if (!raster || !anchors || anchors.length < 2) return null;
-  const previewRaster = applyToneCurveToRasterBand(raster, clampBandIndexToRaster(raster, bandIndex), anchors);
-  return { kind: "raster", raster: previewRaster };
+  state: ViewportRenderingState | null,
+): ToneCurveChannelPreviewLuts | null {
+  const channelAnchors = useMergedToneCurveChannelAnchors(state);
+  const red = useComposedChannelPreviewLut(raster, "red", channelAnchors);
+  const green = useComposedChannelPreviewLut(raster, "green", channelAnchors);
+  const blue = useComposedChannelPreviewLut(raster, "blue", channelAnchors);
+  const isActive = useMemo(
+    () => isCompositeToneCurvePreviewActive(raster, channelAnchors),
+    [raster, channelAnchors],
+  );
+  return useMemo(
+    () => (isActive && red && green && blue ? { red, green, blue } : null),
+    [isActive, red, green, blue],
+  );
+}
+
+function useComposedChannelPreviewLut(
+  raster: RasterImage | null,
+  channel: ColorToneCurveChannel,
+  channelAnchors: ToneCurveChannelAnchors,
+): ReadonlyArray<number> | null {
+  const channelCurveAnchors = channelAnchors[channel];
+  const valueAnchors = channelAnchors.rgb;
+  return useMemo(
+    () => buildComposedChannelPreviewLutOrNull(raster, channel, channelCurveAnchors, valueAnchors),
+    [raster, channel, channelCurveAnchors, valueAnchors],
+  );
+}
+
+function useMergedToneCurveChannelAnchors(
+  state: ViewportRenderingState | null,
+): ToneCurveChannelAnchors {
+  const channelAnchors = state?.toneCurveChannelAnchors ?? EMPTY_TONE_CURVE_CHANNEL_ANCHORS;
+  const activeChannel = state?.toneCurveActiveChannel ?? DEFAULT_TONE_CURVE_CHANNEL;
+  const activeAnchors = state?.toneCurveAnchors ?? null;
+  return useMemo(
+    () => mergeActiveToneCurveChannelAnchors(channelAnchors, activeChannel, activeAnchors),
+    [channelAnchors, activeChannel, activeAnchors],
+  );
 }
 
 function resolveActiveToolRasterOrNull(
@@ -1769,6 +1866,30 @@ function buildFalseColorPreviewOrNull(
 ): FalseColorPreview | null {
   if (source === null || sourceIndex === null) return null;
   return { viewportIndex: sourceIndex, source };
+}
+
+function usePublishToneCurvePreviewForViewport(
+  setPreview: ToneCurvePreviewApi["setPreview"],
+  parts: ToneCurvePreviewParts,
+  sourceIndex: number | null,
+): void {
+  useEffect(() => {
+    setPreview(buildToneCurvePreviewOrNull(parts, sourceIndex));
+    return () => setPreview(null);
+  }, [setPreview, parts, sourceIndex]);
+}
+
+function buildToneCurvePreviewOrNull(
+  parts: ToneCurvePreviewParts,
+  sourceIndex: number | null,
+): ToneCurveLutPreview | null {
+  if (sourceIndex === null) return null;
+  if (parts.lookupTable === null && parts.channelLookupTables === null) return null;
+  return {
+    viewportIndex: sourceIndex,
+    lookupTable: parts.lookupTable,
+    channelLookupTables: parts.channelLookupTables,
+  };
 }
 
 function readSingleIndexFromSelection(selection: ReadonlySet<number>): number | null {
@@ -2118,6 +2239,7 @@ function runApplyActionFromPanel(
     options.parameterValues,
     bindings.getRenderingState(source.index),
     options.applyScope,
+    readRasterAtViewportIndexOrNull(bindings.imagesByIndex, source.index),
   );
   if (merged === null) return;
   if (options.openInNewViewport) {
@@ -2152,14 +2274,24 @@ function mergeParameterValuesWithSourceRenderingState(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
   applyScope: ApplyScope,
+  sourceRaster: RasterImage | null,
 ): ParameterValuesById | null {
   if (!action.prepareParameterValuesForApply) return rawParameterValues;
   try {
-    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope);
+    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope, sourceRaster);
   } catch (error) {
     toast.error(formatActionPreparationErrorMessage(action.label, error));
     return null;
   }
+}
+
+function readRasterAtViewportIndexOrNull(
+  imagesByIndex: ImagesByIndexMap,
+  index: number,
+): RasterImage | null {
+  const source = imagesByIndex.get(index)?.source;
+  if (!source || source.kind !== "raster") return null;
+  return source.raster;
 }
 
 function formatActionPreparationErrorMessage(actionLabel: string, error: unknown): string {

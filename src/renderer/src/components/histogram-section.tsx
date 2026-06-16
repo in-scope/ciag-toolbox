@@ -284,10 +284,13 @@ function absorbBandHistogramAbandonmentOrRethrow(reason: unknown): void {
   throw reason;
 }
 
+const DEFAULT_HISTOGRAM_CANVAS_LABEL = "Active band intensity histogram";
+
 interface HistogramCanvasProps {
   histogram: BandHistogram;
   sampleFormat: RasterSampleFormat;
   canvasOverlay?: ReactNode;
+  accessibleLabel?: string;
 }
 
 export function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
@@ -314,7 +317,7 @@ export function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
             ref={canvasRef}
             width={canvasWidthPx}
             height={HISTOGRAM_CANVAS_HEIGHT_PX}
-            aria-label="Active band intensity histogram"
+            aria-label={props.accessibleLabel ?? DEFAULT_HISTOGRAM_CANVAS_LABEL}
             role="img"
             className="block w-full rounded-sm bg-muted text-primary"
             style={{ height: `${HISTOGRAM_CANVAS_HEIGHT_PX}px` }}

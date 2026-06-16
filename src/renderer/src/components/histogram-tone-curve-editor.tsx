@@ -1,10 +1,19 @@
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   buildMonotoneToneCurve,
   evaluateToneCurveAtInput,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
+import { toneCurveFieldStepForBand } from "@/lib/image/tone-curve-anchor-fields";
+import {
+  applyToneCurveAnchorKeyboardAction,
+  isToneCurveEditorKey,
+} from "@/lib/image/tone-curve-anchor-keyboard";
 import {
   addToneCurveAnchor,
   indexOfToneCurveAnchorByInput,
@@ -18,35 +27,59 @@ import { cn } from "@/lib/utils";
 
 const TONE_CURVE_SAMPLE_COUNT = 48;
 
+// CT-168: GIMP Curves draws an 8x8 reference grid behind the curve so anchor positions can be
+// judged against eighths of the input/output range.
+const TONE_CURVE_GRID_DIVISION_COUNT = 8;
+
 interface HistogramToneCurveEditorProps {
   ranges: ToneCurveValueRanges;
   anchors: ReadonlyArray<ToneCurveAnchor> | null;
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void;
+  selectedAnchorIndex: number;
+  onSelectAnchor: (index: number) => void;
+  isIntegerBand: boolean;
 }
 
 export function HistogramToneCurveEditor(props: HistogramToneCurveEditorProps): JSX.Element {
   const anchors = resolveToneCurveAnchorsOrDefault(props.anchors, props.ranges);
-  const drag = useToneCurveAnchorDrag(props.ranges, anchors, props.onChange);
+  const drag = useToneCurveAnchorDrag(props.ranges, anchors, props.onChange, props.onSelectAnchor);
   return (
     <div
-      className="absolute inset-0 touch-none"
+      className="absolute inset-0 touch-none rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      tabIndex={0}
+      onKeyDown={(event) => nudgeOrDeleteSelectedAnchorFromKey(event, props, anchors)}
       onPointerDown={drag.onBackgroundPointerDown}
       onPointerMove={drag.onPointerMove}
       onPointerUp={drag.endDrag}
       onPointerCancel={drag.endDrag}
     >
+      <ToneCurveReferenceGrid />
       <ToneCurveSvgPath ranges={props.ranges} anchors={anchors} />
       {anchors.map((anchor, index) => (
         <ToneCurveAnchorHandle
-          key={`${anchor.input}-${index}`}
+          key={index}
           point={projectAnchorToFractionPoint(anchor, props.ranges)}
           isInterior={isRemovableInteriorAnchorIndex(anchors, index)}
+          isSelected={index === props.selectedAnchorIndex}
           onPointerDown={(event) => drag.beginDrag(event, index)}
           onRemove={() => drag.removeAnchorAt(index)}
         />
       ))}
     </div>
   );
+}
+
+function nudgeOrDeleteSelectedAnchorFromKey(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  props: HistogramToneCurveEditorProps,
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+): void {
+  if (!isToneCurveEditorKey(event.key)) return;
+  event.preventDefault();
+  const step = toneCurveFieldStepForBand(props.isIntegerBand);
+  const next = applyToneCurveAnchorKeyboardAction(event.key, anchors, props.selectedAnchorIndex, props.ranges, step);
+  if (next.anchors !== anchors) props.onChange(next.anchors);
+  if (next.selectedAnchorIndex !== props.selectedAnchorIndex) props.onSelectAnchor(next.selectedAnchorIndex);
 }
 
 interface FractionPoint {
@@ -66,11 +99,13 @@ function useToneCurveAnchorDrag(
   ranges: ToneCurveValueRanges,
   anchors: ReadonlyArray<ToneCurveAnchor>,
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void,
+  onSelectAnchor: (index: number) => void,
 ): ToneCurveAnchorDrag {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   return {
-    beginDrag: (event, index) => beginAnchorDrag(event, index, setActiveIndex),
-    onBackgroundPointerDown: (event) => addAnchorFromBackgroundClick(event, ranges, anchors, onChange, setActiveIndex),
+    beginDrag: (event, index) => beginAnchorDrag(event, index, setActiveIndex, onSelectAnchor),
+    onBackgroundPointerDown: (event) =>
+      addAnchorFromBackgroundClick(event, ranges, anchors, onChange, setActiveIndex, onSelectAnchor),
     onPointerMove: (event) => continueAnchorDrag(event, activeIndex, ranges, anchors, onChange),
     endDrag: () => setActiveIndex(null),
     removeAnchorAt: (index) => onChange(removeToneCurveAnchor(anchors, index)),
@@ -81,9 +116,11 @@ function beginAnchorDrag(
   event: ReactPointerEvent<HTMLElement>,
   index: number,
   setActiveIndex: (next: number | null) => void,
+  onSelectAnchor: (index: number) => void,
 ): void {
   event.stopPropagation();
   event.currentTarget.setPointerCapture?.(event.pointerId);
+  onSelectAnchor(index);
   setActiveIndex(index);
 }
 
@@ -93,12 +130,15 @@ function addAnchorFromBackgroundClick(
   anchors: ReadonlyArray<ToneCurveAnchor>,
   onChange: (next: ReadonlyArray<ToneCurveAnchor>) => void,
   setActiveIndex: (next: number | null) => void,
+  onSelectAnchor: (index: number) => void,
 ): void {
   const anchor = anchorFromPointerEvent(event, ranges);
   const next = addToneCurveAnchor(anchors, anchor, ranges);
   onChange(next);
   event.currentTarget.setPointerCapture?.(event.pointerId);
-  setActiveIndex(indexOfToneCurveAnchorByInput(next, anchor.input));
+  const addedIndex = indexOfToneCurveAnchorByInput(next, anchor.input);
+  onSelectAnchor(addedIndex);
+  setActiveIndex(addedIndex);
 }
 
 function continueAnchorDrag(
@@ -129,6 +169,56 @@ function pointerFractionWithinElement(element: HTMLElement, clientX: number, cli
     x: rect.width <= 0 ? 0 : clampUnit((clientX - rect.left) / rect.width),
     y: rect.height <= 0 ? 0 : clampUnit((clientY - rect.top) / rect.height),
   };
+}
+
+// Decorative only: pointer-events-none lets background clicks reach the editor div so a click
+// on a gridline still adds/selects an anchor. The 0..1 viewBox + non-scaling-stroke keeps the
+// lines crisp at any editor size and on high-DPI displays.
+function ToneCurveReferenceGrid(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      data-testid="tone-curve-reference-grid"
+      className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+      viewBox="0 0 1 1"
+      preserveAspectRatio="none"
+    >
+      {listInteriorGridLineFractions().map((fraction) => (
+        <ToneCurveReferenceGridLines key={fraction} fraction={fraction} />
+      ))}
+    </svg>
+  );
+}
+
+function listInteriorGridLineFractions(): number[] {
+  return Array.from(
+    { length: TONE_CURVE_GRID_DIVISION_COUNT - 1 },
+    (_unused, index) => (index + 1) / TONE_CURVE_GRID_DIVISION_COUNT,
+  );
+}
+
+function ToneCurveReferenceGridLines(props: { fraction: number }): JSX.Element {
+  const fraction = props.fraction;
+  return (
+    <>
+      <line
+        x1={fraction}
+        y1={0}
+        x2={fraction}
+        y2={1}
+        className="stroke-border"
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        x1={0}
+        y1={fraction}
+        x2={1}
+        y2={fraction}
+        className="stroke-border"
+        vectorEffect="non-scaling-stroke"
+      />
+    </>
+  );
 }
 
 interface ToneCurveSvgPathProps {
@@ -185,6 +275,7 @@ function projectAnchorToFractionPoint(anchor: ToneCurveAnchor, ranges: ToneCurve
 interface ToneCurveAnchorHandleProps {
   point: FractionPoint;
   isInterior: boolean;
+  isSelected: boolean;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onRemove: () => void;
 }
@@ -194,9 +285,11 @@ function ToneCurveAnchorHandle(props: ToneCurveAnchorHandleProps): JSX.Element {
     <button
       type="button"
       aria-label={props.isInterior ? "Curve anchor (right-click to remove)" : "Curve endpoint"}
+      data-selected={props.isSelected ? "true" : "false"}
       className={cn(
-        "absolute size-3 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full border border-background bg-primary",
+        "absolute -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full border border-background bg-primary",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        props.isSelected ? "size-4 ring-2 ring-ring ring-offset-1 ring-offset-background" : "size-3",
       )}
       style={{ left: `${props.point.x * 100}%`, top: `${props.point.y * 100}%` }}
       onPointerDown={props.onPointerDown}

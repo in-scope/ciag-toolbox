@@ -107,6 +107,21 @@ function extensionOf(fileName: string): string {
   return dot > 0 ? fileName.slice(dot + 1) : "";
 }
 
+async function readColorInterpretationFromBundleManifest(
+  bundlePath: string,
+): Promise<string | undefined> {
+  const extractedDir = await extractProjectBundleToFreshTempDirectory(bundlePath);
+  try {
+    const projectJsonText = await readFile(join(extractedDir, "project.json"), "utf-8");
+    const parsed = JSON.parse(projectJsonText) as {
+      viewports: ReadonlyArray<{ colorInterpretation?: string }>;
+    };
+    return parsed.viewports[0]!.colorInterpretation;
+  } finally {
+    await rm(extractedDir, { recursive: true, force: true });
+  }
+}
+
 describe("writeProjectBundleAtPath round-trip", () => {
   it("writes a zip with project.json plus a baked asset and rewritten path", async () => {
     const tifBytes = new TextEncoder().encode("fake-tiff-bytes");
@@ -187,6 +202,29 @@ describe("writeProjectBundleAtPath round-trip", () => {
     } finally {
       await rm(extractedDir, { recursive: true, force: true });
     }
+  });
+
+  it("persists the rgb colour interpretation flag for a baked true-colour photo", async () => {
+    const tifBytes = new TextEncoder().encode("fake-photo-bytes");
+    const draft = buildDraftFromViewports([
+      { ...buildBakedTiffAssetViewport(0, "photo.png", tifBytes), colorInterpretation: "rgb" },
+    ]);
+    const bundlePath = join(workspaceDir, "photo.ctbundle");
+    await writeProjectBundleAtPath(bundlePath, draft);
+    const colorInterpretation = await readColorInterpretationFromBundleManifest(bundlePath);
+    expect(colorInterpretation).toBe("rgb");
+  });
+
+  it("omits the colour interpretation flag for a scientific stack viewport", async () => {
+    const headerBytes = new TextEncoder().encode("hdr-bytes");
+    const binaryBytes = new TextEncoder().encode("bin-bytes");
+    const draft = buildDraftFromViewports([
+      buildBakedEnviAssetViewport(0, "cube.hdr", headerBytes, binaryBytes),
+    ]);
+    const bundlePath = join(workspaceDir, "stack.ctbundle");
+    await writeProjectBundleAtPath(bundlePath, draft);
+    const colorInterpretation = await readColorInterpretationFromBundleManifest(bundlePath);
+    expect(colorInterpretation).toBeUndefined();
   });
 
   it("preserves selectedViewportIndices and gridLayout in the rewritten project.json", async () => {

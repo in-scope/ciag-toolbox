@@ -10,6 +10,8 @@ import { NO_PARAMETER_VALUES } from "./parameter-schema";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   applyActionToSelectedViewports,
+  clearToneCurveEditingState,
+  hasToneCurveEditingState,
   type ApplyActionCallbacks,
   type ViewportAction,
 } from "./viewport-action";
@@ -66,6 +68,8 @@ describe("applyActionToSelectedViewports", () => {
       roi: null,
       operationRegion: null,
       toneCurveAnchors: null,
+      toneCurveChannelAnchors: {},
+      toneCurveActiveChannel: "rgb",
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],
@@ -96,6 +100,33 @@ function createMockApplyActionCallbacks(): MockApplyActionCallbacks {
     reportApplyFailure: vi.fn(),
   };
 }
+
+describe("tone-curve editing state helpers", () => {
+  it("reports no editing state for a default rendering state", () => {
+    expect(hasToneCurveEditingState(DEFAULT_VIEWPORT_RENDERING_STATE)).toBe(false);
+  });
+
+  it("reports editing state once anchors, a non-default channel, or stored channels exist", () => {
+    const withAnchors = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: [] };
+    const withChannel = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveActiveChannel: "red" as const };
+    const withStash = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveChannelAnchors: { red: [] } };
+    expect(hasToneCurveEditingState(withAnchors)).toBe(true);
+    expect(hasToneCurveEditingState(withChannel)).toBe(true);
+    expect(hasToneCurveEditingState(withStash)).toBe(true);
+  });
+
+  it("clears anchors, stored channels, and the active channel back to defaults", () => {
+    const dirty = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      toneCurveAnchors: [{ input: 1, output: 2 }],
+      toneCurveChannelAnchors: { red: [{ input: 1, output: 2 }] },
+      toneCurveActiveChannel: "blue" as const,
+    };
+    const cleared = clearToneCurveEditingState(dirty);
+    expect(hasToneCurveEditingState(cleared)).toBe(false);
+    expect(cleared.toneCurveActiveChannel).toBe("rgb");
+  });
+});
 
 function makeActionThatThrowsOnFirstApplyCall(): ViewportAction {
   let invocations = 0;

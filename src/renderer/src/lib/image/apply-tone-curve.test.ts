@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
+  buildDisplayNormalizedToneCurveLookupTable,
   buildMonotoneToneCurve,
   buildToneCurveLookupTable,
   evaluateToneCurveAtInput,
@@ -131,6 +133,92 @@ describe("applyToneCurveToRasterBand", () => {
       { input: 64, output: 255 },
     ]);
     expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 128, 255]);
+  });
+});
+
+describe("applyComposedToneCurveToRasterBand", () => {
+  const HALVE_CURVE: ToneCurveAnchor[] = [
+    { input: 0, output: 0 },
+    { input: 255, output: 128 },
+  ];
+
+  it("composes the rgb/Value curve over the per-channel curve: value(channel(v))", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, HALVE_CURVE, HALVE_CURVE);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([50, 25, 0]);
+  });
+
+  it("treats a null per-channel curve as identity so the rgb/Value curve still applies", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, HALVE_CURVE);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 50, 0]);
+  });
+
+  it("treats a null rgb/Value curve as identity so only the per-channel curve applies", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, HALVE_CURVE, null);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 50, 0]);
+  });
+
+  it("leaves the band unchanged when both curves are identity", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, null);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([200, 100, 0]);
+  });
+
+  it("remaps only the pixels inside the region", () => {
+    const raster = makeUint8Raster([200, 200, 200, 200], 2, 2);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, HALVE_CURVE, {
+      region: { imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 0, imagePixelY1: 0 },
+    });
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 200, 200, 200]);
+  });
+});
+
+describe("buildDisplayNormalizedToneCurveLookupTable", () => {
+  const UINT16_RANGE = { min: 0, max: 65535 };
+
+  it("maps an identity curve to an evenly spaced [0,1] ramp (no visible change)", () => {
+    const identity = buildMonotoneToneCurve([
+      { input: 0, output: 0 },
+      { input: 65535, output: 65535 },
+    ]);
+    const lookupTable = buildDisplayNormalizedToneCurveLookupTable(identity, UINT16_RANGE, 1024);
+    expect(lookupTable[0]).toBeCloseTo(0, 6);
+    expect(lookupTable[1023]).toBeCloseTo(1, 6);
+    for (let index = 0; index < lookupTable.length; index += 1) {
+      expect(lookupTable[index]!).toBeCloseTo(index / 1023, 6);
+    }
+  });
+
+  it("renormalizes a black/white stretch curve into the display unit", () => {
+    const stretch = buildMonotoneToneCurve([
+      { input: 0, output: 32768 },
+      { input: 65535, output: 65535 },
+    ]);
+    const lookupTable = buildDisplayNormalizedToneCurveLookupTable(stretch, UINT16_RANGE, 1024);
+    expect(lookupTable[0]).toBeCloseTo(32768 / 65535, 4);
+    expect(lookupTable[1023]).toBeCloseTo(1, 6);
+  });
+
+  it("clamps curve outputs that leave the range into [0,1]", () => {
+    const flatWhite = buildMonotoneToneCurve([
+      { input: 0, output: 65535 },
+      { input: 65535, output: 65535 },
+    ]);
+    const lookupTable = buildDisplayNormalizedToneCurveLookupTable(flatWhite, UINT16_RANGE, 1024);
+    for (const entry of lookupTable) {
+      expect(entry).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("returns zeros for a degenerate zero-width range", () => {
+    const curve = buildMonotoneToneCurve([
+      { input: 0, output: 0 },
+      { input: 255, output: 255 },
+    ]);
+    const lookupTable = buildDisplayNormalizedToneCurveLookupTable(curve, { min: 5, max: 5 }, 8);
+    expect(lookupTable).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });
 });
 

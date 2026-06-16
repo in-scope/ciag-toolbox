@@ -35,6 +35,19 @@ export function resolveToneCurveAnchorsOrDefault(
   return buildDefaultToneCurveAnchors(ranges);
 }
 
+export function toneCurveAnchorsMatchDefaultIdentity(
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+  ranges: ToneCurveValueRanges,
+): boolean {
+  const identity = buildDefaultToneCurveAnchors(ranges);
+  if (anchors.length !== identity.length) return false;
+  return anchors.every((anchor, index) => anchorsHaveSameInputAndOutput(anchor, identity[index]!));
+}
+
+function anchorsHaveSameInputAndOutput(first: ToneCurveAnchor, second: ToneCurveAnchor): boolean {
+  return first.input === second.input && first.output === second.output;
+}
+
 export function addToneCurveAnchor(
   anchors: ReadonlyArray<ToneCurveAnchor>,
   anchor: ToneCurveAnchor,

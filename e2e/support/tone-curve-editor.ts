@@ -22,9 +22,15 @@ export const TONE_CURVE_LABEL = "Tone Curve";
 
 const ENDPOINT_HANDLE_NAME = "Curve endpoint";
 const INTERIOR_HANDLE_NAME = "Curve anchor (right-click to remove)";
-const HISTOGRAM_CANVAS_NAME = "Active band intensity histogram";
+// The editor histogram backdrop is named "Active band intensity histogram" for a scientific
+// stack but "<Channel> channel intensity histogram" for a CT-176 composite channel; match
+// either so a single helper locates the one histogram canvas inside the Tone Curve panel.
+const HISTOGRAM_CANVAS_NAME = /intensity histogram$/;
 const ANY_HANDLE_SELECTOR =
   `button[aria-label="${ENDPOINT_HANDLE_NAME}"], button[aria-label^="Curve anchor"]`;
+const SELECTED_HANDLE_SELECTOR =
+  `button[aria-label="${ENDPOINT_HANDLE_NAME}"][data-selected="true"], ` +
+  `button[aria-label^="Curve anchor"][data-selected="true"]`;
 
 export interface ToneCurveValueRanges {
   readonly inputMin: number;
@@ -52,6 +58,174 @@ export function toneCurveInteriorHandles(page: Page): Locator {
 
 export function toneCurveAllHandles(page: Page): Locator {
   return operationPanel(page, TONE_CURVE_LABEL).locator(ANY_HANDLE_SELECTOR);
+}
+
+// CT-164: exactly one anchor handle is selected at a time, exposed via the stable
+// data-selected="true" attribute (used by the CT-165 numeric fields and these specs).
+export function selectedToneCurveAnchorHandles(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(SELECTED_HANDLE_SELECTOR);
+}
+
+export async function expectExactlyOneToneCurveAnchorSelected(page: Page): Promise<void> {
+  await expect(selectedToneCurveAnchorHandles(page)).toHaveCount(1);
+}
+
+export async function expectToneCurveHandleIsSelected(handle: Locator): Promise<void> {
+  await expect(handle).toHaveAttribute("data-selected", "true");
+}
+
+export async function clickToneCurveAnchorHandle(handle: Locator): Promise<void> {
+  await handle.click();
+}
+
+// CT-165: the selected anchor's Input/Output numeric fields with +/- steppers. Each field
+// is an <input aria-label="Input"|"Output"> flanked by "Decrease <label>"/"Increase <label>"
+// stepper buttons inside the Tone Curve tool-options panel.
+export type ToneCurveAnchorFieldLabel = "Input" | "Output";
+
+export function toneCurveAnchorField(page: Page, label: ToneCurveAnchorFieldLabel): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByLabel(label, { exact: true });
+}
+
+export function readToneCurveAnchorFieldValue(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+): Promise<string> {
+  return toneCurveAnchorField(page, label).inputValue();
+}
+
+export async function setToneCurveAnchorField(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+  value: number,
+): Promise<void> {
+  const field = toneCurveAnchorField(page, label);
+  await field.fill(String(value));
+  await field.press("Enter");
+}
+
+export async function stepToneCurveAnchorField(
+  page: Page,
+  label: ToneCurveAnchorFieldLabel,
+  direction: "increase" | "decrease",
+): Promise<void> {
+  const verb = direction === "increase" ? "Increase" : "Decrease";
+  await operationPanel(page, TONE_CURVE_LABEL).getByRole("button", { name: `${verb} ${label}` }).click();
+}
+
+// CT-166: with an anchor selected and the editor focused, arrow keys nudge the selected
+// anchor (Left/Right = Input, Up/Down = Output) by one data-type step and Delete/Backspace
+// removes the selected interior anchor. Clicking a handle focuses it (the keydown bubbles to
+// the editor surface), so callers select a handle before pressing keys.
+export type ToneCurveNudgeDirection = "left" | "right" | "up" | "down";
+
+const NUDGE_KEY_BY_DIRECTION: Record<ToneCurveNudgeDirection, string> = {
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  up: "ArrowUp",
+  down: "ArrowDown",
+};
+
+export async function nudgeSelectedToneCurveAnchor(
+  page: Page,
+  direction: ToneCurveNudgeDirection,
+): Promise<void> {
+  await page.keyboard.press(NUDGE_KEY_BY_DIRECTION[direction]);
+}
+
+export async function deleteSelectedToneCurveAnchor(page: Page): Promise<void> {
+  await page.keyboard.press("Delete");
+}
+
+// CT-167: the editor exposes a Reset control that returns the curve to the default two-endpoint
+// identity diagonal. It is disabled while the curve already equals identity (idempotency made
+// observable) and enabled once any anchor has been added/moved off the diagonal.
+const RESET_BUTTON_NAME = "Reset";
+
+export function toneCurveResetButton(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByRole("button", { name: RESET_BUTTON_NAME });
+}
+
+export async function clickToneCurveResetToIdentity(page: Page): Promise<void> {
+  await toneCurveResetButton(page).click();
+}
+
+// CT-168: a decorative 8x8 reference grid is drawn behind the curve. It is exposed via the
+// stable data-testid hook and uses pointer-events-none so clicking a gridline still adds an
+// anchor. Eight divisions yield 7 interior vertical + 7 interior horizontal lines = 14 lines.
+const REFERENCE_GRID_TESTID = "tone-curve-reference-grid";
+const REFERENCE_GRID_INTERIOR_LINE_COUNT = 14;
+
+export function toneCurveReferenceGrid(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(`[data-testid="${REFERENCE_GRID_TESTID}"]`);
+}
+
+export function toneCurveReferenceGridLines(page: Page): Locator {
+  return toneCurveReferenceGrid(page).locator("line");
+}
+
+export async function expectToneCurveReferenceGridIsPresent(page: Page): Promise<void> {
+  await expect(toneCurveReferenceGrid(page)).toBeVisible();
+  await expect(toneCurveReferenceGridLines(page)).toHaveCount(REFERENCE_GRID_INTERIOR_LINE_COUNT);
+}
+
+// CT-176: a true-colour composite shows a channel selector (RGB/R/G/B) above the histogram;
+// each option re-targets the editor at that channel's own curve + histogram backdrop. The
+// selector is a role="group" of toggle buttons whose accessible names are RGB/Red/Green/Blue.
+const CHANNEL_SELECTOR_GROUP_NAME = "Tone curve channel";
+
+export type ToneCurveChannelButtonName = "RGB" | "Red" | "Green" | "Blue";
+export type ToneCurveChannelBackdropName = "Value" | "Red" | "Green" | "Blue";
+
+export function toneCurveChannelSelector(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).getByRole("group", { name: CHANNEL_SELECTOR_GROUP_NAME });
+}
+
+export function toneCurveChannelButton(page: Page, name: ToneCurveChannelButtonName): Locator {
+  return toneCurveChannelSelector(page).getByRole("button", { name, exact: true });
+}
+
+export async function selectToneCurveChannel(page: Page, name: ToneCurveChannelButtonName): Promise<void> {
+  await toneCurveChannelButton(page, name).click();
+}
+
+export async function expectToneCurveChannelSelectorPresent(page: Page): Promise<void> {
+  await expect(toneCurveChannelSelector(page)).toBeVisible();
+}
+
+export async function expectToneCurveChannelSelectorAbsent(page: Page): Promise<void> {
+  await expect(toneCurveChannelSelector(page)).toHaveCount(0);
+}
+
+export async function expectToneCurveChannelIsActive(
+  page: Page,
+  name: ToneCurveChannelButtonName,
+): Promise<void> {
+  await expect(toneCurveChannelButton(page, name)).toHaveAttribute("aria-pressed", "true");
+}
+
+// The single histogram canvas inside the panel is re-labelled to the channel it bins, so its
+// accessible name is the observable proof the backdrop switched when the channel switches.
+export async function expectToneCurveHistogramBackdrop(
+  page: Page,
+  backdrop: ToneCurveChannelBackdropName,
+): Promise<void> {
+  await expect(toneCurveEditorHistogramCanvas(page)).toHaveAttribute(
+    "aria-label",
+    `${backdrop} channel intensity histogram`,
+  );
+}
+
+// CT-176: a scientific multi-band stack has no selector; it shows a read-only label naming the
+// band the curve targets, which tracks the band navigator's selection.
+const EDITING_BAND_LABEL_TESTID = "tone-curve-editing-band";
+
+export function toneCurveEditingBandLabel(page: Page): Locator {
+  return operationPanel(page, TONE_CURVE_LABEL).locator(`[data-testid="${EDITING_BAND_LABEL_TESTID}"]`);
+}
+
+export function readToneCurveEditingBandLabel(page: Page): Promise<string> {
+  return toneCurveEditingBandLabel(page).innerText();
 }
 
 export async function expectToneCurveOpensWithTwoEndpoints(page: Page): Promise<void> {

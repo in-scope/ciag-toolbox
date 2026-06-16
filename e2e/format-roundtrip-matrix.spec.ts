@@ -47,13 +47,16 @@ import {
 //
 // The expected outcome of every cell is DERIVED from two facts about the app (see
 // encode-saved-image.ts):
-//   1. A plain-opened PNG/JPG is a BROWSER-IMAGE source promoted to a true-colour R/G/B
-//      raster. CT-162: ENVI, ENVI (32-bit float) and TIFF (32-bit float) are DISABLED in the
-//      Save-image picker for such a photo source (each with an explaining tooltip) and cannot
-//      be chosen - replacing the old offer-then-reject (ENVI) and silent float->uint
-//      downgrade (TIFF float). The remaining uint TIFF/PNG/JPEG keep it true-colour on
-//      reopen: a TIFF written from a true-colour source carries PhotometricInterpretation
-//      RGB, so the loader (CT-160) reopens it as a 3-band RGB composite, not a grey band.
+//   1. A plain-opened COLOUR PNG/JPG is a browser-image source promoted to a true-colour
+//      R/G/B raster. CT-162/CT-173: ENVI, ENVI (32-bit float) and TIFF (32-bit float) are
+//      DISABLED in the Save-image picker for such a TRUE-COLOUR photo (decided by the colour
+//      flag, not source.kind, now that photos are rasters - each with an explaining tooltip)
+//      and cannot be chosen - replacing the old offer-then-reject (ENVI) and silent
+//      float->uint downgrade (TIFF float). The remaining uint TIFF/PNG/JPEG keep it
+//      true-colour on reopen: a TIFF written from a true-colour source carries
+//      PhotometricInterpretation RGB, so the loader (CT-160) reopens it as a 3-band RGB
+//      composite, not a grey band. A GRAYSCALE PNG/JPG promotes to a single-band raster (no
+//      colour tag), so it is treated like any scientific raster: every format is enabled.
 //   2. A raster (TIFF/ENVI) science source exports the selected band to TIFF, the whole cube
 //      to ENVI, and a single rendered band to PNG/JPEG; those TIFF/ENVI reopen as grayscale
 //      stacks because the science source carries no true-colour tag to write.
@@ -129,7 +132,10 @@ const SAVES_ALL_BANDS_NOTE = "Saves all";
 type BandDisclosureExpectation = { readonly noteSubstring: string } | "none";
 
 const INPUT_FIXTURES: ReadonlyArray<InputFixture> = [
-  { label: "grayscale PNG", committedFileName: lowContrastGrayPng.fileName, kind: "trueColour" },
+  // CT-172/CT-173: a grayscale photo promotes to a SINGLE-band raster (no true-colour tag), so
+  // it is treated as a scientific single-band raster - every export format is enabled and it
+  // reopens grey. Only the colour PNG stays a true-colour photo with ENVI/float disabled.
+  { label: "grayscale PNG", committedFileName: lowContrastGrayPng.fileName, kind: "raster" },
   { label: "true-colour RGB PNG", committedFileName: rgbPng.fileName, kind: "trueColour" },
   { label: "uint16 stack TIFF", committedFileName: multiBandTiff.fileName, kind: "raster" },
   { label: "single-band reference TIFF", committedFileName: flatFieldReferenceTiff.fileName, kind: "raster" },
@@ -164,7 +170,9 @@ function expectedCellOutcome(fixture: InputFixture, format: ExportFormat): CellE
     };
   }
   if (format.kind === "canvas") {
-    return enabledCell("-", true);
+    // CT-172: a reopened PNG/JPEG is promoted to a uint8 raster, so its Metadata reports a uint
+    // sample format (not the old browser-image "-" placeholder); it still tracks source colour.
+    return enabledCell("uint", true);
   }
   if (fixture.kind === "trueColour" && isTiffKind(format.kind)) {
     return enabledCell("uint", true);

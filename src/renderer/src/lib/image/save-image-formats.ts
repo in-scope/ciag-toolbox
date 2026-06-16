@@ -105,27 +105,31 @@ const ENVI_NEEDS_RASTER_REASON =
 const FLOAT_NEEDS_RASTER_REASON =
   "Float export needs raster data; an 8-bit photo has none.";
 
-// A browser-image (PNG/JPG photo) source has no per-band raster, so ENVI and float
-// exports cannot apply to it. Raster sources can use every format (null = enabled).
+// CT-173: a true-colour photo (a PNG/JPG promoted to an RGB composite) is presented as one
+// 8-bit colour image, so the scientific-only export formats - ENVI, ENVI float and 32-bit
+// float TIFF - do not apply to it. Every other raster, including a single-band grayscale photo
+// promoted to a raster and a scientific stack, can use every format (null = enabled). The
+// "is this a photo?" decision is the colour flag, NOT the source kind (photos are rasters now).
 export function describeSaveImageFormatDisabledReason(
   formatId: SaveImageFormatId,
-  isRasterSource: boolean,
+  isTrueColorPhoto: boolean,
 ): string | null {
-  if (isRasterSource) return null;
+  if (!isTrueColorPhoto) return null;
   if (formatId === "envi" || formatId === "envi-float") return ENVI_NEEDS_RASTER_REASON;
   if (formatId === "tiff-float-32") return FLOAT_NEEDS_RASTER_REASON;
   return null;
 }
 
 export interface SaveImageSourceBandInfo {
-  readonly isRasterSource: boolean;
+  readonly isTrueColorPhoto: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
 
-// A multi-band stack loses bands silently when saved to a single-band format (TIFF/PNG/JPEG
-// keep only the displayed band; ENVI writes the whole cube). This note discloses that before
-// the user confirms. Single-band stacks and photo sources lose nothing, so they get null.
+// A multi-band SCIENTIFIC stack loses bands silently when saved to a single-band format
+// (TIFF/PNG/JPEG keep only the displayed band; ENVI writes the whole cube). This note discloses
+// that before the user confirms. A single-band stack and a true-colour photo (shown as one
+// colour image, not browsable bands) lose nothing, so they get null.
 export function describeSaveImageFormatBandCoverageNote(
   formatId: SaveImageFormatId,
   source: SaveImageSourceBandInfo,
@@ -136,7 +140,7 @@ export function describeSaveImageFormatBandCoverageNote(
 }
 
 function sourceIsMultiBandStack(source: SaveImageSourceBandInfo): boolean {
-  return source.isRasterSource && source.bandCount > 1;
+  return !source.isTrueColorPhoto && source.bandCount > 1;
 }
 
 function formatSavesEveryBand(formatId: SaveImageFormatId): boolean {
