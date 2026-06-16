@@ -82,7 +82,7 @@ import {
 } from "@/lib/image/tone-curve-composite-preview";
 import {
   DEFAULT_TONE_CURVE_CHANNEL,
-  setToneCurveChannelAnchors,
+  mergeActiveToneCurveChannelAnchors,
   type ToneCurveChannelAnchors,
 } from "@/lib/image/tone-curve-channels";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
@@ -1833,8 +1833,7 @@ function useMergedToneCurveChannelAnchors(
   const activeChannel = state?.toneCurveActiveChannel ?? DEFAULT_TONE_CURVE_CHANNEL;
   const activeAnchors = state?.toneCurveAnchors ?? null;
   return useMemo(
-    () =>
-      activeAnchors ? setToneCurveChannelAnchors(channelAnchors, activeChannel, activeAnchors) : channelAnchors,
+    () => mergeActiveToneCurveChannelAnchors(channelAnchors, activeChannel, activeAnchors),
     [channelAnchors, activeChannel, activeAnchors],
   );
 }
@@ -2240,6 +2239,7 @@ function runApplyActionFromPanel(
     options.parameterValues,
     bindings.getRenderingState(source.index),
     options.applyScope,
+    readRasterAtViewportIndexOrNull(bindings.imagesByIndex, source.index),
   );
   if (merged === null) return;
   if (options.openInNewViewport) {
@@ -2274,14 +2274,24 @@ function mergeParameterValuesWithSourceRenderingState(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
   applyScope: ApplyScope,
+  sourceRaster: RasterImage | null,
 ): ParameterValuesById | null {
   if (!action.prepareParameterValuesForApply) return rawParameterValues;
   try {
-    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope);
+    return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope, sourceRaster);
   } catch (error) {
     toast.error(formatActionPreparationErrorMessage(action.label, error));
     return null;
   }
+}
+
+function readRasterAtViewportIndexOrNull(
+  imagesByIndex: ImagesByIndexMap,
+  index: number,
+): RasterImage | null {
+  const source = imagesByIndex.get(index)?.source;
+  if (!source || source.kind !== "raster") return null;
+  return source.raster;
 }
 
 function formatActionPreparationErrorMessage(actionLabel: string, error: unknown): string {

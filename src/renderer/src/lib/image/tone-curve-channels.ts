@@ -16,9 +16,24 @@ import {
  */
 export type ToneCurveChannel = "rgb" | "red" | "green" | "blue";
 
+export type ColorToneCurveChannel = "red" | "green" | "blue";
+
 export const TONE_CURVE_CHANNELS: ReadonlyArray<ToneCurveChannel> = ["rgb", "red", "green", "blue"];
 
+export const COLOR_TONE_CURVE_CHANNELS: ReadonlyArray<ColorToneCurveChannel> = ["red", "green", "blue"];
+
 export const DEFAULT_TONE_CURVE_CHANNEL: ToneCurveChannel = "rgb";
+
+const TONE_CURVE_CHANNEL_DISPLAY_NAMES: Readonly<Record<ToneCurveChannel, string>> = {
+  rgb: "RGB",
+  red: "Red",
+  green: "Green",
+  blue: "Blue",
+};
+
+export function formatToneCurveChannelDisplayName(channel: ToneCurveChannel): string {
+  return TONE_CURVE_CHANNEL_DISPLAY_NAMES[channel];
+}
 
 export type ToneCurveChannelAnchors = Readonly<
   Partial<Record<ToneCurveChannel, ReadonlyArray<ToneCurveAnchor>>>
@@ -66,6 +81,34 @@ export function resetToneCurveChannel(
 
 export function resetAllToneCurveChannels(): ToneCurveChannelAnchors {
   return {};
+}
+
+// CT-178: at Apply time the active channel's live anchors still sit in the single
+// editing buffer (CT-176 only stashes a channel into the map when the user switches
+// away). Folding them back in gives the canonical full channel map that both the
+// preview (App) and Apply reproduce identically.
+export function mergeActiveToneCurveChannelAnchors(
+  channelAnchors: ToneCurveChannelAnchors,
+  activeChannel: ToneCurveChannel,
+  activeAnchors: ReadonlyArray<ToneCurveAnchor> | null,
+): ToneCurveChannelAnchors {
+  if (!activeAnchors) return channelAnchors;
+  return setToneCurveChannelAnchors(channelAnchors, activeChannel, activeAnchors);
+}
+
+// CT-178: which channels the user actually edited, for the single History entry.
+// Range-free counterpart of listNonIdentityToneCurveChannels: a stored curve is an
+// edit unless it is exactly the two-point diagonal (each anchor input === output).
+export function listEditedToneCurveChannels(
+  channelAnchors: ToneCurveChannelAnchors,
+): ReadonlyArray<ToneCurveChannel> {
+  return TONE_CURVE_CHANNELS.filter((channel) => channelHoldsEditedCurve(channelAnchors[channel]));
+}
+
+function channelHoldsEditedCurve(anchors: ReadonlyArray<ToneCurveAnchor> | undefined): boolean {
+  if (!anchors || anchors.length < 2) return false;
+  if (anchors.length !== 2) return true;
+  return anchors.some((anchor) => anchor.input !== anchor.output);
 }
 
 export function listNonIdentityToneCurveChannels(

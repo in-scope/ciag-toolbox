@@ -12,9 +12,19 @@ import {
 } from "@/lib/image/apply-band-keep";
 import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import {
+  applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import {
+  colorBandIndexForToneCurveChannel,
+  COLOR_TONE_CURVE_CHANNELS,
+  formatToneCurveChannelDisplayName,
+  listEditedToneCurveChannels,
+  mergeActiveToneCurveChannelAnchors,
+  type ToneCurveChannelAnchors,
+} from "@/lib/image/tone-curve-channels";
 import {
   applyBrightnessToRasterBands,
   brightnessDeltaForRangeFractionOfBand,
@@ -132,6 +142,7 @@ export interface RegisteredViewportAction extends ViewportAction {
     rawParameterValues: ParameterValuesById,
     sourceRenderingState: ViewportRenderingState,
     applyScope: ApplyScope,
+    sourceRaster?: RasterImage | null,
   ) => ParameterValuesById;
   readonly isAvailableForActiveViewport?: (
     sourceRenderingState: ViewportRenderingState,
@@ -590,6 +601,7 @@ function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): str
 
 const TONE_CURVE_ANCHORS_PARAMETER_ID = "toneCurveAnchorsJson";
 const TONE_CURVE_BAND_PARAMETER_ID = "targetBandIndex";
+const TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID = "toneCurveChannelAnchorsJson";
 const TONE_CURVE_REGION_PARAMETER_IDS = {
   x0: "regionImagePixelX0",
   y0: "regionImagePixelY0",
@@ -620,13 +632,33 @@ function prepareToneCurveParameterValues(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
   applyScope: ApplyScope,
+  sourceRaster: RasterImage | null = null,
 ): ParameterValuesById {
   const anchors = sourceRenderingState.toneCurveAnchors;
   if (!anchors || anchors.length < 2) {
     throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
-  return injectToneCurveRegionIfPresent(withAnchors, resolveToneCurveRegion(sourceRenderingState, applyScope));
+  const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
+  return injectToneCurveRegionIfPresent(withChannels, resolveToneCurveRegion(sourceRenderingState, applyScope));
+}
+
+// CT-178: for a true-colour composite, record the canonical full channel map so
+// Apply bakes every channel exactly as the preview showed it. A scientific stack
+// (or a non-raster source) keeps the single-curve path and skips this.
+function withToneCurveChannelAnchorsForComposite(
+  parameterValues: ParameterValuesById,
+  sourceRenderingState: ViewportRenderingState,
+  activeAnchors: ReadonlyArray<ToneCurveAnchor>,
+  sourceRaster: RasterImage | null,
+): ParameterValuesById {
+  if (!sourceRaster || !shouldRenderRasterAsRgbComposite(sourceRaster)) return parameterValues;
+  const merged = mergeActiveToneCurveChannelAnchors(
+    sourceRenderingState.toneCurveChannelAnchors,
+    sourceRenderingState.toneCurveActiveChannel,
+    activeAnchors,
+  );
+  return { ...parameterValues, [TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID]: serializeToneCurveChannelAnchors(merged) };
 }
 
 function resolveToneCurveRegion(
@@ -661,15 +693,66 @@ function serializeToneCurveAnchors(anchors: ReadonlyArray<ToneCurveAnchor>): str
   return JSON.stringify(anchors.map((anchor) => [anchor.input, anchor.output]));
 }
 
+function serializeToneCurveChannelAnchors(channelAnchors: ToneCurveChannelAnchors): string {
+  const serialized = Object.entries(channelAnchors).map(([channel, anchors]) => [
+    channel,
+    (anchors ?? []).map((anchor) => [anchor.input, anchor.output]),
+  ]);
+  return JSON.stringify(Object.fromEntries(serialized));
+}
+
+function readToneCurveChannelAnchorsIfPresent(
+  parameterValues: ParameterValuesById,
+): ToneCurveChannelAnchors | null {
+  const raw = parameterValues[TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID];
+  if (typeof raw !== "string") return null;
+  return parseSerializedToneCurveChannelAnchors(raw);
+}
+
+function parseSerializedToneCurveChannelAnchors(raw: string): ToneCurveChannelAnchors {
+  const parsed = JSON.parse(raw) as Record<string, ReadonlyArray<readonly [number, number]>>;
+  const entries = Object.entries(parsed).map(([channel, pairs]) => [
+    channel,
+    pairs.map(([input, output]) => ({ input, output })),
+  ]);
+  return Object.fromEntries(entries) as ToneCurveChannelAnchors;
+}
+
 function createToneCurveSourceTransform(): ViewportActionSourceTransform {
   return (rawSource, parameterValues) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const bandIndex = readToneCurveBandIndex(parameterValues);
-    const anchors = readToneCurveAnchorsOrThrow(parameterValues);
     const region = readToneCurveRegionIfPresent(parameterValues);
-    const raster = applyToneCurveToRasterBand(source.raster, bandIndex, anchors, region ? { region } : {});
-    return { kind: "raster", raster };
+    const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
+    if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
+      return { kind: "raster", raster: bakeCompositeToneCurve(source.raster, channelAnchors, region) };
+    }
+    return { kind: "raster", raster: bakeSingleBandToneCurve(source.raster, parameterValues, region) };
   };
+}
+
+function bakeSingleBandToneCurve(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+  region: ViewportRoi | null,
+): RasterImage {
+  const bandIndex = readToneCurveBandIndex(parameterValues);
+  const anchors = readToneCurveAnchorsOrThrow(parameterValues);
+  return applyToneCurveToRasterBand(raster, bandIndex, anchors, region ? { region } : {});
+}
+
+// CT-178: bake every R/G/B band, folding the rgb/Value curve over each channel's
+// own curve, so all channel edits commit together in a single operation.
+function bakeCompositeToneCurve(
+  raster: RasterImage,
+  channelAnchors: ToneCurveChannelAnchors,
+  region: ViewportRoi | null,
+): RasterImage {
+  const valueAnchors = channelAnchors.rgb ?? null;
+  const options = region ? { region } : {};
+  return COLOR_TONE_CURVE_CHANNELS.reduce((current, channel) => {
+    const bandIndex = colorBandIndexForToneCurveChannel(channel) ?? 0;
+    return applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors, options);
+  }, raster);
 }
 
 function readToneCurveBandIndex(parameterValues: ParameterValuesById): number {
@@ -706,8 +789,25 @@ function readToneCurveRegionIfPresent(
 }
 
 function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): string {
+  const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
+  const label = channelAnchors
+    ? formatCompositeToneCurveLabel(channelAnchors)
+    : formatSingleBandToneCurveLabel(parameterValues);
+  return appendToneCurveRegionSuffix(label, parameterValues);
+}
+
+function formatSingleBandToneCurveLabel(parameterValues: ParameterValuesById): string {
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  const label = `Tone curve (${anchors.length} points)`;
+  return `Tone curve (${anchors.length} points)`;
+}
+
+function formatCompositeToneCurveLabel(channelAnchors: ToneCurveChannelAnchors): string {
+  const editedNames = listEditedToneCurveChannels(channelAnchors).map(formatToneCurveChannelDisplayName);
+  if (editedNames.length === 0) return "Tone curve (no channel changes)";
+  return `Tone curve (channels: ${editedNames.join(", ")})`;
+}
+
+function appendToneCurveRegionSuffix(label: string, parameterValues: ParameterValuesById): string {
   const region = readToneCurveRegionIfPresent(parameterValues);
   if (!region) return label;
   const canonical = canonicalizeViewportRoiCorners(region);

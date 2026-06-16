@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import { buildDefaultToneCurveAnchors, type ToneCurveValueRanges } from "@/lib/image/tone-curve-editor-state";
 import {
   colorBandIndexForToneCurveChannel,
+  COLOR_TONE_CURVE_CHANNELS,
   DEFAULT_TONE_CURVE_CHANNEL,
+  formatToneCurveChannelDisplayName,
   getToneCurveChannelAnchorsOrDefault,
+  listEditedToneCurveChannels,
   listNonIdentityToneCurveChannels,
+  mergeActiveToneCurveChannelAnchors,
   resetAllToneCurveChannels,
   resetToneCurveChannel,
   setToneCurveChannelAnchors,
@@ -94,5 +98,54 @@ describe("listNonIdentityToneCurveChannels", () => {
 
   it("returns nothing when no channel has been edited", () => {
     expect(listNonIdentityToneCurveChannels({}, RANGES)).toEqual([]);
+  });
+});
+
+describe("COLOR_TONE_CURVE_CHANNELS", () => {
+  it("lists the three colour bands in band order, excluding the rgb/Value channel", () => {
+    expect(COLOR_TONE_CURVE_CHANNELS).toEqual(["red", "green", "blue"]);
+  });
+});
+
+describe("formatToneCurveChannelDisplayName", () => {
+  it("names each channel for the History entry", () => {
+    expect(formatToneCurveChannelDisplayName("rgb")).toBe("RGB");
+    expect(formatToneCurveChannelDisplayName("red")).toBe("Red");
+    expect(formatToneCurveChannelDisplayName("green")).toBe("Green");
+    expect(formatToneCurveChannelDisplayName("blue")).toBe("Blue");
+  });
+});
+
+describe("mergeActiveToneCurveChannelAnchors", () => {
+  it("folds the active editing buffer back into the channel map", () => {
+    const map: ToneCurveChannelAnchors = { green: RED_CURVE };
+    expect(mergeActiveToneCurveChannelAnchors(map, "red", RED_CURVE)).toEqual({
+      green: RED_CURVE,
+      red: RED_CURVE,
+    });
+  });
+
+  it("leaves the map untouched when there are no active anchors", () => {
+    const map: ToneCurveChannelAnchors = { green: RED_CURVE };
+    expect(mergeActiveToneCurveChannelAnchors(map, "red", null)).toBe(map);
+  });
+});
+
+describe("listEditedToneCurveChannels", () => {
+  it("lists channels whose stored curve is not the two-point diagonal, range-free", () => {
+    const channels: ToneCurveChannelAnchors = {
+      rgb: buildDefaultToneCurveAnchors(RANGES),
+      red: RED_CURVE,
+      blue: [
+        { input: 0, output: 0 },
+        { input: 255, output: 100 },
+      ],
+    };
+    expect(listEditedToneCurveChannels(channels)).toEqual(["red", "blue"]);
+  });
+
+  it("treats an absent or pure-diagonal channel as unedited", () => {
+    const channels: ToneCurveChannelAnchors = { rgb: buildDefaultToneCurveAnchors(RANGES) };
+    expect(listEditedToneCurveChannels(channels)).toEqual([]);
   });
 });

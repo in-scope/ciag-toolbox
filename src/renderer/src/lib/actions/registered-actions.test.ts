@@ -186,7 +186,79 @@ describe("TONE_CURVE_ACTION", () => {
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
   });
+
+  // CT-178: on a true-colour composite Apply bakes every R/G/B band in one operation,
+  // folding the rgb/Value curve over each channel's own curve.
+  const halveCurve = [
+    { input: 0, output: 0 },
+    { input: 255, output: 128 },
+  ];
+
+  it("bakes only the edited channel band on a composite, leaving the other channels untouched", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      toneCurveActiveChannel: "red" as const,
+      toneCurveAnchors: halveCurve,
+    };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", makeRgbCompositeRaster());
+    const result = TONE_CURVE_ACTION.transformSource!(
+      { kind: "raster", raster: makeRgbCompositeRaster() },
+      prepared,
+    ) as { raster: RasterImage };
+    expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
+    expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
+    expect(Array.from(result.raster.bandPixels[2]!)).toEqual([50]);
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: Red)");
+  });
+
+  it("folds an rgb/Value curve into every channel band on a composite", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: halveCurve };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", makeRgbCompositeRaster());
+    const result = TONE_CURVE_ACTION.transformSource!(
+      { kind: "raster", raster: makeRgbCompositeRaster() },
+      prepared,
+    ) as { raster: RasterImage };
+    expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
+    expect(Array.from(result.raster.bandPixels[1]!)).toEqual([50]);
+    expect(Array.from(result.raster.bandPixels[2]!)).toEqual([25]);
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: RGB)");
+  });
+
+  it("keeps the single-band path for a scientific stack even though it has three bands", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: halveCurve };
+    const scientific = makeThreeBandScientificStack();
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", scientific);
+    const result = TONE_CURVE_ACTION.transformSource!({ kind: "raster", raster: scientific }, prepared) as {
+      raster: RasterImage;
+    };
+    expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
+    expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
+  });
 });
+
+function makeRgbCompositeRaster(): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from([200]), Uint8Array.from([100]), Uint8Array.from([50])],
+    width: 1,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+    colorInterpretation: "rgb",
+  };
+}
+
+function makeThreeBandScientificStack(): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from([200]), Uint8Array.from([100]), Uint8Array.from([50])],
+    width: 1,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
 
 describe("region-requesting operations (CT-095)", () => {
   const operationRegion = { imagePixelX0: 2, imagePixelY0: 3, imagePixelX1: 7, imagePixelY1: 8 };

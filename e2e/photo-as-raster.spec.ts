@@ -118,7 +118,9 @@ async function expectOneToneCurveHistoryEntry(): Promise<void> {
   expect(await historyEntryCount(launched.window)).toBe(1);
   await expectHistoryToRecordOperation(launched.window, {
     actionLabel: TONE_CURVE_LABEL,
-    detailSubstrings: ["points"],
+    // CT-178: editing the rgb/Value channel on a composite bakes every channel in one
+    // operation (preview-faithful), so the History entry names the edited channel(s).
+    detailSubstrings: ["channels: RGB"],
   });
 }
 

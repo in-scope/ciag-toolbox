@@ -131,6 +131,47 @@ export function applyToneCurveToRasterBand(
   );
 }
 
+// CT-178: bake one composite channel band. The per-channel curve is the inner
+// map and the rgb/Value curve is applied on top, matching the CT-177 preview
+// contract composed(v) = valueCurve(channelCurve(v)). A null curve folds in as the
+// identity diagonal over the band's data-type range, so an unedited channel still
+// receives the rgb/Value curve.
+export function applyComposedToneCurveToRasterBand(
+  raster: RasterImage,
+  bandIndex: number,
+  perChannelAnchors: ReadonlyArray<ToneCurveAnchor> | null,
+  valueAnchors: ReadonlyArray<ToneCurveAnchor> | null,
+  options: ApplyToneCurveOptions = {},
+): RasterImage {
+  const band = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const typeRange = dataTypeValueRangeForBand(band, raster.sampleFormat);
+  const roundForOutput = !isFloatTypedArray(band);
+  const perChannelCurve = buildToneCurveOrIdentity(perChannelAnchors, typeRange);
+  const valueCurve = buildToneCurveOrIdentity(valueAnchors, typeRange);
+  return remapRasterBandWithinRegion(raster, bandIndex, options, (value) =>
+    clampValueToDataTypeRangeRoundingIntegers(
+      evaluateComposedToneCurves(perChannelCurve, valueCurve, value),
+      typeRange,
+      roundForOutput,
+    ),
+  );
+}
+
+function evaluateComposedToneCurves(perChannelCurve: ToneCurve, valueCurve: ToneCurve, value: number): number {
+  return evaluateToneCurveAtInput(valueCurve, evaluateToneCurveAtInput(perChannelCurve, value));
+}
+
+function buildToneCurveOrIdentity(
+  anchors: ReadonlyArray<ToneCurveAnchor> | null,
+  range: DataTypeValueRange,
+): ToneCurve {
+  if (anchors && anchors.length >= 2) return buildMonotoneToneCurve(anchors);
+  return buildMonotoneToneCurve([
+    { input: range.min, output: range.min },
+    { input: range.max, output: range.max },
+  ]);
+}
+
 function inputForLookupTableEntry(
   range: DataTypeValueRange,
   index: number,

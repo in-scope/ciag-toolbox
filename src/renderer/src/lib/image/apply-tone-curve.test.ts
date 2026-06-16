@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
   buildDisplayNormalizedToneCurveLookupTable,
   buildMonotoneToneCurve,
@@ -132,6 +133,45 @@ describe("applyToneCurveToRasterBand", () => {
       { input: 64, output: 255 },
     ]);
     expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 128, 255]);
+  });
+});
+
+describe("applyComposedToneCurveToRasterBand", () => {
+  const HALVE_CURVE: ToneCurveAnchor[] = [
+    { input: 0, output: 0 },
+    { input: 255, output: 128 },
+  ];
+
+  it("composes the rgb/Value curve over the per-channel curve: value(channel(v))", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, HALVE_CURVE, HALVE_CURVE);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([50, 25, 0]);
+  });
+
+  it("treats a null per-channel curve as identity so the rgb/Value curve still applies", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, HALVE_CURVE);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 50, 0]);
+  });
+
+  it("treats a null rgb/Value curve as identity so only the per-channel curve applies", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, HALVE_CURVE, null);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 50, 0]);
+  });
+
+  it("leaves the band unchanged when both curves are identity", () => {
+    const raster = makeUint8Raster([200, 100, 0], 3, 1);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, null);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([200, 100, 0]);
+  });
+
+  it("remaps only the pixels inside the region", () => {
+    const raster = makeUint8Raster([200, 200, 200, 200], 2, 2);
+    const result = applyComposedToneCurveToRasterBand(raster, 0, null, HALVE_CURVE, {
+      region: { imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 0, imagePixelY1: 0 },
+    });
+    expect(Array.from(result.bandPixels[0]!)).toEqual([100, 200, 200, 200]);
   });
 });
 
