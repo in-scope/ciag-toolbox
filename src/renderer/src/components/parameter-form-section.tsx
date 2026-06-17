@@ -289,8 +289,12 @@ function ComponentCountParameterField(props: ComponentCountParameterFieldProps):
   const bandCount = props.sourceBandCount;
   const displayValue = bandCount === null ? props.value : resolveComponentCount(props.value, bandCount);
   return (
-    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
-      <span className="text-foreground">{props.schema.label}</span>
+    // The "X of N components" hint sits OUTSIDE the <label> so the input's accessible
+    // name stays exactly the field label, not the label plus the live hint text.
+    <div className="flex flex-col gap-1 text-sm">
+      <label htmlFor={id} className="text-foreground">
+        {props.schema.label}
+      </label>
       <input
         id={id}
         type="number"
@@ -310,7 +314,7 @@ function ComponentCountParameterField(props: ComponentCountParameterFieldProps):
           {formatComponentCountLabel(displayValue, bandCount)} components
         </span>
       ) : null}
-    </label>
+    </div>
   );
 }
 

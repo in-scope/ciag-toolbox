@@ -114,6 +114,7 @@ import {
   EMPTY_REMOVED_BAND_INDEXES,
   type ViewportRenderingState,
 } from "./viewport-action";
+import { PCA_ACTION } from "./pca-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1628,4 +1629,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   FALSE_COLOR_ACTION,
   ROTATE_ACTION,
   REFLECT_ACTION,
+  PCA_ACTION,
 ];
