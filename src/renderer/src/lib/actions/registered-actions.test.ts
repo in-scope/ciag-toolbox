@@ -48,6 +48,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "reflect",
       "pca",
       "mnf",
+      "ica",
     ]);
   });
 
