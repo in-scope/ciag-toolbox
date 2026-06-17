@@ -2,11 +2,34 @@ import { describe, expect, it } from "vitest";
 
 import {
   FLOAT32_BITS_PER_SAMPLE,
+  makeFloat32RasterFromBands,
   makeFloatRasterFromBandComputation,
   makeFloatRasterReusingUnchangedSourceBands,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
+
+describe("makeFloat32RasterFromBands", () => {
+  it("builds a float32 raster whose band count comes from the supplied bands", () => {
+    const result = makeFloat32RasterFromBands(
+      { width: 2, height: 1 },
+      [new Float32Array([1.5, 2.5]), new Float32Array([3.5, 4.5]), new Float32Array([5.5, 6.5])],
+    );
+    expect(result.bandCount).toBe(3);
+    expect(result.sampleFormat).toBe("float");
+    expect(result.bitsPerSample).toBe(FLOAT32_BITS_PER_SAMPLE);
+    expect(result.width).toBe(2);
+    expect(result.height).toBe(1);
+  });
+
+  it("carries optional band labels", () => {
+    const result = makeFloat32RasterFromBands(
+      { width: 1, height: 1, bandLabels: ["PC 1"] },
+      [new Float32Array([9])],
+    );
+    expect(result.bandLabels).toEqual(["PC 1"]);
+  });
+});
 
 describe("makeFloatRasterFromBandComputation", () => {
   it("produces a float32 raster with Float32Array band buffers", () => {

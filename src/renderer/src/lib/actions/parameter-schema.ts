@@ -70,6 +70,16 @@ export interface BandNumberParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: number;
 }
 
+// CT-180: the primary control of every dimension-reduction transform. Its valid
+// range and default both depend on the source band count (1..bandCount,
+// defaulting to min(10, bandCount)), which is only known when the panel opens,
+// so the field resolves and displays "X of N" from the live band count rather
+// than from static schema bounds. resolveComponentCount is the shared clamp.
+export interface ComponentCountParameterSchema extends ParameterSchemaBase {
+  readonly kind: "component-count";
+  readonly defaultValue: number;
+}
+
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
@@ -78,7 +88,8 @@ export type ParameterSchema =
   | BooleanParameterSchema
   | CubeScopeParameterSchema
   | RasterReferenceParameterSchema
-  | BandNumberParameterSchema;
+  | BandNumberParameterSchema
+  | ComponentCountParameterSchema;
 
 export type ResolvedCubeScopeSelection =
   | { readonly scope: "full-cube" }

@@ -18,6 +18,10 @@ import {
   type ReferencePickerOption,
 } from "@/lib/image/reference-token";
 import {
+  formatComponentCountLabel,
+  resolveComponentCount,
+} from "@/lib/image/dimension-reduction/component-count";
+import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
@@ -28,6 +32,7 @@ import {
   NO_RASTER_REFERENCE_SELECTED,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
+  type ComponentCountParameterSchema,
   type CubeScopeChoice,
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
@@ -160,6 +165,16 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
       />
     );
   }
+  if (props.schema.kind === "component-count") {
+    return (
+      <ComponentCountParameterField
+        schema={props.schema}
+        value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
+        sourceBandCount={props.sourceBandCount}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
   return (
     <NumericParameterField
       schema={props.schema}
@@ -260,6 +275,53 @@ function BandNumberParameterField(props: BandNumberParameterFieldProps): JSX.Ele
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </label>
   );
+}
+
+interface ComponentCountParameterFieldProps {
+  schema: ComponentCountParameterSchema;
+  value: number;
+  sourceBandCount: number | null;
+  onChangeValue: (next: number) => void;
+}
+
+function ComponentCountParameterField(props: ComponentCountParameterFieldProps): JSX.Element {
+  const id = useId();
+  const bandCount = props.sourceBandCount;
+  const displayValue = bandCount === null ? props.value : resolveComponentCount(props.value, bandCount);
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
+      <span className="text-foreground">{props.schema.label}</span>
+      <input
+        id={id}
+        type="number"
+        value={displayValue}
+        min={1}
+        max={bandCount ?? undefined}
+        step={1}
+        onChange={(event) =>
+          props.onChangeValue(
+            clampComponentCountInput(event.target.value, displayValue, bandCount),
+          )
+        }
+        className={NUMERIC_INPUT_CLASSES}
+      />
+      {bandCount !== null ? (
+        <span className="text-xs text-muted-foreground">
+          {formatComponentCountLabel(displayValue, bandCount)} components
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
+function clampComponentCountInput(
+  rawValue: string,
+  fallback: number,
+  bandCount: number | null,
+): number {
+  const parsed = parseNumericInputValueOrFallback(rawValue, fallback);
+  if (bandCount === null) return Math.max(1, Math.round(parsed));
+  return resolveComponentCount(parsed, bandCount);
 }
 
 interface SliderParameterFieldProps {

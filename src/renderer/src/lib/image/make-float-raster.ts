@@ -121,3 +121,29 @@ function buildFloat32RasterPreservingMetadata(
     bitsPerSample: FLOAT32_BITS_PER_SAMPLE,
   };
 }
+
+export interface Float32RasterShape {
+  readonly width: number;
+  readonly height: number;
+  readonly bandLabels?: ReadonlyArray<string>;
+}
+
+// CT-180: an operation whose output band count DIFFERS from its source (e.g. a
+// dimension-reduction transform that emits N principal components from M bands)
+// cannot carry source band metadata through, so it builds a fresh float raster
+// from an explicit shape rather than spreading the source. The float
+// sampleFormat/bitsPerSample stay defined in one place alongside CT-077.
+export function makeFloat32RasterFromBands(
+  shape: Float32RasterShape,
+  bandPixels: ReadonlyArray<Float32Array>,
+): RasterImage {
+  return {
+    bandPixels,
+    width: shape.width,
+    height: shape.height,
+    bandCount: bandPixels.length,
+    sampleFormat: "float",
+    bitsPerSample: FLOAT32_BITS_PER_SAMPLE,
+    bandLabels: shape.bandLabels ? [...shape.bandLabels] : undefined,
+  };
+}
