@@ -8,10 +8,14 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
   COMPONENT_COUNT_PARAMETER_ID,
+  DIMENSION_REDUCTION_FIT_SCOPE_PARAMETER_ID,
   DIMENSION_REDUCTION_SOURCE_BAND_COUNT_PARAMETER_ID,
   registerDimensionReductionAction,
+  ROI_FIT_SCOPE,
+  WHOLE_IMAGE_FIT_SCOPE,
 } from "./dimension-reduction-action";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
+import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
 // A trivial "keep the first N bands" transform exercises the descriptor wiring
 // (count resolution, float output, audit label) without any real fit math.
@@ -46,6 +50,10 @@ function makeFourBandRaster(): RasterImage {
 
 function rasterSource(raster: RasterImage): ViewportImageSource {
   return { kind: "raster", raster };
+}
+
+function stateWithOperationRegion(operationRegion: ViewportRoi) {
+  return { ...DEFAULT_VIEWPORT_RENDERING_STATE, operationRegion };
 }
 
 describe("registerDimensionReductionAction", () => {
@@ -95,6 +103,85 @@ describe("registerDimensionReductionAction", () => {
       [DIMENSION_REDUCTION_SOURCE_BAND_COUNT_PARAMETER_ID]: 12,
     });
     expect(label).toBe("Test DR (3 of 12 components)");
+  });
+
+  it("opts into the shared ROI scope so the 'Whole image | ROI' radio appears", () => {
+    expect(registerDimensionReductionAction(IDENTITY_CONFIG).supportsRoiScope).toBe(true);
+  });
+
+  it("records whole-image scope when apply scope is whole-image", () => {
+    const action = registerDimensionReductionAction(IDENTITY_CONFIG);
+    const prepared = action.prepareParameterValuesForApply!(
+      { [COMPONENT_COUNT_PARAMETER_ID]: 2 },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeFourBandRaster(),
+    );
+    expect(prepared[DIMENSION_REDUCTION_FIT_SCOPE_PARAMETER_ID]).toBe(WHOLE_IMAGE_FIT_SCOPE);
+    expect(prepared.fitRegionImagePixelX0).toBeUndefined();
+  });
+
+  it("records the ROI scope and bounds when apply scope is roi", () => {
+    const action = registerDimensionReductionAction(IDENTITY_CONFIG);
+    const prepared = action.prepareParameterValuesForApply!(
+      { [COMPONENT_COUNT_PARAMETER_ID]: 2 },
+      stateWithOperationRegion({ imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 1, imagePixelY1: 1 }),
+      "roi",
+      makeFourBandRaster(),
+    );
+    expect(prepared[DIMENSION_REDUCTION_FIT_SCOPE_PARAMETER_ID]).toBe(ROI_FIT_SCOPE);
+    expect(prepared.fitRegionImagePixelX1).toBe(1);
+    expect(prepared.fitRegionImagePixelY1).toBe(1);
+  });
+
+  it("throws when ROI scope is chosen but no region was selected", () => {
+    const action = registerDimensionReductionAction(IDENTITY_CONFIG);
+    expect(() =>
+      action.prepareParameterValuesForApply!(
+        { [COMPONENT_COUNT_PARAMETER_ID]: 2 },
+        DEFAULT_VIEWPORT_RENDERING_STATE,
+        "roi",
+        makeFourBandRaster(),
+      ),
+    ).toThrow(/region/i);
+  });
+
+  it("fits on only the in-ROI pixels yet still projects the whole cube", () => {
+    let fitSampleCount = -1;
+    let projectSampleCount = -1;
+    const action = registerDimensionReductionAction({
+      ...IDENTITY_CONFIG,
+      fit: (samples): null => {
+        fitSampleCount = samples.sampleCount;
+        return null;
+      },
+      project: (samples, _fit, keptCount) => {
+        projectSampleCount = samples.sampleCount;
+        return keepLeadingBands(samples, null, keptCount);
+      },
+    });
+    action.transformSource!(rasterSource(makeFourBandRaster()), {
+      [COMPONENT_COUNT_PARAMETER_ID]: 2,
+      fitRegionImagePixelX0: 0,
+      fitRegionImagePixelY0: 0,
+      fitRegionImagePixelX1: 0,
+      fitRegionImagePixelY1: 0,
+    });
+    expect(fitSampleCount).toBe(1);
+    expect(projectSampleCount).toBe(4);
+  });
+
+  it("notes the ROI bounds in the applied label", () => {
+    const action = registerDimensionReductionAction(IDENTITY_CONFIG);
+    const label = action.formatAppliedLabel!({
+      [COMPONENT_COUNT_PARAMETER_ID]: 2,
+      [DIMENSION_REDUCTION_SOURCE_BAND_COUNT_PARAMETER_ID]: 4,
+      fitRegionImagePixelX0: 0,
+      fitRegionImagePixelY0: 0,
+      fitRegionImagePixelX1: 1,
+      fitRegionImagePixelY1: 1,
+    });
+    expect(label).toBe("Test DR (2 of 4 components) fit on ROI (0, 0) - (1, 1)");
   });
 
   it("lets a transform supply per-component strength labels", () => {
