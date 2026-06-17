@@ -6,7 +6,8 @@ import { applyPca, fitPca, varianceExplained } from "./pca";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
-  return { bandCount: bands.length, sampleCount: bands[0]!.length, bandValues };
+  const sampleCount = bands[0]!.length;
+  return { bandCount: bands.length, sampleCount, width: sampleCount, height: 1, bandValues };
 }
 
 function dotProduct(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {

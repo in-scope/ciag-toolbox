@@ -10,17 +10,22 @@ import {
 // projection loops, and matches the raster's own band-pixel layout so the
 // whole-image case is a straight copy. CT-182 adds an ROI variant that fills the
 // same shape from a pixel subset, so the transform math never branches on scope.
+// CT-183: the samples are laid out row-major over a width x height rectangle (the
+// whole image, or the ROI rectangle), so a transform that needs spatial
+// adjacency (MNF's shift-difference noise estimate) can walk neighbours.
 
 export interface CubeSampleMatrix {
   readonly bandCount: number;
   readonly sampleCount: number;
+  readonly width: number;
+  readonly height: number;
   readonly bandValues: ReadonlyArray<Float64Array>;
 }
 
 export function extractCubeSampleMatrixFromRaster(raster: RasterImage): CubeSampleMatrix {
   const sampleCount = raster.width * raster.height;
   const bandValues = collectEveryBandAsFloat64(raster, sampleCount);
-  return { bandCount: raster.bandCount, sampleCount, bandValues };
+  return { bandCount: raster.bandCount, sampleCount, width: raster.width, height: raster.height, bandValues };
 }
 
 function collectEveryBandAsFloat64(raster: RasterImage, sampleCount: number): Float64Array[] {
@@ -49,7 +54,9 @@ export function collectRoiSamples(raster: RasterImage, roi: ViewportRoi): CubeSa
   const bounds = clampViewportRoiToImageBounds(roi, raster);
   const pixelIndexes = listRoiPixelIndexes(bounds, raster.width);
   const bandValues = collectBandsAtPixelIndexes(raster, pixelIndexes);
-  return { bandCount: raster.bandCount, sampleCount: pixelIndexes.length, bandValues };
+  const width = bounds.imagePixelX1 - bounds.imagePixelX0 + 1;
+  const height = bounds.imagePixelY1 - bounds.imagePixelY0 + 1;
+  return { bandCount: raster.bandCount, sampleCount: pixelIndexes.length, width, height, bandValues };
 }
 
 function listRoiPixelIndexes(bounds: ViewportRoi, width: number): number[] {

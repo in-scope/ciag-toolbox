@@ -131,6 +131,7 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
   key: "dimension-reduction",
   commands: [
     buildMenuAndToolbarCommand("pca", "PCA", "open-action-panel"),
+    buildMenuAndToolbarCommand("mnf", "MNF", "open-action-panel"),
   ],
 };
 

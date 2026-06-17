@@ -1,4 +1,5 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
+import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 
@@ -28,9 +29,7 @@ export function applyPca(
   fit: PcaFit,
   keep: number,
 ): ComponentProjection {
-  return Array.from({ length: keep }, (_unused, component) =>
-    projectSamplesOntoEigenvector(samples, fit, component),
-  );
+  return projectMeanCentredSamplesOntoComponentVectors(samples, fit.means, fit.eigenvectors, keep);
 }
 
 export function varianceExplained(eigenvalues: ReadonlyArray<number>): number[] {
@@ -76,30 +75,4 @@ function covarianceBetweenBands(
     sum += (rowValues[pixel]! - means[rowBand]!) * (columnValues[pixel]! - means[columnBand]!);
   }
   return sum / Math.max(1, samples.sampleCount);
-}
-
-function projectSamplesOntoEigenvector(
-  samples: CubeSampleMatrix,
-  fit: PcaFit,
-  component: number,
-): Float32Array {
-  const eigenvector = fit.eigenvectors[component]!;
-  const projected = new Float32Array(samples.sampleCount);
-  for (let pixel = 0; pixel < samples.sampleCount; pixel += 1) {
-    projected[pixel] = projectSingleSampleOntoEigenvector(samples, fit.means, eigenvector, pixel);
-  }
-  return projected;
-}
-
-function projectSingleSampleOntoEigenvector(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  eigenvector: ReadonlyArray<number>,
-  pixel: number,
-): number {
-  let value = 0;
-  for (let band = 0; band < samples.bandCount; band += 1) {
-    value += eigenvector[band]! * (samples.bandValues[band]![pixel]! - means[band]!);
-  }
-  return value;
 }

@@ -47,6 +47,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "rotate",
       "reflect",
       "pca",
+      "mnf",
     ]);
   });
 

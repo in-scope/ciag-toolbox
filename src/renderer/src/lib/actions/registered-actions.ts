@@ -115,6 +115,7 @@ import {
   type ViewportRenderingState,
 } from "./viewport-action";
 import { PCA_ACTION } from "./pca-action";
+import { MNF_ACTION } from "./mnf-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1630,4 +1631,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   ROTATE_ACTION,
   REFLECT_ACTION,
   PCA_ACTION,
+  MNF_ACTION,
 ];
