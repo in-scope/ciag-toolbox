@@ -9,6 +9,36 @@ import type { Locator } from "@playwright/test";
 
 const CLEAR_COLOR_LUMINANCE_SUM_THRESHOLD = 24;
 
+// A panel canvas is replaced by a React remount (e.g. a fresh-app round-trip reopening a
+// file into a panel) between Playwright resolving the locator and running the element
+// screenshot, which throws "Element is not attached to the DOM". The panelCanvas locator
+// re-resolves on every use, so retrying after a settle picks up the freshly mounted canvas.
+const DETACHED_ELEMENT_ERROR_FRAGMENT = "not attached to the DOM";
+const MAX_CANVAS_SCREENSHOT_ATTEMPTS = 5;
+const CANVAS_SCREENSHOT_RETRY_DELAY_MS = 100;
+
+async function captureCanvasScreenshotRetryingWhenDetached(canvas: Locator): Promise<Buffer> {
+  for (let attempt = 1; attempt < MAX_CANVAS_SCREENSHOT_ATTEMPTS; attempt += 1) {
+    const screenshot = await screenshotCanvasOrNullWhenDetached(canvas);
+    if (screenshot) return screenshot;
+    await canvas.page().waitForTimeout(CANVAS_SCREENSHOT_RETRY_DELAY_MS);
+  }
+  return canvas.screenshot();
+}
+
+async function screenshotCanvasOrNullWhenDetached(canvas: Locator): Promise<Buffer | null> {
+  try {
+    return await canvas.screenshot();
+  } catch (error) {
+    if (errorReportsDetachedElement(error)) return null;
+    throw error;
+  }
+}
+
+function errorReportsDetachedElement(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(DETACHED_ELEMENT_ERROR_FRAGMENT);
+}
+
 export interface CanvasPixelSummary {
   readonly sampledPixelCount: number;
   readonly nonClearPixelCount: number;
@@ -16,7 +46,7 @@ export interface CanvasPixelSummary {
 }
 
 export async function summarizeCanvasPixels(canvas: Locator): Promise<CanvasPixelSummary> {
-  const screenshot = await canvas.screenshot();
+  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
   const { data, info } = await sharp(screenshot)
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -52,7 +82,7 @@ export interface CanvasAverageColor {
 // sensitivity (CT-145): routing a band to the red vs blue channel flips which channel
 // dominates the composite, so swapping two assignments measurably swaps these averages.
 export async function averageNonClearCanvasColor(canvas: Locator): Promise<CanvasAverageColor> {
-  const screenshot = await canvas.screenshot();
+  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
   const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
   return averageNonClearRgbaBuffer(data, info.channels);
 }
@@ -100,7 +130,7 @@ function buildAverageColorFromTotals(totals: {
 const GRAYSCALE_CHANNEL_SPREAD_THRESHOLD = 24;
 
 export async function colorfulNonClearPixelFraction(canvas: Locator): Promise<number> {
-  const screenshot = await canvas.screenshot();
+  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
   const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
   return computeColorfulNonClearPixelFraction(data, info.channels);
 }
