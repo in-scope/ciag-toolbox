@@ -294,6 +294,16 @@ describe("region-requesting operations (CT-095)", () => {
     expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(prepared)).toBe("Crop to (2, 3) - (7, 8)");
   });
 
+  it("crop label records the four corner pixel coordinates verbatim (CT-191)", () => {
+    const corners = { imagePixelX0: 12, imagePixelY0: 34, imagePixelX1: 56, imagePixelY1: 78 };
+    expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(corners)).toBe("Crop to (12, 34) - (56, 78)");
+  });
+
+  it("crop label canonicalizes swapped corners so the label always reads top-left to bottom-right", () => {
+    const swappedCorners = { imagePixelX0: 56, imagePixelY0: 78, imagePixelX1: 12, imagePixelY1: 34 };
+    expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(swappedCorners)).toBe("Crop to (12, 34) - (56, 78)");
+  });
+
   it("crop rejects apply when no per-operation region was selected, even if an inspection ROI exists", () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion: null };
     expect(() => CROP_TO_REGION_ACTION.prepareParameterValuesForApply!({}, state, "whole-image")).toThrow(
