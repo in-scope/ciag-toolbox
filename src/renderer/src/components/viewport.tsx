@@ -65,6 +65,7 @@ interface ViewportProps {
 
 export function Viewport(props: ViewportProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const readoutContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
   const imageSource = props.imageSource ?? null;
@@ -81,7 +82,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
-  useViewportPixelReadoutPublisher(canvasRef, rendererRef, {
+  useViewportPixelReadoutPublisher(readoutContainerRef, canvasRef, rendererRef, {
     viewportNumber: props.viewportNumber ?? null,
     imageSource,
     selectedBandIndex: props.selectedBandIndex,
@@ -123,7 +124,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
         onClose={props.onClose ?? null}
         showCloseButton={imageSource !== null && Boolean(props.onClose)}
       />
-      <div className="relative min-h-0 flex-1">
+      <div ref={readoutContainerRef} className="relative min-h-0 flex-1">
         <canvas
           ref={canvasRef}
           className={`block h-full w-full touch-none select-none ${cursorClassName}`}
@@ -516,6 +517,7 @@ interface ViewportPixelReadoutInputs {
 }
 
 function useViewportPixelReadoutPublisher(
+  containerRef: RefObject<HTMLElement>,
   canvasRef: RefObject<HTMLCanvasElement>,
   rendererRef: MutableRefObject<ViewportRenderer | null>,
   inputs: ViewportPixelReadoutInputs,
@@ -524,13 +526,14 @@ function useViewportPixelReadoutPublisher(
   const inputsRef = useLatestValueRef(inputs);
   const publisherRef = useLatestValueRef(publishReadoutSnapshot);
   useEffect(() => {
+    const container = containerRef.current;
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    return attachPointerReadoutEventHandlers(canvas, {
+    if (!container || !canvas) return;
+    return attachPointerReadoutEventHandlers(container, canvas, {
       onMove: (cursor) => publishReadoutSnapshotForCursor(cursor, rendererRef, inputsRef, publisherRef),
       onLeave: () => publisherRef.current(null),
     });
-    // canvasRef and rendererRef are stable refs; latest-value refs hold dynamic inputs.
+    // containerRef, canvasRef, rendererRef are stable refs; latest-value refs hold dynamic inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

@@ -11,21 +11,26 @@ export interface PointerReadoutHandlers {
   readonly onLeave: () => void;
 }
 
+// The readout listens on the panel CONTAINER (not the canvas) so a pointer moving
+// over an in-panel floating overlay (the band navigator, the ROI overlay) still
+// updates the readout: pointermove bubbles from those children up to the container,
+// while the cursor position stays measured against the canvas the overlay covers.
 export function attachPointerReadoutEventHandlers(
-  canvas: HTMLCanvasElement,
+  listenerTarget: HTMLElement,
+  coordinateCanvas: HTMLCanvasElement,
   handlers: PointerReadoutHandlers,
 ): () => void {
   const throttledOnMove = createThrottledMoveHandler(handlers.onMove);
   const onPointerMove = (event: PointerEvent): void =>
-    throttledOnMove(extractCursorPositionFromPointerEvent(event, canvas));
+    throttledOnMove(extractCursorPositionFromPointerEvent(event, coordinateCanvas));
   const onPointerLeave = (): void => handlers.onLeave();
-  canvas.addEventListener("pointermove", onPointerMove);
-  canvas.addEventListener("pointerleave", onPointerLeave);
-  canvas.addEventListener("pointercancel", onPointerLeave);
+  listenerTarget.addEventListener("pointermove", onPointerMove);
+  listenerTarget.addEventListener("pointerleave", onPointerLeave);
+  listenerTarget.addEventListener("pointercancel", onPointerLeave);
   return () => {
-    canvas.removeEventListener("pointermove", onPointerMove);
-    canvas.removeEventListener("pointerleave", onPointerLeave);
-    canvas.removeEventListener("pointercancel", onPointerLeave);
+    listenerTarget.removeEventListener("pointermove", onPointerMove);
+    listenerTarget.removeEventListener("pointerleave", onPointerLeave);
+    listenerTarget.removeEventListener("pointercancel", onPointerLeave);
   };
 }
 

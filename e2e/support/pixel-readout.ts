@@ -15,7 +15,12 @@ import { panelCanvas } from "./panels";
 // requested pixel, keeping numeric assertions repeatable instead of flaky.
 const POINTER_READOUT_THROTTLE_MS = 1000 / 30;
 const READOUT_SETTLE_DELAY_MS = Math.ceil(POINTER_READOUT_THROTTLE_MS) + 20;
-const MAX_HOVER_ATTEMPTS = 12;
+// A transient overlay (a success toast portals to the bottom-left over the lowest
+// panels) can sit on top of the hovered pixel for its lifetime, so a single move
+// then a long innerText wait hangs the whole 30s. Instead keep re-hovering on a time
+// budget that outlasts the toast, reading the readout WITHOUT blocking so each
+// attempt re-moves until the overlay clears and the canvas reports the pixel.
+const HOVER_READOUT_DEADLINE_MS = 8000;
 const SUB_CELL_NUDGE_CYCLE_PX = 5;
 
 interface CanvasBoundingBox {
@@ -89,14 +94,21 @@ async function hoverUntilReadoutReportsRequestedPixel(
   imageX: number,
   imageY: number,
 ): Promise<PixelReadout> {
-  for (let attempt = 0; attempt < MAX_HOVER_ATTEMPTS; attempt += 1) {
+  const deadline = Date.now() + HOVER_READOUT_DEADLINE_MS;
+  for (let attempt = 0; Date.now() < deadline; attempt += 1) {
     await moveCursorWithinPixelCellThenSettle(page, box, point, attempt);
-    const readout = await readPixelReadout(page);
-    if (readout.imageX === imageX && readout.imageY === imageY) return readout;
+    const readout = await readPixelReadoutWhenPopulatedOrNull(page);
+    if (readout && readout.imageX === imageX && readout.imageY === imageY) return readout;
   }
   throw new Error(
-    `Readout never reported pixel (${imageX}, ${imageY}) after ${MAX_HOVER_ATTEMPTS} hovers`,
+    `Readout never reported pixel (${imageX}, ${imageY}) within ${HOVER_READOUT_DEADLINE_MS}ms`,
   );
+}
+
+async function readPixelReadoutWhenPopulatedOrNull(page: Page): Promise<PixelReadout | null> {
+  const bar = statusBar(page);
+  if ((await bar.getByTestId("pixel-readout-panel").count()) === 0) return null;
+  return readPixelReadout(page);
 }
 
 async function moveCursorWithinPixelCellThenSettle(
