@@ -12,7 +12,11 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
-import { describeBandRangeErrorOrNull } from "@/lib/image/parse-band-range";
+import {
+  BAND_RANGE_SYNTAX_EXAMPLES,
+  BAND_RANGE_SYNTAX_HINT,
+  describeBandRangeErrorOrNull,
+} from "@/lib/image/parse-band-range";
 import {
   readReferenceTokenDisplayName,
   type ReferencePickerOption,
@@ -444,18 +448,23 @@ interface BandRangeTextInputProps {
 function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
   const id = useId();
   const rangeError = describeBandRangeErrorOrNull(props.value, props.sourceBandCount);
+  const hintId = `${id}-syntax-hint`;
   return (
     <div className="flex flex-col gap-1 pl-6 text-sm">
       <input
         id={id}
         type="text"
         value={props.value}
-        placeholder="1,3,5 or 1-5,10"
+        placeholder={BAND_RANGE_SYNTAX_EXAMPLES}
         aria-label="Bands to process"
+        aria-describedby={hintId}
         aria-invalid={rangeError !== null}
         onChange={(event) => props.onChangeValue(event.target.value)}
         className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
+      <span id={hintId} className="text-xs text-muted-foreground">
+        {BAND_RANGE_SYNTAX_HINT}
+      </span>
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </div>
   );
