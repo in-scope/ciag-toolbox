@@ -5,9 +5,12 @@ import { flatFieldReferenceTiff, multiBandTiff } from "./fixtures/fixture-manife
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
+  applyOperation,
   applyOperationInPlace,
+  countPanels,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
+  expectPanelHoldsFile,
   expectPixelReadoutToEqual,
   historyEntryCount,
   loadFixtureAsStack,
@@ -81,6 +84,21 @@ test("a non-RGB source is rejected with a clear toast and leaves the stack uncha
   await expect(grayscaleErrorToast(launched.window)).toContainText("1 band");
   await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: 4, height: 4 });
   await expectGrayscaleReadout(0, 0, flatFieldReferenceCornerValue());
+  expect(await historyEntryCount(launched.window)).toBe(0);
+});
+
+// CT-190: with "Open in a new panel" ON (the default), a non-RGB source must NOT
+// leave a blank result panel behind. The pre-flight applicability check fires the
+// error toast BEFORE the apply flow reserves a panel or expands the grid, so the
+// grid stays at its single source panel and no History entry is recorded.
+test("a non-RGB source rejected on the new-panel path opens no blank panel", async () => {
+  await loadFixtureAsStack(launched.window, flatFieldReferenceTiff.fileName);
+  await openOperation(launched.window, RGB_TO_GRAYSCALE_LABEL);
+  await applyOperation(launched.window, RGB_TO_GRAYSCALE_LABEL);
+
+  await expect(grayscaleErrorToast(launched.window)).toContainText("1 band");
+  expect(await countPanels(launched.window)).toBe(1);
+  await expectPanelHoldsFile(launched.window, PANEL, flatFieldReferenceTiff.fileName);
   expect(await historyEntryCount(launched.window)).toBe(0);
 });
 

@@ -91,6 +91,15 @@ export type ViewportActionSecondaryOutputsTransform = (
   parameterValues: ParameterValuesById,
 ) => ReadonlyArray<ViewportActionOutput>;
 
+// CT-190: a pre-flight check that throws a user-facing Error when the action
+// cannot run against the given source (e.g. RGB-to-grayscale on a non-3-band
+// image). The apply flow runs it BEFORE reserving a result panel, so a doomed
+// operation surfaces its error without leaving a blank panel behind.
+export type ViewportActionSourceApplicabilityCheck = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => void;
+
 export type ApplyScope = "whole-image" | "roi";
 
 export const DEFAULT_APPLY_SCOPE: ApplyScope = "whole-image";

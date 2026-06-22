@@ -57,6 +57,7 @@ import {
 } from "@/lib/image/apply-normalize";
 import {
   applyRgbToGrayscale,
+  assertRasterIsThreeBandRgb,
   LUMINANCE_GRAYSCALE_WEIGHTS,
   type RgbToGrayscaleWeights,
 } from "@/lib/image/apply-rgb-to-grayscale";
@@ -67,6 +68,7 @@ import {
   parseBandRangeText,
 } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
@@ -107,6 +109,7 @@ import type {
   ViewportAction,
   ViewportActionOutput,
   ViewportActionSecondaryOutputsTransform,
+  ViewportActionSourceApplicabilityCheck,
   ViewportActionSourceTransform,
 } from "./viewport-action";
 import {
@@ -158,6 +161,12 @@ export interface RegisteredViewportAction extends ViewportAction {
    * placed in its own fresh viewport with its own applied label (CT-097).
    */
   readonly transformSourceToSecondaryOutputs?: ViewportActionSecondaryOutputsTransform;
+  /**
+   * CT-190: throws a user-facing Error when the action cannot run against the
+   * source, checked BEFORE the apply flow reserves a result panel so a failure
+   * opens no blank panel and records no History entry.
+   */
+  readonly assertCanApplyToSource?: ViewportActionSourceApplicabilityCheck;
 }
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
@@ -1418,8 +1427,13 @@ export const RGB_TO_GRAYSCALE_ACTION: RegisteredViewportAction = {
   appliedLabel: "RGB to grayscale",
   formatAppliedLabel: formatRgbToGrayscaleAppliedLabel,
   apply: resetToSingleBandAfterGrayscaleApply,
+  assertCanApplyToSource: assertRgbToGrayscaleSourceIsThreeBandRgb,
   transformSource: createRgbToGrayscaleSourceTransform(),
 };
+
+function assertRgbToGrayscaleSourceIsThreeBandRgb(source: ViewportImageSource): void {
+  assertRasterIsThreeBandRgb(coerceViewportSourceToRasterSource(source).raster);
+}
 
 function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): ViewportRenderingState {
   return resetBandDependentStateAfterBandCountChange(state);

@@ -100,7 +100,32 @@ describe("applyRgbToGrayscale", () => {
     };
     expect(() => applyRgbToGrayscale(twoBand, LUMINANCE_GRAYSCALE_WEIGHTS)).toThrow(/3-band RGB/i);
   });
+
+  it("throws naming the band count for a single-band non-RGB raster", () => {
+    const oneBand = makeNonRgbRaster(1);
+    expect(() => applyRgbToGrayscale(oneBand, LUMINANCE_GRAYSCALE_WEIGHTS)).toThrow(
+      "Convert RGB to grayscale needs a 3-band RGB image, but this image has 1 band(s).",
+    );
+  });
+
+  it("throws naming the band count for an N-band non-RGB raster", () => {
+    const fiveBand = makeNonRgbRaster(5);
+    expect(() => applyRgbToGrayscale(fiveBand, LUMINANCE_GRAYSCALE_WEIGHTS)).toThrow(
+      "Convert RGB to grayscale needs a 3-band RGB image, but this image has 5 band(s).",
+    );
+  });
 });
+
+function makeNonRgbRaster(bandCount: number): RasterImage {
+  return {
+    bandPixels: Array.from({ length: bandCount }, () => Uint8Array.from([0])),
+    width: 1,
+    height: 1,
+    bandCount,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
 
 describe("assertRasterIsThreeBandRgb", () => {
   it("passes for a 3-band raster and throws otherwise", () => {

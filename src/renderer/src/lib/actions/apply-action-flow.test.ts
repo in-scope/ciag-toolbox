@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import {
@@ -9,6 +10,7 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
   applyActionInPlaceAtSourceIndex,
+  applyActionToDuplicateOfSource,
   runDuplicateAndApplyAtTargetIndex,
   type ApplyActionFlowBindings,
 } from "./apply-action-flow";
@@ -229,6 +231,23 @@ describe("runDuplicateAndApplyAtTargetIndex with transformSourceToSecondaryOutpu
   });
 });
 
+describe("applyActionToDuplicateOfSource with assertCanApplyToSource (CT-190)", () => {
+  it("opens no panel and writes no rendering state when the source is unappliable", () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    vi.mocked(toast.error).mockClear();
+    applyActionToDuplicateOfSource(
+      buildActionThatRejectsSource(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
+    expect(harness.bindings.setGridLayout).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Reject Source failed: not appliable");
+  });
+});
+
 const SOURCE_INDEX = 0;
 const TARGET_INDEX = 1;
 const SECONDARY_OUTPUT_INDEX = 2;
@@ -395,6 +414,21 @@ function buildActionThatThrowsOnTransform(): RegisteredViewportAction {
     apply: (state: ViewportRenderingState) => state,
     transformSource: () => {
       throw new Error("boom");
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildActionThatRejectsSource(): RegisteredViewportAction {
+  return {
+    id: "reject-source",
+    label: "Reject Source",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Rejected",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+    assertCanApplyToSource: () => {
+      throw new Error("not appliable");
     },
   } as unknown as RegisteredViewportAction;
 }
