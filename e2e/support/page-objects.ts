@@ -91,6 +91,11 @@ export {
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
 export {
+  fixedUnitFloatViewToggle,
+  toggleFixedUnitFloatView,
+  expectFixedUnitFloatViewEnabled,
+} from "./fixed-unit-float-view";
+export {
   goToBandNumberInput,
   selectActiveBandNumber,
   bandNavigatorStrip,

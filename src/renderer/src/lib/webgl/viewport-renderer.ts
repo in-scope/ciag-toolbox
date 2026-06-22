@@ -59,6 +59,10 @@ import {
   type RgbChannelExtents,
 } from "@/lib/image/compute-image-channel-extents";
 import {
+  resolveEffectiveFloatDisplayNormalization,
+  type NormalizationState,
+} from "./float-display-normalization";
+import {
   clampBandIndexToRaster,
   getRasterBandPixelsOrThrow,
   type RasterImage,
@@ -117,10 +121,6 @@ interface RendererProgramResources {
   uniforms: ProgramUniformLocations;
 }
 
-interface NormalizationState {
-  enabled: boolean;
-  extents: RgbChannelExtents;
-}
 
 interface ToneCurvePassState {
   readonly enabled: boolean;
@@ -167,6 +167,7 @@ export class ViewportRenderer {
     extents: IDENTITY_RGB_CHANNEL_EXTENTS,
   };
   private autoFitsFloatDisplayWindow = false;
+  private floatDisplayUsesFixedUnitWindow = false;
   private toneCurveLutTexture: WebGLTexture | null = null;
   private toneCurveGreenLutTexture: WebGLTexture | null = null;
   private toneCurveBlueLutTexture: WebGLTexture | null = null;
@@ -211,6 +212,15 @@ export class ViewportRenderer {
   setNormalizationEnabled(enabled: boolean): void {
     if (this.normalization.enabled === enabled) return;
     this.normalization = { ...this.normalization, enabled };
+    this.draw();
+  }
+
+  // CT-193: pin out-of-range float data to the fixed [0, 1] display window instead
+  // of auto-stretching it to the data's own extents on open. Display-only: the
+  // pixel data, History, and the normalized-viewing toggle are untouched.
+  setFloatDisplayUsesFixedUnitWindow(enabled: boolean): void {
+    if (this.floatDisplayUsesFixedUnitWindow === enabled) return;
+    this.floatDisplayUsesFixedUnitWindow = enabled;
     this.draw();
   }
 
@@ -480,11 +490,15 @@ export class ViewportRenderer {
 
   // A float raster whose data lies outside [0, 1] would saturate to a flat white
   // frame under the fixed [0, 1] default window, so auto-fit its display window to
-  // the data's own extents on open. This is display-only: the user toggle, pixel
-  // data, and History are untouched (CT-161).
+  // the data's own extents on open (CT-161) - unless the user pins the display to
+  // the fixed [0, 1] window (CT-193). This is display-only: the user toggle, pixel
+  // data, and History are untouched.
   private resolveEffectiveNormalization(): NormalizationState {
-    if (this.normalization.enabled || !this.autoFitsFloatDisplayWindow) return this.normalization;
-    return { enabled: true, extents: this.normalization.extents };
+    return resolveEffectiveFloatDisplayNormalization(
+      this.normalization,
+      this.autoFitsFloatDisplayWindow,
+      this.floatDisplayUsesFixedUnitWindow,
+    );
   }
 
   private drawRasterTilesWithPerTileTransforms(

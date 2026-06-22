@@ -22,6 +22,7 @@ import {
 
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
+  readonly floatDisplayUsesFixedUnitWindow: boolean;
   readonly lastAppliedOperationLabel: string | null;
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
@@ -42,6 +43,7 @@ export const EMPTY_TONE_CURVE_CHANNEL_ANCHORS: ToneCurveChannelAnchors = Object.
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
+  floatDisplayUsesFixedUnitWindow: false,
   lastAppliedOperationLabel: null,
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
