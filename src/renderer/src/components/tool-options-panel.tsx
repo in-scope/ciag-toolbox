@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ParameterFormSection } from "@/components/parameter-form-section";
 import {
   buildDefaultParameterValuesForSchemas,
-  describeBandScopeBlockingErrorOrNull,
+  describeBlockingParameterErrorOrNull,
   seedBandScopeBandRangeDefaults,
   type ParameterSchema,
   type ParameterValue,
@@ -105,7 +105,7 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
     : DEFAULT_APPLY_SCOPE;
   const isRegionRequiredNow = doesActionRequireRegionNow(props.action, effectiveApplyScope);
   const operationRegion = props.sourceViewport?.operationRegion ?? null;
-  const hasBlockingParameterError = hasBlockingBandScopeError(parameterSchemas, parameterValues, props.sourceViewport);
+  const hasBlockingParameterError = hasBlockingParameterValueError(parameterSchemas, parameterValues, props.sourceViewport);
   const handleApply = () =>
     props.onApply({ openInNewViewport, parameterValues, applyScope: effectiveApplyScope });
   return (
@@ -193,13 +193,13 @@ function computeWhetherApplyIsAllowed(
   return !hasBlockingParameterError;
 }
 
-function hasBlockingBandScopeError(
+function hasBlockingParameterValueError(
   parameterSchemas: ReadonlyArray<ParameterSchema>,
   parameterValues: ParameterValuesById,
   sourceViewport: ToolOptionsSourceViewport | null,
 ): boolean {
   const bandCount = sourceViewport?.sourceBandCount ?? null;
-  return describeBandScopeBlockingErrorOrNull(parameterSchemas, parameterValues, bandCount) !== null;
+  return describeBlockingParameterErrorOrNull(parameterSchemas, parameterValues, bandCount) !== null;
 }
 
 const PANEL_CLASSES =

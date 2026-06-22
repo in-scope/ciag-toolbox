@@ -26,6 +26,7 @@ export {
   setOpenInNewPanel,
   openInNewPanelSwitch,
   setOperationNumberParameter,
+  setOperationEnumParameter,
   cancelOperation,
   isApplyEnabled,
 } from "./operations";

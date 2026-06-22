@@ -87,10 +87,12 @@ import {
   NO_RASTER_REFERENCE_SELECTED,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
+  readClipBoundOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
+  type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
   type IntegerParameterSchema,
@@ -1127,8 +1129,12 @@ const NORMALIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const NORMALIZE_METHOD_PARAMETER_ID = "method";
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID = "highPercentile";
+const NORMALIZE_CLIP_BOUNDS_PARAMETER_ID = "clipBounds";
+const NORMALIZE_CLIP_LOW_PARAMETER_ID = "clipLow";
+const NORMALIZE_CLIP_HIGH_PARAMETER_ID = "clipHigh";
 const MIN_MAX_METHOD_VALUE = "min-max";
 const ROBUST_PERCENTILE_METHOD_VALUE = "robust-percentile";
+const CLIP_ABSOLUTE_METHOD_VALUE = "clip-absolute";
 
 const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
@@ -1145,11 +1151,12 @@ const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
   id: NORMALIZE_METHOD_PARAMETER_ID,
   label: "Method",
   description:
-    "Min-max uses the absolute min and max. Robust uses the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1).",
+    "Min-max scales by the absolute min and max. Robust scales by the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1). Clip by value clamps to an absolute low/high range, keeping the data type and in-range values.",
   defaultValue: MIN_MAX_METHOD_VALUE,
   options: [
     { value: MIN_MAX_METHOD_VALUE, label: "Min-max (absolute)" },
     { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Robust (percentile clip)" },
+    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value (absolute)" },
   ],
 };
 
@@ -1162,6 +1169,7 @@ const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   min: 0,
   max: 100,
   step: 0.5,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
 };
 
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
@@ -1173,6 +1181,22 @@ const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   min: 0,
   max: 100,
   step: 0.5,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
+};
+
+const NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
+  kind: "clip-bounds",
+  id: NORMALIZE_CLIP_BOUNDS_PARAMETER_ID,
+  label: "Clip range",
+  description:
+    "Values below the low value clamp to it and values above the high value clamp to it. The data type and in-range values are kept.",
+  loParameterId: NORMALIZE_CLIP_LOW_PARAMETER_ID,
+  hiParameterId: NORMALIZE_CLIP_HIGH_PARAMETER_ID,
+  loLabel: "Clip low",
+  hiLabel: "Clip high",
+  defaultLo: 0,
+  defaultHi: 1,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: CLIP_ABSOLUTE_METHOD_VALUE },
 };
 
 export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
@@ -1184,6 +1208,7 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
     NORMALIZE_METHOD_PARAMETER_SCHEMA,
     NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA,
     NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA,
+    NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA,
   ],
   successMessage: "Normalize applied",
   appliedLabel: "Normalize",
@@ -1230,14 +1255,28 @@ function resolveNormalizeScopeSelection(
 }
 
 function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
-  if (parameterValues[NORMALIZE_METHOD_PARAMETER_ID] !== ROBUST_PERCENTILE_METHOD_VALUE) {
-    return MIN_MAX_NORMALIZE_METHOD;
-  }
+  const method = parameterValues[NORMALIZE_METHOD_PARAMETER_ID];
+  if (method === CLIP_ABSOLUTE_METHOD_VALUE) return resolveClipAbsoluteMethod(parameterValues);
+  if (method === ROBUST_PERCENTILE_METHOD_VALUE) return resolveRobustPercentileMethod(parameterValues);
+  return MIN_MAX_NORMALIZE_METHOD;
+}
+
+function resolveRobustPercentileMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
   return {
     kind: "percentile",
     bounds: {
       lowPercentile: readNormalizePercentile(parameterValues, NORMALIZE_LOW_PERCENTILE_PARAMETER_ID, 2),
       highPercentile: readNormalizePercentile(parameterValues, NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID, 98),
+    },
+  };
+}
+
+function resolveClipAbsoluteMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
+  return {
+    kind: "clip-absolute",
+    bounds: {
+      lo: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_LOW_PARAMETER_ID], 0),
+      hi: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_HIGH_PARAMETER_ID], 1),
     },
   };
 }
@@ -1258,6 +1297,10 @@ function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): num
 }
 
 function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
+  const method = resolveNormalizeRangeMethod(parameterValues);
+  if (method.kind === "clip-absolute") {
+    return `Clip to [${method.bounds.lo}, ${method.bounds.hi}] (${formatNormalizeScopeLabel(parameterValues)})`;
+  }
   return `Normalize to [0,1] (${formatNormalizeScopeLabel(parameterValues)}${formatNormalizeMethodSuffix(parameterValues)})`;
 }
 
@@ -1275,7 +1318,7 @@ function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string
 
 function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
   const method = resolveNormalizeRangeMethod(parameterValues);
-  if (method.kind === "min-max") return "";
+  if (method.kind !== "percentile") return "";
   return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 

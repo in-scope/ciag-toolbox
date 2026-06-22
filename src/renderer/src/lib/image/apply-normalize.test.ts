@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { applyNormalizeToRaster, type NormalizeRangeMethod } from "./apply-normalize";
+import {
+  applyNormalizeToRaster,
+  clampValueToAbsoluteBounds,
+  type NormalizeRangeMethod,
+} from "./apply-normalize";
 import { DEFAULT_PERCENTILE_BOUNDS } from "./percentile-value-range";
 import type { RasterImage } from "./raster-image";
 
 const ROBUST_METHOD: NormalizeRangeMethod = { kind: "percentile", bounds: DEFAULT_PERCENTILE_BOUNDS };
+
+function clipMethod(lo: number, hi: number): NormalizeRangeMethod {
+  return { kind: "clip-absolute", bounds: { lo, hi } };
+}
 
 function makeSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage {
   return {
@@ -133,6 +141,42 @@ describe("applyNormalizeToRaster", () => {
     }
   });
 
+  it("clamps below lo to lo, above hi to hi, and passes in-range values through (CT-194)", () => {
+    const raster = makeTwoBandUint8Raster([10, 50, 100], [10, 50, 100]);
+    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, clipMethod(30, 80));
+    expect(Array.from(result.bandPixels[0]!)).toEqual([30, 50, 80]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([30, 50, 80]);
+  });
+
+  it("preserves the source data type when clipping by value (CT-194)", () => {
+    const raster = makeSingleBandUint16Raster([800, 875, 950]);
+    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, clipMethod(850, 900));
+    expect(result.sampleFormat).toBe("uint");
+    expect(result.bitsPerSample).toBe(16);
+    expect(result.bandPixels[0]).toBeInstanceOf(Uint16Array);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([850, 875, 900]);
+  });
+
+  it("clips only the selected bands in band-wise scope, leaving others untouched (CT-194)", () => {
+    const raster = makeTwoBandUint8Raster([10, 50, 100], [10, 50, 100]);
+    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, clipMethod(30, 80));
+    expect(Array.from(result.bandPixels[0]!)).toEqual([30, 50, 80]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([10, 50, 100]);
+  });
+
+  it("clips every band the same way in full-cube scope (CT-194)", () => {
+    const raster = makeTwoBandUint8Raster([10, 50, 100], [20, 60, 120]);
+    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, clipMethod(30, 80));
+    expect(Array.from(result.bandPixels[0]!)).toEqual([30, 50, 80]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([30, 60, 80]);
+  });
+
+  it("rounds clamped values for an integer band (CT-194)", () => {
+    const raster = makeSingleBandUint16Raster([800, 950]);
+    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, clipMethod(850.4, 900.6));
+    expect(Array.from(result.bandPixels[0]!)).toEqual([850, 901]);
+  });
+
   it("reuses unchanged float bands by reference in band-wise scope (CT-103)", () => {
     const raster = makeThreeBandFloat32Raster();
     const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [1] });
@@ -140,6 +184,20 @@ describe("applyNormalizeToRaster", () => {
     expect(result.bandPixels[2]).toBe(raster.bandPixels[2]);
     expect(result.bandPixels[1]).not.toBe(raster.bandPixels[1]);
     expect(Array.from(result.bandPixels[1]!)).toEqual([0, 0.5, 1]);
+  });
+});
+
+describe("clampValueToAbsoluteBounds", () => {
+  it("returns the low bound for a value below it", () => {
+    expect(clampValueToAbsoluteBounds(5, { lo: 30, hi: 80 })).toBe(30);
+  });
+
+  it("returns the high bound for a value above it", () => {
+    expect(clampValueToAbsoluteBounds(120, { lo: 30, hi: 80 })).toBe(80);
+  });
+
+  it("passes an in-range value through unchanged", () => {
+    expect(clampValueToAbsoluteBounds(50, { lo: 30, hi: 80 })).toBe(50);
   });
 });
 

@@ -29,14 +29,18 @@ import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
+  describeClipBoundsErrorOrNull,
+  isParameterSchemaVisible,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
+  readClipBoundOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   shouldShowCubeScopeControl,
   NO_RASTER_REFERENCE_SELECTED,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
+  type ClipBoundsParameterSchema,
   type ComponentCountParameterSchema,
   type CubeScopeChoice,
   type CubeScopeParameterSchema,
@@ -66,7 +70,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
         <ParameterFieldRow
           key={schema.id}
           schema={schema}
-          value={props.values[schema.id] ?? schema.defaultValue}
+          value={readParameterRowValue(schema, props.values)}
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
@@ -80,6 +84,13 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
 
 const EMPTY_REFERENCE_CANDIDATES: ReadonlyArray<ReferencePickerOption> = [];
 
+// A clip-bounds field owns two values keyed by its own ids, so it has no single
+// schema-level value/default; its component reads both from allValues instead.
+function readParameterRowValue(schema: ParameterSchema, values: ParameterValuesById): ParameterValue {
+  if (schema.kind === "clip-bounds") return values[schema.id] ?? 0;
+  return values[schema.id] ?? schema.defaultValue;
+}
+
 interface ParameterFieldRowProps {
   schema: ParameterSchema;
   value: ParameterValue;
@@ -91,6 +102,7 @@ interface ParameterFieldRowProps {
 }
 
 function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
+  if (!isParameterSchemaVisible(props.schema, props.allValues)) return null;
   if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
@@ -182,6 +194,15 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
         value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
         sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "clip-bounds") {
+    return (
+      <ClipBoundsParameterField
+        schema={props.schema}
+        allValues={props.allValues}
+        onChangeValueAtId={props.onChangeValueAtId}
       />
     );
   }
@@ -336,6 +357,62 @@ function clampComponentCountInput(
   const parsed = parseNumericInputValueOrFallback(rawValue, fallback);
   if (bandCount === null) return Math.max(1, Math.round(parsed));
   return resolveComponentCount(parsed, bandCount);
+}
+
+interface ClipBoundsParameterFieldProps {
+  schema: ClipBoundsParameterSchema;
+  allValues: ParameterValuesById;
+  onChangeValueAtId: (id: string, next: ParameterValue) => void;
+}
+
+function ClipBoundsParameterField(props: ClipBoundsParameterFieldProps): JSX.Element {
+  const lo = readClipBoundOrDefault(props.allValues[props.schema.loParameterId], props.schema.defaultLo);
+  const hi = readClipBoundOrDefault(props.allValues[props.schema.hiParameterId], props.schema.defaultHi);
+  const error = describeClipBoundsErrorOrNull(lo, hi);
+  return (
+    <div className="flex flex-col gap-2">
+      <ClipBoundNumberInput
+        label={props.schema.loLabel}
+        value={lo}
+        invalid={error !== null}
+        onChangeValue={(next) => props.onChangeValueAtId(props.schema.loParameterId, next)}
+      />
+      <ClipBoundNumberInput
+        label={props.schema.hiLabel}
+        value={hi}
+        invalid={error !== null}
+        onChangeValue={(next) => props.onChangeValueAtId(props.schema.hiParameterId, next)}
+      />
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+    </div>
+  );
+}
+
+interface ClipBoundNumberInputProps {
+  label: string;
+  value: number;
+  invalid: boolean;
+  onChangeValue: (next: number) => void;
+}
+
+function ClipBoundNumberInput(props: ClipBoundNumberInputProps): JSX.Element {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
+      <span className="text-foreground">{props.label}</span>
+      <input
+        id={id}
+        type="number"
+        value={props.value}
+        step="any"
+        aria-invalid={props.invalid}
+        onChange={(event) =>
+          props.onChangeValue(parseNumericInputValueOrFallback(event.target.value, props.value))
+        }
+        className={cn(NUMERIC_INPUT_CLASSES, props.invalid && "border-destructive focus:ring-destructive")}
+      />
+    </label>
+  );
 }
 
 interface SliderParameterFieldProps {

@@ -4,6 +4,14 @@ export interface ParameterSchemaBase {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  // CT-194: only render this field when another parameter equals a given value
+  // (e.g. the clip lo/hi inputs appear only when the method is "Clip by value").
+  readonly visibleWhen?: ParameterVisibilityCondition;
+}
+
+export interface ParameterVisibilityCondition {
+  readonly parameterId: string;
+  readonly equals: string;
 }
 
 export interface NumberParameterSchema extends ParameterSchemaBase {
@@ -80,6 +88,19 @@ export interface ComponentCountParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: number;
 }
 
+// CT-194: a paired low/high numeric control for the absolute clip-by-value method.
+// It owns two underlying parameter values (loParameterId / hiParameterId) so the
+// "high must exceed low" validation can render one inline error across both inputs.
+export interface ClipBoundsParameterSchema extends ParameterSchemaBase {
+  readonly kind: "clip-bounds";
+  readonly loParameterId: string;
+  readonly hiParameterId: string;
+  readonly loLabel: string;
+  readonly hiLabel: string;
+  readonly defaultLo: number;
+  readonly defaultHi: number;
+}
+
 export type ParameterSchema =
   | NumberParameterSchema
   | IntegerParameterSchema
@@ -89,7 +110,8 @@ export type ParameterSchema =
   | CubeScopeParameterSchema
   | RasterReferenceParameterSchema
   | BandNumberParameterSchema
-  | ComponentCountParameterSchema;
+  | ComponentCountParameterSchema
+  | ClipBoundsParameterSchema;
 
 export type ResolvedCubeScopeSelection =
   | { readonly scope: "full-cube" }
@@ -115,6 +137,26 @@ export function readCubeScopeChoiceOrDefault(
 // band count is known to exceed one (an unknown count keeps it visible).
 export function shouldShowCubeScopeControl(bandCount: number | null): boolean {
   return bandCount === null || bandCount > 1;
+}
+
+// CT-194: a field is shown unless its visibleWhen condition fails to match the
+// current values (e.g. the clip lo/hi inputs require method === clip-by-value).
+export function isParameterSchemaVisible(
+  schema: ParameterSchema,
+  values: ParameterValuesById,
+): boolean {
+  if (!schema.visibleWhen) return true;
+  return values[schema.visibleWhen.parameterId] === schema.visibleWhen.equals;
+}
+
+export function readClipBoundOrDefault(value: ParameterValue | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// CT-194: clip-by-value needs a usable range, so the high bound must exceed the low.
+export function describeClipBoundsErrorOrNull(lo: number, hi: number): string | null {
+  if (hi > lo) return null;
+  return "Enter a high value greater than the low value.";
 }
 
 export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefined): string {
@@ -148,6 +190,39 @@ export function describeBandScopeBlockingErrorOrNull(
     if (error) return error;
   }
   return null;
+}
+
+// CT-194: every parameter-level reason Apply must stay disabled, evaluated only
+// for currently-visible fields (a hidden clip-bounds control cannot block Apply).
+export function describeBlockingParameterErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  bandCount: number | null,
+): string | null {
+  const bandScopeError = describeBandScopeBlockingErrorOrNull(schemas, values, bandCount);
+  if (bandScopeError) return bandScopeError;
+  return describeClipBoundsBlockingErrorOrNull(schemas, values);
+}
+
+function describeClipBoundsBlockingErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+): string | null {
+  for (const schema of schemas) {
+    if (schema.kind !== "clip-bounds" || !isParameterSchemaVisible(schema, values)) continue;
+    const error = describeClipBoundsErrorForSchemaOrNull(schema, values);
+    if (error) return error;
+  }
+  return null;
+}
+
+function describeClipBoundsErrorForSchemaOrNull(
+  schema: ClipBoundsParameterSchema,
+  values: ParameterValuesById,
+): string | null {
+  const lo = readClipBoundOrDefault(values[schema.loParameterId], schema.defaultLo);
+  const hi = readClipBoundOrDefault(values[schema.hiParameterId], schema.defaultHi);
+  return describeClipBoundsErrorOrNull(lo, hi);
 }
 
 function describeBandWiseRangeErrorForSchemaOrNull(
@@ -190,8 +265,17 @@ export function buildDefaultParameterValuesForSchemas(
   schemas: ReadonlyArray<ParameterSchema>,
 ): ParameterValuesById {
   const values: Record<string, ParameterValue> = {};
-  for (const schema of schemas) values[schema.id] = schema.defaultValue;
+  for (const schema of schemas) seedSchemaDefaultValues(values, schema);
   return Object.freeze(values);
+}
+
+function seedSchemaDefaultValues(values: Record<string, ParameterValue>, schema: ParameterSchema): void {
+  if (schema.kind === "clip-bounds") {
+    values[schema.loParameterId] = schema.defaultLo;
+    values[schema.hiParameterId] = schema.defaultHi;
+    return;
+  }
+  values[schema.id] = schema.defaultValue;
 }
 
 export function serializeParameterValuesToJsonString(values: ParameterValuesById): string {

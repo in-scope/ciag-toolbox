@@ -4,6 +4,9 @@ import {
   buildDefaultParameterValuesForSchemas,
   clampNumericParameterValueToSchema,
   describeBandScopeBlockingErrorOrNull,
+  describeBlockingParameterErrorOrNull,
+  describeClipBoundsErrorOrNull,
+  isParameterSchemaVisible,
   parseParameterValuesFromJsonString,
   readBandRangeTextOrEmpty,
   readCubeScopeChoiceOrDefault,
@@ -11,6 +14,7 @@ import {
   seedBandScopeBandRangeDefaults,
   shouldShowCubeScopeControl,
   serializeParameterValuesToJsonString,
+  type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type IntegerParameterSchema,
   type NumberParameterSchema,
@@ -198,6 +202,66 @@ describe("shouldShowCubeScopeControl", () => {
     expect(shouldShowCubeScopeControl(null)).toBe(true);
   });
 });
+
+describe("clip-bounds schema defaults and visibility (CT-194)", () => {
+  it("seeds both the low and high underlying values from the schema defaults", () => {
+    const values = buildDefaultParameterValuesForSchemas([buildClipBoundsSchema()]);
+    expect(values).toEqual({ clipLow: 0, clipHigh: 100 });
+  });
+
+  it("is hidden until the controlling method parameter matches", () => {
+    const schema = buildClipBoundsSchema();
+    expect(isParameterSchemaVisible(schema, { method: "min-max" })).toBe(false);
+    expect(isParameterSchemaVisible(schema, { method: "clip-absolute" })).toBe(true);
+  });
+
+  it("treats a schema without a visibleWhen condition as always visible", () => {
+    expect(isParameterSchemaVisible(buildCubeScopeSchema(), {})).toBe(true);
+  });
+});
+
+describe("describeClipBoundsErrorOrNull", () => {
+  it("reports an error when the high bound does not exceed the low bound", () => {
+    expect(describeClipBoundsErrorOrNull(80, 30)).not.toBeNull();
+    expect(describeClipBoundsErrorOrNull(50, 50)).not.toBeNull();
+  });
+
+  it("returns null when the high bound exceeds the low bound", () => {
+    expect(describeClipBoundsErrorOrNull(30, 80)).toBeNull();
+  });
+});
+
+describe("describeBlockingParameterErrorOrNull", () => {
+  it("blocks on an invalid visible clip range", () => {
+    const values = { method: "clip-absolute", clipLow: 90, clipHigh: 10 };
+    expect(describeBlockingParameterErrorOrNull([buildClipBoundsSchema()], values, 10)).not.toBeNull();
+  });
+
+  it("ignores an invalid clip range while the clip control is hidden", () => {
+    const values = { method: "min-max", clipLow: 90, clipHigh: 10 };
+    expect(describeBlockingParameterErrorOrNull([buildClipBoundsSchema()], values, 10)).toBeNull();
+  });
+
+  it("still reports band-scope errors alongside the clip check", () => {
+    const values = { scope: "band-wise", bandRange: "99" };
+    expect(describeBlockingParameterErrorOrNull([buildCubeScopeSchema()], values, 10)).toMatch(/out of range/i);
+  });
+});
+
+function buildClipBoundsSchema(): ClipBoundsParameterSchema {
+  return {
+    kind: "clip-bounds",
+    id: "clipBounds",
+    label: "Clip range",
+    loParameterId: "clipLow",
+    hiParameterId: "clipHigh",
+    loLabel: "Clip low",
+    hiLabel: "Clip high",
+    defaultLo: 0,
+    defaultHi: 100,
+    visibleWhen: { parameterId: "method", equals: "clip-absolute" },
+  };
+}
 
 function buildCubeScopeSchema(): CubeScopeParameterSchema {
   return {

@@ -10,6 +10,11 @@ import {
   type PercentileBounds,
   type ValueRange,
 } from "@/lib/image/percentile-value-range";
+import { isFloatTypedArray } from "@/lib/image/data-type-value-range";
+import {
+  mapBandValuesPreservingType,
+  mapSelectedRasterBandsPreservingType,
+} from "@/lib/image/map-band-values";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
 // CT-083: data-changing linear normalize to [0, 1]. Distinct from the view-only
@@ -21,14 +26,25 @@ import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 // CT-107: the robust percentile method scales by low/high percentiles instead of
 // absolute min/max so sparse outliers do not flatten the image; values outside
 // the percentile range clip to 0/1. Plain min/max is unchanged (no clip).
+//
+// CT-194: the clip-by-value method clamps each value to an absolute [lo, hi]
+// range instead of rescaling to [0, 1]. It preserves the source data type and
+// the in-range values (only the known bad highs and lows move to the bounds),
+// so its output is NOT a float32 [0, 1] raster like the two scaling methods.
 
 export type NormalizeScopeSelection =
   | { readonly scope: "full-cube" }
   | { readonly scope: "band-wise"; readonly bandIndexes: ReadonlyArray<number> };
 
+export interface AbsoluteClipBounds {
+  readonly lo: number;
+  readonly hi: number;
+}
+
 export type NormalizeRangeMethod =
   | { readonly kind: "min-max" }
-  | { readonly kind: "percentile"; readonly bounds: PercentileBounds };
+  | { readonly kind: "percentile"; readonly bounds: PercentileBounds }
+  | { readonly kind: "clip-absolute"; readonly bounds: AbsoluteClipBounds };
 
 export const MIN_MAX_NORMALIZE_METHOD: NormalizeRangeMethod = { kind: "min-max" };
 
@@ -37,8 +53,56 @@ export function applyNormalizeToRaster(
   selection: NormalizeScopeSelection,
   method: NormalizeRangeMethod = MIN_MAX_NORMALIZE_METHOD,
 ): RasterImage {
+  if (method.kind === "clip-absolute") return clipRasterToAbsoluteBounds(raster, selection, method.bounds);
   if (selection.scope === "full-cube") return normalizeWholeCubeToUnitRange(raster, method);
   return normalizeSelectedBandsIndependentlyToUnitRange(raster, selection.bandIndexes, method);
+}
+
+function clipRasterToAbsoluteBounds(
+  raster: RasterImage,
+  selection: NormalizeScopeSelection,
+  bounds: AbsoluteClipBounds,
+): RasterImage {
+  return mapSelectedRasterBandsPreservingType(raster, resolveClippedBandIndexes(raster, selection), (band) =>
+    clipBandValuesToAbsoluteBounds(band, bounds),
+  );
+}
+
+function resolveClippedBandIndexes(
+  raster: RasterImage,
+  selection: NormalizeScopeSelection,
+): ReadonlyArray<number> {
+  if (selection.scope === "full-cube") return listEveryBandIndex(raster.bandCount);
+  return selection.bandIndexes;
+}
+
+function listEveryBandIndex(bandCount: number): number[] {
+  return Array.from({ length: bandCount }, (_unused, index) => index);
+}
+
+function clipBandValuesToAbsoluteBounds(
+  band: RasterTypedArray,
+  bounds: AbsoluteClipBounds,
+): RasterTypedArray {
+  const roundForIntegerOutput = !isFloatTypedArray(band);
+  return mapBandValuesPreservingType(band, (value) =>
+    clampValueToAbsoluteBoundsRoundingIntegers(value, bounds, roundForIntegerOutput),
+  );
+}
+
+export function clampValueToAbsoluteBoundsRoundingIntegers(
+  value: number,
+  bounds: AbsoluteClipBounds,
+  roundForIntegerOutput: boolean,
+): number {
+  const clamped = clampValueToAbsoluteBounds(value, bounds);
+  return roundForIntegerOutput ? Math.round(clamped) : clamped;
+}
+
+export function clampValueToAbsoluteBounds(value: number, bounds: AbsoluteClipBounds): number {
+  if (value < bounds.lo) return bounds.lo;
+  if (value > bounds.hi) return bounds.hi;
+  return value;
 }
 
 function normalizeWholeCubeToUnitRange(raster: RasterImage, method: NormalizeRangeMethod): RasterImage {
@@ -81,8 +145,10 @@ function computeBandRangeForMethod(
 }
 
 function computeCubeWideRangeForMethod(raster: RasterImage, method: NormalizeRangeMethod): ValueRange {
-  if (method.kind === "min-max") return computeCubeWideValueRange(raster);
-  return computePercentileValueRangeOfOwnedArray(gatherAllCubeValues(raster), method.bounds);
+  if (method.kind === "percentile") {
+    return computePercentileValueRangeOfOwnedArray(gatherAllCubeValues(raster), method.bounds);
+  }
+  return computeCubeWideValueRange(raster);
 }
 
 function gatherAllCubeValues(raster: RasterImage): Float64Array {

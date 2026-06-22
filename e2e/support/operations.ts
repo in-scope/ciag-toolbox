@@ -83,6 +83,17 @@ export async function setOperationNumberParameter(
   await expect(field).toHaveValue(String(value));
 }
 
+// Enum parameter fields (e.g. Normalize's "Method") render one native <select> in the panel;
+// target it directly, as its wrapping <label> does not resolve reliably via getByLabel for a
+// <select> (mirrors geometric-transform-operation.ts). Pass the option's value, not its label.
+export async function setOperationEnumParameter(
+  page: Page,
+  operationLabel: string,
+  optionValue: string,
+): Promise<void> {
+  await operationPanel(page, operationLabel).locator("select").selectOption(optionValue);
+}
+
 export async function cancelOperation(page: Page, operationLabel: string): Promise<void> {
   const panel = operationPanel(page, operationLabel);
   await panel.getByRole("button", { name: "Cancel", exact: true }).click();
