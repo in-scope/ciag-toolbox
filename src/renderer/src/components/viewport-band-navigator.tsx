@@ -30,6 +30,7 @@ export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.El
     );
   return (
     <div
+      data-testid="viewport-band-navigator"
       className="pointer-events-auto absolute inset-x-0 bottom-3 mx-auto flex w-[min(460px,86%)] items-center gap-2 rounded-md border bg-card/90 px-3 py-2 shadow-lg backdrop-blur"
       onWheel={(event) => handleBandNavigatorWheel(event, stepBandBy)}
     >

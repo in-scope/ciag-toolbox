@@ -6,8 +6,16 @@ import type { Locator } from "@playwright/test";
 // rendered WebGL pixels reliably regardless of the context's preserveDrawingBuffer
 // setting (the renderer leaves it at the default false). The renderer clears to
 // opaque black (0,0,0), so "non-blank" means pixels brighter than that clear color.
+//
+// The band navigator (CT-083) is a floating panel-chrome overlay that sits ON TOP of
+// the bottom of the canvas, so a Playwright element screenshot of the canvas composites
+// its grey card chrome into the result. That chrome is NOT rendered image content, so it
+// is masked out before measuring brightness - otherwise a near-black image reads as ~6%
+// non-clear (the navigator alone) and a "brightened" assertion passes vacuously.
 
 const CLEAR_COLOR_LUMINANCE_SUM_THRESHOLD = 24;
+const BAND_NAVIGATOR_TEST_ID = "viewport-band-navigator";
+const BAND_NAVIGATOR_SHADOW_PADDING_DEVICE_PX = 8;
 
 // A panel canvas is replaced by a React remount (e.g. a fresh-app round-trip reopening a
 // file into a panel) between Playwright resolving the locator and running the element
@@ -39,6 +47,71 @@ function errorReportsDetachedElement(error: unknown): boolean {
   return error instanceof Error && error.message.includes(DETACHED_ELEMENT_ERROR_FRAGMENT);
 }
 
+interface CanvasRegionMask {
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
+interface DecodedCanvasPixels {
+  readonly data: Buffer;
+  readonly width: number;
+  readonly channels: number;
+  readonly bandNavigatorMask: CanvasRegionMask | null;
+}
+
+async function decodeCanvasPixelsExcludingBandNavigator(canvas: Locator): Promise<DecodedCanvasPixels> {
+  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
+  const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
+  const bandNavigatorMask = await computeBandNavigatorMaskOrNull(canvas, info.width, info.height);
+  return { data, width: info.width, channels: info.channels, bandNavigatorMask };
+}
+
+async function computeBandNavigatorMaskOrNull(
+  canvas: Locator,
+  screenshotWidth: number,
+  screenshotHeight: number,
+): Promise<CanvasRegionMask | null> {
+  const navigator = canvas.locator("xpath=..").getByTestId(BAND_NAVIGATOR_TEST_ID);
+  if ((await navigator.count()) === 0) return null;
+  const navigatorBox = await navigator.boundingBox();
+  const canvasBox = await canvas.boundingBox();
+  if (!navigatorBox || !canvasBox || canvasBox.width === 0 || canvasBox.height === 0) return null;
+  return scaleNavigatorBoxToScreenshotMask(navigatorBox, canvasBox, screenshotWidth, screenshotHeight);
+}
+
+interface BoundingBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function scaleNavigatorBoxToScreenshotMask(
+  navigatorBox: BoundingBox,
+  canvasBox: BoundingBox,
+  screenshotWidth: number,
+  screenshotHeight: number,
+): CanvasRegionMask {
+  const scaleX = screenshotWidth / canvasBox.width;
+  const scaleY = screenshotHeight / canvasBox.height;
+  const pad = BAND_NAVIGATOR_SHADOW_PADDING_DEVICE_PX;
+  return {
+    minX: Math.floor((navigatorBox.x - canvasBox.x) * scaleX) - pad,
+    minY: Math.floor((navigatorBox.y - canvasBox.y) * scaleY) - pad,
+    maxX: Math.ceil((navigatorBox.x - canvasBox.x + navigatorBox.width) * scaleX) + pad,
+    maxY: Math.ceil((navigatorBox.y - canvasBox.y + navigatorBox.height) * scaleY) + pad,
+  };
+}
+
+function isPixelInsideMask(pixelIndex: number, width: number, mask: CanvasRegionMask | null): boolean {
+  if (!mask) return false;
+  const x = pixelIndex % width;
+  const y = Math.floor(pixelIndex / width);
+  return x >= mask.minX && x < mask.maxX && y >= mask.minY && y < mask.maxY;
+}
+
 export interface CanvasPixelSummary {
   readonly sampledPixelCount: number;
   readonly nonClearPixelCount: number;
@@ -46,11 +119,7 @@ export interface CanvasPixelSummary {
 }
 
 export async function summarizeCanvasPixels(canvas: Locator): Promise<CanvasPixelSummary> {
-  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
-  const { data, info } = await sharp(screenshot)
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  return summarizeRgbaBuffer(data, info.channels);
+  return summarizeDecodedCanvasPixels(await decodeCanvasPixelsExcludingBandNavigator(canvas));
 }
 
 export function nonClearPixelFraction(summary: CanvasPixelSummary): number {
@@ -58,16 +127,19 @@ export function nonClearPixelFraction(summary: CanvasPixelSummary): number {
   return summary.nonClearPixelCount / summary.sampledPixelCount;
 }
 
-function summarizeRgbaBuffer(data: Buffer, channels: number): CanvasPixelSummary {
+function summarizeDecodedCanvasPixels(decoded: DecodedCanvasPixels): CanvasPixelSummary {
   const distinctColors = new Set<number>();
   let nonClearPixelCount = 0;
-  const pixelCount = Math.floor(data.length / channels);
+  let sampledPixelCount = 0;
+  const pixelCount = Math.floor(decoded.data.length / decoded.channels);
   for (let index = 0; index < pixelCount; index += 1) {
-    const color = readPackedRgbAtPixel(data, index * channels);
+    if (isPixelInsideMask(index, decoded.width, decoded.bandNavigatorMask)) continue;
+    sampledPixelCount += 1;
+    const color = readPackedRgbAtPixel(decoded.data, index * decoded.channels);
     if (isBrighterThanClearColor(color)) nonClearPixelCount += 1;
     distinctColors.add(color);
   }
-  return { sampledPixelCount: pixelCount, nonClearPixelCount, distinctColorCount: distinctColors.size };
+  return { sampledPixelCount, nonClearPixelCount, distinctColorCount: distinctColors.size };
 }
 
 export interface CanvasAverageColor {
@@ -82,16 +154,15 @@ export interface CanvasAverageColor {
 // sensitivity (CT-145): routing a band to the red vs blue channel flips which channel
 // dominates the composite, so swapping two assignments measurably swaps these averages.
 export async function averageNonClearCanvasColor(canvas: Locator): Promise<CanvasAverageColor> {
-  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
-  const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
-  return averageNonClearRgbaBuffer(data, info.channels);
+  return averageDecodedNonClearPixels(await decodeCanvasPixelsExcludingBandNavigator(canvas));
 }
 
-function averageNonClearRgbaBuffer(data: Buffer, channels: number): CanvasAverageColor {
+function averageDecodedNonClearPixels(decoded: DecodedCanvasPixels): CanvasAverageColor {
   const totals = { red: 0, green: 0, blue: 0, count: 0 };
-  const pixelCount = Math.floor(data.length / channels);
+  const pixelCount = Math.floor(decoded.data.length / decoded.channels);
   for (let index = 0; index < pixelCount; index += 1) {
-    accumulateNonClearPixel(totals, data, index * channels);
+    if (isPixelInsideMask(index, decoded.width, decoded.bandNavigatorMask)) continue;
+    accumulateNonClearPixel(totals, decoded.data, index * decoded.channels);
   }
   return buildAverageColorFromTotals(totals);
 }
@@ -130,17 +201,16 @@ function buildAverageColorFromTotals(totals: {
 const GRAYSCALE_CHANNEL_SPREAD_THRESHOLD = 24;
 
 export async function colorfulNonClearPixelFraction(canvas: Locator): Promise<number> {
-  const screenshot = await captureCanvasScreenshotRetryingWhenDetached(canvas);
-  const { data, info } = await sharp(screenshot).raw().toBuffer({ resolveWithObject: true });
-  return computeColorfulNonClearPixelFraction(data, info.channels);
+  return computeColorfulNonClearPixelFraction(await decodeCanvasPixelsExcludingBandNavigator(canvas));
 }
 
-function computeColorfulNonClearPixelFraction(data: Buffer, channels: number): number {
+function computeColorfulNonClearPixelFraction(decoded: DecodedCanvasPixels): number {
   let nonClearPixelCount = 0;
   let colorfulPixelCount = 0;
-  const pixelCount = Math.floor(data.length / channels);
+  const pixelCount = Math.floor(decoded.data.length / decoded.channels);
   for (let index = 0; index < pixelCount; index += 1) {
-    const color = readPackedRgbAtPixel(data, index * channels);
+    if (isPixelInsideMask(index, decoded.width, decoded.bandNavigatorMask)) continue;
+    const color = readPackedRgbAtPixel(decoded.data, index * decoded.channels);
     if (!isBrighterThanClearColor(color)) continue;
     nonClearPixelCount += 1;
     if (channelSpreadExceedsGrayscaleThreshold(color)) colorfulPixelCount += 1;
