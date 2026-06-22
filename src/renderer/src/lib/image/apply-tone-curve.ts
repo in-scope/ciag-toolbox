@@ -12,6 +12,10 @@ import {
   remapRasterBandWithinRegion,
   type RegionRemapOptions,
 } from "@/lib/image/remap-band-region";
+import {
+  computeRasterBandRawValueExtents,
+  type SingleBandScalarExtents,
+} from "@/lib/image/compute-image-channel-extents";
 
 export interface ToneCurveAnchor {
   readonly input: number;
@@ -150,6 +154,67 @@ export function applyToneCurveToRasterBand(
   return remapRasterBandWithinRegion(raster, bandIndex, options, (value) =>
     clampValueToDataTypeRangeRoundingIntegers(evaluateToneCurveAtInput(curve, value), typeRange, roundForOutput),
   );
+}
+
+// CT-192: apply one tone curve's SHAPE to every band of a stack. The shape is the
+// curve's behaviour over the SELECTED band's value range, normalized to a [0, 1]
+// input/output square; each band is then mapped through that shape using its OWN
+// min/max. So every band receives the same contrast shaping relative to its own data
+// range, and on the selected band this reduces to the plain selected-band curve (which
+// is why a single-band stack matches Full image and an identity curve changes nothing).
+export function applyToneCurveToWholeStackPerBandMinMax(
+  raster: RasterImage,
+  selectedBandIndex: number,
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+): RasterImage {
+  const curve = buildMonotoneToneCurve(anchors);
+  const shape = buildNormalizedToneCurveShapeForBand(raster, selectedBandIndex, curve);
+  return raster.bandPixels.reduce(
+    (current, _band, bandIndex) => remapBandThroughShapeByOwnMinMax(current, bandIndex, shape),
+    raster,
+  );
+}
+
+type NormalizedToneCurveShape = (normalizedInput: number) => number;
+
+function buildNormalizedToneCurveShapeForBand(
+  raster: RasterImage,
+  bandIndex: number,
+  curve: ToneCurve,
+): NormalizedToneCurveShape {
+  const { min, max } = computeRasterBandRawValueExtents(raster, bandIndex);
+  const span = max - min;
+  if (span <= 0) return (normalizedInput) => normalizedInput;
+  return (normalizedInput) =>
+    (evaluateToneCurveAtInput(curve, min + normalizedInput * span) - min) / span;
+}
+
+function remapBandThroughShapeByOwnMinMax(
+  raster: RasterImage,
+  bandIndex: number,
+  shape: NormalizedToneCurveShape,
+): RasterImage {
+  const band = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const extents = computeRasterBandRawValueExtents(raster, bandIndex);
+  const typeRange = dataTypeValueRangeForBand(band, raster.sampleFormat);
+  const roundForOutput = !isFloatTypedArray(band);
+  return remapRasterBandWithinRegion(raster, bandIndex, {}, (value) =>
+    mapValueThroughNormalizedShape(value, extents, shape, typeRange, roundForOutput),
+  );
+}
+
+function mapValueThroughNormalizedShape(
+  value: number,
+  extents: SingleBandScalarExtents,
+  shape: NormalizedToneCurveShape,
+  typeRange: DataTypeValueRange,
+  roundForOutput: boolean,
+): number {
+  const span = extents.max - extents.min;
+  if (span <= 0) return value;
+  const normalizedInput = clampToUnitInterval((value - extents.min) / span);
+  const output = extents.min + shape(normalizedInput) * span;
+  return clampValueToDataTypeRangeRoundingIntegers(output, typeRange, roundForOutput);
 }
 
 // CT-178: bake one composite channel band. The per-channel curve is the inner

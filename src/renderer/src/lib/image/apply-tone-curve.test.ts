@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
+  applyToneCurveToWholeStackPerBandMinMax,
   buildDisplayNormalizedToneCurveLookupTable,
   buildMonotoneToneCurve,
   buildToneCurveLookupTable,
@@ -232,3 +233,70 @@ function assertLookupTableIsMonotoneNonDecreasingWithinRange(
     expect(lookupTable[index]!).toBeLessThanOrEqual(range.max + 1e-9);
   }
 }
+
+function makeUint16MultiBandRaster(
+  bands: ReadonlyArray<ReadonlyArray<number>>,
+  width: number,
+  height: number,
+): RasterImage {
+  return {
+    bandPixels: bands.map((band) => Uint16Array.from(band)),
+    width,
+    height,
+    bandCount: bands.length,
+    sampleFormat: "uint",
+    bitsPerSample: 16,
+  };
+}
+
+function readBandValues(raster: RasterImage, bandIndex: number): number[] {
+  return Array.from(raster.bandPixels[bandIndex]!);
+}
+
+describe("applyToneCurveToWholeStackPerBandMinMax (CT-192)", () => {
+  it("leaves every band unchanged for an identity curve, regardless of per-band range", () => {
+    const raster = makeUint16MultiBandRaster([[10, 20, 30, 40], [100, 140, 180, 220]], 2, 2);
+    const identityOverSelectedBand: ToneCurveAnchor[] = [
+      { input: 10, output: 10 },
+      { input: 40, output: 40 },
+    ];
+    const result = applyToneCurveToWholeStackPerBandMinMax(raster, 0, identityOverSelectedBand);
+    expect(readBandValues(result, 0)).toEqual([10, 20, 30, 40]);
+    expect(readBandValues(result, 1)).toEqual([100, 140, 180, 220]);
+  });
+
+  it("maps each band through the same curve SHAPE normalized by that band's own min/max", () => {
+    // Selected band spans [0, 100]; the 2-anchor curve doubles it, so the normalized
+    // shape is s(t) = 2t. Band 1 spans [10, 30], so out = bMin + 2t*(bMax-bMin).
+    const raster = makeUint16MultiBandRaster([[0, 100], [10, 30]], 1, 2);
+    const doublingCurve: ToneCurveAnchor[] = [
+      { input: 0, output: 0 },
+      { input: 100, output: 200 },
+    ];
+    const result = applyToneCurveToWholeStackPerBandMinMax(raster, 0, doublingCurve);
+    expect(readBandValues(result, 0)).toEqual([0, 200]);
+    expect(readBandValues(result, 1)).toEqual([10, 50]);
+  });
+
+  it("reduces to the plain Full-image curve on the selected band (single-band coincidence)", () => {
+    const raster = makeUint16MultiBandRaster([[40, 90, 140, 190], [500, 700, 900, 1100]], 2, 2);
+    const curve: ToneCurveAnchor[] = [
+      { input: 40, output: 10 },
+      { input: 120, output: 9000 },
+      { input: 190, output: 60000 },
+    ];
+    const wholeStack = applyToneCurveToWholeStackPerBandMinMax(raster, 0, curve);
+    const fullImage = applyToneCurveToRasterBand(raster, 0, curve);
+    expect(readBandValues(wholeStack, 0)).toEqual(readBandValues(fullImage, 0));
+  });
+
+  it("leaves a constant band untouched (no division by a zero range)", () => {
+    const raster = makeUint16MultiBandRaster([[0, 100], [700, 700]], 1, 2);
+    const doublingCurve: ToneCurveAnchor[] = [
+      { input: 0, output: 0 },
+      { input: 100, output: 200 },
+    ];
+    const result = applyToneCurveToWholeStackPerBandMinMax(raster, 0, doublingCurve);
+    expect(readBandValues(result, 1)).toEqual([700, 700]);
+  });
+});

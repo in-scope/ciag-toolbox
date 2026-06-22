@@ -253,7 +253,10 @@ export {
   APPLY_SCOPE_GROUP_NAME,
   WHOLE_STACK_SCOPE_LABEL,
   REGION_OF_INTEREST_SCOPE_LABEL,
+  FULL_IMAGE_SCOPE_LABEL,
   applyScopeFieldset,
+  applyScopeRadio,
+  selectFullImageScope,
   selectRegionOfInterestScope,
   selectWholeStackScope,
 } from "./apply-scope-control";

@@ -100,9 +100,24 @@ export type ViewportActionSourceApplicabilityCheck = (
   parameterValues: ParameterValuesById,
 ) => void;
 
-export type ApplyScope = "whole-image" | "roi";
+// CT-192: "whole-stack" applies one operation across every band of a stack (the tone
+// curve's whole-stack scope). "whole-image" still means the selected band over the full
+// spatial extent; "roi" limits the operation to a selected region.
+export type ApplyScope = "whole-image" | "roi" | "whole-stack";
 
 export const DEFAULT_APPLY_SCOPE: ApplyScope = "whole-image";
+
+// CT-192: an action can offer a custom set of scope options (label + scope). Actions
+// without a custom set fall back to the default "Whole stack | Region of interest" pair.
+export interface ApplyScopeOption {
+  readonly scope: ApplyScope;
+  readonly label: string;
+}
+
+export const DEFAULT_APPLY_SCOPE_OPTIONS: ReadonlyArray<ApplyScopeOption> = Object.freeze([
+  { scope: "whole-image", label: "Whole stack" },
+  { scope: "roi", label: "Region of interest" },
+]);
 
 export interface ViewportAction {
   readonly id: string;

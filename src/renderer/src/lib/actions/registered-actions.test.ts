@@ -240,7 +240,46 @@ describe("TONE_CURVE_ACTION", () => {
     expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
   });
+
+  // CT-192: whole-stack scope bakes the same curve shape into every band, each
+  // normalized by its own min/max, and records the scope in the applied label.
+  const doublingAnchors = [
+    { input: 0, output: 0 },
+    { input: 100, output: 200 },
+  ];
+
+  it("records the Whole stack scope in the applied label", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points) on Whole stack");
+  });
+
+  it("bakes every band through the curve shape normalized by its own min/max under Whole stack scope", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: doublingAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
+    const stack = makeTwoBandScientificStack([0, 100], [10, 30]);
+    const result = TONE_CURVE_ACTION.transformSource!(
+      { kind: "raster", raster: stack },
+      prepared,
+    ) as { raster: RasterImage };
+    expect(Array.from(result.raster.bandPixels[0]!)).toEqual([0, 200]);
+    expect(Array.from(result.raster.bandPixels[1]!)).toEqual([10, 50]);
+  });
 });
+
+function makeTwoBandScientificStack(
+  band0: ReadonlyArray<number>,
+  band1: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from(band0), Uint8Array.from(band1)],
+    width: band0.length,
+    height: 1,
+    bandCount: 2,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
 
 function makeRgbCompositeRaster(): RasterImage {
   return {

@@ -14,6 +14,7 @@ import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import {
   applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
+  applyToneCurveToWholeStackPerBandMinMax,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -106,6 +107,7 @@ import {
 } from "./operation-region";
 import type {
   ApplyScope,
+  ApplyScopeOption,
   ViewportAction,
   ViewportActionOutput,
   ViewportActionSecondaryOutputsTransform,
@@ -117,6 +119,12 @@ import {
   EMPTY_REMOVED_BAND_INDEXES,
   type ViewportRenderingState,
 } from "./viewport-action";
+import {
+  resolveToneCurveApplyScopeOptions,
+  TONE_CURVE_SCOPE_PARAMETER_ID,
+  TONE_CURVE_WHOLE_STACK_SCOPE_LABEL,
+  WHOLE_STACK_TONE_CURVE_SCOPE_VALUE,
+} from "./tone-curve-scope";
 import { PCA_ACTION } from "./pca-action";
 import { MNF_ACTION } from "./mnf-action";
 import { ICA_ACTION } from "./ica-action";
@@ -143,6 +151,14 @@ export interface RegisteredViewportAction extends ViewportAction {
    * "Apply to" scope selector and then selects the region (CT-095).
    */
   readonly supportsRoiScope?: boolean;
+  /**
+   * CT-192: a custom set of "Apply to" scope options for this action, resolved against
+   * the source band count (e.g. the tone curve drops "Whole stack" for a single band).
+   * Actions without this fall back to DEFAULT_APPLY_SCOPE_OPTIONS.
+   */
+  readonly resolveApplyScopeOptions?: (
+    bandCount: number | null,
+  ) => ReadonlyArray<ApplyScopeOption>;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
     rawParameterValues: ParameterValuesById,
@@ -637,6 +653,7 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   appliedLabel: "Tone curve",
   loadingMessage: "Applying tone curve...",
   supportsRoiScope: true,
+  resolveApplyScopeOptions: resolveToneCurveApplyScopeOptions,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
   apply: clearToneCurveAfterApply,
@@ -660,7 +677,19 @@ function prepareToneCurveParameterValues(
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
   const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
-  return injectToneCurveRegionIfPresent(withChannels, resolveToneCurveRegion(sourceRenderingState, applyScope));
+  const withScope = withToneCurveWholeStackScope(withChannels, applyScope);
+  return injectToneCurveRegionIfPresent(withScope, resolveToneCurveRegion(sourceRenderingState, applyScope));
+}
+
+// CT-192: mark a whole-stack apply so the transform bakes every band and the History
+// entry records the scope. Whole stack and ROI are mutually exclusive (ROI never injects
+// a region for the whole-stack scope, see resolveToneCurveRegion).
+function withToneCurveWholeStackScope(
+  parameterValues: ParameterValuesById,
+  applyScope: ApplyScope,
+): ParameterValuesById {
+  if (applyScope !== "whole-stack") return parameterValues;
+  return { ...parameterValues, [TONE_CURVE_SCOPE_PARAMETER_ID]: WHOLE_STACK_TONE_CURVE_SCOPE_VALUE };
 }
 
 // CT-178: for a true-colour composite, record the canonical full channel map so
@@ -746,8 +775,26 @@ function createToneCurveSourceTransform(): ViewportActionSourceTransform {
     if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
       return { kind: "raster", raster: bakeCompositeToneCurve(source.raster, channelAnchors, region) };
     }
+    if (isWholeStackToneCurveScope(parameterValues)) {
+      return { kind: "raster", raster: bakeWholeStackToneCurve(source.raster, parameterValues) };
+    }
     return { kind: "raster", raster: bakeSingleBandToneCurve(source.raster, parameterValues, region) };
   };
+}
+
+function isWholeStackToneCurveScope(parameterValues: ParameterValuesById): boolean {
+  return parameterValues[TONE_CURVE_SCOPE_PARAMETER_ID] === WHOLE_STACK_TONE_CURVE_SCOPE_VALUE;
+}
+
+// CT-192: bake the same curve SHAPE into every band, each normalized by its own min/max.
+// The viewed band fixes the shape, so a single-band stack matches the Full image path.
+function bakeWholeStackToneCurve(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): RasterImage {
+  const bandIndex = readToneCurveBandIndex(parameterValues);
+  const anchors = readToneCurveAnchorsOrThrow(parameterValues);
+  return applyToneCurveToWholeStackPerBandMinMax(raster, bandIndex, anchors);
 }
 
 function bakeSingleBandToneCurve(
@@ -813,7 +860,12 @@ function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): stri
   const label = channelAnchors
     ? formatCompositeToneCurveLabel(channelAnchors)
     : formatSingleBandToneCurveLabel(parameterValues);
-  return appendToneCurveRegionSuffix(label, parameterValues);
+  return appendToneCurveRegionSuffix(appendToneCurveWholeStackSuffix(label, parameterValues), parameterValues);
+}
+
+function appendToneCurveWholeStackSuffix(label: string, parameterValues: ParameterValuesById): string {
+  if (!isWholeStackToneCurveScope(parameterValues)) return label;
+  return `${label} on ${TONE_CURVE_WHOLE_STACK_SCOPE_LABEL}`;
 }
 
 function formatSingleBandToneCurveLabel(parameterValues: ParameterValuesById): string {

@@ -16,7 +16,9 @@ import {
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import {
   DEFAULT_APPLY_SCOPE,
+  DEFAULT_APPLY_SCOPE_OPTIONS,
   type ApplyScope,
+  type ApplyScopeOption,
 } from "@/lib/actions/viewport-action";
 import {
   canonicalizeViewportRoiCorners,
@@ -96,8 +98,11 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
     setApplyScope,
   );
   useReportParameterValuesToParent(parameterValues, props.onParametersChange);
-  const showApplyScopeSelector = shouldShowApplyScopeSelector(props.action, props.sourceViewport);
-  const effectiveApplyScope = showApplyScopeSelector ? applyScope : DEFAULT_APPLY_SCOPE;
+  const applyScopeOptions = useApplyScopeOptions(props.action, props.sourceViewport);
+  const showApplyScopeSelector = shouldShowApplyScopeSelector(props.action, props.sourceViewport, applyScopeOptions);
+  const effectiveApplyScope = showApplyScopeSelector
+    ? clampApplyScopeToOptions(applyScope, applyScopeOptions)
+    : DEFAULT_APPLY_SCOPE;
   const isRegionRequiredNow = doesActionRequireRegionNow(props.action, effectiveApplyScope);
   const operationRegion = props.sourceViewport?.operationRegion ?? null;
   const hasBlockingParameterError = hasBlockingBandScopeError(parameterSchemas, parameterValues, props.sourceViewport);
@@ -116,7 +121,8 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
           setParameterValues((previous) => withParameterValueAtId(previous, id, next))
         }
         showApplyScopeSelector={showApplyScopeSelector}
-        applyScope={applyScope}
+        applyScopeOptions={applyScopeOptions}
+        applyScope={effectiveApplyScope}
         onChangeApplyScope={setApplyScope}
         showRegionPicker={isRegionRequiredNow}
         operationRegion={operationRegion}
@@ -139,12 +145,33 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
   );
 }
 
+function useApplyScopeOptions(
+  action: RegisteredViewportAction,
+  sourceViewport: ToolOptionsSourceViewport | null,
+): ReadonlyArray<ApplyScopeOption> {
+  const bandCount = sourceViewport?.sourceBandCount ?? null;
+  return useMemo(
+    () => action.resolveApplyScopeOptions?.(bandCount) ?? DEFAULT_APPLY_SCOPE_OPTIONS,
+    [action, bandCount],
+  );
+}
+
 function shouldShowApplyScopeSelector(
   action: RegisteredViewportAction,
   sourceViewport: ToolOptionsSourceViewport | null,
+  applyScopeOptions: ReadonlyArray<ApplyScopeOption>,
 ): boolean {
   if (!action.supportsRoiScope) return false;
-  return sourceViewport !== null;
+  if (sourceViewport === null) return false;
+  return applyScopeOptions.length >= 2;
+}
+
+function clampApplyScopeToOptions(
+  applyScope: ApplyScope,
+  applyScopeOptions: ReadonlyArray<ApplyScopeOption>,
+): ApplyScope {
+  if (applyScopeOptions.some((option) => option.scope === applyScope)) return applyScope;
+  return applyScopeOptions[0]?.scope ?? DEFAULT_APPLY_SCOPE;
 }
 
 function doesActionRequireRegionNow(
@@ -268,6 +295,7 @@ interface PanelBodyProps {
   parameterValues: ParameterValuesById;
   onChangeParameterValue: (id: string, next: ParameterValue) => void;
   showApplyScopeSelector: boolean;
+  applyScopeOptions: ReadonlyArray<ApplyScopeOption>;
   applyScope: ApplyScope;
   onChangeApplyScope: (next: ApplyScope) => void;
   showRegionPicker: boolean;
@@ -292,6 +320,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
       ) : null}
       {props.showApplyScopeSelector ? (
         <ApplyScopeSelectorSection
+          options={props.applyScopeOptions}
           applyScope={props.applyScope}
           onChangeApplyScope={props.onChangeApplyScope}
         />
@@ -402,6 +431,7 @@ function SourceViewportDescription({
 }
 
 interface ApplyScopeSelectorSectionProps {
+  options: ReadonlyArray<ApplyScopeOption>;
   applyScope: ApplyScope;
   onChangeApplyScope: (next: ApplyScope) => void;
 }
@@ -411,20 +441,16 @@ function ApplyScopeSelectorSection(props: ApplyScopeSelectorSectionProps): JSX.E
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="text-xs font-medium text-muted-foreground">Apply to</legend>
-      <ApplyScopeRadioRow
-        radioGroupName={radioGroupName}
-        scope="whole-image"
-        label="Whole stack"
-        currentScope={props.applyScope}
-        onSelect={props.onChangeApplyScope}
-      />
-      <ApplyScopeRadioRow
-        radioGroupName={radioGroupName}
-        scope="roi"
-        label="Region of interest"
-        currentScope={props.applyScope}
-        onSelect={props.onChangeApplyScope}
-      />
+      {props.options.map((option) => (
+        <ApplyScopeRadioRow
+          key={option.scope}
+          radioGroupName={radioGroupName}
+          scope={option.scope}
+          label={option.label}
+          currentScope={props.applyScope}
+          onSelect={props.onChangeApplyScope}
+        />
+      ))}
     </fieldset>
   );
 }
