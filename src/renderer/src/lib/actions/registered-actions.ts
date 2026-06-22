@@ -924,7 +924,7 @@ function readBrightnessContrastTargetBandIndex(parameterValues: ParameterValuesB
   return Math.max(0, Math.round(raw));
 }
 
-function readBrightnessPercent(parameterValues: ParameterValuesById): number {
+export function readBrightnessPercent(parameterValues: ParameterValuesById): number {
   const raw = parameterValues[BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     return BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_SCHEMA.defaultValue;
@@ -932,7 +932,7 @@ function readBrightnessPercent(parameterValues: ParameterValuesById): number {
   return raw;
 }
 
-function readContrastRatio(parameterValues: ParameterValuesById): number {
+export function readContrastRatio(parameterValues: ParameterValuesById): number {
   const raw = parameterValues[BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     return BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA.defaultValue;

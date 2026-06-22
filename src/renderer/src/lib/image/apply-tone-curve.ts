@@ -71,8 +71,29 @@ export function buildDisplayNormalizedToneCurveLookupTable(
   range: DataTypeValueRange,
   entryCount: number,
 ): ReadonlyArray<number> {
-  const dataDomainOutputs = buildToneCurveLookupTable(curve, range, entryCount);
-  return dataDomainOutputs.map((output) => normalizeOutputIntoDisplayUnit(output, range));
+  return buildDisplayNormalizedLookupTable(
+    (value) => evaluateToneCurveAtInput(curve, value),
+    range,
+    entryCount,
+  );
+}
+
+// CT-186: a display-normalized LUT for ANY data-domain value map (tone curve,
+// brightness/contrast). Entry i answers "for the value at display coordinate
+// i/(N-1), what does mapDataValue output?", renormalized into the display unit, so
+// the GPU shader can remap a sampled value by texturing it without touching pixels.
+export function buildDisplayNormalizedLookupTable(
+  mapDataValue: (value: number) => number,
+  range: DataTypeValueRange,
+  entryCount: number,
+): ReadonlyArray<number> {
+  const lastEntryIndex = entryCount - 1;
+  return Array.from({ length: entryCount }, (_unused, index) =>
+    normalizeOutputIntoDisplayUnit(
+      mapDataValue(inputForLookupTableEntry(range, index, lastEntryIndex)),
+      range,
+    ),
+  );
 }
 
 // CT-177: a composite channel's display LUT folds the per-channel curve and the
