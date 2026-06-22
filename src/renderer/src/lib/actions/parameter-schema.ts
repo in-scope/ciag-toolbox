@@ -110,6 +110,13 @@ export function readCubeScopeChoiceOrDefault(
   return value === FULL_CUBE_SCOPE || value === BAND_WISE_SCOPE ? value : fallback;
 }
 
+// CT-189: full-stack and band-wise are identical for a single-band stack, so the
+// scope radio is a redundant choice there. Hide it for one band; show it once the
+// band count is known to exceed one (an unknown count keeps it visible).
+export function shouldShowCubeScopeControl(bandCount: number | null): boolean {
+  return bandCount === null || bandCount > 1;
+}
+
 export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefined): string {
   return typeof value === "string" ? value : NO_RASTER_REFERENCE_SELECTED;
 }
@@ -148,6 +155,7 @@ function describeBandWiseRangeErrorForSchemaOrNull(
   values: ParameterValuesById,
   bandCount: number | null,
 ): string | null {
+  if (!shouldShowCubeScopeControl(bandCount)) return null;
   const choice = readCubeScopeChoiceOrDefault(values[schema.id] ?? schema.defaultValue, schema.defaultValue);
   if (choice !== BAND_WISE_SCOPE) return null;
   return describeBandRangeErrorOrNull(readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]), bandCount);

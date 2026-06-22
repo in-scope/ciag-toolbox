@@ -9,6 +9,7 @@ import {
   readCubeScopeChoiceOrDefault,
   resolveCubeScopeSelection,
   seedBandScopeBandRangeDefaults,
+  shouldShowCubeScopeControl,
   serializeParameterValuesToJsonString,
   type CubeScopeParameterSchema,
   type IntegerParameterSchema,
@@ -175,6 +176,26 @@ describe("describeBandScopeBlockingErrorOrNull", () => {
   it("reports an error for an empty band-wise range", () => {
     const values = { scope: "band-wise", bandRange: "" };
     expect(describeBandScopeBlockingErrorOrNull([buildCubeScopeSchema()], values, 10)).not.toBeNull();
+  });
+
+  it("never reports a band-range error for a single-band stack", () => {
+    const values = { scope: "band-wise", bandRange: "" };
+    expect(describeBandScopeBlockingErrorOrNull([buildCubeScopeSchema()], values, 1)).toBeNull();
+  });
+});
+
+describe("shouldShowCubeScopeControl", () => {
+  it("hides the scope control for a single-band stack", () => {
+    expect(shouldShowCubeScopeControl(1)).toBe(false);
+  });
+
+  it("shows the scope control for a multi-band stack", () => {
+    expect(shouldShowCubeScopeControl(2)).toBe(true);
+    expect(shouldShowCubeScopeControl(12)).toBe(true);
+  });
+
+  it("shows the scope control while the band count is still unknown", () => {
+    expect(shouldShowCubeScopeControl(null)).toBe(true);
   });
 });
 

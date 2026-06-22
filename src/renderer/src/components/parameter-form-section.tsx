@@ -33,6 +33,7 @@ import {
   readBandRangeTextOrEmpty,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
+  shouldShowCubeScopeControl,
   NO_RASTER_REFERENCE_SELECTED,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
@@ -89,7 +90,8 @@ interface ParameterFieldRowProps {
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
 
-function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
+function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
+  if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <ParameterFieldInput
@@ -106,6 +108,10 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+function isHiddenCubeScopeRow(schema: ParameterSchema, sourceBandCount: number | null): boolean {
+  return schema.kind === "cube-scope" && !shouldShowCubeScopeControl(sourceBandCount);
 }
 
 function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
