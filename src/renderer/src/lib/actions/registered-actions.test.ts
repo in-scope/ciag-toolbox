@@ -12,9 +12,11 @@ import {
   ROTATE_ACTION,
   SPECTRALON_ACTION,
   TONE_CURVE_ACTION,
+  clearPinnedSpectraFromState,
   findGeometricTransformActionForChoice,
   type RegisteredViewportAction,
 } from "./registered-actions";
+import type { PinnedPixelSpectrum, PinnedRoiMeanSpectrum } from "@/lib/image/spectrum-entry";
 
 function readEnumParameterOptionValues(action: RegisteredViewportAction): string[] {
   const parameter = action.parameters?.[0];
@@ -266,6 +268,20 @@ function makeThreeBandScientificStack(): RasterImage {
 describe("region-requesting operations (CT-095)", () => {
   const operationRegion = { imagePixelX0: 2, imagePixelY0: 3, imagePixelX1: 7, imagePixelY1: 8 };
   const staleInspectionRoi = { imagePixelX0: 90, imagePixelY0: 90, imagePixelX1: 95, imagePixelY1: 95 };
+  const pinnedPixelSpectrum: PinnedPixelSpectrum = {
+    kind: "pixel",
+    id: "pin-1",
+    imagePixelX: 91,
+    imagePixelY: 92,
+    bandValues: [10, 20, 30],
+  };
+  const pinnedRoiSpectrum: PinnedRoiMeanSpectrum = {
+    kind: "roi-mean",
+    id: "roi-1",
+    samplePixelCount: 4,
+    bandMeans: [11, 21, 31],
+    bandStandardDeviations: [1, 1, 1],
+  };
 
   it("crop is always available to open: it requests its region in-flow, not from a pre-existing ROI", () => {
     expect(CROP_TO_REGION_ACTION.isAvailableForActiveViewport).toBeUndefined();
@@ -290,6 +306,31 @@ describe("region-requesting operations (CT-095)", () => {
     const after = CROP_TO_REGION_ACTION.apply(state, {});
     expect(after.operationRegion).toBeNull();
     expect(after.roi).toBeNull();
+  });
+
+  it("crop clears both pinned-spectrum lists so no stale pins survive the band/coordinate change", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      operationRegion,
+      pinnedSpectra: [pinnedPixelSpectrum],
+      pinnedRoiSpectra: [pinnedRoiSpectrum],
+    };
+    const after = CROP_TO_REGION_ACTION.apply(state, {});
+    expect(after.pinnedSpectra).toEqual([]);
+    expect(after.pinnedRoiSpectra).toEqual([]);
+  });
+
+  it("clearPinnedSpectraFromState empties both pin lists without mutating the input", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      pinnedSpectra: [pinnedPixelSpectrum],
+      pinnedRoiSpectra: [pinnedRoiSpectrum],
+    };
+    const after = clearPinnedSpectraFromState(state);
+    expect(after.pinnedSpectra).toEqual([]);
+    expect(after.pinnedRoiSpectra).toEqual([]);
+    expect(state.pinnedSpectra).toEqual([pinnedPixelSpectrum]);
+    expect(state.pinnedRoiSpectra).toEqual([pinnedRoiSpectrum]);
   });
 
   it("crop keeps the untouched source's inspection ROI when applied to a duplicate", () => {

@@ -289,7 +289,17 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
 function clearRegionAndStaleInspectionRoiAfterCrop(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
-  return { ...state, operationRegion: null, roi: null };
+  return clearPinnedSpectraFromState({ ...state, operationRegion: null, roi: null });
+}
+
+export function clearPinnedSpectraFromState(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return {
+    ...state,
+    pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
+  };
 }
 
 const CROP_REGION_PARAMETER_IDS = {
@@ -355,14 +365,12 @@ export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
 };
 
 function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return {
+  return clearPinnedSpectraFromState({
     ...state,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     selectedBandIndex: 0,
-    pinnedSpectra: EMPTY_PINNED_SPECTRA,
-    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     isBandSubsetEditModeActive: false,
-  };
+  });
 }
 
 function clearBandSubsetEditModeFromSource(
@@ -1420,14 +1428,12 @@ function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): Vi
 function resetBandDependentStateAfterBandCountChange(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
-  return {
+  return clearPinnedSpectraFromState({
     ...state,
     selectedBandIndex: 0,
-    pinnedSpectra: EMPTY_PINNED_SPECTRA,
-    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,
-  };
+  });
 }
 
 function createRgbToGrayscaleSourceTransform(): ViewportActionSourceTransform {
