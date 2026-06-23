@@ -89,63 +89,144 @@ function covarianceOfBands(
   return sum / Math.max(1, sampleCount);
 }
 
-function estimateShiftDifferenceNoiseCovariance(samples: CubeSampleMatrix, bandCount: number): number[][] {
-  const differences = collectDirectionCentredNeighbourDifferences(samples);
-  const means = computePerBandMeans(differences.bandValues, differences.sampleCount, bandCount);
-  const covariance = computeCovarianceFromMeans(differences.bandValues, means, differences.sampleCount, bandCount);
-  return scaleMatrix(covariance, 0.5);
+// CT-195: the noise covariance is accumulated by STREAMING over neighbour pairs
+// with index arithmetic - never materialising a per-pair tuple object or a
+// per-direction difference array. A real ~100-megapixel cube would otherwise
+// allocate ~100 million [number, number] tuples per direction (tens of GB of
+// heap) and crash the renderer; the streaming accumulator holds only the
+// band-count-square cross-product sums. The math is unchanged within tolerance:
+// each direction's neighbour differences are centred by their own mean, the
+// centred cross-sums are pooled, and the result is halved (var(a - b) =
+// 2*noiseVar for a smooth signal plus independent noise).
+export function estimateShiftDifferenceNoiseCovariance(samples: CubeSampleMatrix, bandCount: number): number[][] {
+  const horizontal = accumulateDirectionCentredCrossSum(samples, bandCount, horizontalNeighbourDirection(samples));
+  const vertical = accumulateDirectionCentredCrossSum(samples, bandCount, verticalNeighbourDirection(samples));
+  const pooledPairCount = Math.max(1, horizontal.pairCount + vertical.pairCount);
+  return scaleMatrix(addMatrices(horizontal.centredCrossSum, vertical.centredCrossSum), 0.5 / pooledPairCount);
 }
 
-interface DifferenceBands {
-  readonly bandValues: ReadonlyArray<Float64Array>;
-  readonly sampleCount: number;
+interface NeighbourDirection {
+  readonly firstColumns: number;
+  readonly firstRows: number;
+  readonly rowStride: number;
+  readonly neighbourOffset: number;
 }
 
-function collectDirectionCentredNeighbourDifferences(samples: CubeSampleMatrix): DifferenceBands {
-  const horizontal = listHorizontalNeighbourPairs(samples.width, samples.height);
-  const vertical = listVerticalNeighbourPairs(samples.width, samples.height);
-  const bandValues = samples.bandValues.map((band) =>
-    concatenateCentredDifferences(differencesAcrossPairs(band, horizontal), differencesAcrossPairs(band, vertical)),
+function horizontalNeighbourDirection(samples: CubeSampleMatrix): NeighbourDirection {
+  return { firstColumns: Math.max(0, samples.width - 1), firstRows: samples.height, rowStride: samples.width, neighbourOffset: 1 };
+}
+
+function verticalNeighbourDirection(samples: CubeSampleMatrix): NeighbourDirection {
+  return { firstColumns: samples.width, firstRows: Math.max(0, samples.height - 1), rowStride: samples.width, neighbourOffset: samples.width };
+}
+
+interface DirectionCrossSum {
+  readonly centredCrossSum: number[][];
+  readonly pairCount: number;
+}
+
+function accumulateDirectionCentredCrossSum(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  direction: NeighbourDirection,
+): DirectionCrossSum {
+  const rawCrossSums = new Float64Array(bandCount * bandCount);
+  const differenceSums = new Float64Array(bandCount);
+  const pairCount = streamNeighbourDifferencesIntoCrossSums(samples, bandCount, direction, rawCrossSums, differenceSums);
+  return { centredCrossSum: centreCrossSums(rawCrossSums, differenceSums, pairCount, bandCount), pairCount };
+}
+
+function streamNeighbourDifferencesIntoCrossSums(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  direction: NeighbourDirection,
+  rawCrossSums: Float64Array,
+  differenceSums: Float64Array,
+): number {
+  const differenceBuffer = new Float64Array(bandCount);
+  let pairCount = 0;
+  for (let row = 0; row < direction.firstRows; row += 1) {
+    const rowStart = row * direction.rowStride;
+    for (let column = 0; column < direction.firstColumns; column += 1) {
+      addNeighbourPairToCrossSums(samples.bandValues, bandCount, rowStart + column, direction, rawCrossSums, differenceSums, differenceBuffer);
+      pairCount += 1;
+    }
+  }
+  return pairCount;
+}
+
+function addNeighbourPairToCrossSums(
+  bandValues: ReadonlyArray<Float64Array>,
+  bandCount: number,
+  firstIndex: number,
+  direction: NeighbourDirection,
+  rawCrossSums: Float64Array,
+  differenceSums: Float64Array,
+  differenceBuffer: Float64Array,
+): void {
+  fillBandDifferencesAtNeighbourPair(bandValues, bandCount, firstIndex, direction.neighbourOffset, differenceBuffer);
+  accumulateDifferenceSumsAndCrossProducts(differenceBuffer, bandCount, differenceSums, rawCrossSums);
+}
+
+function fillBandDifferencesAtNeighbourPair(
+  bandValues: ReadonlyArray<Float64Array>,
+  bandCount: number,
+  firstIndex: number,
+  neighbourOffset: number,
+  differenceBuffer: Float64Array,
+): void {
+  for (let band = 0; band < bandCount; band += 1) {
+    const values = bandValues[band]!;
+    differenceBuffer[band] = values[firstIndex]! - values[firstIndex + neighbourOffset]!;
+  }
+}
+
+function accumulateDifferenceSumsAndCrossProducts(
+  differenceBuffer: Float64Array,
+  bandCount: number,
+  differenceSums: Float64Array,
+  rawCrossSums: Float64Array,
+): void {
+  for (let row = 0; row < bandCount; row += 1) {
+    const rowDifference = differenceBuffer[row]!;
+    differenceSums[row] = differenceSums[row]! + rowDifference;
+    accumulateRowCrossProducts(rowDifference, differenceBuffer, bandCount, row * bandCount, rawCrossSums);
+  }
+}
+
+function accumulateRowCrossProducts(
+  rowDifference: number,
+  differenceBuffer: Float64Array,
+  bandCount: number,
+  rowOffset: number,
+  rawCrossSums: Float64Array,
+): void {
+  for (let column = 0; column < bandCount; column += 1) {
+    const index = rowOffset + column;
+    rawCrossSums[index] = rawCrossSums[index]! + rowDifference * differenceBuffer[column]!;
+  }
+}
+
+// Centred cross-sum for a direction = Σ d_r d_c - (Σ d_r)(Σ d_c)/N, the standard
+// identity for the mean-centred sum of products, so a smooth signal's constant
+// local gradient cancels and only its noise survives.
+function centreCrossSums(
+  rawCrossSums: Float64Array,
+  differenceSums: Float64Array,
+  pairCount: number,
+  bandCount: number,
+): number[][] {
+  const inversePairCount = pairCount > 0 ? 1 / pairCount : 0;
+  return buildSquareMatrix(bandCount, (row, column) =>
+    rawCrossSums[row * bandCount + column]! - differenceSums[row]! * differenceSums[column]! * inversePairCount,
   );
-  return { bandValues, sampleCount: horizontal.length + vertical.length };
 }
 
-function listHorizontalNeighbourPairs(width: number, height: number): Array<readonly [number, number]> {
-  const pairs: Array<readonly [number, number]> = [];
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x + 1 < width; x += 1) pairs.push([y * width + x, y * width + x + 1]);
-  }
-  return pairs;
-}
-
-function listVerticalNeighbourPairs(width: number, height: number): Array<readonly [number, number]> {
-  const pairs: Array<readonly [number, number]> = [];
-  for (let y = 0; y + 1 < height; y += 1) {
-    for (let x = 0; x < width; x += 1) pairs.push([y * width + x, (y + 1) * width + x]);
-  }
-  return pairs;
-}
-
-function differencesAcrossPairs(
-  band: Float64Array,
-  pairs: ReadonlyArray<readonly [number, number]>,
-): Float64Array {
-  const differences = new Float64Array(pairs.length);
-  for (let i = 0; i < pairs.length; i += 1) differences[i] = band[pairs[i]![0]]! - band[pairs[i]![1]]!;
-  return differences;
-}
-
-function concatenateCentredDifferences(horizontal: Float64Array, vertical: Float64Array): Float64Array {
-  const centred = new Float64Array(horizontal.length + vertical.length);
-  centred.set(subtractMean(horizontal), 0);
-  centred.set(subtractMean(vertical), horizontal.length);
-  return centred;
-}
-
-function subtractMean(values: Float64Array): Float64Array {
-  if (values.length === 0) return values;
-  const mean = meanOfValues(values, values.length);
-  return values.map((value) => value - mean);
+function addMatrices(
+  left: ReadonlyArray<ReadonlyArray<number>>,
+  right: ReadonlyArray<ReadonlyArray<number>>,
+): number[][] {
+  return left.map((row, rowIndex) => row.map((value, columnIndex) => value + right[rowIndex]![columnIndex]!));
 }
 
 function buildNoiseWhiteningMatrix(noiseCovariance: ReadonlyArray<ReadonlyArray<number>>): number[][] {

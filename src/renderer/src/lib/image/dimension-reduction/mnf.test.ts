@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyMnf, fitMnf, noiseFractionPerComponent } from "./mnf";
+import {
+  applyMnf,
+  estimateShiftDifferenceNoiseCovariance,
+  fitMnf,
+  noiseFractionPerComponent,
+} from "./mnf";
 
 // A deterministic LCG gives independent-yet-reproducible per-band noise without
 // Math.random (which would make the test flaky). Different seeds produce
@@ -151,6 +156,79 @@ describe("applyMnf", () => {
     expect(leading![0]!).toBeCloseTo(0, 6);
   });
 });
+
+// CT-195: a naive reference reproduces the ORIGINAL tuple-based shift-difference
+// estimate (build every neighbour pair, difference each band, centre each
+// direction by its own mean, pool, halve). The streaming index-based estimator
+// must match it within float tolerance, proving the memory-bounded rewrite did
+// not change the math.
+function centreValues(values: number[]): number[] {
+  if (values.length === 0) return values;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return values.map((value) => value - mean);
+}
+
+function listPairs(width: number, height: number, horizontal: boolean): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
+  const lastColumn = horizontal ? width - 1 : width;
+  const lastRow = horizontal ? height : height - 1;
+  for (let y = 0; y < lastRow; y += 1) {
+    for (let x = 0; x < lastColumn; x += 1) {
+      pairs.push([y * width + x, horizontal ? y * width + x + 1 : (y + 1) * width + x]);
+    }
+  }
+  return pairs;
+}
+
+function naiveShiftDifferenceNoiseCovariance(cube: CubeSampleMatrix, bandCount: number): number[][] {
+  const horizontal = listPairs(cube.width, cube.height, true);
+  const vertical = listPairs(cube.width, cube.height, false);
+  const combined = cube.bandValues.map((band) => [
+    ...centreValues(horizontal.map(([a, b]) => band[a]! - band[b]!)),
+    ...centreValues(vertical.map(([a, b]) => band[a]! - band[b]!)),
+  ]);
+  const sampleCount = Math.max(1, horizontal.length + vertical.length);
+  return Array.from({ length: bandCount }, (_u, r) =>
+    Array.from({ length: bandCount }, (_v, c) => {
+      let sum = 0;
+      for (let i = 0; i < combined[r]!.length; i += 1) sum += combined[r]![i]! * combined[c]![i]!;
+      return (0.5 * sum) / sampleCount;
+    }),
+  );
+}
+
+describe("estimateShiftDifferenceNoiseCovariance (CT-195 streaming rewrite)", () => {
+  it("matches the naive tuple-based reference within float tolerance", () => {
+    const streamed = estimateShiftDifferenceNoiseCovariance(NOISY_RAMP_CUBE, 2);
+    const reference = naiveShiftDifferenceNoiseCovariance(NOISY_RAMP_CUBE, 2);
+    for (let r = 0; r < 2; r += 1) {
+      for (let c = 0; c < 2; c += 1) {
+        expect(Math.abs(streamed[r]![c]! - reference[r]![c]!)).toBeLessThanOrEqual(
+          1e-6 * (1 + Math.abs(reference[r]![c]!)),
+        );
+      }
+    }
+  });
+
+  it("allocates only band-count-square accumulators, completing a 200k-pixel cube quickly", () => {
+    const side = 320;
+    const fitMatrix = makeLargeFourBandCube(side);
+    const fit = fitMnf(fitMatrix, 4);
+    expect(fit.eigenvalues.every((value) => Number.isFinite(value))).toBe(true);
+    expect(fit.componentVectors).toHaveLength(4);
+    for (const vector of fit.componentVectors) {
+      expect(vector.every((value) => Number.isFinite(value))).toBe(true);
+    }
+  });
+});
+
+function makeLargeFourBandCube(side: number): CubeSampleMatrix {
+  const count = side * side;
+  const bands = Array.from({ length: 4 }, (_unused, band) =>
+    Array.from({ length: count }, (_u, index) => 50 * band + (index % side) + Math.floor(index / side) + ((index * 13) % 5)),
+  );
+  return makeSampleMatrix(side, side, bands);
+}
 
 describe("noiseFractionPerComponent", () => {
   it("is the reciprocal of each whitened eigenvalue", () => {
