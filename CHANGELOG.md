@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.4.0](https://github.com/in-scope/ciag-toolbox/compare/v0.3.1...v0.4.0) (2026-06-23)
+
+
+### Features
+
+* **CT-180:** add shared dimension-reduction operation infrastructure ([bd18a78](https://github.com/in-scope/ciag-toolbox/commit/bd18a78bc9fe03187850cd0fb480cb8ffddfde54))
+* **CT-181:** add PCA transform with per-component variance readout ([d01426d](https://github.com/in-scope/ciag-toolbox/commit/d01426d3610ae353ad437ea96ad44f55cec0ac72))
+* **CT-182:** add ROI-fit-then-apply-to-whole for dimension-reduction transforms ([6c8aab3](https://github.com/in-scope/ciag-toolbox/commit/6c8aab3b5f306395bb7ab8eff068d118ddb51043))
+* **CT-183:** add MNF transform with per-component noise-fraction readout ([d9ef373](https://github.com/in-scope/ciag-toolbox/commit/d9ef3732b01870383b0cd0d1902ffe5d4b5273ba))
+* **CT-184:** add ICA transform with deterministic FastICA and recovered-source ordering ([2ad0062](https://github.com/in-scope/ciag-toolbox/commit/2ad0062db791fb67f0598008ffa926befbdf1db9))
+* **CT-186:** add live display-only preview for brightness/contrast sliders ([b5366e8](https://github.com/in-scope/ciag-toolbox/commit/b5366e870938fcc448e137e8f914498e251b3799))
+* **CT-187:** document band-range syntax in band-wise tool help text ([d6ed9e8](https://github.com/in-scope/ciag-toolbox/commit/d6ed9e80bf80d80d9fc2398fda5f2b98b4824d95))
+* **CT-188:** clear pinned spectra when cropping ([bf5e01d](https://github.com/in-scope/ciag-toolbox/commit/bf5e01d0716c548e09e8be71885f85248ac95efc))
+* **CT-189:** hide scope selector on single-band stacks ([307a2b9](https://github.com/in-scope/ciag-toolbox/commit/307a2b9b1ba146a829f297d473478015e9a016d2))
+* **CT-190:** reject RGB-to-grayscale on non-RGB input before opening a panel ([96f78ce](https://github.com/in-scope/ciag-toolbox/commit/96f78cef7112ba6a58545db7995aed14cec4180f))
+* **CT-192:** add whole-stack scope to the tone curve (one curve, all bands) ([736ad06](https://github.com/in-scope/ciag-toolbox/commit/736ad06d98bddd4123f06a8c4a2b07a255f8efd2))
+* **CT-193:** add per-panel fixed [0,1] float view toggle ([5c6dc62](https://github.com/in-scope/ciag-toolbox/commit/5c6dc628540fd65f661f0b07f770e44d4b242587))
+* **CT-194:** add clip by value (absolute) method to normalize ([7046ee2](https://github.com/in-scope/ciag-toolbox/commit/7046ee21c7a15dd5f7867ff6590c9f1c792425f0))
+
+
+### Bug Fixes
+
+* **CT-185b:** read pixel values under floating panel overlays ([1482d51](https://github.com/in-scope/ciag-toolbox/commit/1482d51f35de933750e41d687b59d3145210480a))
+* **CT-185c:** exclude the band-navigator overlay from the canvas brightness oracle ([f4ce651](https://github.com/in-scope/ciag-toolbox/commit/f4ce651fc81ce87d879f82e730995a96c56303e1))
+* **CT-195:** scale MNF components to unit length so they fit the half-float display texture ([7998b0d](https://github.com/in-scope/ciag-toolbox/commit/7998b0d6cebc30631937b8b4eec23f85e5279a66))
+* **CT-195:** stream MNF shift-difference noise covariance so large stacks don't OOM the renderer ([319b053](https://github.com/in-scope/ciag-toolbox/commit/319b0538d31aee56f203a0b76e3e6d2313d50d83))
+
+
+### Miscellaneous
+
+* release 0.4.0 ([30eae5e](https://github.com/in-scope/ciag-toolbox/commit/30eae5ee330cbb61ec42f50ebba153f3a551e999))
+
 ## [0.3.1](https://github.com/in-scope/ciag-toolbox/compare/v0.3.0...v0.3.1) (2026-06-16)
 
 
