@@ -2,6 +2,12 @@ export type BandRangeParseResult =
   | { readonly ok: true; readonly bandNumbers: number[] }
   | { readonly ok: false; readonly error: string };
 
+// CT-187: the single source of truth for how a band selection is written, shared by
+// every band-wise tool's input placeholder, help text, and the empty-input error so
+// the accepted syntax (comma lists + dash ranges, never colons) can never drift apart.
+export const BAND_RANGE_SYNTAX_EXAMPLES = "1,3,5 or 1-5,10";
+export const BAND_RANGE_SYNTAX_HINT = `Use commas to list bands and dashes for ranges (e.g. ${BAND_RANGE_SYNTAX_EXAMPLES}); ranges use dashes, not colons.`;
+
 interface BandRangeSpanEndpoints {
   readonly start: number;
   readonly end: number;
@@ -9,7 +15,7 @@ interface BandRangeSpanEndpoints {
 
 export function parseBandRangeText(text: string, bandCount: number): BandRangeParseResult {
   const tokens = splitBandRangeIntoTokens(text);
-  if (tokens.length === 0) return failBandRange("Enter at least one band (e.g. 1,3,5 or 1-5,10).");
+  if (tokens.length === 0) return failBandRange(`Enter at least one band (e.g. ${BAND_RANGE_SYNTAX_EXAMPLES}).`);
   const collected: number[] = [];
   for (const token of tokens) {
     const tokenResult = parseSingleBandRangeToken(token, bandCount);

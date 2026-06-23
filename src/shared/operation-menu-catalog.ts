@@ -127,6 +127,15 @@ const DATA_GROUP: OperationGroup = {
   ],
 };
 
+const DIMENSION_REDUCTION_GROUP: OperationGroup = {
+  key: "dimension-reduction",
+  commands: [
+    buildMenuAndToolbarCommand("pca", "PCA", "open-action-panel"),
+    buildMenuAndToolbarCommand("mnf", "MNF", "open-action-panel"),
+    buildMenuAndToolbarCommand("ica", "ICA", "open-action-panel"),
+  ],
+};
+
 export const EDIT_MENU: OperationMenu = {
   menuLabel: "Edit",
   groups: [SELECTION_GROUP, EDIT_REGION_GROUP],
@@ -134,7 +143,14 @@ export const EDIT_MENU: OperationMenu = {
 
 export const IMAGE_MENU: OperationMenu = {
   menuLabel: "Image",
-  groups: [ADJUST_GROUP, COLOR_GROUP, TRANSFORM_GROUP, CALIBRATE_GROUP, DATA_GROUP],
+  groups: [
+    ADJUST_GROUP,
+    COLOR_GROUP,
+    TRANSFORM_GROUP,
+    CALIBRATE_GROUP,
+    DATA_GROUP,
+    DIMENSION_REDUCTION_GROUP,
+  ],
 };
 
 export const OPERATION_MENUS: ReadonlyArray<OperationMenu> = [EDIT_MENU, IMAGE_MENU];

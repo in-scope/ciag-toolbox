@@ -22,6 +22,7 @@ import {
 
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
+  readonly floatDisplayUsesFixedUnitWindow: boolean;
   readonly lastAppliedOperationLabel: string | null;
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
@@ -42,6 +43,7 @@ export const EMPTY_TONE_CURVE_CHANNEL_ANCHORS: ToneCurveChannelAnchors = Object.
 
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
+  floatDisplayUsesFixedUnitWindow: false,
   lastAppliedOperationLabel: null,
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
@@ -91,9 +93,33 @@ export type ViewportActionSecondaryOutputsTransform = (
   parameterValues: ParameterValuesById,
 ) => ReadonlyArray<ViewportActionOutput>;
 
-export type ApplyScope = "whole-image" | "roi";
+// CT-190: a pre-flight check that throws a user-facing Error when the action
+// cannot run against the given source (e.g. RGB-to-grayscale on a non-3-band
+// image). The apply flow runs it BEFORE reserving a result panel, so a doomed
+// operation surfaces its error without leaving a blank panel behind.
+export type ViewportActionSourceApplicabilityCheck = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => void;
+
+// CT-192: "whole-stack" applies one operation across every band of a stack (the tone
+// curve's whole-stack scope). "whole-image" still means the selected band over the full
+// spatial extent; "roi" limits the operation to a selected region.
+export type ApplyScope = "whole-image" | "roi" | "whole-stack";
 
 export const DEFAULT_APPLY_SCOPE: ApplyScope = "whole-image";
+
+// CT-192: an action can offer a custom set of scope options (label + scope). Actions
+// without a custom set fall back to the default "Whole stack | Region of interest" pair.
+export interface ApplyScopeOption {
+  readonly scope: ApplyScope;
+  readonly label: string;
+}
+
+export const DEFAULT_APPLY_SCOPE_OPTIONS: ReadonlyArray<ApplyScopeOption> = Object.freeze([
+  { scope: "whole-image", label: "Whole stack" },
+  { scope: "roi", label: "Region of interest" },
+]);
 
 export interface ViewportAction {
   readonly id: string;

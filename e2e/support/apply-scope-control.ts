@@ -13,13 +13,22 @@ import { operationPanel } from "./operations";
 export const APPLY_SCOPE_GROUP_NAME = "Apply to";
 export const WHOLE_STACK_SCOPE_LABEL = "Whole stack";
 export const REGION_OF_INTEREST_SCOPE_LABEL = "Region of interest";
+// CT-192: the tone curve relabels the whole-image scope "Full image" and adds a
+// distinct "Whole stack" scope (one curve shape across every band).
+export const FULL_IMAGE_SCOPE_LABEL = "Full image";
 
 export function applyScopeFieldset(page: Page, operationLabel: string): Locator {
   return operationPanel(page, operationLabel).getByRole("group", { name: APPLY_SCOPE_GROUP_NAME });
 }
 
-function applyScopeRadio(page: Page, operationLabel: string, scopeLabel: string): Locator {
+export function applyScopeRadio(page: Page, operationLabel: string, scopeLabel: string): Locator {
   return applyScopeFieldset(page, operationLabel).getByRole("radio", { name: scopeLabel });
+}
+
+export async function selectFullImageScope(page: Page, operationLabel: string): Promise<void> {
+  const radio = applyScopeRadio(page, operationLabel, FULL_IMAGE_SCOPE_LABEL);
+  await radio.check();
+  await expect(radio).toBeChecked();
 }
 
 export async function selectRegionOfInterestScope(page: Page, operationLabel: string): Promise<void> {

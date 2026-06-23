@@ -14,6 +14,7 @@ import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
 import {
   applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
+  applyToneCurveToWholeStackPerBandMinMax,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -57,6 +58,7 @@ import {
 } from "@/lib/image/apply-normalize";
 import {
   applyRgbToGrayscale,
+  assertRasterIsThreeBandRgb,
   LUMINANCE_GRAYSCALE_WEIGHTS,
   type RgbToGrayscaleWeights,
 } from "@/lib/image/apply-rgb-to-grayscale";
@@ -67,6 +69,7 @@ import {
   parseBandRangeText,
 } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
 import {
   readRememberedReferenceRasterOrNull,
 } from "@/lib/image/reference-raster-store";
@@ -84,10 +87,12 @@ import {
   NO_RASTER_REFERENCE_SELECTED,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
+  readClipBoundOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
+  type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
   type IntegerParameterSchema,
@@ -104,9 +109,11 @@ import {
 } from "./operation-region";
 import type {
   ApplyScope,
+  ApplyScopeOption,
   ViewportAction,
   ViewportActionOutput,
   ViewportActionSecondaryOutputsTransform,
+  ViewportActionSourceApplicabilityCheck,
   ViewportActionSourceTransform,
 } from "./viewport-action";
 import {
@@ -114,6 +121,15 @@ import {
   EMPTY_REMOVED_BAND_INDEXES,
   type ViewportRenderingState,
 } from "./viewport-action";
+import {
+  resolveToneCurveApplyScopeOptions,
+  TONE_CURVE_SCOPE_PARAMETER_ID,
+  TONE_CURVE_WHOLE_STACK_SCOPE_LABEL,
+  WHOLE_STACK_TONE_CURVE_SCOPE_VALUE,
+} from "./tone-curve-scope";
+import { PCA_ACTION } from "./pca-action";
+import { MNF_ACTION } from "./mnf-action";
+import { ICA_ACTION } from "./ica-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -137,6 +153,14 @@ export interface RegisteredViewportAction extends ViewportAction {
    * "Apply to" scope selector and then selects the region (CT-095).
    */
   readonly supportsRoiScope?: boolean;
+  /**
+   * CT-192: a custom set of "Apply to" scope options for this action, resolved against
+   * the source band count (e.g. the tone curve drops "Whole stack" for a single band).
+   * Actions without this fall back to DEFAULT_APPLY_SCOPE_OPTIONS.
+   */
+  readonly resolveApplyScopeOptions?: (
+    bandCount: number | null,
+  ) => ReadonlyArray<ApplyScopeOption>;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
     rawParameterValues: ParameterValuesById,
@@ -155,6 +179,12 @@ export interface RegisteredViewportAction extends ViewportAction {
    * placed in its own fresh viewport with its own applied label (CT-097).
    */
   readonly transformSourceToSecondaryOutputs?: ViewportActionSecondaryOutputsTransform;
+  /**
+   * CT-190: throws a user-facing Error when the action cannot run against the
+   * source, checked BEFORE the apply flow reserves a result panel so a failure
+   * opens no blank panel and records no History entry.
+   */
+  readonly assertCanApplyToSource?: ViewportActionSourceApplicabilityCheck;
 }
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
@@ -286,7 +316,17 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
 function clearRegionAndStaleInspectionRoiAfterCrop(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
-  return { ...state, operationRegion: null, roi: null };
+  return clearPinnedSpectraFromState({ ...state, operationRegion: null, roi: null });
+}
+
+export function clearPinnedSpectraFromState(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return {
+    ...state,
+    pinnedSpectra: EMPTY_PINNED_SPECTRA,
+    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
+  };
 }
 
 const CROP_REGION_PARAMETER_IDS = {
@@ -352,14 +392,12 @@ export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
 };
 
 function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return {
+  return clearPinnedSpectraFromState({
     ...state,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     selectedBandIndex: 0,
-    pinnedSpectra: EMPTY_PINNED_SPECTRA,
-    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     isBandSubsetEditModeActive: false,
-  };
+  });
 }
 
 function clearBandSubsetEditModeFromSource(
@@ -617,6 +655,7 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   appliedLabel: "Tone curve",
   loadingMessage: "Applying tone curve...",
   supportsRoiScope: true,
+  resolveApplyScopeOptions: resolveToneCurveApplyScopeOptions,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
   apply: clearToneCurveAfterApply,
@@ -640,7 +679,19 @@ function prepareToneCurveParameterValues(
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
   const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
-  return injectToneCurveRegionIfPresent(withChannels, resolveToneCurveRegion(sourceRenderingState, applyScope));
+  const withScope = withToneCurveWholeStackScope(withChannels, applyScope);
+  return injectToneCurveRegionIfPresent(withScope, resolveToneCurveRegion(sourceRenderingState, applyScope));
+}
+
+// CT-192: mark a whole-stack apply so the transform bakes every band and the History
+// entry records the scope. Whole stack and ROI are mutually exclusive (ROI never injects
+// a region for the whole-stack scope, see resolveToneCurveRegion).
+function withToneCurveWholeStackScope(
+  parameterValues: ParameterValuesById,
+  applyScope: ApplyScope,
+): ParameterValuesById {
+  if (applyScope !== "whole-stack") return parameterValues;
+  return { ...parameterValues, [TONE_CURVE_SCOPE_PARAMETER_ID]: WHOLE_STACK_TONE_CURVE_SCOPE_VALUE };
 }
 
 // CT-178: for a true-colour composite, record the canonical full channel map so
@@ -726,8 +777,26 @@ function createToneCurveSourceTransform(): ViewportActionSourceTransform {
     if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
       return { kind: "raster", raster: bakeCompositeToneCurve(source.raster, channelAnchors, region) };
     }
+    if (isWholeStackToneCurveScope(parameterValues)) {
+      return { kind: "raster", raster: bakeWholeStackToneCurve(source.raster, parameterValues) };
+    }
     return { kind: "raster", raster: bakeSingleBandToneCurve(source.raster, parameterValues, region) };
   };
+}
+
+function isWholeStackToneCurveScope(parameterValues: ParameterValuesById): boolean {
+  return parameterValues[TONE_CURVE_SCOPE_PARAMETER_ID] === WHOLE_STACK_TONE_CURVE_SCOPE_VALUE;
+}
+
+// CT-192: bake the same curve SHAPE into every band, each normalized by its own min/max.
+// The viewed band fixes the shape, so a single-band stack matches the Full image path.
+function bakeWholeStackToneCurve(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): RasterImage {
+  const bandIndex = readToneCurveBandIndex(parameterValues);
+  const anchors = readToneCurveAnchorsOrThrow(parameterValues);
+  return applyToneCurveToWholeStackPerBandMinMax(raster, bandIndex, anchors);
 }
 
 function bakeSingleBandToneCurve(
@@ -793,7 +862,12 @@ function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): stri
   const label = channelAnchors
     ? formatCompositeToneCurveLabel(channelAnchors)
     : formatSingleBandToneCurveLabel(parameterValues);
-  return appendToneCurveRegionSuffix(label, parameterValues);
+  return appendToneCurveRegionSuffix(appendToneCurveWholeStackSuffix(label, parameterValues), parameterValues);
+}
+
+function appendToneCurveWholeStackSuffix(label: string, parameterValues: ParameterValuesById): string {
+  if (!isWholeStackToneCurveScope(parameterValues)) return label;
+  return `${label} on ${TONE_CURVE_WHOLE_STACK_SCOPE_LABEL}`;
 }
 
 function formatSingleBandToneCurveLabel(parameterValues: ParameterValuesById): string {
@@ -921,7 +995,7 @@ function readBrightnessContrastTargetBandIndex(parameterValues: ParameterValuesB
   return Math.max(0, Math.round(raw));
 }
 
-function readBrightnessPercent(parameterValues: ParameterValuesById): number {
+export function readBrightnessPercent(parameterValues: ParameterValuesById): number {
   const raw = parameterValues[BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     return BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_SCHEMA.defaultValue;
@@ -929,7 +1003,7 @@ function readBrightnessPercent(parameterValues: ParameterValuesById): number {
   return raw;
 }
 
-function readContrastRatio(parameterValues: ParameterValuesById): number {
+export function readContrastRatio(parameterValues: ParameterValuesById): number {
   const raw = parameterValues[BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID];
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     return BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA.defaultValue;
@@ -1055,8 +1129,12 @@ const NORMALIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const NORMALIZE_METHOD_PARAMETER_ID = "method";
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID = "highPercentile";
+const NORMALIZE_CLIP_BOUNDS_PARAMETER_ID = "clipBounds";
+const NORMALIZE_CLIP_LOW_PARAMETER_ID = "clipLow";
+const NORMALIZE_CLIP_HIGH_PARAMETER_ID = "clipHigh";
 const MIN_MAX_METHOD_VALUE = "min-max";
 const ROBUST_PERCENTILE_METHOD_VALUE = "robust-percentile";
+const CLIP_ABSOLUTE_METHOD_VALUE = "clip-absolute";
 
 const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
@@ -1073,11 +1151,12 @@ const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
   id: NORMALIZE_METHOD_PARAMETER_ID,
   label: "Method",
   description:
-    "Min-max uses the absolute min and max. Robust uses the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1).",
+    "Min-max scales by the absolute min and max. Robust scales by the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1). Clip by value clamps to an absolute low/high range, keeping the data type and in-range values.",
   defaultValue: MIN_MAX_METHOD_VALUE,
   options: [
     { value: MIN_MAX_METHOD_VALUE, label: "Min-max (absolute)" },
     { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Robust (percentile clip)" },
+    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value (absolute)" },
   ],
 };
 
@@ -1090,6 +1169,7 @@ const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   min: 0,
   max: 100,
   step: 0.5,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
 };
 
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
@@ -1101,6 +1181,22 @@ const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   min: 0,
   max: 100,
   step: 0.5,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
+};
+
+const NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
+  kind: "clip-bounds",
+  id: NORMALIZE_CLIP_BOUNDS_PARAMETER_ID,
+  label: "Clip range",
+  description:
+    "Values below the low value clamp to it and values above the high value clamp to it. The data type and in-range values are kept.",
+  loParameterId: NORMALIZE_CLIP_LOW_PARAMETER_ID,
+  hiParameterId: NORMALIZE_CLIP_HIGH_PARAMETER_ID,
+  loLabel: "Clip low",
+  hiLabel: "Clip high",
+  defaultLo: 0,
+  defaultHi: 1,
+  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: CLIP_ABSOLUTE_METHOD_VALUE },
 };
 
 export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
@@ -1112,6 +1208,7 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
     NORMALIZE_METHOD_PARAMETER_SCHEMA,
     NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA,
     NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA,
+    NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA,
   ],
   successMessage: "Normalize applied",
   appliedLabel: "Normalize",
@@ -1158,14 +1255,28 @@ function resolveNormalizeScopeSelection(
 }
 
 function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
-  if (parameterValues[NORMALIZE_METHOD_PARAMETER_ID] !== ROBUST_PERCENTILE_METHOD_VALUE) {
-    return MIN_MAX_NORMALIZE_METHOD;
-  }
+  const method = parameterValues[NORMALIZE_METHOD_PARAMETER_ID];
+  if (method === CLIP_ABSOLUTE_METHOD_VALUE) return resolveClipAbsoluteMethod(parameterValues);
+  if (method === ROBUST_PERCENTILE_METHOD_VALUE) return resolveRobustPercentileMethod(parameterValues);
+  return MIN_MAX_NORMALIZE_METHOD;
+}
+
+function resolveRobustPercentileMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
   return {
     kind: "percentile",
     bounds: {
       lowPercentile: readNormalizePercentile(parameterValues, NORMALIZE_LOW_PERCENTILE_PARAMETER_ID, 2),
       highPercentile: readNormalizePercentile(parameterValues, NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID, 98),
+    },
+  };
+}
+
+function resolveClipAbsoluteMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
+  return {
+    kind: "clip-absolute",
+    bounds: {
+      lo: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_LOW_PARAMETER_ID], 0),
+      hi: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_HIGH_PARAMETER_ID], 1),
     },
   };
 }
@@ -1186,6 +1297,10 @@ function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): num
 }
 
 function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
+  const method = resolveNormalizeRangeMethod(parameterValues);
+  if (method.kind === "clip-absolute") {
+    return `Clip to [${method.bounds.lo}, ${method.bounds.hi}] (${formatNormalizeScopeLabel(parameterValues)})`;
+  }
   return `Normalize to [0,1] (${formatNormalizeScopeLabel(parameterValues)}${formatNormalizeMethodSuffix(parameterValues)})`;
 }
 
@@ -1203,7 +1318,7 @@ function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string
 
 function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
   const method = resolveNormalizeRangeMethod(parameterValues);
-  if (method.kind === "min-max") return "";
+  if (method.kind !== "percentile") return "";
   return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 
@@ -1407,8 +1522,13 @@ export const RGB_TO_GRAYSCALE_ACTION: RegisteredViewportAction = {
   appliedLabel: "RGB to grayscale",
   formatAppliedLabel: formatRgbToGrayscaleAppliedLabel,
   apply: resetToSingleBandAfterGrayscaleApply,
+  assertCanApplyToSource: assertRgbToGrayscaleSourceIsThreeBandRgb,
   transformSource: createRgbToGrayscaleSourceTransform(),
 };
+
+function assertRgbToGrayscaleSourceIsThreeBandRgb(source: ViewportImageSource): void {
+  assertRasterIsThreeBandRgb(coerceViewportSourceToRasterSource(source).raster);
+}
 
 function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): ViewportRenderingState {
   return resetBandDependentStateAfterBandCountChange(state);
@@ -1417,14 +1537,12 @@ function resetToSingleBandAfterGrayscaleApply(state: ViewportRenderingState): Vi
 function resetBandDependentStateAfterBandCountChange(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
-  return {
+  return clearPinnedSpectraFromState({
     ...state,
     selectedBandIndex: 0,
-    pinnedSpectra: EMPTY_PINNED_SPECTRA,
-    pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
     isBandSubsetEditModeActive: false,
-  };
+  });
 }
 
 function createRgbToGrayscaleSourceTransform(): ViewportActionSourceTransform {
@@ -1628,4 +1746,7 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   FALSE_COLOR_ACTION,
   ROTATE_ACTION,
   REFLECT_ACTION,
+  PCA_ACTION,
+  MNF_ACTION,
+  ICA_ACTION,
 ];

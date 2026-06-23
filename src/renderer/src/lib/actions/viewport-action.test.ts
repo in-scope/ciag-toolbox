@@ -62,6 +62,7 @@ describe("applyActionToSelectedViewports", () => {
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledTimes(1);
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledWith(1, {
       normalizationEnabled: true,
+      floatDisplayUsesFixedUnitWindow: false,
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,

@@ -26,6 +26,7 @@ export {
   setOpenInNewPanel,
   openInNewPanelSwitch,
   setOperationNumberParameter,
+  setOperationEnumParameter,
   cancelOperation,
   isApplyEnabled,
 } from "./operations";
@@ -90,6 +91,11 @@ export {
   toggleNormalizedViewing,
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
+export {
+  fixedUnitFloatViewToggle,
+  toggleFixedUnitFloatView,
+  expectFixedUnitFloatViewEnabled,
+} from "./fixed-unit-float-view";
 export {
   goToBandNumberInput,
   selectActiveBandNumber,
@@ -253,7 +259,10 @@ export {
   APPLY_SCOPE_GROUP_NAME,
   WHOLE_STACK_SCOPE_LABEL,
   REGION_OF_INTEREST_SCOPE_LABEL,
+  FULL_IMAGE_SCOPE_LABEL,
   applyScopeFieldset,
+  applyScopeRadio,
+  selectFullImageScope,
   selectRegionOfInterestScope,
   selectWholeStackScope,
 } from "./apply-scope-control";

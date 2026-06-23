@@ -58,6 +58,8 @@ import {
   ROTATE_ACTION,
   buildBandSubsetParameterValuesFromKeptNumbers,
   findGeometricTransformActionForChoice,
+  readBrightnessPercent,
+  readContrastRatio,
   readFalseColorBandAssignment,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
@@ -75,6 +77,7 @@ import {
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
+import { buildBrightnessContrastPreviewLutOrNull } from "@/lib/image/brightness-contrast-preview";
 import {
   buildComposedChannelPreviewLutOrNull,
   isCompositeToneCurvePreviewActive,
@@ -1733,10 +1736,10 @@ interface PublishActiveToolPreviewInputs {
 
 function usePublishActiveToolPreview(inputs: PublishActiveToolPreviewInputs): void {
   const falseColorSource = useFalseColorPreviewSource(inputs);
-  const toneCurveParts = useToneCurvePreviewParts(inputs);
+  const displayLutParts = useActiveToolDisplayLutPreviewParts(inputs);
   const sourceIndex = inputs.singleSelectedSource?.index ?? null;
   usePublishPreviewSourceForViewport(inputs.falseColorPreview.setPreview, falseColorSource, sourceIndex);
-  usePublishToneCurvePreviewForViewport(inputs.toneCurvePreview.setPreview, toneCurveParts, sourceIndex);
+  usePublishToneCurvePreviewForViewport(inputs.toneCurvePreview.setPreview, displayLutParts, sourceIndex);
 }
 
 function useFalseColorPreviewSource(
@@ -1773,13 +1776,36 @@ interface ToneCurvePreviewParts {
   readonly channelLookupTables: ToneCurveChannelPreviewLuts | null;
 }
 
-function useToneCurvePreviewParts(inputs: PublishActiveToolPreviewInputs): ToneCurvePreviewParts {
-  const raster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
+function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInputs): ToneCurvePreviewParts {
+  const toneCurveRaster = resolveActiveToolRasterOrNull(inputs, "tone-curve");
   const index = inputs.singleSelectedSource?.index ?? null;
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
-  const lookupTable = useSingleBandToneCurvePreviewLut(raster, state);
-  const channelLookupTables = useCompositeToneCurvePreviewLuts(raster, state);
+  const toneCurveLut = useSingleBandToneCurvePreviewLut(toneCurveRaster, state);
+  const brightnessContrastLut = useBrightnessContrastPreviewLut(inputs, state);
+  const channelLookupTables = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
+  const lookupTable = toneCurveLut ?? brightnessContrastLut;
   return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
+}
+
+// CT-186: brightness/contrast previews through the SAME single-band display LUT slot
+// the tone curve uses (only one tool is open at a time). It tracks the VIEWED band
+// only - even when "Apply to all bands" is on - and stays display-only until Apply.
+function useBrightnessContrastPreviewLut(
+  inputs: PublishActiveToolPreviewInputs,
+  state: ViewportRenderingState | null,
+): ReadonlyArray<number> | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "brightness-contrast");
+  const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
+  const bandIndex = state?.selectedBandIndex ?? 0;
+  const brightnessPercent = readBrightnessPercent(inputs.parameterValues);
+  const contrastRatio = readContrastRatio(inputs.parameterValues);
+  return useMemo(
+    () =>
+      isComposite
+        ? null
+        : buildBrightnessContrastPreviewLutOrNull(raster, bandIndex, brightnessPercent, contrastRatio),
+    [isComposite, raster, bandIndex, brightnessPercent, contrastRatio],
+  );
 }
 
 function useSingleBandToneCurvePreviewLut(

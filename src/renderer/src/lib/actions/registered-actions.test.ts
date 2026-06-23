@@ -12,9 +12,11 @@ import {
   ROTATE_ACTION,
   SPECTRALON_ACTION,
   TONE_CURVE_ACTION,
+  clearPinnedSpectraFromState,
   findGeometricTransformActionForChoice,
   type RegisteredViewportAction,
 } from "./registered-actions";
+import type { PinnedPixelSpectrum, PinnedRoiMeanSpectrum } from "@/lib/image/spectrum-entry";
 
 function readEnumParameterOptionValues(action: RegisteredViewportAction): string[] {
   const parameter = action.parameters?.[0];
@@ -46,6 +48,9 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "false-color",
       "rotate",
       "reflect",
+      "pca",
+      "mnf",
+      "ica",
     ]);
   });
 
@@ -235,7 +240,46 @@ describe("TONE_CURVE_ACTION", () => {
     expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
   });
+
+  // CT-192: whole-stack scope bakes the same curve shape into every band, each
+  // normalized by its own min/max, and records the scope in the applied label.
+  const doublingAnchors = [
+    { input: 0, output: 0 },
+    { input: 100, output: 200 },
+  ];
+
+  it("records the Whole stack scope in the applied label", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points) on Whole stack");
+  });
+
+  it("bakes every band through the curve shape normalized by its own min/max under Whole stack scope", () => {
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: doublingAnchors };
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
+    const stack = makeTwoBandScientificStack([0, 100], [10, 30]);
+    const result = TONE_CURVE_ACTION.transformSource!(
+      { kind: "raster", raster: stack },
+      prepared,
+    ) as { raster: RasterImage };
+    expect(Array.from(result.raster.bandPixels[0]!)).toEqual([0, 200]);
+    expect(Array.from(result.raster.bandPixels[1]!)).toEqual([10, 50]);
+  });
 });
+
+function makeTwoBandScientificStack(
+  band0: ReadonlyArray<number>,
+  band1: ReadonlyArray<number>,
+): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from(band0), Uint8Array.from(band1)],
+    width: band0.length,
+    height: 1,
+    bandCount: 2,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+  };
+}
 
 function makeRgbCompositeRaster(): RasterImage {
   return {
@@ -263,6 +307,20 @@ function makeThreeBandScientificStack(): RasterImage {
 describe("region-requesting operations (CT-095)", () => {
   const operationRegion = { imagePixelX0: 2, imagePixelY0: 3, imagePixelX1: 7, imagePixelY1: 8 };
   const staleInspectionRoi = { imagePixelX0: 90, imagePixelY0: 90, imagePixelX1: 95, imagePixelY1: 95 };
+  const pinnedPixelSpectrum: PinnedPixelSpectrum = {
+    kind: "pixel",
+    id: "pin-1",
+    imagePixelX: 91,
+    imagePixelY: 92,
+    bandValues: [10, 20, 30],
+  };
+  const pinnedRoiSpectrum: PinnedRoiMeanSpectrum = {
+    kind: "roi-mean",
+    id: "roi-1",
+    samplePixelCount: 4,
+    bandMeans: [11, 21, 31],
+    bandStandardDeviations: [1, 1, 1],
+  };
 
   it("crop is always available to open: it requests its region in-flow, not from a pre-existing ROI", () => {
     expect(CROP_TO_REGION_ACTION.isAvailableForActiveViewport).toBeUndefined();
@@ -273,6 +331,16 @@ describe("region-requesting operations (CT-095)", () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi: staleInspectionRoi, operationRegion };
     const prepared = CROP_TO_REGION_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
     expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(prepared)).toBe("Crop to (2, 3) - (7, 8)");
+  });
+
+  it("crop label records the four corner pixel coordinates verbatim (CT-191)", () => {
+    const corners = { imagePixelX0: 12, imagePixelY0: 34, imagePixelX1: 56, imagePixelY1: 78 };
+    expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(corners)).toBe("Crop to (12, 34) - (56, 78)");
+  });
+
+  it("crop label canonicalizes swapped corners so the label always reads top-left to bottom-right", () => {
+    const swappedCorners = { imagePixelX0: 56, imagePixelY0: 78, imagePixelX1: 12, imagePixelY1: 34 };
+    expect(CROP_TO_REGION_ACTION.formatAppliedLabel!(swappedCorners)).toBe("Crop to (12, 34) - (56, 78)");
   });
 
   it("crop rejects apply when no per-operation region was selected, even if an inspection ROI exists", () => {
@@ -287,6 +355,31 @@ describe("region-requesting operations (CT-095)", () => {
     const after = CROP_TO_REGION_ACTION.apply(state, {});
     expect(after.operationRegion).toBeNull();
     expect(after.roi).toBeNull();
+  });
+
+  it("crop clears both pinned-spectrum lists so no stale pins survive the band/coordinate change", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      operationRegion,
+      pinnedSpectra: [pinnedPixelSpectrum],
+      pinnedRoiSpectra: [pinnedRoiSpectrum],
+    };
+    const after = CROP_TO_REGION_ACTION.apply(state, {});
+    expect(after.pinnedSpectra).toEqual([]);
+    expect(after.pinnedRoiSpectra).toEqual([]);
+  });
+
+  it("clearPinnedSpectraFromState empties both pin lists without mutating the input", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      pinnedSpectra: [pinnedPixelSpectrum],
+      pinnedRoiSpectra: [pinnedRoiSpectrum],
+    };
+    const after = clearPinnedSpectraFromState(state);
+    expect(after.pinnedSpectra).toEqual([]);
+    expect(after.pinnedRoiSpectra).toEqual([]);
+    expect(state.pinnedSpectra).toEqual([pinnedPixelSpectrum]);
+    expect(state.pinnedRoiSpectra).toEqual([pinnedRoiSpectrum]);
   });
 
   it("crop keeps the untouched source's inspection ROI when applied to a duplicate", () => {

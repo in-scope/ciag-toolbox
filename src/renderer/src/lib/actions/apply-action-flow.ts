@@ -10,6 +10,7 @@ import {
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import type { ViewportActionOutput, ViewportRenderingState } from "@/lib/actions/viewport-action";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
@@ -258,6 +259,7 @@ export function applyActionToDuplicateOfSource(
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
+  if (reportActionCannotApplyToSourceBeforeOpeningPanel(action, sourceContent.source, parameterValues)) return;
   if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   bindings.setPendingDuplicate({
@@ -422,6 +424,25 @@ function writeViewportContentAtIndex(
   const updated = new Map(previous);
   updated.set(index, next);
   return updated;
+}
+
+// CT-190: surface an unappliable operation (e.g. RGB-to-grayscale on a non-RGB
+// image) as an error toast BEFORE any panel is reserved or the grid is expanded,
+// so a failure opens no blank panel and records no History entry. Returns true
+// when the apply flow must stop.
+function reportActionCannotApplyToSourceBeforeOpeningPanel(
+  action: RegisteredViewportAction,
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+): boolean {
+  if (!action.assertCanApplyToSource) return false;
+  try {
+    action.assertCanApplyToSource(source, parameterValues);
+    return false;
+  } catch (error) {
+    toast.error(formatActionErrorMessage(action.label, error));
+    return true;
+  }
 }
 
 function formatActionErrorMessage(actionLabel: string, error: unknown): string {

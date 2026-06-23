@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BAND_RANGE_SYNTAX_EXAMPLES,
+  BAND_RANGE_SYNTAX_HINT,
   describeBandRangeErrorOrNull,
   formatBandNumbersAsRangeText,
   parseBandRangeText,
@@ -80,6 +82,23 @@ describe("describeBandRangeErrorOrNull", () => {
 
   it("skips range validation when the band count is unknown", () => {
     expect(describeBandRangeErrorOrNull("1-5,10", null)).toBeNull();
+  });
+});
+
+describe("band-range syntax hint", () => {
+  it("documents both a comma list and a dash range example", () => {
+    expect(BAND_RANGE_SYNTAX_EXAMPLES).toContain("1,3,5");
+    expect(BAND_RANGE_SYNTAX_EXAMPLES).toContain("1-5,10");
+  });
+
+  it("warns that ranges use dashes, not colons", () => {
+    expect(BAND_RANGE_SYNTAX_HINT).toContain(BAND_RANGE_SYNTAX_EXAMPLES);
+    expect(BAND_RANGE_SYNTAX_HINT.toLowerCase()).toContain("not colons");
+  });
+
+  it("sources the empty-input error from the shared examples constant", () => {
+    const error = describeBandRangeErrorOrNull("", 10);
+    expect(error).toContain(BAND_RANGE_SYNTAX_EXAMPLES);
   });
 });
 

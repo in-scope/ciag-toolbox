@@ -140,6 +140,8 @@ function renderViewportCellViewport(
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
+      floatDisplayUsesFixedUnitWindow={settings.floatDisplayUsesFixedUnitWindow}
+      onToggleFixedUnitFloatView={settings.handleToggleFixedUnitFloatView}
       selectedBandIndex={settings.selectedBandIndex}
       onSelectBandIndex={settings.handleSelectBandIndex}
       onRemoveBand={settings.handleRemoveBand}
@@ -174,6 +176,8 @@ interface ViewportCellInteractionSettings {
   toneCurvePreviewChannelLookupTables: ToneCurveChannelPreviewLuts | null;
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
+  floatDisplayUsesFixedUnitWindow: boolean;
+  handleToggleFixedUnitFloatView: () => void;
   selectedBandIndex: number;
   handleSelectBandIndex: (bandIndex: number) => void;
   handleRemoveBand: (bandIndex: number) => void;
@@ -261,6 +265,14 @@ function useViewportCellInteractionSettings(
       }),
     [cellIndex, renderingState, setRenderingState],
   );
+  const handleToggleFixedUnitFloatView = useCallback(
+    () =>
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        floatDisplayUsesFixedUnitWindow: !renderingState.floatDisplayUsesFixedUnitWindow,
+      }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   const handleSelectBandIndex = useCallback(
     (bandIndex: number) =>
       setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
@@ -279,6 +291,8 @@ function useViewportCellInteractionSettings(
     toneCurvePreviewChannelLookupTables: getChannelLookupTablesForViewport(cellIndex),
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
+    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
+    handleToggleFixedUnitFloatView,
     selectedBandIndex: renderingState.selectedBandIndex,
     handleSelectBandIndex,
     handleRemoveBand,

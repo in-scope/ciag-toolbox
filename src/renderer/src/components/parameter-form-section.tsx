@@ -12,22 +12,36 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
-import { describeBandRangeErrorOrNull } from "@/lib/image/parse-band-range";
+import {
+  BAND_RANGE_SYNTAX_EXAMPLES,
+  BAND_RANGE_SYNTAX_HINT,
+  describeBandRangeErrorOrNull,
+} from "@/lib/image/parse-band-range";
 import {
   readReferenceTokenDisplayName,
   type ReferencePickerOption,
 } from "@/lib/image/reference-token";
 import {
+  formatComponentCountLabel,
+  resolveComponentCount,
+} from "@/lib/image/dimension-reduction/component-count";
+import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
+  describeClipBoundsErrorOrNull,
+  isParameterSchemaVisible,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
+  readClipBoundOrDefault,
   readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
+  shouldShowCubeScopeControl,
   NO_RASTER_REFERENCE_SELECTED,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
+  type ClipBoundsParameterSchema,
+  type ComponentCountParameterSchema,
   type CubeScopeChoice,
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
@@ -56,7 +70,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
         <ParameterFieldRow
           key={schema.id}
           schema={schema}
-          value={props.values[schema.id] ?? schema.defaultValue}
+          value={readParameterRowValue(schema, props.values)}
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
@@ -70,6 +84,13 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
 
 const EMPTY_REFERENCE_CANDIDATES: ReadonlyArray<ReferencePickerOption> = [];
 
+// A clip-bounds field owns two values keyed by its own ids, so it has no single
+// schema-level value/default; its component reads both from allValues instead.
+function readParameterRowValue(schema: ParameterSchema, values: ParameterValuesById): ParameterValue {
+  if (schema.kind === "clip-bounds") return values[schema.id] ?? 0;
+  return values[schema.id] ?? schema.defaultValue;
+}
+
 interface ParameterFieldRowProps {
   schema: ParameterSchema;
   value: ParameterValue;
@@ -80,7 +101,9 @@ interface ParameterFieldRowProps {
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
 
-function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
+function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
+  if (!isParameterSchemaVisible(props.schema, props.allValues)) return null;
+  if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <ParameterFieldInput
@@ -97,6 +120,10 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+function isHiddenCubeScopeRow(schema: ParameterSchema, sourceBandCount: number | null): boolean {
+  return schema.kind === "cube-scope" && !shouldShowCubeScopeControl(sourceBandCount);
 }
 
 function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
@@ -157,6 +184,25 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
         value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
         sourceBandCount={props.sourceBandCount}
         onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "component-count") {
+    return (
+      <ComponentCountParameterField
+        schema={props.schema}
+        value={readNumericValueOrDefault(props.value, props.schema.defaultValue)}
+        sourceBandCount={props.sourceBandCount}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "clip-bounds") {
+    return (
+      <ClipBoundsParameterField
+        schema={props.schema}
+        allValues={props.allValues}
+        onChangeValueAtId={props.onChangeValueAtId}
       />
     );
   }
@@ -258,6 +304,113 @@ function BandNumberParameterField(props: BandNumberParameterFieldProps): JSX.Ele
         className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
+    </label>
+  );
+}
+
+interface ComponentCountParameterFieldProps {
+  schema: ComponentCountParameterSchema;
+  value: number;
+  sourceBandCount: number | null;
+  onChangeValue: (next: number) => void;
+}
+
+function ComponentCountParameterField(props: ComponentCountParameterFieldProps): JSX.Element {
+  const id = useId();
+  const bandCount = props.sourceBandCount;
+  const displayValue = bandCount === null ? props.value : resolveComponentCount(props.value, bandCount);
+  return (
+    // The "X of N components" hint sits OUTSIDE the <label> so the input's accessible
+    // name stays exactly the field label, not the label plus the live hint text.
+    <div className="flex flex-col gap-1 text-sm">
+      <label htmlFor={id} className="text-foreground">
+        {props.schema.label}
+      </label>
+      <input
+        id={id}
+        type="number"
+        value={displayValue}
+        min={1}
+        max={bandCount ?? undefined}
+        step={1}
+        onChange={(event) =>
+          props.onChangeValue(
+            clampComponentCountInput(event.target.value, displayValue, bandCount),
+          )
+        }
+        className={NUMERIC_INPUT_CLASSES}
+      />
+      {bandCount !== null ? (
+        <span className="text-xs text-muted-foreground">
+          {formatComponentCountLabel(displayValue, bandCount)} components
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function clampComponentCountInput(
+  rawValue: string,
+  fallback: number,
+  bandCount: number | null,
+): number {
+  const parsed = parseNumericInputValueOrFallback(rawValue, fallback);
+  if (bandCount === null) return Math.max(1, Math.round(parsed));
+  return resolveComponentCount(parsed, bandCount);
+}
+
+interface ClipBoundsParameterFieldProps {
+  schema: ClipBoundsParameterSchema;
+  allValues: ParameterValuesById;
+  onChangeValueAtId: (id: string, next: ParameterValue) => void;
+}
+
+function ClipBoundsParameterField(props: ClipBoundsParameterFieldProps): JSX.Element {
+  const lo = readClipBoundOrDefault(props.allValues[props.schema.loParameterId], props.schema.defaultLo);
+  const hi = readClipBoundOrDefault(props.allValues[props.schema.hiParameterId], props.schema.defaultHi);
+  const error = describeClipBoundsErrorOrNull(lo, hi);
+  return (
+    <div className="flex flex-col gap-2">
+      <ClipBoundNumberInput
+        label={props.schema.loLabel}
+        value={lo}
+        invalid={error !== null}
+        onChangeValue={(next) => props.onChangeValueAtId(props.schema.loParameterId, next)}
+      />
+      <ClipBoundNumberInput
+        label={props.schema.hiLabel}
+        value={hi}
+        invalid={error !== null}
+        onChangeValue={(next) => props.onChangeValueAtId(props.schema.hiParameterId, next)}
+      />
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+    </div>
+  );
+}
+
+interface ClipBoundNumberInputProps {
+  label: string;
+  value: number;
+  invalid: boolean;
+  onChangeValue: (next: number) => void;
+}
+
+function ClipBoundNumberInput(props: ClipBoundNumberInputProps): JSX.Element {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
+      <span className="text-foreground">{props.label}</span>
+      <input
+        id={id}
+        type="number"
+        value={props.value}
+        step="any"
+        aria-invalid={props.invalid}
+        onChange={(event) =>
+          props.onChangeValue(parseNumericInputValueOrFallback(event.target.value, props.value))
+        }
+        className={cn(NUMERIC_INPUT_CLASSES, props.invalid && "border-destructive focus:ring-destructive")}
+      />
     </label>
   );
 }
@@ -378,18 +531,23 @@ interface BandRangeTextInputProps {
 function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
   const id = useId();
   const rangeError = describeBandRangeErrorOrNull(props.value, props.sourceBandCount);
+  const hintId = `${id}-syntax-hint`;
   return (
     <div className="flex flex-col gap-1 pl-6 text-sm">
       <input
         id={id}
         type="text"
         value={props.value}
-        placeholder="1,3,5 or 1-5,10"
+        placeholder={BAND_RANGE_SYNTAX_EXAMPLES}
         aria-label="Bands to process"
+        aria-describedby={hintId}
         aria-invalid={rangeError !== null}
         onChange={(event) => props.onChangeValue(event.target.value)}
         className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
+      <span id={hintId} className="text-xs text-muted-foreground">
+        {BAND_RANGE_SYNTAX_HINT}
+      </span>
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </div>
   );
