@@ -40,5 +40,13 @@ function projectSingleSampleOntoComponentVector(
   for (let band = 0; band < samples.bandCount; band += 1) {
     value += componentVector[band]! * (samples.bandValues[band]![pixel]! - means[band]!);
   }
-  return value;
+  return finiteOrZero(value);
+}
+
+// A component band that is not finite (e.g. a non-finite source value or fit
+// vector reaching the projection) would render as a white/blank panel through the
+// float display texture (CT-195). Every dimension-reduction transform routes its
+// projection through here, so guarding it once keeps PCA/MNF/ICA output finite.
+function finiteOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
 }

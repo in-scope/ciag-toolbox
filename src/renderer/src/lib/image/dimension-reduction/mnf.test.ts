@@ -80,6 +80,62 @@ describe("fitMnf", () => {
   });
 });
 
+// CT-195: when the noise covariance is rank-deficient (e.g. two bands carrying
+// independent signals but the SAME correlated noise), the noise-whitening gain
+// (1 / sqrt(noise eigenvalue)) explodes along the signal-bearing noise null
+// space. Before the fix the data-space component vectors inherited that gain and
+// the projected component values reached ~1.5e6, which overflows the half-float
+// display texture (max ~65504) into Inf and a uniformly white panel. The float
+// values stayed finite, so the readout oracle and the collinear-fixture e2e never
+// caught it. The fix rescales each component vector to unit length, keeping the
+// components finite AND within the half-float display range while leaving the
+// eigenvalues / noise fractions intact.
+const HALF_FLOAT_MAX_FINITE = 65504;
+const RANK_DEFICIENT_SIDE = 24;
+const RANK_DEFICIENT_COUNT = RANK_DEFICIENT_SIDE * RANK_DEFICIENT_SIDE;
+
+// Same integer noise added to a horizontal-ramp band and a vertical-ramp band:
+// the per-direction-centred neighbour differences are identical across the two
+// bands, so the estimated noise covariance is singular and the (independent)
+// signals occupy its null space.
+function rankDeficientNoiseCube(): CubeSampleMatrix {
+  const sharedNoise = Array.from({ length: RANK_DEFICIENT_COUNT }, (_u, i) => ((i * 7) % 3) - 1);
+  const horizontal = Array.from({ length: RANK_DEFICIENT_COUNT }, (_u, i) => 100 + 100 * (i % RANK_DEFICIENT_SIDE));
+  const vertical = Array.from(
+    { length: RANK_DEFICIENT_COUNT },
+    (_u, i) => 100 + 80 * Math.floor(i / RANK_DEFICIENT_SIDE),
+  );
+  const b0 = horizontal.map((value, i) => value + sharedNoise[i]!);
+  const b1 = vertical.map((value, i) => value + sharedNoise[i]!);
+  return makeSampleMatrix(RANK_DEFICIENT_SIDE, RANK_DEFICIENT_SIDE, [b0, b1]);
+}
+
+function vectorLength(vector: ReadonlyArray<number>): number {
+  return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+}
+
+describe("fitMnf on a rank-deficient-noise cube (CT-195 white-screen regression)", () => {
+  const cube = rankDeficientNoiseCube();
+
+  it("produces finite component vectors of unit length, not the exploded whitening scale", () => {
+    const fit = fitMnf(cube, 2);
+    for (const vector of fit.componentVectors) {
+      expect(vector.every((value) => Number.isFinite(value))).toBe(true);
+      expect(vectorLength(vector)).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("keeps the projected components finite and within the half-float display range", () => {
+    const fit = fitMnf(cube, 2);
+    for (const band of applyMnf(cube, fit, 2)) {
+      for (const value of band) {
+        expect(Number.isFinite(value)).toBe(true);
+        expect(Math.abs(value)).toBeLessThan(HALF_FLOAT_MAX_FINITE);
+      }
+    }
+  });
+});
+
 describe("applyMnf", () => {
   it("keeps only the requested number of components", () => {
     const fit = fitMnf(NOISY_RAMP_CUBE, 2);

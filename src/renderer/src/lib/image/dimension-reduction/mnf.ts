@@ -207,8 +207,22 @@ function mapWhitenedVectorsIntoDataSpace(
   bandCount: number,
 ): number[][] {
   return whitenedEigenvectors.map((eigenvector) =>
-    applyTransposedWhitening(eigenvector, whitening, bandCount),
+    normalizeToUnitLength(applyTransposedWhitening(eigenvector, whitening, bandCount)),
   );
+}
+
+// The noise whitening scales each direction by 1 / sqrt(noise eigenvalue), so a
+// near-noise-free or rank-deficient cube gives the data-space component vector an
+// enormous norm and the projected component values overflow the half-float
+// display texture into white (CT-195). MNF only needs the noise-ordered
+// DIRECTION (the eigenvalue-derived noise fraction carries the strength), so
+// rescaling each vector to unit length keeps the components finite and
+// displayable - in data units, like PCA's unit eigenvectors - with no change to
+// the ordering or the noise-fraction readout.
+function normalizeToUnitLength(vector: ReadonlyArray<number>): number[] {
+  const length = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (!(length > 0)) return vector.map(() => 0);
+  return vector.map((value) => value / length);
 }
 
 function applyTransposedWhitening(

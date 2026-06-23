@@ -225,6 +225,37 @@ function channelSpreadExceedsGrayscaleThreshold(packedRgb: number): boolean {
   return Math.max(red, green, blue) - Math.min(red, green, blue) > GRAYSCALE_CHANNEL_SPREAD_THRESHOLD;
 }
 
+// CT-195: an MNF component that overflowed the half-float display texture renders
+// as a uniformly white panel - every sampled pixel is saturated white. A healthy
+// component renders as a stretched gradient with plenty of mid-tones, so only a
+// small slice of pixels is fully white. This reports the fraction of ALL sampled
+// pixels (band navigator masked out) that are near-pure-white, so a "not white
+// screen" assertion can require it to stay well below 1.
+const SATURATED_WHITE_CHANNEL_FLOOR = 250;
+
+export async function saturatedWhitePixelFraction(canvas: Locator): Promise<number> {
+  return computeSaturatedWhitePixelFraction(await decodeCanvasPixelsExcludingBandNavigator(canvas));
+}
+
+function computeSaturatedWhitePixelFraction(decoded: DecodedCanvasPixels): number {
+  let saturatedWhiteCount = 0;
+  let sampledPixelCount = 0;
+  const pixelCount = Math.floor(decoded.data.length / decoded.channels);
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (isPixelInsideMask(index, decoded.width, decoded.bandNavigatorMask)) continue;
+    sampledPixelCount += 1;
+    if (isSaturatedWhite(readPackedRgbAtPixel(decoded.data, index * decoded.channels))) saturatedWhiteCount += 1;
+  }
+  return sampledPixelCount === 0 ? 0 : saturatedWhiteCount / sampledPixelCount;
+}
+
+function isSaturatedWhite(packedRgb: number): boolean {
+  const red = (packedRgb >> 16) & 0xff;
+  const green = (packedRgb >> 8) & 0xff;
+  const blue = packedRgb & 0xff;
+  return red >= SATURATED_WHITE_CHANNEL_FLOOR && green >= SATURATED_WHITE_CHANNEL_FLOOR && blue >= SATURATED_WHITE_CHANNEL_FLOOR;
+}
+
 function readPackedRgbAtPixel(data: Buffer, offset: number): number {
   const red = data[offset] ?? 0;
   const green = data[offset + 1] ?? 0;
