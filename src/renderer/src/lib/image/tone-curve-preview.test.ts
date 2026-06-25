@@ -58,6 +58,25 @@ describe("buildToneCurvePreviewLutOrNull", () => {
     expect(lut!.every((entry) => entry > 0.999)).toBe(true);
   });
 
+  it("CT-198: a float band's default identity curve builds an even ramp over its OWN extents (no stretch)", () => {
+    const band = Float32Array.from([-0.05, 0.5855, 1.1, 0.42]);
+    const raster: RasterImage = {
+      bandPixels: [band],
+      width: 2,
+      height: 2,
+      bandCount: 1,
+      sampleFormat: "float",
+      bitsPerSample: 32,
+    };
+    const lut = buildToneCurvePreviewLutOrNull(raster, 0, [
+      { input: Math.fround(-0.05), output: Math.fround(-0.05) },
+      { input: Math.fround(1.1), output: Math.fround(1.1) },
+    ]);
+    expect(lut![0]).toBeCloseTo(0, 6);
+    expect(lut![TONE_CURVE_LUT_ENTRY_COUNT - 1]).toBeCloseTo(1, 6);
+    expect(lut![Math.floor((TONE_CURVE_LUT_ENTRY_COUNT - 1) / 2)]).toBeCloseTo(0.5, 2);
+  });
+
   it("returns null when there is no raster or fewer than two anchors", () => {
     const raster = makeSingleBandUint16Raster([100, 150, 200, 250]);
     expect(buildToneCurvePreviewLutOrNull(null, 0, IDENTITY_UINT16_ANCHORS)).toBeNull();

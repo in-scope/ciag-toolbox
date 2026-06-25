@@ -29,6 +29,7 @@ function buildAllFixtures() {
     multiBandTiff: buildMultiBandTwelveBitTiffFixture(),
     flatFieldReferenceTiff: buildSingleBandReferenceTiffFixture(),
     enviStack: buildEnviStackFixture(),
+    enviFloatStack: buildEnviFloatStackFixture(),
   };
 }
 
@@ -39,6 +40,8 @@ function writeAllFixtureFiles(fixtures) {
   writeFixtureFile(fixtures.flatFieldReferenceTiff.fileName, fixtures.flatFieldReferenceTiff.bytes);
   writeFixtureFile(fixtures.enviStack.headerFileName, fixtures.enviStack.headerBytes);
   writeFixtureFile(fixtures.enviStack.binaryFileName, fixtures.enviStack.binaryBytes);
+  writeFixtureFile(fixtures.enviFloatStack.headerFileName, fixtures.enviFloatStack.headerBytes);
+  writeFixtureFile(fixtures.enviFloatStack.binaryFileName, fixtures.enviFloatStack.binaryBytes);
 }
 
 function writeFixtureFile(fileName, bytes) {
@@ -225,6 +228,78 @@ function writeBandSequentialUint16Run(buffer, band, baseByteOffset) {
   }
 }
 
+// --- Single-file ENVI float32 stack (.hdr + binary), values straddling [0,1] --
+// CT-198: 4x4, 3 bands, float32 (data type 4), BSQ, little-endian. Band 0 is a
+// mostly-negative field (-1.0) with four bright (+1.5) pixels in the centre, so its
+// extents straddle [0,1] (some < 0, some > 1). Opening the Tone Curve panel on a float
+// band must NOT restretch it: with the float default-identity fix the negatives stay
+// black and only the four bright pixels light up, exactly as before the panel opened.
+
+const ENVI_FLOAT_WIDTH = 4;
+const ENVI_FLOAT_HEIGHT = 4;
+const ENVI_FLOAT_DATA_TYPE = 4;
+const ENVI_FLOAT_WAVELENGTHS = [500, 600, 700];
+const ENVI_FLOAT_DARK_VALUE = -1.0;
+const ENVI_FLOAT_BRIGHT_VALUE = 1.5;
+const ENVI_FLOAT_BRIGHT_INDICES = [5, 6, 9, 10];
+
+function buildEnviFloatStackFixture() {
+  const bands = [buildMostlyDarkFloatBandWithBrightCentre(), buildFloatRampBand(-0.5, 0.12), buildFloatRampBand(-0.8, 0.15)];
+  return {
+    headerFileName: "envi-float-stack.hdr",
+    binaryFileName: "envi-float-stack.bin",
+    width: ENVI_FLOAT_WIDTH,
+    height: ENVI_FLOAT_HEIGHT,
+    bands,
+    wavelengths: ENVI_FLOAT_WAVELENGTHS,
+    headerBytes: encodeEnviFloatHeaderBytes(),
+    binaryBytes: encodeEnviBandSequentialFloat32Binary(bands),
+  };
+}
+
+function buildMostlyDarkFloatBandWithBrightCentre() {
+  const band = new Float32Array(ENVI_FLOAT_WIDTH * ENVI_FLOAT_HEIGHT).fill(ENVI_FLOAT_DARK_VALUE);
+  for (const index of ENVI_FLOAT_BRIGHT_INDICES) band[index] = ENVI_FLOAT_BRIGHT_VALUE;
+  return band;
+}
+
+function buildFloatRampBand(base, step) {
+  const band = new Float32Array(ENVI_FLOAT_WIDTH * ENVI_FLOAT_HEIGHT);
+  for (let index = 0; index < band.length; index += 1) band[index] = base + index * step;
+  return band;
+}
+
+function encodeEnviFloatHeaderBytes() {
+  const lines = [
+    "ENVI",
+    `samples = ${ENVI_FLOAT_WIDTH}`,
+    `lines = ${ENVI_FLOAT_HEIGHT}`,
+    `bands = ${ENVI_FLOAT_WAVELENGTHS.length}`,
+    "header offset = 0",
+    "file type = ENVI Standard",
+    `data type = ${ENVI_FLOAT_DATA_TYPE}`,
+    "interleave = bsq",
+    "byte order = 0",
+    `wavelength = { ${ENVI_FLOAT_WAVELENGTHS.join(", ")} }`,
+  ];
+  return Buffer.from(`${lines.join("\n")}\n`, "utf-8");
+}
+
+function encodeEnviBandSequentialFloat32Binary(bands) {
+  const samplesPerBand = ENVI_FLOAT_WIDTH * ENVI_FLOAT_HEIGHT;
+  const buffer = Buffer.alloc(bands.length * samplesPerBand * 4);
+  bands.forEach((band, bandIndex) => {
+    writeBandSequentialFloat32Run(buffer, band, bandIndex * samplesPerBand * 4);
+  });
+  return buffer;
+}
+
+function writeBandSequentialFloat32Run(buffer, band, baseByteOffset) {
+  for (let index = 0; index < band.length; index += 1) {
+    buffer.writeFloatLE(band[index], baseByteOffset + index * 4);
+  }
+}
+
 // --- PNG encoding -----------------------------------------------------------
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -400,6 +475,21 @@ function buildFixtureManifest(fixtures) {
     multiBandTiff: describeStackFixture(fixtures.multiBandTiff, "uint16"),
     flatFieldReferenceTiff: describeStackFixture(fixtures.flatFieldReferenceTiff, "uint16"),
     enviStack: describeEnviFixture(fixtures.enviStack),
+    enviFloatStack: describeEnviFloatFixture(fixtures.enviFloatStack),
+  };
+}
+
+function describeEnviFloatFixture(fixture) {
+  return {
+    headerFileName: fixture.headerFileName,
+    binaryFileName: fixture.binaryFileName,
+    width: fixture.width,
+    height: fixture.height,
+    bandCount: fixture.bands.length,
+    dataType: "float32",
+    wavelengths: fixture.wavelengths,
+    bandMeans: fixture.bands.map(computeMean),
+    samplePixels: buildStackCornerSamplePixels(fixture.bands, fixture.width, fixture.height),
   };
 }
 

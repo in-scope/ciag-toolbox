@@ -8,6 +8,7 @@ import {
   buildMonotoneToneCurve,
   buildToneCurveLookupTable,
   evaluateToneCurveAtInput,
+  toneCurveOutputRangeForBand,
   type ToneCurveAnchor,
 } from "./apply-tone-curve";
 import { applyBlackWhitePointsToRasterBand } from "./apply-black-white-points";
@@ -134,6 +135,23 @@ describe("applyToneCurveToRasterBand", () => {
       { input: 64, output: 255 },
     ]);
     expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 128, 255]);
+  });
+
+  it("CT-198: applying the untouched float default identity curve leaves out-of-[0,1] data unchanged", () => {
+    const band = Float32Array.from([-0.05, 0.5855, 1.1, 0.42]);
+    const raster = makeSingleBandRaster(band, 2, 2, "float", 32);
+    const range = toneCurveOutputRangeForBand(raster, 0);
+    const result = applyToneCurveToRasterBand(raster, 0, [
+      { input: range.min, output: range.min },
+      { input: range.max, output: range.max },
+    ]);
+    expect(Array.from(result.bandPixels[0]!)).toEqual(Array.from(band));
+  });
+
+  it("CT-198: float output range is the band value extents; integer keeps the type container", () => {
+    const floatRaster = makeSingleBandRaster(Float32Array.from([-0.05, 1.1]), 2, 1, "float", 32);
+    expect(toneCurveOutputRangeForBand(floatRaster, 0)).toEqual({ min: Math.fround(-0.05), max: Math.fround(1.1) });
+    expect(toneCurveOutputRangeForBand(makeUint8Raster([10, 20], 2, 1), 0)).toEqual({ min: 0, max: 255 });
   });
 });
 
