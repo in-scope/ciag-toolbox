@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.2](https://github.com/in-scope/ciag-toolbox/compare/v0.4.1...v0.4.2) (2026-06-25)
+
+
+### Features
+
+* **CT-199:** editable endpoint input with gimp black/white-point semantics ([ebbc343](https://github.com/in-scope/ciag-toolbox/commit/ebbc343ad24cf770d802cb11178027f40e738b69))
+
+
+### Bug Fixes
+
+* **CT-198:** float tone curve opens as a true no-op identity ([0d1da73](https://github.com/in-scope/ciag-toolbox/commit/0d1da73b422977b3f4ede3263b61a6c708ea7d15))
+
+
+### Miscellaneous
+
+* release 0.4.2 ([42e469d](https://github.com/in-scope/ciag-toolbox/commit/42e469d6beb540ae27d85f166f4fe00e9967f06a))
+
 ## [0.4.1](https://github.com/in-scope/ciag-toolbox/compare/v0.4.0...v0.4.1) (2026-06-25)
 
 
