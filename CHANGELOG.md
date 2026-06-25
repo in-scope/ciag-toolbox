@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/in-scope/ciag-toolbox/compare/v0.4.0...v0.4.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **CT-196:** preserve wide integer-container values on 16-bit TIFF save ([522165f](https://github.com/in-scope/ciag-toolbox/commit/522165fbc5243e5355514fa798c8804f0da39fe9))
+* **CT-196:** preserve wide integer-container values on 16-bit TIFF save ([8f84485](https://github.com/in-scope/ciag-toolbox/commit/8f84485dfaca28239b6da87a24e7a26e1540adcd))
+
 ## [0.4.0](https://github.com/in-scope/ciag-toolbox/compare/v0.3.1...v0.4.0) (2026-06-23)
 
 
