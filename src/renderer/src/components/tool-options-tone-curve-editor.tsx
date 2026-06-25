@@ -24,7 +24,6 @@ import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-inter
 import { buildLuminanceRasterFromRgbComposite } from "@/lib/image/rgb-composite-luminance";
 import {
   formatToneCurveFieldValue,
-  isToneCurveEndpointIndex,
   moveSelectedAnchorInputTo,
   moveSelectedAnchorOutputTo,
   parseToneCurveFieldValueOrNull,
@@ -382,7 +381,6 @@ function SelectedToneCurveAnchorFields(props: SelectedToneCurveAnchorFieldsProps
         value={anchor.input}
         step={step}
         isIntegerBand={props.isIntegerBand}
-        disabled={isToneCurveEndpointIndex(index, props.anchors.length)}
         onCommitValue={(value) => props.onChange(moveSelectedAnchorInputTo(props.anchors, index, value, props.ranges))}
       />
       <ToneCurveAnchorField

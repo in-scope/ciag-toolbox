@@ -38,6 +38,7 @@ export const rgbPng = manifestJson.rgbPng as SingleFileFixture;
 export const multiBandTiff = manifestJson.multiBandTiff as SingleFileFixture;
 export const flatFieldReferenceTiff = manifestJson.flatFieldReferenceTiff as SingleFileFixture;
 export const enviStack = manifestJson.enviStack as EnviFixture;
+export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 
 export function fixturePath(fileName: string): string {
   return join(FIXTURES_DIRECTORY, fileName);

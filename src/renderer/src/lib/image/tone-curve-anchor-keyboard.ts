@@ -14,9 +14,10 @@ import {
  * Pure keyboard model for the CT-166 nudge/delete actions on the selected
  * tone-curve anchor. Arrow keys move the selected anchor by one data-type step,
  * funnelling through the SAME move helpers as the drag and numeric-field paths so
- * the clamping can never diverge: endpoints keep a fixed Input (only their Output
- * nudges), interior anchors cannot cross their neighbours, and Output is clamped
- * to the band's output range. Delete/Backspace removes the selected interior
+ * the clamping can never diverge: an endpoint Input nudges inward between the
+ * data-range edge and its neighbour (CT-199 black/white point), interior anchors
+ * cannot cross their neighbours, and Output is clamped to the band's output range.
+ * Delete/Backspace removes the selected interior
  * anchor and selects its left neighbour; on an endpoint it is a no-op. The result
  * always returns the (possibly unchanged) anchors plus the next selected index so
  * the caller can apply both atomically.

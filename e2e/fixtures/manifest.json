@@ -163,5 +163,43 @@
         ]
       }
     ]
+  },
+  "enviFloatStack": {
+    "headerFileName": "envi-float-stack.hdr",
+    "binaryFileName": "envi-float-stack.bin",
+    "width": 4,
+    "height": 4,
+    "bandCount": 3,
+    "dataType": "float32",
+    "wavelengths": [
+      500,
+      600,
+      700
+    ],
+    "bandMeans": [
+      -0.375,
+      0.3999999894294888,
+      0.32500000135041773
+    ],
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          -1,
+          -0.5,
+          -0.800000011920929
+        ]
+      },
+      {
+        "x": 3,
+        "y": 3,
+        "valuesPerBand": [
+          -1,
+          1.2999999523162842,
+          1.4500000476837158
+        ]
+      }
+    ]
   }
 }

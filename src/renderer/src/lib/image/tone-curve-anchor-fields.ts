@@ -7,8 +7,9 @@ import {
 /**
  * Pure model for the CT-165 numeric Input/Output fields of the selected tone-curve
  * anchor. Numeric edits MUST clamp exactly like a drag, so the move helpers below
- * funnel through the same `moveToneCurveAnchor` as the drag path: the endpoints stay
- * fixed in Input, interior anchors cannot cross their neighbours, and Output is
+ * funnel through the same `moveToneCurveAnchor` as the drag path: an endpoint Input
+ * moves inward between the data-range edge and its neighbour (the GIMP black/white
+ * point, CT-199), interior anchors cannot cross their neighbours, and Output is
  * clamped to the band's output range. Formatting/stepping pick an integer step (1)
  * or a small float step from the active band's data type.
  */

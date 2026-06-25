@@ -79,4 +79,22 @@ describe("moveSelectedAnchorInputTo", () => {
     const moved = moveSelectedAnchorInputTo(threeAnchors(), 1, -10, UINT16_RANGES);
     expect(moved[1]!.input).toBeGreaterThan(moved[0]!.input);
   });
+
+  it("moves a left endpoint Input inward to a value between the floor and the right neighbour (CT-199)", () => {
+    const moved = moveSelectedAnchorInputTo(threeAnchors(), 0, 20000, UINT16_RANGES);
+    expect(moved[0]!.input).toBe(20000);
+    expect(moved[0]!.input).toBeLessThan(moved[1]!.input);
+  });
+
+  it("clamps a left endpoint Input pushed past the right neighbour (CT-199)", () => {
+    const moved = moveSelectedAnchorInputTo(threeAnchors(), 0, 999999, UINT16_RANGES);
+    expect(moved[0]!.input).toBeGreaterThan(0);
+    expect(moved[0]!.input).toBeLessThan(moved[1]!.input);
+  });
+
+  it("moves a right endpoint Input inward toward its left neighbour (CT-199)", () => {
+    const moved = moveSelectedAnchorInputTo(threeAnchors(), 2, 40000, UINT16_RANGES);
+    expect(moved[2]!.input).toBe(40000);
+    expect(moved[2]!.input).toBeGreaterThan(moved[1]!.input);
+  });
 });

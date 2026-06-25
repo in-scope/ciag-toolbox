@@ -167,14 +167,26 @@ export function buildToneCurveValueRanges(
   bandIndex: number,
   histogram: BandHistogram,
 ): ToneCurveValueRanges {
-  const band = getRasterBandPixelsOrThrow(raster, bandIndex);
-  const outputRange = dataTypeValueRangeForBand(band, raster.sampleFormat);
+  const outputRange = toneCurveEditorOutputRangeForBand(raster, bandIndex, histogram);
   return {
     inputMin: histogram.min,
     inputMax: histogram.max,
     outputMin: outputRange.min,
     outputMax: outputRange.max,
   };
+}
+
+// CT-198: a float band's tone-curve output range is its OWN value extents (the same
+// [dataMin, dataMax] the histogram spans), so the default endpoints map each value to
+// itself - a true identity. An integer band keeps its data-type container range, which
+// already equals the editor's input range, so its default was already an identity.
+function toneCurveEditorOutputRangeForBand(
+  raster: RasterImage,
+  bandIndex: number,
+  histogram: BandHistogram,
+): { min: number; max: number } {
+  if (raster.sampleFormat === "float") return { min: histogram.min, max: histogram.max };
+  return dataTypeValueRangeForBand(getRasterBandPixelsOrThrow(raster, bandIndex), raster.sampleFormat);
 }
 
 export interface ToneCurveAnchorBinding {

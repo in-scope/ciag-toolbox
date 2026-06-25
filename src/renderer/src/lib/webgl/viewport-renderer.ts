@@ -105,6 +105,9 @@ interface BandModeUniformLocations {
 interface ToneCurveUniformLocations {
   enabled: WebGLUniformLocation | null;
   multiChannel: WebGLUniformLocation | null;
+  remapsSampleDomain: WebGLUniformLocation | null;
+  sampleDomainMin: WebGLUniformLocation | null;
+  sampleDomainMax: WebGLUniformLocation | null;
 }
 
 interface ProgramUniformLocations {
@@ -122,12 +125,28 @@ interface RendererProgramResources {
 }
 
 
+// CT-198: a single-band float source remaps the tone-curve sample domain so the GPU
+// LUT (built over the band's raw value extents) lines up with the raw values it samples.
+// Disabled for integer/composite sources, where the sample is already a [0, 1] coordinate.
+interface ToneCurveSampleDomain {
+  readonly remaps: boolean;
+  readonly min: number;
+  readonly max: number;
+}
+
+const DISABLED_TONE_CURVE_SAMPLE_DOMAIN: ToneCurveSampleDomain = {
+  remaps: false,
+  min: 0,
+  max: 1,
+};
+
 interface ToneCurvePassState {
   readonly enabled: boolean;
   readonly multiChannel: boolean;
   readonly redOrValueLutTexture: WebGLTexture | null;
   readonly greenLutTexture: WebGLTexture | null;
   readonly blueLutTexture: WebGLTexture | null;
+  readonly sampleDomain: ToneCurveSampleDomain;
 }
 
 // CT-177: tracks the last values uploaded to each tone-curve LUT texture by
@@ -485,7 +504,23 @@ export class ViewportRenderer {
       redOrValueLutTexture: this.toneCurveLutTexture,
       greenLutTexture: this.toneCurveGreenLutTexture,
       blueLutTexture: this.toneCurveBlueLutTexture,
+      sampleDomain: this.resolveToneCurveSampleDomain(),
     };
+  }
+
+  // CT-198: a single-band float band's LUT is built over its raw value extents, so the
+  // shader must remap the raw sample into that domain. The extents are the same ones the
+  // normalize/auto-fit block uses (computeImageRgbChannelExtents), so the LUT and the
+  // shader agree on [dataMin, dataMax]. Integer/composite sources keep the disabled domain.
+  private resolveToneCurveSampleDomain(): ToneCurveSampleDomain {
+    if (!this.isSingleBandSource || !this.currentSourceIsFloatRaster()) {
+      return DISABLED_TONE_CURVE_SAMPLE_DOMAIN;
+    }
+    return { remaps: true, min: this.normalization.extents.min[0], max: this.normalization.extents.max[0] };
+  }
+
+  private currentSourceIsFloatRaster(): boolean {
+    return this.currentSource?.kind === "raster" && this.currentSource.raster.sampleFormat === "float";
   }
 
   // A float raster whose data lies outside [0, 1] would saturate to a flat white
@@ -671,6 +706,19 @@ function applyToneCurveUniforms(
   if (uniforms.multiChannel !== null) {
     gl.uniform1i(uniforms.multiChannel, toneCurve.multiChannel ? 1 : 0);
   }
+  applyToneCurveSampleDomainUniforms(gl, uniforms, toneCurve.sampleDomain);
+}
+
+function applyToneCurveSampleDomainUniforms(
+  gl: WebGL2RenderingContext,
+  uniforms: ToneCurveUniformLocations,
+  sampleDomain: ToneCurveSampleDomain,
+): void {
+  if (uniforms.remapsSampleDomain !== null) {
+    gl.uniform1i(uniforms.remapsSampleDomain, sampleDomain.remaps ? 1 : 0);
+  }
+  if (uniforms.sampleDomainMin !== null) gl.uniform1f(uniforms.sampleDomainMin, sampleDomain.min);
+  if (uniforms.sampleDomainMax !== null) gl.uniform1f(uniforms.sampleDomainMax, sampleDomain.max);
 }
 
 function bindToneCurveLutsToUnits(
@@ -763,6 +811,9 @@ function lookUpToneCurveUniformLocations(
   return {
     enabled: gl.getUniformLocation(program, "u_toneCurveEnabled"),
     multiChannel: gl.getUniformLocation(program, "u_toneCurveMultiChannel"),
+    remapsSampleDomain: gl.getUniformLocation(program, "u_toneCurveRemapsSampleDomain"),
+    sampleDomainMin: gl.getUniformLocation(program, "u_toneCurveSampleDomainMin"),
+    sampleDomainMax: gl.getUniformLocation(program, "u_toneCurveSampleDomainMax"),
   };
 }
 

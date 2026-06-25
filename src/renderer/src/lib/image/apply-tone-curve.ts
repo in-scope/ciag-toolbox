@@ -38,6 +38,22 @@ export interface ToneCurve {
 
 export type ApplyToneCurveOptions = RegionRemapOptions;
 
+// CT-198: the tone curve's output/clamp range. Integer bands keep the data-type
+// container range (the historical black/white-stretch default, already an identity
+// because the editor's input range is that same container range). Float bands use their
+// OWN value extents [dataMin, dataMax], so the default two-endpoint curve maps each
+// endpoint to itself - a TRUE identity that preserves out-of-[0,1] float values instead
+// of restretching them to the fixed {0, 1} window.
+export function toneCurveOutputRangeForBand(
+  raster: RasterImage,
+  bandIndex: number,
+): DataTypeValueRange {
+  if (raster.sampleFormat === "float") {
+    return computeRasterBandRawValueExtents(raster, bandIndex);
+  }
+  return dataTypeValueRangeForBand(getRasterBandPixelsOrThrow(raster, bandIndex), raster.sampleFormat);
+}
+
 export function buildMonotoneToneCurve(anchors: ReadonlyArray<ToneCurveAnchor>): ToneCurve {
   const ordered = assertAnchorsAreOrderedWithAtLeastTwo(anchors);
   const secantSlopes = computeSecantSlopesBetweenAnchors(ordered);
@@ -148,11 +164,11 @@ export function applyToneCurveToRasterBand(
   options: ApplyToneCurveOptions = {},
 ): RasterImage {
   const band = getRasterBandPixelsOrThrow(raster, bandIndex);
-  const typeRange = dataTypeValueRangeForBand(band, raster.sampleFormat);
+  const outputRange = toneCurveOutputRangeForBand(raster, bandIndex);
   const roundForOutput = !isFloatTypedArray(band);
   const curve = buildMonotoneToneCurve(anchors);
   return remapRasterBandWithinRegion(raster, bandIndex, options, (value) =>
-    clampValueToDataTypeRangeRoundingIntegers(evaluateToneCurveAtInput(curve, value), typeRange, roundForOutput),
+    clampValueToDataTypeRangeRoundingIntegers(evaluateToneCurveAtInput(curve, value), outputRange, roundForOutput),
   );
 }
 
