@@ -4,6 +4,7 @@ import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
   type RasterSampleFormat,
+  type RasterTypedArray,
 } from "@/lib/image/raster-image";
 import { buildRgbaBytesFromRgbRaster } from "@/lib/image/rgb-raster-to-rgba";
 
@@ -14,6 +15,15 @@ const TIFF_PHOTOMETRIC_RGB = 2;
 const TIFF_SAMPLE_FORMAT_UINT = 1;
 const TIFF_SAMPLE_FORMAT_FLOAT = 3;
 const FLOAT_BITS_PER_SAMPLE = 32;
+
+// CT-196: scientific integer data never fills more than a 16-bit container in this app, so a
+// wider integer container (e.g. a uint32 TIFF holding 12-bit-packed, bit-shifted values) is
+// treated as 16-bit when computing the export rescale. Scaling such a band by its true 2^32
+// type range collapsed every real value into the 0..1 band, where rounding produced a constant
+// output of 1. Capping at 16 makes a 16-bit save of a >=16-bit integer container a value-preserving
+// pass-through (scale 1) instead.
+const MAX_SCIENTIFIC_INTEGER_CONTAINER_BITS = 16;
+const BITS_PER_BYTE = 8;
 
 interface TiffWriteMetadata {
   width: number;
@@ -35,7 +45,6 @@ export function encodeRasterBandAsSingleChannelTiffBytes(
   const targetPixels = convertSourcePixelsToTargetBitDepth(
     sourcePixels,
     raster.sampleFormat,
-    raster.bitsPerSample,
     targetBitDepth,
   );
   const metadata = buildSingleBandTiffMetadata(raster.width, raster.height, targetBitDepth);
@@ -74,14 +83,13 @@ export function encodeRgbRasterAsRgbTiffBytes(
 }
 
 function convertSourcePixelsToTargetBitDepth(
-  pixels: ArrayLike<number>,
+  pixels: RasterTypedArray,
   sourceSampleFormat: RasterSampleFormat,
-  sourceBitsPerSample: number,
   targetBitDepth: TargetBitDepth,
 ): Uint8Array | Uint16Array {
   const scaleFactor = computeBitDepthScaleFactor(
     sourceSampleFormat,
-    sourceBitsPerSample,
+    readEffectiveIntegerContainerBits(pixels),
     targetBitDepth,
   );
   if (targetBitDepth === 8) {
@@ -90,14 +98,19 @@ function convertSourcePixelsToTargetBitDepth(
   return rescalePixelsToUint16(pixels, scaleFactor);
 }
 
+function readEffectiveIntegerContainerBits(pixels: RasterTypedArray): number {
+  const containerBits = pixels.BYTES_PER_ELEMENT * BITS_PER_BYTE;
+  return Math.min(containerBits, MAX_SCIENTIFIC_INTEGER_CONTAINER_BITS);
+}
+
 function computeBitDepthScaleFactor(
   sourceSampleFormat: RasterSampleFormat,
-  sourceBitsPerSample: number,
+  sourceContainerBits: number,
   targetBitDepth: TargetBitDepth,
 ): number {
   const targetMax = Math.pow(2, targetBitDepth) - 1;
   if (sourceSampleFormat === "float") return targetMax;
-  const sourceMax = Math.pow(2, sourceBitsPerSample) - 1;
+  const sourceMax = Math.pow(2, sourceContainerBits) - 1;
   if (sourceMax <= 0) return 1;
   return targetMax / sourceMax;
 }

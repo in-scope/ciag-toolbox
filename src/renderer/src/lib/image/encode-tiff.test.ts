@@ -54,6 +54,24 @@ describe("encodeRasterBandAsSingleChannelTiffBytes", () => {
     expect(Array.from(decoded)).toEqual([0, 0, 65535, 65535]);
   });
 
+  // CT-196: a 12-bit-packed, bit-shifted band stored in a uint32 container (a TIFF tagged
+  // BitsPerSample=32) must keep its real magnitudes on a 16-bit save. Scaling by the true 2^32
+  // type range collapsed every value into 0..1, which rounded to a constant 1.
+  it("preserves a uint32-container band's values on a 16-bit save (CT-196 regression)", async () => {
+    const raster = buildSingleBandUint32Raster([16, 240, 1600, 16000, 65520]);
+    const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 16);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(decoded).toBeInstanceOf(Uint16Array);
+    expect(Array.from(decoded)).toEqual([16, 240, 1600, 16000, 65520]);
+  });
+
+  it("clamps a uint32-container value above the uint16 max on a 16-bit save", async () => {
+    const raster = buildSingleBandUint32Raster([0, 65535, 70000]);
+    const tiffBytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 16);
+    const decoded = await decodeSingleBandTiffBytesAsTypedArray(tiffBytes);
+    expect(Array.from(decoded)).toEqual([0, 65535, 65535]);
+  });
+
   it("encodes the chosen band only when the raster has multiple bands", async () => {
     const raster: RasterImage = {
       width: 2,
@@ -139,6 +157,17 @@ function buildSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage
     sampleFormat: "uint",
     bandCount: 1,
     bandPixels: [Uint16Array.from(values)],
+  };
+}
+
+function buildSingleBandUint32Raster(values: ReadonlyArray<number>): RasterImage {
+  return {
+    width: values.length,
+    height: 1,
+    bitsPerSample: 32,
+    sampleFormat: "uint",
+    bandCount: 1,
+    bandPixels: [Uint32Array.from(values)],
   };
 }
 
