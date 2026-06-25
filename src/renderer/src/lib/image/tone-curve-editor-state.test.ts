@@ -91,6 +91,44 @@ describe("moveToneCurveAnchor", () => {
     const anchors = buildDefaultToneCurveAnchors(RANGES);
     expect(moveToneCurveAnchor(anchors, 5, { input: 10, output: 10 }, RANGES)).toBe(anchors);
   });
+
+  it("moves a left endpoint Input inward toward its right neighbour (CT-199 black point)", () => {
+    const anchors = buildDefaultToneCurveAnchors(RANGES);
+    const moved = moveToneCurveAnchor(anchors, 0, { input: 40, output: 0 }, RANGES);
+    expect(moved[0]!.input).toBe(40);
+    expect(moved[0]!.input).toBeLessThan(moved[1]!.input);
+    expect(moved[0]!.output).toBe(0);
+  });
+
+  it("clamps a left endpoint Input pushed past its right neighbour", () => {
+    const anchors = [
+      { input: 0, output: 0 },
+      { input: 64, output: 100 },
+      { input: 128, output: 255 },
+    ];
+    const moved = moveToneCurveAnchor(anchors, 0, { input: 9999, output: 0 }, RANGES);
+    expect(moved[0]!.input).toBeLessThan(64);
+    expect(moved[0]!.input).toBeGreaterThan(0);
+  });
+
+  it("moves a right endpoint Input inward toward its left neighbour (CT-199 white point)", () => {
+    const anchors = buildDefaultToneCurveAnchors(RANGES);
+    const moved = moveToneCurveAnchor(anchors, 1, { input: 80, output: 255 }, RANGES);
+    expect(moved[1]!.input).toBe(80);
+    expect(moved[1]!.input).toBeGreaterThan(moved[0]!.input);
+    expect(moved[1]!.output).toBe(255);
+  });
+
+  it("clamps a right endpoint Input pushed below its left neighbour", () => {
+    const anchors = [
+      { input: 0, output: 0 },
+      { input: 64, output: 100 },
+      { input: 128, output: 255 },
+    ];
+    const moved = moveToneCurveAnchor(anchors, 2, { input: -9999, output: 255 }, RANGES);
+    expect(moved[2]!.input).toBeGreaterThan(64);
+    expect(moved[2]!.input).toBeLessThan(128);
+  });
 });
 
 describe("removeToneCurveAnchor", () => {

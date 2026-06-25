@@ -24,8 +24,9 @@ import {
 // CT-165: the selected tone-curve anchor exposes numeric Input/Output fields with +/- steppers,
 // so points can be placed precisely instead of only by dragging. multiband-12bit.tif is an
 // integer uint16 band (step 1, input/output axis 0..65535), so the fields show integers. The
-// numeric edits share the drag path's clamping helper: endpoints keep a fixed Input, interior
-// anchors cannot cross their neighbours, and Output is clamped to the band's output range.
+// numeric edits share the drag path's clamping helper: an endpoint Input moves inward between
+// the data-range edge and its neighbour (CT-199 black/white point), interior anchors cannot
+// cross their neighbours, and Output is clamped to the band's output range.
 
 const PANEL = 1;
 const UINT16_TYPE_MAX = 65535;
@@ -45,10 +46,10 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("selecting an anchor populates the Input/Output fields, with a fixed Input on endpoints", async () => {
+test("selecting an anchor populates the Input/Output fields, with an editable Input on endpoints", async () => {
   expect(await readToneCurveAnchorFieldValue(launched.window, "Input")).toBe("0");
   expect(await readToneCurveAnchorFieldValue(launched.window, "Output")).toBe("0");
-  await expect(toneCurveAnchorField(launched.window, "Input")).toBeDisabled();
+  await expect(toneCurveAnchorField(launched.window, "Input")).not.toBeDisabled();
   await clickToneCurveAnchorHandle(toneCurveEndpointHandles(launched.window).last());
   expect(await readToneCurveAnchorFieldValue(launched.window, "Input")).toBe(String(UINT16_TYPE_MAX));
   expect(await readToneCurveAnchorFieldValue(launched.window, "Output")).toBe(String(UINT16_TYPE_MAX));
