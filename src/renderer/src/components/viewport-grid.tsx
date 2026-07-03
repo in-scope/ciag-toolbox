@@ -1,4 +1,5 @@
 import { useCallback, type MouseEvent } from "react";
+import { toast } from "sonner";
 
 import { ViewportBusyOverlay } from "@/components/busy-indicators";
 import {
@@ -47,6 +48,7 @@ import {
   useViewportSelection,
   type ViewportSelectionClickModifiers,
 } from "@/state/selection-context";
+import { usePanelLink, type PanelLinkApi, type PanelLinkFailureReason } from "@/state/panel-link-context";
 
 export interface ViewportCellContent {
   fileName: string;
@@ -162,6 +164,7 @@ function ViewportCellContextMenuContent(props: { sourceIndex: number }): JSX.Ele
     <ContextMenuContent>
       <DuplicateContextMenuItem sourceIndex={props.sourceIndex} />
       <ReimportSourceContextMenuItem sourceIndex={props.sourceIndex} />
+      <LinkPanZoomContextMenuItem sourceIndex={props.sourceIndex} />
       <CloseContextMenuItem sourceIndex={props.sourceIndex} />
     </ContextMenuContent>
   );
@@ -377,4 +380,39 @@ function ReimportSourceContextMenuItem(props: { sourceIndex: number }): JSX.Elem
       Re-import source from disk
     </ContextMenuItem>
   );
+}
+
+function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element {
+  const panelLink = usePanelLink();
+  const { selectedIndices } = useViewportSelection();
+  if (panelLink.isPanelLinked(props.sourceIndex)) {
+    return (
+      <ContextMenuItem onSelect={() => panelLink.unlinkPanel(props.sourceIndex)}>
+        Unlink pan &amp; zoom
+      </ContextMenuItem>
+    );
+  }
+  return (
+    <ContextMenuItem
+      onSelect={() => linkPanZoomFromSelection(panelLink, selectedIndices, props.sourceIndex)}
+    >
+      Link pan &amp; zoom
+    </ContextMenuItem>
+  );
+}
+
+function linkPanZoomFromSelection(
+  panelLink: PanelLinkApi,
+  selectedIndices: ReadonlySet<number>,
+  sourceIndex: number,
+): void {
+  const indices = new Set(selectedIndices);
+  indices.add(sourceIndex);
+  const result = panelLink.linkPanels([...indices]);
+  if (!result.ok) toast.error(describePanelLinkFailureMessage(result.reason));
+}
+
+function describePanelLinkFailureMessage(reason: PanelLinkFailureReason): string {
+  if (reason === "different-size") return "Only panels of the same size can be linked.";
+  return "Select two or more panels to link their pan and zoom.";
 }

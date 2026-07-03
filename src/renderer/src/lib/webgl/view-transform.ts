@@ -15,6 +15,13 @@ export interface ViewportSize {
 
 export const IDENTITY_PAN: ClipPoint = { x: 0, y: 0 };
 
+// CT-207: the full user-controlled view transform for a single panel (a clip-space
+// pan plus a scalar zoom over fit-to-viewport). Linked panels share this value.
+export interface UserView {
+  readonly pan: ClipPoint;
+  readonly zoom: number;
+}
+
 export function computeFitToViewportScale(
   image: ViewportSize,
   display: ViewportSize,

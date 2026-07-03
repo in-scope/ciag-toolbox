@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, X } from "lucide-react";
+import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
@@ -32,6 +32,9 @@ import {
 } from "@/lib/webgl/roi-draw-input";
 import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
+import { getViewportIndexFromNumber } from "@/lib/grid/grid-layout";
+import type { PanelSize } from "@/lib/grid/panel-link-groups";
+import { usePanelLink, type PanelLinkApi, type PanelLinkTarget } from "@/state/panel-link-context";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import {
   usePixelReadoutPublisher,
@@ -73,7 +76,10 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
 
+  const panelLink = usePanelLink();
+  const linkGroupIndex = panelLinkGroupIndexOrNull(props.viewportNumber);
   useViewportRendererLifecycle(canvasRef, rendererRef);
+  useLinkedViewSynchronization(rendererRef, panelLink, linkGroupIndex, imageSource);
   useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
   useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
@@ -106,6 +112,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
     onPinPixelSpectrum: props.onPinPixelSpectrum,
   });
   const transformVersion = useRendererViewTransformVersion(rendererRef);
+  const isLinkedForPanZoom = linkGroupIndex !== null && panelLink.isPanelLinked(linkGroupIndex);
   const cursorClassName = props.isRegionToolActive ? "cursor-crosshair" : "";
 
   return (
@@ -113,6 +120,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        isLinkedForPanZoom={isLinkedForPanZoom}
         raster={getRasterFromSourceOrNull(imageSource)}
         selectedBandIndex={props.selectedBandIndex}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
@@ -192,6 +200,7 @@ function getRasterFromSourceOrNull(source: ViewportImageSource | null): RasterIm
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  isLinkedForPanZoom: boolean;
   raster: RasterImage | null;
   selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
@@ -218,6 +227,7 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
+      {props.isLinkedForPanZoom ? <ViewportLinkedBadge /> : null}
       {props.showNormalizedViewingToggle ? (
         <NormalizedViewingToggleButton
           enabled={props.normalizationEnabled}
@@ -373,6 +383,81 @@ function ViewportNumberBadge({
       {viewportNumber}
     </span>
   );
+}
+
+// CT-207: a small badge showing this panel's pan/zoom is linked to peers.
+function ViewportLinkedBadge(): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex items-center text-primary"
+          aria-label="Linked pan and zoom"
+        >
+          <Link2 className="size-4" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Linked pan and zoom</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function panelLinkGroupIndexOrNull(viewportNumber: number | null | undefined): number | null {
+  if (typeof viewportNumber !== "number") return null;
+  return getViewportIndexFromNumber(viewportNumber);
+}
+
+// CT-207: register this panel's renderer as a link target and broadcast its view
+// transform to linked peers whenever a gesture moves it.
+function useLinkedViewSynchronization(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  panelLink: PanelLinkApi,
+  linkGroupIndex: number | null,
+  imageSource: ViewportImageSource | null,
+): void {
+  const panelLinkRef = useLatestValueRef(panelLink);
+  const imageSourceRef = useLatestValueRef(imageSource);
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || linkGroupIndex === null) return;
+    return attachLinkedViewSynchronization(renderer, panelLinkRef.current, linkGroupIndex, imageSourceRef);
+    // rendererRef is stable; latest-value refs hold the dynamic api and source.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkGroupIndex]);
+}
+
+function attachLinkedViewSynchronization(
+  renderer: ViewportRenderer,
+  panelLink: PanelLinkApi,
+  linkGroupIndex: number,
+  imageSourceRef: MutableRefObject<ViewportImageSource | null>,
+): () => void {
+  const unregister = panelLink.registerLinkTarget(
+    linkGroupIndex,
+    buildLinkTargetForRenderer(renderer, imageSourceRef),
+  );
+  const unsubscribe = renderer.subscribeToViewTransformChanges(() =>
+    panelLink.notifyPanelViewTransformChanged(linkGroupIndex),
+  );
+  return () => {
+    unregister();
+    unsubscribe();
+  };
+}
+
+function buildLinkTargetForRenderer(
+  renderer: ViewportRenderer,
+  imageSourceRef: MutableRefObject<ViewportImageSource | null>,
+): PanelLinkTarget {
+  return {
+    getUserView: () => renderer.getUserView(),
+    applyUserView: (view) => renderer.applyUserView(view),
+    getPanelSize: () => readPanelSizeFromSourceOrNull(imageSourceRef.current),
+  };
+}
+
+function readPanelSizeFromSourceOrNull(source: ViewportImageSource | null): PanelSize | null {
+  return source ? getImageSourceDimensions(source) : null;
 }
 
 function useViewportRendererLifecycle(

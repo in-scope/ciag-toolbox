@@ -215,6 +215,16 @@ export {
   type OpenProjectBundleRequest,
 } from "./project-bundle-flow";
 export {
+  linkPanZoomMenuItem,
+  unlinkPanZoomMenuItem,
+  openPanelContextMenuAtCorner,
+  linkPanZoomFromPanelContextMenu,
+  linkedPanelBadge,
+  expectPanelIsLinked,
+  expectPanelIsNotLinked,
+  differentSizeLinkErrorToast,
+} from "./linked-panels";
+export {
   regionToolButton,
   activateRegionTool,
   ensureRegionToolInactive,

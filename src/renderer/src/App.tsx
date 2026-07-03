@@ -208,6 +208,7 @@ import {
   useViewportSelection,
   type ViewportSelectionState,
 } from "@/state/selection-context";
+import { PanelLinkProvider, usePanelLink } from "@/state/panel-link-context";
 import {
   ViewportRenderingProvider,
   useViewportRendering,
@@ -257,6 +258,7 @@ export function App(): JSX.Element {
   return (
     <TooltipProvider delayDuration={300}>
       <ViewportSelectionProvider>
+        <PanelLinkProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
             <RegionRequestProvider>
@@ -277,6 +279,7 @@ export function App(): JSX.Element {
             </RegionRequestProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
+        </PanelLinkProvider>
       </ViewportSelectionProvider>
     </TooltipProvider>
   );
@@ -308,6 +311,7 @@ function ApplicationShell(): JSX.Element {
     replaceSelection,
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
+  const panelLink = usePanelLink();
   const regionTool = useRegionTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
@@ -323,6 +327,7 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     pruneSelectionToCellCount,
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
+    pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
   });
   const gridLayoutRef = useLatestRef(gridLayout);
   const handleOpenImagesRequested = useOpenImagesThroughDialogHandler({
@@ -451,6 +456,8 @@ function ApplicationShell(): JSX.Element {
     compactRenderingStateAfterRemovingIndex: renderingApi.compactRenderingStateAfterRemovingIndex,
     pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
+    compactLinkGroupsAfterRemovingIndex: panelLink.compactAfterRemovingIndex,
     replaceSelection,
   });
   const reimportApi = useViewportReimportApi({
@@ -1175,6 +1182,7 @@ interface GridLayoutChangeBindings {
   setImagesByIndex: SetImagesByIndex;
   pruneSelectionToCellCount: (cellCount: number) => void;
   pruneRenderingStateToCellCount: (cellCount: number) => void;
+  pruneLinkGroupsToCellCount: (cellCount: number) => void;
 }
 
 function createGridLayoutChangeHandler(
@@ -1190,6 +1198,7 @@ function applyGridLayoutChange(newLayout: GridLayout, bindings: GridLayoutChange
   bindings.setImagesByIndex(filterImagesToWithinCellCount(bindings.imagesByIndex, newCellCount));
   bindings.pruneSelectionToCellCount(newCellCount);
   bindings.pruneRenderingStateToCellCount(newCellCount);
+  bindings.pruneLinkGroupsToCellCount(newCellCount);
   bindings.setGridLayout(newLayout);
 }
 
@@ -1417,6 +1426,8 @@ interface ViewportClosingApiBindings {
   compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
   pruneSelectionToCellCount: (cellCount: number) => void;
   compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
+  pruneLinkGroupsToCellCount: (cellCount: number) => void;
+  compactLinkGroupsAfterRemovingIndex: (removedIndex: number) => void;
   replaceSelection: (indices: ReadonlySet<number>) => void;
 }
 
@@ -1431,6 +1442,8 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
     compactRenderingStateAfterRemovingIndex,
     pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    pruneLinkGroupsToCellCount,
+    compactLinkGroupsAfterRemovingIndex,
     replaceSelection,
   } = bindings;
   return useMemo(
@@ -1445,6 +1458,8 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
         compactRenderingStateAfterRemovingIndex,
         pruneSelectionToCellCount,
         compactSelectionAfterRemovingIndex,
+        pruneLinkGroupsToCellCount,
+        compactLinkGroupsAfterRemovingIndex,
         replaceSelection,
       }),
     [
@@ -1457,6 +1472,8 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
       compactRenderingStateAfterRemovingIndex,
       pruneSelectionToCellCount,
       compactSelectionAfterRemovingIndex,
+      pruneLinkGroupsToCellCount,
+      compactLinkGroupsAfterRemovingIndex,
       replaceSelection,
     ],
   );
@@ -1556,6 +1573,7 @@ function closeViewportAndCompactRemainingIndices(
   bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
   bindings.compactRenderingStateAfterRemovingIndex(index);
   bindings.compactSelectionAfterRemovingIndex(index);
+  bindings.compactLinkGroupsAfterRemovingIndex(index);
   collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
   toast.info(formatClosedSingleViewportMessage(index, content.fileName));
 }
@@ -1599,6 +1617,7 @@ function collapseGridLayoutAndRestoreSelectionAfterClose(
   bindings.setGridLayout(plan.collapsedLayout);
   bindings.pruneRenderingStateToCellCount(newCellCount);
   bindings.pruneSelectionToCellCount(newCellCount);
+  bindings.pruneLinkGroupsToCellCount(newCellCount);
   if (plan.fallbackSelectionIndex !== null) {
     bindings.replaceSelection(new Set([plan.fallbackSelectionIndex]));
   }
