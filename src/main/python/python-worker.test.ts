@@ -1,12 +1,16 @@
 // Integration tests for the subprocess worker harness against the real bundled
 // interpreter. The runtime is installed by `node scripts/setup-python-runtime.mjs`;
 // on a machine without it, the suite is skipped rather than failing the unit run.
-import { existsSync } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { encodeCubeAsFloat32Payload, type CubeForUserScript } from "./cube-payload";
 import { resolveActivePythonInterpreterPath } from "./interpreter-resolver";
 import { runUserScriptInPythonSubprocess } from "./python-worker";
+import { prepareImportedUserScriptFromFilePath } from "./script-import";
+import { writeZipArchiveWithEntries } from "./zip-archive-test-helper";
 
 function tryResolveDevelopmentInterpreterPathOrNull(): string | null {
   try {
@@ -55,6 +59,25 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       cube: encodeCubeAsFloat32Payload(cube),
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
+  }
+
+  async function runImportedZipToolAgainstCube(entries: Record<string, string>, cube: CubeForUserScript) {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const workingDirectory = await fs.mkdtemp(path.join(tmpdir(), "msi-imported-tool-test-"));
+    const zipPath = path.join(workingDirectory, "tool.zip");
+    await writeZipArchiveWithEntries(zipPath, entries);
+    const prepared = await prepareImportedUserScriptFromFilePath(zipPath);
+    try {
+      return await runUserScriptInPythonSubprocess({
+        interpreterPath,
+        input: prepared.input,
+        cube: encodeCubeAsFloat32Payload(cube),
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      });
+    } finally {
+      await prepared.releaseResources();
+      await fs.rm(workingDirectory, { recursive: true, force: true });
+    }
   }
 
   const sampleCube: CubeForUserScript = {
@@ -153,4 +176,49 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     const outcome = await runFormulaAgainstCube("cube * float('nan')", sampleCube);
     expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
   }, 60_000);
+
+  it("runs an imported multi-module .zip tool, matching a pure-TS reference", async () => {
+    const outcome = await runImportedZipToolAgainstCube(
+      {
+        "main.py": "from combine import combine_bands\n\n\ndef run(cube, wavelengths=None):\n    return combine_bands(cube)\n",
+        "combine.py": "def combine_bands(cube):\n    return cube[0] * 2 - cube[1]\n",
+      },
+      sampleCube,
+    );
+    const expectedBand = combinePerPixelReference(sampleCube, (first, second) => first * 2 - second);
+    expect(outcome).toEqual({ kind: "completed", value: expectedBand });
+  }, 60_000);
+
+  it("surfaces an imported .zip whose main.py has no run() as a script error", async () => {
+    const outcome = await runImportedZipToolAgainstCube({ "main.py": "answer = 42\n" }, sampleCube);
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "script-error",
+      userFacingMessage: "The script failed: The tool's main.py must define a run() function.",
+    });
+  }, 60_000);
 });
+
+function combinePerPixelReference(
+  cube: CubeForUserScript,
+  combineTwoBands: (first: number, second: number) => number,
+): number[][] {
+  const rows: number[][] = [];
+  for (let row = 0; row < cube.height; row += 1) {
+    rows.push(buildCombinedRow(cube, row, combineTwoBands));
+  }
+  return rows;
+}
+
+function buildCombinedRow(
+  cube: CubeForUserScript,
+  row: number,
+  combineTwoBands: (first: number, second: number) => number,
+): number[] {
+  const columns: number[] = [];
+  for (let column = 0; column < cube.width; column += 1) {
+    const pixelIndex = row * cube.width + column;
+    columns.push(combineTwoBands(cube.bands[0]![pixelIndex]!, cube.bands[1]![pixelIndex]!));
+  }
+  return columns;
+}

@@ -15,10 +15,12 @@ export interface CubePayloadHeader {
 }
 
 // A formula is a single expression the worker wraps as run(cube); a script defines run
-// itself. The user never writes the wrapping function for a formula.
+// itself; a package is a multi-module tool extracted to a directory whose top-level
+// main.py defines run. The user never writes the wrapping function for a formula.
 export type UserScriptInput =
   | { kind: "formula"; expression: string }
-  | { kind: "script"; scriptSource: string };
+  | { kind: "script"; scriptSource: string }
+  | { kind: "package"; packageDirectory: string };
 
 export interface RunUserScriptRequest {
   type: "run-user-script";

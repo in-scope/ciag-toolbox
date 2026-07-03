@@ -60,9 +60,22 @@ def load_run_function_from_script(script_source):
     return run_function
 
 
+def load_run_function_from_package(package_directory):
+    import importlib
+    sys.path.insert(0, package_directory)
+    main_module = importlib.import_module("main")
+    run_function = getattr(main_module, "run", None)
+    if not callable(run_function):
+        raise RuntimeError("The tool's main.py must define a run() function.")
+    return run_function
+
+
 def load_run_function(input_spec):
-    if isinstance(input_spec, dict) and input_spec.get("kind") == "formula":
+    kind = input_spec.get("kind") if isinstance(input_spec, dict) else None
+    if kind == "formula":
         return build_formula_run_function(input_spec.get("expression", ""))
+    if kind == "package":
+        return load_run_function_from_package(input_spec.get("packageDirectory", ""))
     return load_run_function_from_script((input_spec or {}).get("scriptSource", ""))
 
 
