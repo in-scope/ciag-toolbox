@@ -55,6 +55,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "spectral-derivative",
       "spatial-filter",
       "denoise",
+      "percentile-clip",
     ]);
   });
 
