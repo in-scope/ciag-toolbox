@@ -168,6 +168,27 @@ interface ToolboxPythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
+interface ToolboxRunUserScriptCube {
+  bands: Float32Array[];
+  height: number;
+  width: number;
+  wavelengths: number[] | null;
+}
+
+type ToolboxRunUserScriptSource =
+  | { mode: "formula"; expression: string }
+  | { mode: "import" };
+
+interface ToolboxRunUserScriptRequest {
+  cube: ToolboxRunUserScriptCube;
+  source: ToolboxRunUserScriptSource;
+}
+
+type ToolboxRunUserScriptResult =
+  | { status: "completed"; value: unknown }
+  | { status: "canceled" }
+  | { status: "failed"; message: string };
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
@@ -241,6 +262,9 @@ interface ToolboxApi {
   setPythonEnvironment: (
     ownInterpreterPath: string | null,
   ) => Promise<ToolboxPythonEnvironmentSnapshot>;
+  runUserScript: (
+    request: ToolboxRunUserScriptRequest,
+  ) => Promise<ToolboxRunUserScriptResult>;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (
     listener: ToolboxThemeChangeListener,

@@ -56,6 +56,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "spatial-filter",
       "denoise",
       "percentile-clip",
+      "band-weighting",
     ]);
   });
 

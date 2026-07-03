@@ -135,6 +135,7 @@ import { SPECTRAL_DERIVATIVE_ACTION } from "./spectral-derivative-action";
 import { SPATIAL_FILTER_ACTION } from "./spatial-filter-action";
 import { DENOISE_ACTION } from "./denoise-action";
 import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
+import { BAND_WEIGHTING_ACTION } from "./band-weighting-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1759,4 +1760,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   SPATIAL_FILTER_ACTION,
   DENOISE_ACTION,
   PERCENTILE_CLIP_ACTION,
+  BAND_WEIGHTING_ACTION,
 ];

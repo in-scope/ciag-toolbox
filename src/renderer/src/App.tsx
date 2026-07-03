@@ -32,6 +32,7 @@ import {
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
+import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
@@ -74,6 +75,7 @@ import {
 } from "@/lib/actions/operation-command-bindings";
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
+import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -219,10 +221,12 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearBandWeightingEditingState,
   clearThresholdEditingState,
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  hasBandWeightingEditingState,
   hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyScope,
@@ -636,7 +640,8 @@ function buildActiveOperationEmbeddedEditorOrNull(
 ): ReactNode {
   return (
     buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
+    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
   );
 }
 
@@ -670,6 +675,24 @@ function buildActiveThresholdEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsThresholdEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveBandWeightingEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedBandWeightingEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsBandWeightingEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -1680,6 +1703,14 @@ function clearTransientOperationStateOnActiveSource(
   clearOperationRegionOnActiveSource(inputs);
   clearToneCurveAnchorsOnActiveSource(inputs);
   clearThresholdBoundsOnActiveSource(inputs);
+  clearBandWeightsOnActiveSource(inputs);
+}
+
+function clearBandWeightsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasBandWeightingEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearBandWeightingEditingState(state));
 }
 
 function clearThresholdBoundsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {

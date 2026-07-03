@@ -35,6 +35,7 @@ export interface ViewportRenderingState {
   readonly toneCurveActiveChannel: ToneCurveChannel;
   readonly thresholdBounds: ThresholdBounds | null;
   readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
+  readonly bandWeights: ReadonlyArray<number> | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -58,6 +59,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
   thresholdBounds: null,
   thresholdOtsuCutoffs: null,
+  bandWeights: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -92,6 +94,18 @@ export function hasThresholdEditingState(state: ViewportRenderingState): boolean
 
 export function clearThresholdEditingState(state: ViewportRenderingState): ViewportRenderingState {
   return { ...state, thresholdBounds: null, thresholdOtsuCutoffs: null };
+}
+
+// CT-209: the band-weighting popup's per-band weights live in rendering state
+// (the same editor-owned pattern as the threshold bounds), so the weight fields,
+// a formula/imported-tool result, and Apply all read one source of truth. Opening
+// or closing the panel and Apply clear them.
+export function hasBandWeightingEditingState(state: ViewportRenderingState): boolean {
+  return state.bandWeights !== null;
+}
+
+export function clearBandWeightingEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, bandWeights: null };
 }
 
 export type ViewportActionSourceTransform = (

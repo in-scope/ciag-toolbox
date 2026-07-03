@@ -20,6 +20,7 @@ import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 import { initializePythonEnvironmentControllerFromDisk } from "./python/python-environment-controller";
+import { registerRunUserScriptIpcHandler } from "./python/user-script-ipc";
 import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -144,6 +145,7 @@ app.whenReady().then(() => {
   setWindowsAppUserModelIdForTaskbarGrouping();
   initializeThemeControllerFromDisk();
   initializePythonEnvironmentControllerFromDisk();
+  registerRunUserScriptIpcHandler();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerOpenImagesDialogIpcHandlers();

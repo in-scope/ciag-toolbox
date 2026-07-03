@@ -168,6 +168,27 @@ export interface PythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
+export interface RunUserScriptCube {
+  bands: Float32Array[];
+  height: number;
+  width: number;
+  wavelengths: number[] | null;
+}
+
+export type RunUserScriptSource =
+  | { mode: "formula"; expression: string }
+  | { mode: "import" };
+
+export interface RunUserScriptRequest {
+  cube: RunUserScriptCube;
+  source: RunUserScriptSource;
+}
+
+export type RunUserScriptResult =
+  | { status: "completed"; value: unknown }
+  | { status: "canceled" }
+  | { status: "failed"; message: string };
+
 export type MenuEventListener = () => void;
 export type MenuCommandListener = (commandId: string) => void;
 export type UnsubscribeMenuListener = () => void;
@@ -195,6 +216,7 @@ const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
 const PYTHON_ENVIRONMENT_GET_CHANNEL = "python-environment:get";
 const PYTHON_ENVIRONMENT_SET_CHANNEL = "python-environment:set";
+const RUN_USER_SCRIPT_CHANNEL = "user-script:run";
 
 function fetchAppInfoFromMainProcess(): Promise<AppInfo> {
   return ipcRenderer.invoke(GET_APP_INFO_CHANNEL) as Promise<AppInfo>;
@@ -326,6 +348,15 @@ function setPythonEnvironmentThroughMainProcess(
   ) as Promise<PythonEnvironmentSnapshot>;
 }
 
+function runUserScriptThroughMainProcess(
+  request: RunUserScriptRequest,
+): Promise<RunUserScriptResult> {
+  return ipcRenderer.invoke(
+    RUN_USER_SCRIPT_CHANNEL,
+    request,
+  ) as Promise<RunUserScriptResult>;
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -376,6 +407,7 @@ const apiBridge = {
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
+  runUserScript: runUserScriptThroughMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

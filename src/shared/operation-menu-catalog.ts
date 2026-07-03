@@ -148,6 +148,14 @@ const FILTERS_GROUP: OperationGroup = {
   ],
 };
 
+// Stage 5 band-combining operations gated behind the scripting worker (CT-209..CT-210).
+const BAND_OPS_GROUP: OperationGroup = {
+  key: "band-ops",
+  commands: [
+    buildMenuAndToolbarCommand("band-weighting", "Band Weighting", "open-action-panel"),
+  ],
+};
+
 export const EDIT_MENU: OperationMenu = {
   menuLabel: "Edit",
   groups: [SELECTION_GROUP, EDIT_REGION_GROUP],
@@ -163,6 +171,7 @@ export const IMAGE_MENU: OperationMenu = {
     DATA_GROUP,
     DIMENSION_REDUCTION_GROUP,
     FILTERS_GROUP,
+    BAND_OPS_GROUP,
   ],
 };
 

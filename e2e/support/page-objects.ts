@@ -392,3 +392,15 @@ export {
   expectHistogramShowsEmptyMiddleBins,
   type HistogramRowProfile,
 } from "./histogram-bar-canvas";
+export {
+  BAND_WEIGHTING_OPERATION_LABEL,
+  bandWeightField,
+  expectBandWeightingEditorReady,
+  setBandWeightField,
+  clickResetAllWeightsToOne,
+  clickResetAllWeightsToZero,
+  runBandWeightingFormula,
+  clickImportBandWeightingScript,
+  expectBandWeightFieldsToEqual,
+} from "./band-weighting";
+export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
