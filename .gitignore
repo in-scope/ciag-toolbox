@@ -9,6 +9,9 @@ CLAUDE.md
 .devcontainer/
 tasks/
 
+# Bundled Python runtime (installed by scripts/setup-python-runtime.mjs)
+.python/
+
 # Build output
 node_modules/
 out/
