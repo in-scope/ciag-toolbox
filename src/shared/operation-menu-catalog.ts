@@ -142,6 +142,7 @@ const FILTERS_GROUP: OperationGroup = {
   commands: [
     buildMenuAndToolbarCommand("threshold", "Threshold", "open-action-panel"),
     buildMenuAndToolbarCommand("spectral-derivative", "Spectral Derivative", "open-action-panel"),
+    buildMenuAndToolbarCommand("spatial-filter", "Spatial Filter", "open-action-panel"),
   ],
 };
 

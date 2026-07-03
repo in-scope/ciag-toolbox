@@ -53,6 +53,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "ica",
       "threshold",
       "spectral-derivative",
+      "spatial-filter",
     ]);
   });
 
