@@ -153,6 +153,7 @@ const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
   commands: [
     buildMenuAndToolbarCommand("band-weighting", "Band Weighting", "open-action-panel"),
+    buildMenuAndToolbarCommand("band-selection", "Band Selection", "open-action-panel"),
   ],
 };
 

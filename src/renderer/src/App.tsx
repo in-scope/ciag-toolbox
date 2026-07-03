@@ -33,6 +33,7 @@ import {
 } from "@/components/tool-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
+import { ToolOptionsBandSelectionEditor } from "@/components/tool-options-band-selection-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
@@ -76,6 +77,7 @@ import {
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
+import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -221,11 +223,13 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearBandSelectionEditingState,
   clearBandWeightingEditingState,
   clearThresholdEditingState,
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  hasBandSelectionEditingState,
   hasBandWeightingEditingState,
   hasThresholdEditingState,
   hasToneCurveEditingState,
@@ -641,7 +645,8 @@ function buildActiveOperationEmbeddedEditorOrNull(
   return (
     buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
+    buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
   );
 }
 
@@ -693,6 +698,24 @@ function buildActiveBandWeightingEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsBandWeightingEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveBandSelectionEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedBandSelectionEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsBandSelectionEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -1704,6 +1727,7 @@ function clearTransientOperationStateOnActiveSource(
   clearToneCurveAnchorsOnActiveSource(inputs);
   clearThresholdBoundsOnActiveSource(inputs);
   clearBandWeightsOnActiveSource(inputs);
+  clearBandSelectionOnActiveSource(inputs);
 }
 
 function clearBandWeightsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
@@ -1711,6 +1735,13 @@ function clearBandWeightsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInp
   const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
   if (!hasBandWeightingEditingState(state)) return;
   inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearBandWeightingEditingState(state));
+}
+
+function clearBandSelectionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasBandSelectionEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearBandSelectionEditingState(state));
 }
 
 function clearThresholdBoundsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {

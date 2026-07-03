@@ -185,7 +185,7 @@ interface ToolboxRunUserScriptRequest {
 }
 
 type ToolboxRunUserScriptResult =
-  | { status: "completed"; value: unknown }
+  | { status: "completed"; value: unknown; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
 

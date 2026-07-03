@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+
 import { BrowserWindow, ipcMain } from "electron";
 
 import { showOpenDialogOrStub } from "../e2e-dialog-stub";
@@ -49,9 +51,14 @@ export interface RunUserScriptIpcRequest {
 }
 
 export type RunUserScriptIpcResult =
-  | { status: "completed"; value: JsonValue }
+  | { status: "completed"; value: JsonValue; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
+
+interface PreparedUserScriptRun {
+  prepared: PreparedImportedScript;
+  sourceName: string | null;
+}
 
 export function registerRunUserScriptIpcHandler(): void {
   ipcMain.handle(RUN_USER_SCRIPT_CHANNEL, (event, request: RunUserScriptIpcRequest) =>
@@ -75,9 +82,9 @@ async function runUserScriptForRequest(
   request: RunUserScriptIpcRequest,
 ): Promise<RunUserScriptIpcResult> {
   const selection = resolveInterpreterSelectionOrThrow();
-  const prepared = await prepareUserScriptInputOrCancel(window, request.source);
-  if (prepared === null) return { status: "canceled" };
-  return runPreparedUserScript(selection, prepared, request.cube);
+  const run = await prepareUserScriptInputOrCancel(window, request.source);
+  if (run === null) return { status: "canceled" };
+  return runPreparedUserScript(selection, run, request.cube);
 }
 
 function resolveInterpreterSelectionOrThrow(): PythonInterpreterSelection {
@@ -89,19 +96,22 @@ function resolveInterpreterSelectionOrThrow(): PythonInterpreterSelection {
 async function prepareUserScriptInputOrCancel(
   window: BrowserWindow | null,
   source: RunUserScriptIpcSource,
-): Promise<PreparedImportedScript | null> {
+): Promise<PreparedUserScriptRun | null> {
   if (source.mode === "formula") {
-    return { input: { kind: "formula", expression: source.expression }, releaseResources: releaseNothing };
+    return {
+      prepared: { input: { kind: "formula", expression: source.expression }, releaseResources: releaseNothing },
+      sourceName: null,
+    };
   }
   return prepareImportedUserScriptFromDialog(window);
 }
 
 async function prepareImportedUserScriptFromDialog(
   window: BrowserWindow | null,
-): Promise<PreparedImportedScript | null> {
+): Promise<PreparedUserScriptRun | null> {
   const filePath = await chooseImportedScriptFilePathOrNull(window);
   if (filePath === null) return null;
-  return prepareImportedUserScriptFromFilePath(filePath);
+  return { prepared: await prepareImportedUserScriptFromFilePath(filePath), sourceName: basename(filePath) };
 }
 
 async function chooseImportedScriptFilePathOrNull(
@@ -119,20 +129,20 @@ async function chooseImportedScriptFilePathOrNull(
 
 async function runPreparedUserScript(
   selection: PythonInterpreterSelection,
-  prepared: PreparedImportedScript,
+  run: PreparedUserScriptRun,
   cube: RunUserScriptIpcCube,
 ): Promise<RunUserScriptIpcResult> {
   try {
     const outcome = await runUserScriptInPythonSubprocess({
       interpreterPath: selection.interpreterPath,
-      input: prepared.input,
+      input: run.prepared.input,
       cube: encodeCubeAsFloat32Payload(toCubeForUserScript(cube)),
       sandbox: !selection.isOwnEnvironmentMode,
       timeoutMs: USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS,
     });
-    return mapWorkerOutcomeToIpcResult(outcome);
+    return mapWorkerOutcomeToIpcResult(outcome, run.sourceName);
   } finally {
-    await prepared.releaseResources();
+    await run.prepared.releaseResources();
   }
 }
 
@@ -145,9 +155,13 @@ function toCubeForUserScript(cube: RunUserScriptIpcCube): CubeForUserScript {
   };
 }
 
-function mapWorkerOutcomeToIpcResult(outcome: PythonWorkerOutcome): RunUserScriptIpcResult {
-  if (outcome.kind === "completed") return { status: "completed", value: outcome.value };
-  return { status: "failed", message: outcome.userFacingMessage };
+function mapWorkerOutcomeToIpcResult(
+  outcome: PythonWorkerOutcome,
+  sourceName: string | null,
+): RunUserScriptIpcResult {
+  if (outcome.kind !== "completed") return { status: "failed", message: outcome.userFacingMessage };
+  if (sourceName === null) return { status: "completed", value: outcome.value };
+  return { status: "completed", value: outcome.value, sourceName };
 }
 
 function describeUserScriptFailure(error: unknown): string {

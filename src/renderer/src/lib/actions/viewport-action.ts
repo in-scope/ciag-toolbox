@@ -10,6 +10,7 @@ import {
   type PinnedRoiSpectraList,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
+import type { BandSelectionEditingState } from "@/lib/image/band-ops/band-selection";
 import type { ThresholdOtsuCutoffs } from "@/lib/image/threshold/otsu-cutoffs";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -36,6 +37,7 @@ export interface ViewportRenderingState {
   readonly thresholdBounds: ThresholdBounds | null;
   readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
   readonly bandWeights: ReadonlyArray<number> | null;
+  readonly bandSelection: BandSelectionEditingState | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -60,6 +62,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   thresholdBounds: null,
   thresholdOtsuCutoffs: null,
   bandWeights: null,
+  bandSelection: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -106,6 +109,17 @@ export function hasBandWeightingEditingState(state: ViewportRenderingState): boo
 
 export function clearBandWeightingEditingState(state: ViewportRenderingState): ViewportRenderingState {
   return { ...state, bandWeights: null };
+}
+
+// CT-210: the band-selection popup's current choice (a preset, or a custom
+// formula/tool result token) lives in rendering state, the same editor-owned
+// pattern as the band weights. Opening or closing the panel and Apply clear it.
+export function hasBandSelectionEditingState(state: ViewportRenderingState): boolean {
+  return state.bandSelection !== null;
+}
+
+export function clearBandSelectionEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, bandSelection: null };
 }
 
 export type ViewportActionSourceTransform = (

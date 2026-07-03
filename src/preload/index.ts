@@ -185,7 +185,7 @@ export interface RunUserScriptRequest {
 }
 
 export type RunUserScriptResult =
-  | { status: "completed"; value: unknown }
+  | { status: "completed"; value: unknown; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
 

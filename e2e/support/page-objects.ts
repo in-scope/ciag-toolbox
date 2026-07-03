@@ -403,4 +403,12 @@ export {
   clickImportBandWeightingScript,
   expectBandWeightFieldsToEqual,
 } from "./band-weighting";
+export {
+  BAND_SELECTION_OPERATION_LABEL,
+  expectBandSelectionEditorReady,
+  clickBandSelectionPreset,
+  runBandSelectionFormula,
+  clickImportBandSelectionScript,
+  expectBandSelectionFunction,
+} from "./band-selection";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
