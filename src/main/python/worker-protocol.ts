@@ -26,6 +26,10 @@ export interface RunUserScriptRequest {
   type: "run-user-script";
   input: UserScriptInput;
   cube: CubePayloadHeader | null;
+  // Bundled mode (default for the app's own interpreter) is sandboxed; own-environment
+  // mode (CT-208e) is explicitly trusted and passes false. The sandbox itself lives in
+  // the Python bootstrap (sandbox-policy.ts); this flag only toggles installing it.
+  sandbox: boolean;
 }
 
 export type PythonWorkerResponse =

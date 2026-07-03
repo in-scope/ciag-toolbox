@@ -37,7 +37,30 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "script", scriptSource },
       cube: null,
+      sandbox: false,
       timeoutMs,
+    });
+  }
+
+  function runSandboxedScript(scriptSource: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: { kind: "script", scriptSource },
+      cube: null,
+      sandbox: true,
+      timeoutMs,
+    });
+  }
+
+  function runSandboxedFormulaAgainstCube(expression: string, cube: CubeForUserScript) {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: { kind: "formula", expression },
+      cube: encodeCubeAsFloat32Payload(cube),
+      sandbox: true,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
     });
   }
 
@@ -47,6 +70,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "formula", expression },
       cube: encodeCubeAsFloat32Payload(cube),
+      sandbox: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
   }
@@ -57,6 +81,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "script", scriptSource },
       cube: encodeCubeAsFloat32Payload(cube),
+      sandbox: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
   }
@@ -72,6 +97,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
         interpreterPath,
         input: prepared.input,
         cube: encodeCubeAsFloat32Payload(cube),
+        sandbox: false,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
     } finally {
@@ -195,6 +221,45 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       kind: "failed",
       reason: "script-error",
       userFacingMessage: "The script failed: The tool's main.py must define a run() function.",
+    });
+  }, 60_000);
+
+  it("still runs a legitimate numpy computation under the bundled sandbox", async () => {
+    const outcome = await runSandboxedFormulaAgainstCube("cube.mean(axis=(1, 2))", sampleCube);
+    const expectedBandMeans = sampleCube.bands.map((band) => band.reduce((s, v) => s + v, 0) / band.length);
+    expect(outcome).toEqual({ kind: "completed", value: expectedBandMeans });
+  }, 60_000);
+
+  it("denies filesystem writes to a sandboxed script", async () => {
+    const outcome = await runSandboxedScript(
+      "def run():\n    open(r'C:/msi-sandbox-probe.txt', 'w').write('x')\n    return 'wrote'\n",
+    );
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("blocked in bundled mode");
+  }, 60_000);
+
+  it("denies reading an arbitrary file outside the runtime from a sandboxed script", async () => {
+    const outcome = await runSandboxedScript(
+      "def run():\n    open(r'C:/Windows/win.ini', 'r').read()\n    return 'read'\n",
+    );
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("filesystem");
+  }, 60_000);
+
+  it("denies opening a network connection from a sandboxed script", async () => {
+    const outcome = await runSandboxedScript(
+      "def run():\n    import socket\n    socket.socket().connect(('127.0.0.1', 9))\n    return 'connected'\n",
+    );
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("blocked in bundled mode");
+  }, 60_000);
+
+  it("still kills a runaway sandboxed script at the wall-clock limit", async () => {
+    const outcome = await runSandboxedScript("def run():\n    while True:\n        pass\n", 1_500);
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "timeout",
+      userFacingMessage: "The script exceeded the 1.5-second limit and was stopped.",
     });
   }, 60_000);
 });

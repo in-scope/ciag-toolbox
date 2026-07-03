@@ -19,6 +19,9 @@ export interface PythonWorkerRunRequest {
   interpreterPath: string;
   input: UserScriptInput;
   cube: EncodedCubePayload | null;
+  // True in bundled mode (the app's own interpreter, sandboxed); false in the
+  // explicitly-trusted own-environment mode (CT-208e). The wall-clock kill applies either way.
+  sandbox: boolean;
   timeoutMs: number;
 }
 
@@ -34,7 +37,7 @@ export async function runUserScriptInPythonSubprocess(
   request: PythonWorkerRunRequest,
 ): Promise<PythonWorkerOutcome> {
   const worker = spawnPythonWorkerProcess(request.interpreterPath);
-  sendRunUserScriptRequestToWorker(worker, request.input, request.cube);
+  sendRunUserScriptRequestToWorker(worker, request);
   return new Promise((resolveOutcome) => {
     new PythonWorkerRunObserver(worker, request.timeoutMs, resolveOutcome).beginObserving();
   });
@@ -51,22 +54,26 @@ function spawnPythonWorkerProcess(interpreterPath: string): ChildProcessWithoutN
 
 function sendRunUserScriptRequestToWorker(
   worker: ChildProcessWithoutNullStreams,
-  input: UserScriptInput,
-  cube: EncodedCubePayload | null,
+  request: PythonWorkerRunRequest,
 ): void {
   worker.stdin.on("error", () => undefined);
-  worker.stdin.write(encodeRunUserScriptTransmission(input, cube));
+  worker.stdin.write(encodeRunUserScriptTransmission(request));
   worker.stdin.end();
 }
 
-function encodeRunUserScriptTransmission(
-  input: UserScriptInput,
-  cube: EncodedCubePayload | null,
-): Buffer {
-  const request: RunUserScriptRequest = { type: "run-user-script", input, cube: cube?.header ?? null };
-  const requestFrame = encodeWorkerRequestFrame(request);
-  if (cube === null) return requestFrame;
-  return Buffer.concat([requestFrame, encodeRawBinaryFrame(cube.buffer)]);
+function encodeRunUserScriptTransmission(request: PythonWorkerRunRequest): Buffer {
+  const requestFrame = encodeWorkerRequestFrame(buildWorkerRequest(request));
+  if (request.cube === null) return requestFrame;
+  return Buffer.concat([requestFrame, encodeRawBinaryFrame(request.cube.buffer)]);
+}
+
+function buildWorkerRequest(request: PythonWorkerRunRequest): RunUserScriptRequest {
+  return {
+    type: "run-user-script",
+    input: request.input,
+    cube: request.cube?.header ?? null,
+    sandbox: request.sandbox,
+  };
 }
 
 function outcomeFromWorkerResponse(response: PythonWorkerResponse): PythonWorkerOutcome {

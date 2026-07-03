@@ -21,6 +21,7 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "script", scriptSource: "def run(): return 1" },
       cube: null,
+      sandbox: true,
     });
     const payload = frame.subarray(4);
     expect(frame.readUInt32LE(0)).toBe(payload.length);
@@ -28,6 +29,7 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "script", scriptSource: "def run(): return 1" },
       cube: null,
+      sandbox: true,
     });
   });
 
@@ -36,6 +38,7 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "formula", expression: "# λ = 550nm" },
       cube: null,
+      sandbox: true,
     });
     expect(frame.readUInt32LE(0)).toBe(frame.length - 4);
   });

@@ -4,6 +4,8 @@
 // user Python. It must mirror the frame layout in worker-protocol.ts exactly: the JSON
 // request frame is followed by a raw little-endian float32 cube frame when the request
 // header declares a cube.
+import { PYTHON_SANDBOX_INSTALL_SOURCE } from "./sandbox-policy";
+
 export const PYTHON_WORKER_BOOTSTRAP_SOURCE = `
 import inspect
 import json
@@ -13,6 +15,8 @@ import traceback
 
 REAL_STDOUT = sys.stdout.buffer
 sys.stdout = sys.stderr
+
+${PYTHON_SANDBOX_INSTALL_SOURCE}
 
 
 def read_frame_payload(stream):
@@ -114,8 +118,18 @@ def encode_response(message):
     return json.dumps(message, allow_nan=False).encode("utf-8")
 
 
+def sandbox_user_origin_prefixes(input_spec):
+    if isinstance(input_spec, dict) and input_spec.get("kind") == "package":
+        directory = input_spec.get("packageDirectory")
+        return [directory] if directory else []
+    return []
+
+
 def run_user_code(request, cube):
-    run_function = load_run_function(request.get("input"))
+    input_spec = request.get("input")
+    run_function = load_run_function(input_spec)
+    if request.get("sandbox"):
+        install_bundled_mode_sandbox(sandbox_user_origin_prefixes(input_spec))
     wavelengths = (request.get("cube") or {}).get("wavelengths")
     value = invoke_run_function(run_function, cube, wavelengths)
     return encode_response({"type": "script-result", "value": make_json_safe(value)})
