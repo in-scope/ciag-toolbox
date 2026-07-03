@@ -230,10 +230,23 @@ function buildAboutMenuItem(
   };
 }
 
+function buildHowToWriteScriptMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "How to Write a Custom Script",
+    click: () => sendMenuChannelToRenderer(window, "menu:script-docs"),
+  };
+}
+
 function buildHelpMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     role: "help",
-    submenu: [buildAboutMenuItem(window)],
+    submenu: [
+      buildHowToWriteScriptMenuItem(window),
+      { type: "separator" },
+      buildAboutMenuItem(window),
+    ],
   };
 }
 

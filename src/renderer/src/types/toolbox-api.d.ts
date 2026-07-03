@@ -231,6 +231,9 @@ interface ToolboxApi {
   onMenuPythonEnvironment: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
+  onMenuScriptDocs: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
   onMenuInvokeCommand: (
     listener: ToolboxMenuCommandListener,
   ) => ToolboxUnsubscribeMenuListener;
