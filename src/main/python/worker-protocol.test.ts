@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  encodeRawBinaryFrame,
   encodeWorkerRequestFrame,
   MalformedWorkerResponseError,
   WorkerResponseFrameDecoder,
@@ -16,18 +17,36 @@ function encodeResponseFrame(response: PythonWorkerResponse): Buffer {
 
 describe("encodeWorkerRequestFrame", () => {
   it("prefixes the UTF-8 JSON payload with its little-endian byte length", () => {
-    const frame = encodeWorkerRequestFrame({ type: "run-user-script", scriptSource: "def run(): return 1" });
+    const frame = encodeWorkerRequestFrame({
+      type: "run-user-script",
+      input: { kind: "script", scriptSource: "def run(): return 1" },
+      cube: null,
+    });
     const payload = frame.subarray(4);
     expect(frame.readUInt32LE(0)).toBe(payload.length);
     expect(JSON.parse(payload.toString("utf8"))).toEqual({
       type: "run-user-script",
-      scriptSource: "def run(): return 1",
+      input: { kind: "script", scriptSource: "def run(): return 1" },
+      cube: null,
     });
   });
 
   it("measures multi-byte characters in bytes, not code units", () => {
-    const frame = encodeWorkerRequestFrame({ type: "run-user-script", scriptSource: "# λ = 550nm" });
+    const frame = encodeWorkerRequestFrame({
+      type: "run-user-script",
+      input: { kind: "formula", expression: "# λ = 550nm" },
+      cube: null,
+    });
     expect(frame.readUInt32LE(0)).toBe(frame.length - 4);
+  });
+});
+
+describe("encodeRawBinaryFrame", () => {
+  it("length-prefixes a raw payload so it decodes like any other frame", () => {
+    const payload = Buffer.from([1, 2, 3, 4, 5]);
+    const frame = encodeRawBinaryFrame(payload);
+    expect(frame.readUInt32LE(0)).toBe(payload.length);
+    expect(frame.subarray(4)).toEqual(payload);
   });
 });
 

@@ -3,17 +3,22 @@
 // Expected failures (script errors, timeouts, crashes) resolve as a failed outcome
 // with a user-facing message; this function never rejects for them.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { EncodedCubePayload } from "./cube-payload";
 import { PYTHON_WORKER_BOOTSTRAP_SOURCE } from "./worker-bootstrap";
 import {
+  encodeRawBinaryFrame,
   encodeWorkerRequestFrame,
   WorkerResponseFrameDecoder,
   type JsonValue,
   type PythonWorkerResponse,
+  type RunUserScriptRequest,
+  type UserScriptInput,
 } from "./worker-protocol";
 
 export interface PythonWorkerRunRequest {
   interpreterPath: string;
-  scriptSource: string;
+  input: UserScriptInput;
+  cube: EncodedCubePayload | null;
   timeoutMs: number;
 }
 
@@ -29,7 +34,7 @@ export async function runUserScriptInPythonSubprocess(
   request: PythonWorkerRunRequest,
 ): Promise<PythonWorkerOutcome> {
   const worker = spawnPythonWorkerProcess(request.interpreterPath);
-  sendRunUserScriptRequestToWorker(worker, request.scriptSource);
+  sendRunUserScriptRequestToWorker(worker, request.input, request.cube);
   return new Promise((resolveOutcome) => {
     new PythonWorkerRunObserver(worker, request.timeoutMs, resolveOutcome).beginObserving();
   });
@@ -46,11 +51,22 @@ function spawnPythonWorkerProcess(interpreterPath: string): ChildProcessWithoutN
 
 function sendRunUserScriptRequestToWorker(
   worker: ChildProcessWithoutNullStreams,
-  scriptSource: string,
+  input: UserScriptInput,
+  cube: EncodedCubePayload | null,
 ): void {
   worker.stdin.on("error", () => undefined);
-  worker.stdin.write(encodeWorkerRequestFrame({ type: "run-user-script", scriptSource }));
+  worker.stdin.write(encodeRunUserScriptTransmission(input, cube));
   worker.stdin.end();
+}
+
+function encodeRunUserScriptTransmission(
+  input: UserScriptInput,
+  cube: EncodedCubePayload | null,
+): Buffer {
+  const request: RunUserScriptRequest = { type: "run-user-script", input, cube: cube?.header ?? null };
+  const requestFrame = encodeWorkerRequestFrame(request);
+  if (cube === null) return requestFrame;
+  return Buffer.concat([requestFrame, encodeRawBinaryFrame(cube.buffer)]);
 }
 
 function outcomeFromWorkerResponse(response: PythonWorkerResponse): PythonWorkerOutcome {
