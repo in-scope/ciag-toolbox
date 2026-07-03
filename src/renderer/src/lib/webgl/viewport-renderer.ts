@@ -20,8 +20,8 @@ import {
   type RasterTile,
 } from "./raster-tile-splitter";
 import {
-  createR16FTextureForRasterTile,
-  createRgbF16TextureForRasterTileTriple,
+  createRgbCompositeTextureForRasterTileTriple,
+  createSingleBandTextureForRasterTile,
   deleteRasterTileTexturesSafely,
   probeHalfFloatColorBufferExtension,
   type RasterTileTexture,
@@ -631,7 +631,7 @@ function createRasterTileTexturesForRasterBand(
   bandIndex: number,
 ): RasterTileTexture[] {
   const rasterTiles = splitRasterBandIntoTiles(bandPixelGridForRaster(raster, bandIndex), DEFAULT_RASTER_TILE_SIZE);
-  return rasterTiles.map((tile) => createR16FTextureForRasterTile(gl, tile, raster));
+  return rasterTiles.map((tile) => createSingleBandTextureForRasterTile(gl, tile, raster));
 }
 
 function createRgbCompositeTileTextures(
@@ -640,7 +640,7 @@ function createRgbCompositeTileTextures(
 ): RasterTileTexture[] {
   const [redTiles, greenTiles, blueTiles] = splitRgbCompositeBandsIntoAlignedTiles(raster);
   return redTiles.map((redTile, tileIndex) =>
-    createRgbF16TextureForRasterTileTriple(gl, [redTile, greenTiles[tileIndex]!, blueTiles[tileIndex]!], raster),
+    createRgbCompositeTextureForRasterTileTriple(gl, [redTile, greenTiles[tileIndex]!, blueTiles[tileIndex]!], raster),
   );
 }
 

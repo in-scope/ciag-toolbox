@@ -6,6 +6,7 @@ import {
 import type { RasterTile } from "@/lib/webgl/raster-tile-splitter";
 
 const HALF_FLOAT_COLOR_BUFFER_EXTENSION_NAME = "EXT_color_buffer_half_float";
+const FLOAT_LINEAR_FILTERING_EXTENSION_NAME = "OES_texture_float_linear";
 
 export interface RasterTileTexture {
   readonly texture: WebGLTexture;
@@ -21,14 +22,15 @@ export function probeHalfFloatColorBufferExtension(
   return gl.getExtension(HALF_FLOAT_COLOR_BUFFER_EXTENSION_NAME) !== null;
 }
 
-export function createR16FTextureForRasterTile(
+export function createSingleBandTextureForRasterTile(
   gl: WebGL2RenderingContext,
   tile: RasterTile,
   raster: RasterImage,
 ): RasterTileTexture {
-  const texture = createR16FTextureBoundForSingleChannelSampling(gl, tile.width, tile.height);
-  const floatPixels = convertRasterTilePixelsToNormalizedFloat32(tile.pixels, raster);
-  uploadFloatPixelsToBoundR16FTexture(gl, floatPixels, tile.width, tile.height);
+  const storage = chooseSingleBandTileStorage(gl, raster);
+  const texture = createTileTextureBoundForSampling(gl, tile.width, tile.height, storage);
+  const floatPixels = convertRasterTilePixelsToUploadFloat32(tile.pixels, raster);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, tile.width, tile.height, gl.RED, gl.FLOAT, floatPixels);
   return {
     texture,
     imageSpaceX: tile.x,
@@ -38,87 +40,87 @@ export function createR16FTextureForRasterTile(
   };
 }
 
-function createR16FTextureBoundForSingleChannelSampling(
+interface TileTextureStorage {
+  readonly internalFormat: GLenum;
+  readonly minFilter: GLenum;
+}
+
+// A float raster's band pixels upload RAW (unscaled), and PCA/MNF components or
+// band-math results routinely exceed half-float's ~65504 max finite value, which
+// binarized the display (the venere PCA field regression). Float tiles therefore
+// take lossless float32 storage. Integer tiles are pre-scaled to [0,1], always in
+// range, and keep the cheaper half-float storage.
+function chooseSingleBandTileStorage(
+  gl: WebGL2RenderingContext,
+  raster: RasterImage,
+): TileTextureStorage {
+  if (raster.sampleFormat !== "float") return { internalFormat: gl.R16F, minFilter: gl.LINEAR };
+  return { internalFormat: gl.R32F, minFilter: chooseFloat32MinificationFilter(gl) };
+}
+
+function chooseRgbCompositeTileStorage(
+  gl: WebGL2RenderingContext,
+  raster: RasterImage,
+): TileTextureStorage {
+  if (raster.sampleFormat !== "float") return { internalFormat: gl.RGBA16F, minFilter: gl.LINEAR };
+  return { internalFormat: gl.RGBA32F, minFilter: chooseFloat32MinificationFilter(gl) };
+}
+
+// LINEAR minification of float32 textures requires OES_texture_float_linear
+// (ubiquitous on desktop GL); without it fall back to NEAREST, matching the
+// magnification filter, rather than leaving the texture incomplete.
+function chooseFloat32MinificationFilter(gl: WebGL2RenderingContext): GLenum {
+  const supportsLinear = gl.getExtension(FLOAT_LINEAR_FILTERING_EXTENSION_NAME) !== null;
+  return supportsLinear ? gl.LINEAR : gl.NEAREST;
+}
+
+function createTileTextureBoundForSampling(
   gl: WebGL2RenderingContext,
   width: number,
   height: number,
+  storage: TileTextureStorage,
 ): WebGLTexture {
   const texture = gl.createTexture();
-  if (!texture) throw new Error("Failed to create R16F WebGL texture");
+  if (!texture) throw new Error("Failed to create raster tile WebGL texture");
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  configureR16FTextureSamplingParameters(gl);
-  reserveR16FTextureStorage(gl, width, height);
+  configureTileTextureSamplingParameters(gl, storage.minFilter);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, storage.internalFormat, width, height);
   return texture;
 }
 
-function configureR16FTextureSamplingParameters(gl: WebGL2RenderingContext): void {
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+function configureTileTextureSamplingParameters(
+  gl: WebGL2RenderingContext,
+  minFilter: GLenum,
+): void {
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 }
 
-function reserveR16FTextureStorage(
-  gl: WebGL2RenderingContext,
-  width: number,
-  height: number,
-): void {
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R16F, width, height);
-}
-
-function uploadFloatPixelsToBoundR16FTexture(
-  gl: WebGL2RenderingContext,
-  pixels: Float32Array,
-  width: number,
-  height: number,
-): void {
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RED, gl.FLOAT, pixels);
-}
-
 // CT-159: an RGB-composite raster uploads three aligned band tiles into one
-// RGBA16F texture so the fragment shader samples real colour. The tiles share an
+// RGBA texture so the fragment shader samples real colour. The tiles share an
 // identical rect (same splitter, same dimensions), so band index i lines up.
-export function createRgbF16TextureForRasterTileTriple(
+export function createRgbCompositeTextureForRasterTileTriple(
   gl: WebGL2RenderingContext,
   tiles: readonly [RasterTile, RasterTile, RasterTile],
   raster: RasterImage,
 ): RasterTileTexture {
   const [red] = tiles;
-  const texture = createRgba16FTextureBoundForColorSampling(gl, red.width, red.height);
-  const rgba = packRasterTileTripleAsNormalizedRgbaFloat32(tiles, raster);
-  uploadFloatPixelsToBoundRgba16FTexture(gl, rgba, red.width, red.height);
+  const storage = chooseRgbCompositeTileStorage(gl, raster);
+  const texture = createTileTextureBoundForSampling(gl, red.width, red.height, storage);
+  const rgba = packRasterTileTripleAsUploadRgbaFloat32(tiles, raster);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, red.width, red.height, gl.RGBA, gl.FLOAT, rgba);
   return { texture, imageSpaceX: red.x, imageSpaceY: red.y, width: red.width, height: red.height };
 }
 
-function createRgba16FTextureBoundForColorSampling(
-  gl: WebGL2RenderingContext,
-  width: number,
-  height: number,
-): WebGLTexture {
-  const texture = gl.createTexture();
-  if (!texture) throw new Error("Failed to create RGBA16F WebGL texture");
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  configureR16FTextureSamplingParameters(gl);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, width, height);
-  return texture;
-}
-
-function uploadFloatPixelsToBoundRgba16FTexture(
-  gl: WebGL2RenderingContext,
-  pixels: Float32Array,
-  width: number,
-  height: number,
-): void {
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
-}
-
-function packRasterTileTripleAsNormalizedRgbaFloat32(
+function packRasterTileTripleAsUploadRgbaFloat32(
   tiles: readonly [RasterTile, RasterTile, RasterTile],
   raster: RasterImage,
 ): Float32Array {
-  const red = convertRasterTilePixelsToNormalizedFloat32(tiles[0].pixels, raster);
-  const green = convertRasterTilePixelsToNormalizedFloat32(tiles[1].pixels, raster);
-  const blue = convertRasterTilePixelsToNormalizedFloat32(tiles[2].pixels, raster);
+  const red = convertRasterTilePixelsToUploadFloat32(tiles[0].pixels, raster);
+  const green = convertRasterTilePixelsToUploadFloat32(tiles[1].pixels, raster);
+  const blue = convertRasterTilePixelsToUploadFloat32(tiles[2].pixels, raster);
   return interleaveRgbChannelsAsOpaqueRgbaFloat32(red, green, blue);
 }
 
@@ -138,7 +140,7 @@ function interleaveRgbChannelsAsOpaqueRgbaFloat32(
   return rgba;
 }
 
-function convertRasterTilePixelsToNormalizedFloat32(
+function convertRasterTilePixelsToUploadFloat32(
   pixels: RasterTypedArray,
   raster: RasterImage,
 ): Float32Array {
