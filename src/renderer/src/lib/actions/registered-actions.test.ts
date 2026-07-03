@@ -52,6 +52,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "mnf",
       "ica",
       "threshold",
+      "spectral-derivative",
     ]);
   });
 
