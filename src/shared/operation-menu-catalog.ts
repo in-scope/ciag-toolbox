@@ -136,6 +136,14 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
   ],
 };
 
+// Stage 5 filters and per-pixel operations (CT-200..CT-205 land here).
+const FILTERS_GROUP: OperationGroup = {
+  key: "filters",
+  commands: [
+    buildMenuAndToolbarCommand("threshold", "Threshold", "open-action-panel"),
+  ],
+};
+
 export const EDIT_MENU: OperationMenu = {
   menuLabel: "Edit",
   groups: [SELECTION_GROUP, EDIT_REGION_GROUP],
@@ -150,6 +158,7 @@ export const IMAGE_MENU: OperationMenu = {
     CALIBRATE_GROUP,
     DATA_GROUP,
     DIMENSION_REDUCTION_GROUP,
+    FILTERS_GROUP,
   ],
 };
 

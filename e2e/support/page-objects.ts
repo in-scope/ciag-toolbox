@@ -312,9 +312,21 @@ export {
   nonClearPixelFraction,
   averageNonClearCanvasColor,
   colorfulNonClearPixelFraction,
+  saturatedWhitePixelFraction,
   type CanvasPixelSummary,
   type CanvasAverageColor,
 } from "./canvas-pixels";
+export {
+  THRESHOLD_OPERATION_LABEL,
+  thresholdBoundHandle,
+  thresholdBoundField,
+  expectThresholdEditorReady,
+  setThresholdBoundField,
+  readThresholdBoundFieldValue,
+  dragThresholdBoundHandleToFraction,
+  releaseThresholdBoundDrag,
+  type ThresholdBoundSide,
+} from "./threshold-editor";
 export {
   readImageTextureUploadCount,
   readPreviewRasterAllocationCount,

@@ -326,6 +326,7 @@ function buildRenderingStateWithHistory(
     toneCurveAnchors: null,
     toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
     toneCurveActiveChannel: "rgb",
+    thresholdBounds: null,
     pinnedSpectra: EMPTY_PINNED_SPECTRA,
     pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,

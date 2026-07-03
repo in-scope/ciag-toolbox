@@ -28,6 +28,7 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
@@ -69,6 +70,7 @@ import {
   type OperationCommandHandlers,
 } from "@/lib/actions/operation-command-bindings";
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
+import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -78,6 +80,7 @@ import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-prev
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
 import { buildBrightnessContrastPreviewLutOrNull } from "@/lib/image/brightness-contrast-preview";
+import { buildThresholdPreviewLutOrNull } from "@/lib/image/threshold/threshold-preview";
 import {
   buildComposedChannelPreviewLutOrNull,
   isCompositeToneCurvePreviewActive,
@@ -212,9 +215,11 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearThresholdEditingState,
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyScope,
   type ViewportRenderingState,
@@ -473,7 +478,7 @@ function ApplicationShell(): JSX.Element {
                 activeAction={activeAction}
                 sourceViewport={singleSelectedSource?.summary ?? null}
                 loadedReferenceCandidates={loadedReferenceCandidates}
-                toolOptionsEmbeddedEditor={buildActiveToneCurveEditorElementOrNull(
+                toolOptionsEmbeddedEditor={buildActiveOperationEmbeddedEditorOrNull(
                   activeAction,
                   singleSelectedSource,
                   imagesByIndex,
@@ -610,6 +615,17 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
 }
 
+function buildActiveOperationEmbeddedEditorOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  return (
+    buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
+  );
+}
+
 function buildActiveToneCurveEditorElementOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
@@ -622,6 +638,24 @@ function buildActiveToneCurveEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsToneCurveEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveThresholdEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedThresholdEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsThresholdEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -1619,6 +1653,14 @@ function clearTransientOperationStateOnActiveSource(
 ): void {
   clearOperationRegionOnActiveSource(inputs);
   clearToneCurveAnchorsOnActiveSource(inputs);
+  clearThresholdBoundsOnActiveSource(inputs);
+}
+
+function clearThresholdBoundsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasThresholdEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearThresholdEditingState(state));
 }
 
 function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
@@ -1782,9 +1824,27 @@ function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInp
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
   const toneCurveLut = useSingleBandToneCurvePreviewLut(toneCurveRaster, state);
   const brightnessContrastLut = useBrightnessContrastPreviewLut(inputs, state);
+  const thresholdLut = useThresholdPreviewLut(inputs, state);
   const channelLookupTables = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
-  const lookupTable = toneCurveLut ?? brightnessContrastLut;
+  const lookupTable = toneCurveLut ?? brightnessContrastLut ?? thresholdLut;
   return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
+}
+
+// CT-200: the manual threshold previews its binary result through the SAME
+// single-band display-LUT slot (only one tool panel is open at a time). It
+// tracks the VIEWED band only and stays display-only until Apply.
+function useThresholdPreviewLut(
+  inputs: PublishActiveToolPreviewInputs,
+  state: ViewportRenderingState | null,
+): ReadonlyArray<number> | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "threshold");
+  const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
+  const bandIndex = state?.selectedBandIndex ?? 0;
+  const bounds = state?.thresholdBounds ?? null;
+  return useMemo(
+    () => (isComposite ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds)),
+    [isComposite, raster, bandIndex, bounds],
+  );
 }
 
 // CT-186: brightness/contrast previews through the SAME single-band display LUT slot

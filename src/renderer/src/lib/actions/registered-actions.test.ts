@@ -51,6 +51,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "pca",
       "mnf",
       "ica",
+      "threshold",
     ]);
   });
 

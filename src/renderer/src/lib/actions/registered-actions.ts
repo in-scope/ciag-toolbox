@@ -130,6 +130,7 @@ import {
 import { PCA_ACTION } from "./pca-action";
 import { MNF_ACTION } from "./mnf-action";
 import { ICA_ACTION } from "./ica-action";
+import { THRESHOLD_ACTION } from "./threshold-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1749,4 +1750,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   PCA_ACTION,
   MNF_ACTION,
   ICA_ACTION,
+  THRESHOLD_ACTION,
 ];
