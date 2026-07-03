@@ -2,17 +2,17 @@ import { Waves } from "lucide-react";
 
 import { applySpatialFrequencyFilterToBand, type SpatialFrequencyFilterMode, type SpatialFrequencyFilterSettings } from "@/lib/image/filters/spatial-frequency-filter";
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
-import {
-  formatBandNumbersAsRangeText,
-  parseBandRangeText,
-} from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 
 import {
+  describeCubeScopeForAppliedLabel,
+  injectSelectedBandAsBandWiseDefault,
+  resolveScopedBandIndexSet,
+  type CubeScopeParameterIds,
+} from "./band-scope-selection";
+import {
   FULL_CUBE_SCOPE,
-  readBandRangeTextOrEmpty,
-  readCubeScopeChoiceOrDefault,
   type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
@@ -39,6 +39,12 @@ export const SPATIAL_FILTER_BANDPASS_HIGH_CUTOFF_PARAMETER_ID = "bandpassHighCut
 export const SPATIAL_FILTER_SCOPE_PARAMETER_ID = "scope";
 export const SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID = "bandRange";
 const SPATIAL_FILTER_TARGET_BAND_PARAMETER_ID = "targetBandIndex";
+
+const SPATIAL_FILTER_SCOPE_IDS: CubeScopeParameterIds = {
+  scopeParameterId: SPATIAL_FILTER_SCOPE_PARAMETER_ID,
+  bandRangeParameterId: SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID,
+  targetBandParameterId: SPATIAL_FILTER_TARGET_BAND_PARAMETER_ID,
+};
 
 const LOWPASS_MODE_VALUE = "lowpass" satisfies SpatialFrequencyFilterMode;
 const HIGHPASS_MODE_VALUE = "highpass" satisfies SpatialFrequencyFilterMode;
@@ -131,21 +137,22 @@ export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   appliedLabel: "Spatial filter",
   loadingMessage: "Filtering spatial frequencies...",
   formatAppliedLabel: formatSpatialFilterAppliedLabel,
-  prepareParameterValuesForApply: injectSelectedBandAsBandWiseDefault,
+  prepareParameterValuesForApply: injectSelectedBandIntoSpatialFilterParameters,
   apply: (state) => state,
   transformSource: createSpatialFilterSourceTransform(),
 };
 
 // Band-wise scope with an empty range falls back to the band the user is
 // looking at, so the viewed band is captured at Apply time (threshold pattern).
-function injectSelectedBandAsBandWiseDefault(
+function injectSelectedBandIntoSpatialFilterParameters(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
 ): ParameterValuesById {
-  return Object.freeze({
-    ...rawParameterValues,
-    [SPATIAL_FILTER_TARGET_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
-  });
+  return injectSelectedBandAsBandWiseDefault(
+    SPATIAL_FILTER_SCOPE_IDS,
+    rawParameterValues,
+    sourceRenderingState,
+  );
 }
 
 export function readSpatialFilterSettings(
@@ -187,7 +194,11 @@ function createSpatialFilterSourceTransform(): ViewportActionSourceTransform {
   return (rawSource, parameterValues) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const settings = readSpatialFilterSettings(parameterValues);
-    const filteredBandIndexes = resolveFilteredBandIndexSet(parameterValues, source.raster.bandCount);
+    const filteredBandIndexes = resolveScopedBandIndexSet(
+      SPATIAL_FILTER_SCOPE_IDS,
+      parameterValues,
+      source.raster.bandCount,
+    );
     return { kind: "raster", raster: filterBandsOfRaster(source.raster, filteredBandIndexes, settings) };
   };
 }
@@ -203,43 +214,10 @@ function filterBandsOfRaster(
   );
 }
 
-function resolveFilteredBandIndexSet(
-  parameterValues: ParameterValuesById,
-  bandCount: number,
-): ReadonlySet<number> {
-  if (readSpatialFilterScopeChoice(parameterValues) === FULL_CUBE_SCOPE) {
-    return new Set(Array.from({ length: bandCount }, (_unused, index) => index));
-  }
-  return new Set(resolveBandWiseFilteredIndexes(parameterValues, bandCount));
-}
-
-function resolveBandWiseFilteredIndexes(
-  parameterValues: ParameterValuesById,
-  bandCount: number,
-): ReadonlyArray<number> {
-  const text = readBandRangeTextOrEmpty(parameterValues[SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID]);
-  if (text.trim() === "") return [readTargetBandIndexOrZero(parameterValues)];
-  const parsed = parseBandRangeText(text, bandCount);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return parsed.bandNumbers.map((bandNumber) => bandNumber - 1);
-}
-
-function readTargetBandIndexOrZero(parameterValues: ParameterValuesById): number {
-  const raw = parameterValues[SPATIAL_FILTER_TARGET_BAND_PARAMETER_ID];
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.round(raw));
-}
-
-function readSpatialFilterScopeChoice(parameterValues: ParameterValuesById) {
-  return readCubeScopeChoiceOrDefault(
-    parameterValues[SPATIAL_FILTER_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
-    FULL_CUBE_SCOPE,
-  );
-}
-
 function formatSpatialFilterAppliedLabel(parameterValues: ParameterValuesById): string {
   const settings = readSpatialFilterSettings(parameterValues);
-  return `Spatial filter (${describeSettingsForLabel(settings)}, ${describeScopeForLabel(parameterValues)})`;
+  const scopeText = describeCubeScopeForAppliedLabel(SPATIAL_FILTER_SCOPE_IDS, parameterValues);
+  return `Spatial filter (${describeSettingsForLabel(settings)}, ${scopeText})`;
 }
 
 function describeSettingsForLabel(settings: SpatialFrequencyFilterSettings): string {
@@ -253,16 +231,4 @@ function describeSettingsForLabel(settings: SpatialFrequencyFilterSettings): str
 function formatCutoffForLabel(cutoff: number): string {
   if (Number.isInteger(cutoff)) return String(cutoff);
   return cutoff.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function describeScopeForLabel(parameterValues: ParameterValuesById): string {
-  if (readSpatialFilterScopeChoice(parameterValues) === FULL_CUBE_SCOPE) return "full stack";
-  return `band-wise: bands ${describeBandWiseBandSetForLabel(parameterValues)}`;
-}
-
-function describeBandWiseBandSetForLabel(parameterValues: ParameterValuesById): string {
-  const text = readBandRangeTextOrEmpty(parameterValues[SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID]);
-  if (text.trim() === "") return String(readTargetBandIndexOrZero(parameterValues) + 1);
-  const parsed = parseBandRangeText(text, Number.MAX_SAFE_INTEGER);
-  return parsed.ok ? formatBandNumbersAsRangeText(parsed.bandNumbers) : text.trim();
 }

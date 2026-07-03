@@ -37,10 +37,26 @@ export interface BimodalGrayFixture extends SingleFileFixture {
   readonly expectedOtsuCutoff: number;
 }
 
+// CT-204: a smooth grayscale fixture with fixed salt-and-pepper spikes; the
+// generator pins each spike's noisy (pre) value, smooth base value, and
+// radius-1 median-denoised (post) value.
+export interface NoisyGraySpike {
+  readonly x: number;
+  readonly y: number;
+  readonly noisyValue: number;
+  readonly smoothValue: number;
+  readonly medianDenoisedValue: number;
+}
+
+export interface NoisyGrayFixture extends SingleFileFixture {
+  readonly spikes: ReadonlyArray<NoisyGraySpike>;
+}
+
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
 export const lowContrastGrayPng = manifestJson.lowContrastGrayPng as SingleFileFixture;
 export const bimodalGrayPng = manifestJson.bimodalGrayPng as BimodalGrayFixture;
+export const noisyGrayPng = manifestJson.noisyGrayPng as NoisyGrayFixture;
 export const rgbPng = manifestJson.rgbPng as SingleFileFixture;
 export const multiBandTiff = manifestJson.multiBandTiff as SingleFileFixture;
 export const flatFieldReferenceTiff = manifestJson.flatFieldReferenceTiff as SingleFileFixture;

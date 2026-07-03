@@ -133,6 +133,7 @@ import { ICA_ACTION } from "./ica-action";
 import { THRESHOLD_ACTION } from "./threshold-action";
 import { SPECTRAL_DERIVATIVE_ACTION } from "./spectral-derivative-action";
 import { SPATIAL_FILTER_ACTION } from "./spatial-filter-action";
+import { DENOISE_ACTION } from "./denoise-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1755,4 +1756,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   THRESHOLD_ACTION,
   SPECTRAL_DERIVATIVE_ACTION,
   SPATIAL_FILTER_ACTION,
+  DENOISE_ACTION,
 ];

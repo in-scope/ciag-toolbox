@@ -54,6 +54,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "threshold",
       "spectral-derivative",
       "spatial-filter",
+      "denoise",
     ]);
   });
 

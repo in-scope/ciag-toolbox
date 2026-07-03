@@ -143,6 +143,7 @@ const FILTERS_GROUP: OperationGroup = {
     buildMenuAndToolbarCommand("threshold", "Threshold", "open-action-panel"),
     buildMenuAndToolbarCommand("spectral-derivative", "Spectral Derivative", "open-action-panel"),
     buildMenuAndToolbarCommand("spatial-filter", "Spatial Filter", "open-action-panel"),
+    buildMenuAndToolbarCommand("denoise", "Denoise", "open-action-panel"),
   ],
 };
 
