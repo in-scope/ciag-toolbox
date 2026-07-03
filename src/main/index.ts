@@ -19,6 +19,7 @@ import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
 import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
+import { initializePythonEnvironmentControllerFromDisk } from "./python/python-environment-controller";
 import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -142,6 +143,7 @@ function quitWhenAllWindowsClosed(): void {
 app.whenReady().then(() => {
   setWindowsAppUserModelIdForTaskbarGrouping();
   initializeThemeControllerFromDisk();
+  initializePythonEnvironmentControllerFromDisk();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerOpenImagesDialogIpcHandlers();

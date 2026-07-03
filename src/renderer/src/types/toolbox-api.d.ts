@@ -163,6 +163,11 @@ interface ToolboxThemeSnapshot {
   isDark: boolean;
 }
 
+interface ToolboxPythonEnvironmentSnapshot {
+  ownInterpreterPath: string | null;
+  pathExists: boolean;
+}
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
@@ -223,9 +228,16 @@ interface ToolboxApi {
   onMenuAbout: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
+  onMenuPythonEnvironment: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
   onMenuInvokeCommand: (
     listener: ToolboxMenuCommandListener,
   ) => ToolboxUnsubscribeMenuListener;
+  getPythonEnvironment: () => Promise<ToolboxPythonEnvironmentSnapshot>;
+  setPythonEnvironment: (
+    ownInterpreterPath: string | null,
+  ) => Promise<ToolboxPythonEnvironmentSnapshot>;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (
     listener: ToolboxThemeChangeListener,

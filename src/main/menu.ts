@@ -192,19 +192,32 @@ function buildDeveloperRefreshMenuItems(): MenuItemConstructorOptions[] {
   ];
 }
 
-function buildViewMenuSubmenu(): MenuItemConstructorOptions[] {
+function buildPythonEnvironmentMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Python Environment...",
+    click: () => sendMenuChannelToRenderer(window, "menu:python-environment"),
+  };
+}
+
+function buildViewMenuSubmenu(
+  window: BrowserWindow,
+): MenuItemConstructorOptions[] {
   return [
     buildThemeSubmenu(),
+    { type: "separator" },
+    buildPythonEnvironmentMenuItem(window),
     ...buildDeveloperRefreshMenuItems(),
     { type: "separator" },
     { role: "togglefullscreen" },
   ];
 }
 
-function buildViewMenu(): MenuItemConstructorOptions {
+function buildViewMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "View",
-    submenu: buildViewMenuSubmenu(),
+    submenu: buildViewMenuSubmenu(window),
   };
 }
 
@@ -231,7 +244,7 @@ function buildMenuTemplateForPlatform(
   if (isRunningOnMac) template.push(buildMacAppMenu());
   template.push(buildFileMenu(window));
   template.push(...buildOperationMenus(window));
-  template.push(buildViewMenu());
+  template.push(buildViewMenu(window));
   template.push(buildHelpMenu(window));
   return template;
 }

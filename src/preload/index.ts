@@ -163,6 +163,11 @@ export interface ThemeSnapshot {
   isDark: boolean;
 }
 
+export interface PythonEnvironmentSnapshot {
+  ownInterpreterPath: string | null;
+  pathExists: boolean;
+}
+
 export type MenuEventListener = () => void;
 export type MenuCommandListener = (commandId: string) => void;
 export type UnsubscribeMenuListener = () => void;
@@ -183,9 +188,12 @@ const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
+const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
+const PYTHON_ENVIRONMENT_GET_CHANNEL = "python-environment:get";
+const PYTHON_ENVIRONMENT_SET_CHANNEL = "python-environment:set";
 
 function fetchAppInfoFromMainProcess(): Promise<AppInfo> {
   return ipcRenderer.invoke(GET_APP_INFO_CHANNEL) as Promise<AppInfo>;
@@ -290,6 +298,27 @@ function subscribeToAboutMenuEvent(
   return subscribeToMenuChannel(MENU_ABOUT_CHANNEL, listener);
 }
 
+function subscribeToPythonEnvironmentMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_PYTHON_ENVIRONMENT_CHANNEL, listener);
+}
+
+function fetchPythonEnvironmentFromMainProcess(): Promise<PythonEnvironmentSnapshot> {
+  return ipcRenderer.invoke(
+    PYTHON_ENVIRONMENT_GET_CHANNEL,
+  ) as Promise<PythonEnvironmentSnapshot>;
+}
+
+function setPythonEnvironmentThroughMainProcess(
+  ownInterpreterPath: string | null,
+): Promise<PythonEnvironmentSnapshot> {
+  return ipcRenderer.invoke(
+    PYTHON_ENVIRONMENT_SET_CHANNEL,
+    ownInterpreterPath,
+  ) as Promise<PythonEnvironmentSnapshot>;
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -335,7 +364,10 @@ const apiBridge = {
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
+  onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
+  getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
+  setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;
