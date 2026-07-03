@@ -31,9 +31,16 @@ export interface EnviFixture {
   readonly samplePixels: ReadonlyArray<FixtureSamplePixel>;
 }
 
+// CT-201: a grayscale fixture whose values form two separated clusters with a
+// known empty valley; the generator pins the expected Otsu cutoff.
+export interface BimodalGrayFixture extends SingleFileFixture {
+  readonly expectedOtsuCutoff: number;
+}
+
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
 export const lowContrastGrayPng = manifestJson.lowContrastGrayPng as SingleFileFixture;
+export const bimodalGrayPng = manifestJson.bimodalGrayPng as BimodalGrayFixture;
 export const rgbPng = manifestJson.rgbPng as SingleFileFixture;
 export const multiBandTiff = manifestJson.multiBandTiff as SingleFileFixture;
 export const flatFieldReferenceTiff = manifestJson.flatFieldReferenceTiff as SingleFileFixture;

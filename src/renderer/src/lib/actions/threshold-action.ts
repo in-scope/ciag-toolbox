@@ -16,6 +16,11 @@ import {
 } from "@/lib/image/raster-image";
 import { makeBinaryStackFromBands } from "@/lib/image/threshold/binary-stack";
 import {
+  parseThresholdOtsuCutoffsFromJson,
+  serializeThresholdOtsuCutoffsToJson,
+  type ThresholdOtsuCutoffs,
+} from "@/lib/image/threshold/otsu-cutoffs";
+import {
   applyManualThreshold,
   applyManualThresholdAcrossBands,
   type ThresholdBounds,
@@ -50,6 +55,11 @@ export const THRESHOLD_BAND_RANGE_PARAMETER_ID = "bandRange";
 export const THRESHOLD_TARGET_BAND_PARAMETER_ID = "targetBandIndex";
 export const THRESHOLD_LOWER_BOUND_PARAMETER_ID = "lowerBound";
 export const THRESHOLD_UPPER_BOUND_PARAMETER_ID = "upperBound";
+// CT-201: present only when the bounds came from the Auto (Otsu) button. Its
+// presence marks the cutoff as Otsu-derived in the audit trail; band-wise
+// Apply reads each band's own cutoff from it, combined Apply the single
+// cutoff over all bands' data together.
+export const THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID = "otsuCutoffsJson";
 
 const THRESHOLD_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
@@ -87,11 +97,21 @@ function injectThresholdBoundsForApply(
   }
   return Object.freeze({
     ...rawParameterValues,
+    ...serializedOtsuCutoffsParameterOrEmpty(sourceRenderingState.thresholdOtsuCutoffs),
     [THRESHOLD_LOWER_BOUND_PARAMETER_ID]: bounds.lower,
     [THRESHOLD_UPPER_BOUND_PARAMETER_ID]: bounds.upper,
     [THRESHOLD_TARGET_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
   });
 }
+
+function serializedOtsuCutoffsParameterOrEmpty(
+  cutoffs: ThresholdOtsuCutoffs | null,
+): ParameterValuesById {
+  if (!cutoffs) return NO_OTSU_PARAMETER;
+  return { [THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID]: serializeThresholdOtsuCutoffsToJson(cutoffs) };
+}
+
+const NO_OTSU_PARAMETER: ParameterValuesById = Object.freeze({});
 
 // The binary output has its own band count, so band-dependent viewer state
 // (selected band, subset edit mode, pinned spectra) resets like the other
@@ -112,10 +132,64 @@ function resetStateForBinaryThresholdOutput(
 function createThresholdSourceTransform(): ViewportActionSourceTransform {
   return (rawSource, parameterValues) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const bounds = readThresholdBoundsOrThrow(parameterValues);
     const selection = resolveThresholdScopeSelection(parameterValues, source.raster.bandCount);
+    const otsuCutoffs = readThresholdOtsuCutoffsIfPresent(parameterValues);
+    if (otsuCutoffs) {
+      return { kind: "raster", raster: buildOtsuThresholdStack(source.raster, otsuCutoffs, selection) };
+    }
+    const bounds = readThresholdBoundsOrThrow(parameterValues);
     return { kind: "raster", raster: buildBinaryThresholdStack(source.raster, bounds, selection) };
   };
+}
+
+// CT-201: an Otsu apply thresholds each band with ITS OWN cutoff (band-wise)
+// or every band with the one cutoff derived over the combined data (full stack).
+function buildOtsuThresholdStack(
+  raster: RasterImage,
+  cutoffs: ThresholdOtsuCutoffs,
+  selection: ResolvedCubeScopeSelection,
+): RasterImage {
+  if (selection.scope === "full-cube") {
+    return makeCombinedBinaryStack(raster, cutoffs.combinedBounds);
+  }
+  return makePerBandOtsuBinaryStack(raster, cutoffs, selection.bandIndexes);
+}
+
+function makePerBandOtsuBinaryStack(
+  raster: RasterImage,
+  cutoffs: ThresholdOtsuCutoffs,
+  bandIndexes: ReadonlyArray<number>,
+): RasterImage {
+  const bands = bandIndexes.map((bandIndex) =>
+    applyManualThreshold(
+      getRasterBandPixelsOrThrow(raster, bandIndex),
+      otsuBoundsForBandOrThrow(cutoffs, bandIndex),
+    ),
+  );
+  return makeBinaryStackFromBands(bands, {
+    width: raster.width,
+    height: raster.height,
+    bandLabels: bandIndexes.map((bandIndex) => getRasterBandLabelOrDefault(raster, bandIndex)),
+  });
+}
+
+function otsuBoundsForBandOrThrow(
+  cutoffs: ThresholdOtsuCutoffs,
+  bandIndex: number,
+): ThresholdBounds {
+  const bounds = cutoffs.perBandBounds[bandIndex];
+  if (!bounds) {
+    throw new Error(`Threshold has no Otsu cutoff for band ${bandIndex + 1}. Click Auto again.`);
+  }
+  return bounds;
+}
+
+function readThresholdOtsuCutoffsIfPresent(
+  parameterValues: ParameterValuesById,
+): ThresholdOtsuCutoffs | null {
+  const raw = parameterValues[THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID];
+  if (typeof raw !== "string") return null;
+  return parseThresholdOtsuCutoffsFromJson(raw);
 }
 
 function buildBinaryThresholdStack(
@@ -198,9 +272,44 @@ function readThresholdTargetBandIndex(parameterValues: ParameterValuesById): num
 }
 
 function formatThresholdAppliedLabel(parameterValues: ParameterValuesById): string {
+  const otsuCutoffs = readThresholdOtsuCutoffsIfPresent(parameterValues);
+  if (otsuCutoffs) return formatOtsuThresholdAppliedLabel(parameterValues, otsuCutoffs);
   const bounds = readThresholdBoundsOrThrow(parameterValues);
   const boundsText = `[${formatThresholdBoundForLabel(bounds.lower)}, ${formatThresholdBoundForLabel(bounds.upper)}]`;
   return `Threshold ${boundsText} (${describeThresholdScopeForLabel(parameterValues)})`;
+}
+
+// CT-201: the audit trail records that the cutoff was Otsu-derived and its
+// value(s); band-wise scope surfaces the per-band cutoff list here ONLY (the
+// popup keeps showing just the current band's bounds).
+function formatOtsuThresholdAppliedLabel(
+  parameterValues: ParameterValuesById,
+  cutoffs: ThresholdOtsuCutoffs,
+): string {
+  const choice = readCubeScopeChoiceOrDefault(
+    parameterValues[THRESHOLD_SCOPE_PARAMETER_ID] ?? BAND_WISE_SCOPE,
+    BAND_WISE_SCOPE,
+  );
+  if (choice !== BAND_WISE_SCOPE) {
+    const cutoffText = formatThresholdBoundForLabel(cutoffs.combinedBounds.lower);
+    return `Threshold Otsu (cutoff ${cutoffText}, combined: full stack)`;
+  }
+  return `Threshold Otsu (band-wise cutoffs: ${describePerBandOtsuCutoffs(parameterValues, cutoffs)})`;
+}
+
+function describePerBandOtsuCutoffs(
+  parameterValues: ParameterValuesById,
+  cutoffs: ThresholdOtsuCutoffs,
+): string {
+  const selection = resolveThresholdScopeSelection(parameterValues, cutoffs.perBandBounds.length);
+  if (selection.scope !== "band-wise") return "";
+  return selection.bandIndexes
+    .map((bandIndex) => describeSingleBandOtsuCutoff(cutoffs, bandIndex))
+    .join(", ");
+}
+
+function describeSingleBandOtsuCutoff(cutoffs: ThresholdOtsuCutoffs, bandIndex: number): string {
+  return `band ${bandIndex + 1}: ${formatThresholdBoundForLabel(otsuBoundsForBandOrThrow(cutoffs, bandIndex).lower)}`;
 }
 
 function formatThresholdBoundForLabel(value: number): string {

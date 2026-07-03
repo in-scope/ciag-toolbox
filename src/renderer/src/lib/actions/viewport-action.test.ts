@@ -74,6 +74,7 @@ describe("applyActionToSelectedViewports", () => {
       toneCurveChannelAnchors: {},
       toneCurveActiveChannel: "rgb",
       thresholdBounds: null,
+      thresholdOtsuCutoffs: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],

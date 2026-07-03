@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  serializeThresholdOtsuCutoffsToJson,
+  type ThresholdOtsuCutoffs,
+} from "@/lib/image/threshold/otsu-cutoffs";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
   THRESHOLD_ACTION,
   THRESHOLD_BAND_RANGE_PARAMETER_ID,
   THRESHOLD_LOWER_BOUND_PARAMETER_ID,
+  THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID,
   THRESHOLD_SCOPE_PARAMETER_ID,
   THRESHOLD_UPPER_BOUND_PARAMETER_ID,
 } from "./threshold-action";
@@ -65,7 +70,64 @@ describe("THRESHOLD_ACTION.transformSource", () => {
   });
 });
 
+// CT-201: Otsu cutoffs with a distinct cutoff per band plus one over the
+// combined data, exercised against the two-band source above.
+const OTSU_CUTOFFS: ThresholdOtsuCutoffs = {
+  perBandBounds: [
+    { lower: 150, upper: 255 },
+    { lower: 210, upper: 255 },
+  ],
+  combinedBounds: { lower: 130, upper: 255 },
+};
+
+const OTSU_PARAMS = {
+  [THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID]: serializeThresholdOtsuCutoffsToJson(OTSU_CUTOFFS),
+};
+
+describe("THRESHOLD_ACTION.transformSource with Otsu cutoffs", () => {
+  it("band-wise scope thresholds each band with its own cutoff", () => {
+    const raster = transformedRaster({
+      ...OTSU_PARAMS,
+      [THRESHOLD_SCOPE_PARAMETER_ID]: "band-wise",
+      [THRESHOLD_BAND_RANGE_PARAMETER_ID]: "1-2",
+    });
+    expect(raster.bandCount).toBe(2);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 0, 255, 255]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("full-stack scope applies the single combined cutoff to every band", () => {
+    const raster = transformedRaster({
+      ...OTSU_PARAMS,
+      [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube",
+    });
+    expect(raster.bandCount).toBe(1);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 0, 0, 255]);
+  });
+});
+
 describe("THRESHOLD_ACTION.prepareParameterValuesForApply", () => {
+  it("injects the serialized Otsu cutoffs when the Auto state is present", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      thresholdBounds: { lower: 150, upper: 255 },
+      thresholdOtsuCutoffs: OTSU_CUTOFFS,
+    };
+    const prepared = THRESHOLD_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(prepared[THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID]).toBe(
+      serializeThresholdOtsuCutoffsToJson(OTSU_CUTOFFS),
+    );
+  });
+
+  it("omits the Otsu parameter for manually set bounds", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      thresholdBounds: { lower: 105, upper: 118 },
+    };
+    const prepared = THRESHOLD_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(prepared[THRESHOLD_OTSU_CUTOFFS_PARAMETER_ID]).toBeUndefined();
+  });
+
   it("injects the live bounds and the selected band from the rendering state", () => {
     const state = {
       ...DEFAULT_VIEWPORT_RENDERING_STATE,
@@ -104,6 +166,33 @@ describe("THRESHOLD_ACTION applied label", () => {
       [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube",
     });
     expect(label).toBe("Threshold [100, 130] (combined: full stack)");
+  });
+
+  it("records the Otsu-derived per-band cutoff list for the band-wise scope", () => {
+    const label = THRESHOLD_ACTION.formatAppliedLabel!({
+      ...OTSU_PARAMS,
+      [THRESHOLD_SCOPE_PARAMETER_ID]: "band-wise",
+      [THRESHOLD_BAND_RANGE_PARAMETER_ID]: "1-2",
+    });
+    expect(label).toBe("Threshold Otsu (band-wise cutoffs: band 1: 150, band 2: 210)");
+  });
+
+  it("records the single Otsu cutoff for the combined full-stack scope", () => {
+    const label = THRESHOLD_ACTION.formatAppliedLabel!({
+      ...OTSU_PARAMS,
+      [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube",
+    });
+    expect(label).toBe("Threshold Otsu (cutoff 130, combined: full stack)");
+  });
+
+  it("clears the consumed Otsu cutoffs from the source state after Apply", () => {
+    const state = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      thresholdBounds: { lower: 150, upper: 255 },
+      thresholdOtsuCutoffs: OTSU_CUTOFFS,
+    };
+    const cleared = THRESHOLD_ACTION.clearConsumedSourceStateAfterApply!(state);
+    expect(cleared.thresholdOtsuCutoffs).toBeNull();
   });
 
   it("clears the consumed bounds from the source state after Apply", () => {

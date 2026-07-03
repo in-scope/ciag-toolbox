@@ -10,6 +10,7 @@ import {
   type PinnedRoiSpectraList,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
+import type { ThresholdOtsuCutoffs } from "@/lib/image/threshold/otsu-cutoffs";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -33,6 +34,7 @@ export interface ViewportRenderingState {
   readonly toneCurveChannelAnchors: ToneCurveChannelAnchors;
   readonly toneCurveActiveChannel: ToneCurveChannel;
   readonly thresholdBounds: ThresholdBounds | null;
+  readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -55,6 +57,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
   thresholdBounds: null,
+  thresholdOtsuCutoffs: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -80,13 +83,15 @@ export function clearToneCurveEditingState(state: ViewportRenderingState): Viewp
 
 // CT-200: the threshold popup's live bounds live in rendering state (like the
 // tone-curve anchors) so the editor, the GPU preview, and Apply all read one
-// source of truth. Opening/closing the panel and Apply clear them.
+// source of truth. Opening/closing the panel and Apply clear them. CT-201: the
+// Auto button's per-band Otsu cutoffs ride alongside the bounds and clear with
+// them; any manual bound edit also discards them (the editor handles that).
 export function hasThresholdEditingState(state: ViewportRenderingState): boolean {
-  return state.thresholdBounds !== null;
+  return state.thresholdBounds !== null || state.thresholdOtsuCutoffs !== null;
 }
 
 export function clearThresholdEditingState(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, thresholdBounds: null };
+  return { ...state, thresholdBounds: null, thresholdOtsuCutoffs: null };
 }
 
 export type ViewportActionSourceTransform = (

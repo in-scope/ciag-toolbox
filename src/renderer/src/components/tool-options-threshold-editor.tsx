@@ -13,6 +13,7 @@ import {
   HistogramSkeleton,
   useBandHistogramFromCacheOrWorker,
 } from "@/components/histogram-section";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { DataTypeValueRange } from "@/lib/image/data-type-value-range";
 import {
@@ -20,6 +21,7 @@ import {
   formatRasterBandIdentityText,
   type RasterImage,
 } from "@/lib/image/raster-image";
+import { computeOtsuCutoffsForRaster } from "@/lib/image/threshold/otsu-cutoffs";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import {
   buildDefaultThresholdBounds,
@@ -52,6 +54,11 @@ export function ToolOptionsThresholdEditor(
   const bandIndex = useSelectedBandIndexForThreshold(props.viewportIndex, props.raster);
   const histogram = useBandHistogramFromCacheOrWorker(props.raster, bandIndex, props.viewportIndex);
   const binding = useThresholdBoundsBinding(props.viewportIndex);
+  const applyOtsuAutoBounds = useApplyOtsuAutoThresholdBounds(
+    props.viewportIndex,
+    props.raster,
+    bandIndex,
+  );
   const range = useMemo(
     () => (histogram ? { min: histogram.min, max: histogram.max } : null),
     [histogram],
@@ -66,6 +73,7 @@ export function ToolOptionsThresholdEditor(
       range={range}
       bounds={binding.bounds}
       onChange={binding.onChange}
+      onAutoThreshold={applyOtsuAutoBounds}
     />
   );
 }
@@ -75,17 +83,45 @@ export interface ThresholdBoundsBinding {
   onChange: (next: ThresholdBounds) => void;
 }
 
+// A manual edit (drag or typed value) discards the Otsu derivation: the bounds
+// become plain manual bounds again, applying identically to every in-scope
+// band (the CT-200 path).
 function useThresholdBoundsBinding(viewportIndex: number): ThresholdBoundsBinding {
   const renderingApi = useViewportRendering();
   const bounds = renderingApi.getRenderingState(viewportIndex).thresholdBounds;
   const onChange = useCallback(
     (next: ThresholdBounds) => {
       const current = renderingApi.getRenderingState(viewportIndex);
-      renderingApi.setRenderingState(viewportIndex, { ...current, thresholdBounds: next });
+      renderingApi.setRenderingState(viewportIndex, {
+        ...current,
+        thresholdBounds: next,
+        thresholdOtsuCutoffs: null,
+      });
     },
     [renderingApi, viewportIndex],
   );
   return { bounds, onChange };
+}
+
+// CT-201: Auto derives an Otsu cutoff per band (and one over the combined
+// data) and shows the CURRENT band's bounds; the live preview and Apply reuse
+// the CT-200 paths unchanged, with band-wise Apply reading each band's own
+// cutoff from the stored set.
+function useApplyOtsuAutoThresholdBounds(
+  viewportIndex: number,
+  raster: RasterImage,
+  bandIndex: number,
+): () => void {
+  const renderingApi = useViewportRendering();
+  return useCallback(() => {
+    const cutoffs = computeOtsuCutoffsForRaster(raster);
+    const current = renderingApi.getRenderingState(viewportIndex);
+    renderingApi.setRenderingState(viewportIndex, {
+      ...current,
+      thresholdBounds: cutoffs.perBandBounds[bandIndex] ?? current.thresholdBounds,
+      thresholdOtsuCutoffs: cutoffs,
+    });
+  }, [renderingApi, viewportIndex, raster, bandIndex]);
 }
 
 function useSelectedBandIndexForThreshold(viewportIndex: number, raster: RasterImage): number {
@@ -113,13 +149,14 @@ interface LoadedThresholdEditorProps {
   range: DataTypeValueRange;
   bounds: ThresholdBounds;
   onChange: (next: ThresholdBounds) => void;
+  onAutoThreshold: () => void;
 }
 
 function LoadedThresholdEditor(props: LoadedThresholdEditorProps): JSX.Element {
   const isIntegerBand = props.raster.sampleFormat !== "float";
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-muted-foreground">Threshold bounds</span>
+      <ThresholdEditorHeader onAutoThreshold={props.onAutoThreshold} />
       {renderThresholdBandLabelWhenMultiBand(props.raster, props.bandIndex)}
       <HistogramCanvas
         histogram={props.histogram}
@@ -140,9 +177,24 @@ function LoadedThresholdEditor(props: LoadedThresholdEditorProps): JSX.Element {
         isIntegerBand={isIntegerBand}
       />
       <p className="text-xs text-muted-foreground">
-        Drag a handle or type a value. Pixels inside the bounds preview white; outside black.
-        The stack changes only on Apply.
+        Drag a handle or type a value, or use Auto to derive a cutoff per band (Otsu).
+        Pixels inside the bounds preview white; outside black. The stack changes only on Apply.
       </p>
+    </div>
+  );
+}
+
+interface ThresholdEditorHeaderProps {
+  onAutoThreshold: () => void;
+}
+
+function ThresholdEditorHeader(props: ThresholdEditorHeaderProps): JSX.Element {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs font-medium text-muted-foreground">Threshold bounds</span>
+      <Button type="button" variant="outline" size="sm" onClick={props.onAutoThreshold}>
+        Auto
+      </Button>
     </div>
   );
 }

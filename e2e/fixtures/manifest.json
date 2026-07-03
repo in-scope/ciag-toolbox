@@ -23,6 +23,44 @@
       }
     ]
   },
+  "bimodalGrayPng": {
+    "fileName": "bimodal-gray.png",
+    "width": 4,
+    "height": 4,
+    "bandCount": 1,
+    "dataType": "uint8",
+    "expectedOtsuCutoff": 55,
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          40
+        ]
+      },
+      {
+        "x": 3,
+        "y": 1,
+        "valuesPerBand": [
+          54
+        ]
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "valuesPerBand": [
+          200
+        ]
+      },
+      {
+        "x": 3,
+        "y": 3,
+        "valuesPerBand": [
+          214
+        ]
+      }
+    ]
+  },
   "rgbPng": {
     "fileName": "rgb.png",
     "width": 2,

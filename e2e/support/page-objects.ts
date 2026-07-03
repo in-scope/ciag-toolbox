@@ -320,6 +320,8 @@ export {
   THRESHOLD_OPERATION_LABEL,
   thresholdBoundHandle,
   thresholdBoundField,
+  thresholdAutoButton,
+  clickThresholdOtsuAutoButton,
   expectThresholdEditorReady,
   setThresholdBoundField,
   readThresholdBoundFieldValue,

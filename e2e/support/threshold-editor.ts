@@ -32,6 +32,18 @@ export async function expectThresholdEditorReady(page: Page): Promise<void> {
   await expect(thresholdBoundHandle(page, "Upper")).toBeVisible();
 }
 
+// CT-201: the Auto button derives the Otsu cutoff(s) and sets the bounds.
+export function thresholdAutoButton(page: Page): Locator {
+  return operationPanel(page, THRESHOLD_OPERATION_LABEL).getByRole("button", {
+    name: "Auto",
+    exact: true,
+  });
+}
+
+export async function clickThresholdOtsuAutoButton(page: Page): Promise<void> {
+  await thresholdAutoButton(page).click();
+}
+
 export async function setThresholdBoundField(
   page: Page,
   side: ThresholdBoundSide,
