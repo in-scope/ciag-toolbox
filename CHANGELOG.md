@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3](https://github.com/in-scope/ciag-toolbox/compare/v0.4.2...v0.4.3) (2026-07-03)
+
+
+### Bug Fixes
+
+* **webgl:** store float raster tiles in r32f so out-of-half-float components display correctly ([c5566b0](https://github.com/in-scope/ciag-toolbox/commit/c5566b0167bddd0721c64f5a16c1eee3d511e2f4))
+* **webgl:** store float raster tiles in R32F so out-of-half-float components display correctly ([27fbbdd](https://github.com/in-scope/ciag-toolbox/commit/27fbbdd52b3feb9df96d426212be713077c31710))
+
 ## [0.4.2](https://github.com/in-scope/ciag-toolbox/compare/v0.4.1...v0.4.2) (2026-06-25)
 
 
