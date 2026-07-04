@@ -254,6 +254,21 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("blocked in bundled mode");
   }, 60_000);
 
+  it("rejects a fresh user import of a non-allowlisted module under the bundled sandbox", async () => {
+    const outcome = await runSandboxedScript(
+      "def run():\n    import urllib.request\n    return 'imported'\n",
+    );
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("blocked in bundled mode");
+  }, 60_000);
+
+  it("still allows a fresh user import of an allowlisted module under the bundled sandbox", async () => {
+    const outcome = await runSandboxedScript(
+      "def run():\n    import statistics\n    return statistics.mean([1, 2, 3])\n",
+    );
+    expect(outcome).toEqual({ kind: "completed", value: 2 });
+  }, 60_000);
+
   it("still kills a runaway sandboxed script at the wall-clock limit", async () => {
     const outcome = await runSandboxedScript("def run():\n    while True:\n        pass\n", 1_500);
     expect(outcome).toEqual({
