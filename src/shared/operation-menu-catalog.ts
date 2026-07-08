@@ -13,6 +13,10 @@
 // used in essentially every session (Crop, Tone Curve, Brightness &
 // Contrast). Parameterized pipeline operations are menu-only.
 //
+// Groups drive the TOOLBAR separators only. The native operation menus are
+// presented flat and alphabetically (listMenuCommandsAlphabetically), with no
+// separators, so users can find an operation by name.
+//
 // This module is intentionally pure data: no DOM, no Electron, no React. Icons
 // and behaviour bindings live in the renderer because they are environment
 // specific; this file only describes labels, grouping, and intent.
@@ -226,6 +230,17 @@ export const OPERATION_MENUS: ReadonlyArray<OperationMenu> = [
 
 export function listAllOperationCommands(): ReadonlyArray<OperationCommand> {
   return OPERATION_MENUS.flatMap((menu) => menu.groups).flatMap((group) => group.commands);
+}
+
+// The presentation order of a native operation menu: every showInMenu command
+// across the menu's groups, alphabetically by label, with no separators.
+export function listMenuCommandsAlphabetically(
+  menu: OperationMenu,
+): ReadonlyArray<OperationCommand> {
+  return menu.groups
+    .flatMap((group) => group.commands)
+    .filter((command) => command.showInMenu)
+    .sort((first, second) => first.label.localeCompare(second.label));
 }
 
 export function findOperationCommandById(commandId: string): OperationCommand | null {

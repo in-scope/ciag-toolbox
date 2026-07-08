@@ -2,15 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   listAllOperationCommands,
+  listMenuCommandsAlphabetically,
   OPERATION_MENUS,
   type OperationMenu,
 } from "./operation-menu-catalog";
 
 function listMenuItemLabels(menu: OperationMenu): string[] {
-  return menu.groups
-    .flatMap((group) => group.commands)
-    .filter((command) => command.showInMenu)
-    .map((command) => command.label);
+  return listMenuCommandsAlphabetically(menu).map((command) => command.label);
 }
 
 function findMenuByLabel(menuLabel: string): OperationMenu {
@@ -30,55 +28,66 @@ describe("operation menu structure", () => {
     ]);
   });
 
+  // Operation menus present flat and alphabetical (no separators), so each
+  // expectation below is the exact list a user sees, in order.
   it("keeps selection and crop under Edit", () => {
     expect(listMenuItemLabels(findMenuByLabel("Edit"))).toEqual([
+      "Crop to Region",
       "Select Region",
       "Subset Bands",
-      "Crop to Region",
     ]);
   });
 
   it("puts geometry and color representation under Image", () => {
     expect(listMenuItemLabels(findMenuByLabel("Image"))).toEqual([
-      "Rotate",
+      "False-color Composite",
       "Reflect",
       "RGB to Grayscale",
-      "False-color Composite",
+      "Rotate",
     ]);
   });
 
   it("puts per-pixel intensity mapping under Adjust", () => {
     expect(listMenuItemLabels(findMenuByLabel("Adjust"))).toEqual([
-      "Tone Curve",
       "Brightness & Contrast",
       "Invert",
-      "Threshold",
       "Percentile Clip",
+      "Threshold",
+      "Tone Curve",
     ]);
   });
 
   it("puts calibration, data conditioning, and filters under Process", () => {
     expect(listMenuItemLabels(findMenuByLabel("Process"))).toEqual([
-      "Flat-field Correction",
-      "Spectralon Calibration",
       "Bit Shift",
-      "Normalize",
-      "Standardize",
-      "Spatial Filter",
       "Denoise",
+      "Flat-field Correction",
+      "Normalize",
+      "Spatial Filter",
+      "Spectralon Calibration",
+      "Standardize",
     ]);
   });
 
   it("puts band-dimension and whole-cube operations under Spectral", () => {
     expect(listMenuItemLabels(findMenuByLabel("Spectral"))).toEqual([
-      "Spectral Derivative",
-      "PCA",
-      "MNF",
-      "ICA",
-      "Band Weighting",
       "Band Selection",
+      "Band Weighting",
       "Custom Transform",
+      "ICA",
+      "MNF",
+      "PCA",
+      "Spectral Derivative",
     ]);
+  });
+
+  it("sorts every operation menu's items alphabetically", () => {
+    for (const menu of OPERATION_MENUS) {
+      const labels = listMenuItemLabels(menu);
+      expect(labels, menu.menuLabel).toEqual(
+        [...labels].sort((a, b) => a.localeCompare(b)),
+      );
+    }
   });
 });
 

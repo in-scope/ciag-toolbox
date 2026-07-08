@@ -12,9 +12,9 @@ import {
 } from "./theme-controller";
 import type { ThemeMode } from "./theme-state";
 import {
+  listMenuCommandsAlphabetically,
   OPERATION_MENUS,
   type OperationCommand,
-  type OperationGroup,
   type OperationMenu,
 } from "../shared/operation-menu-catalog";
 
@@ -130,30 +130,17 @@ function buildOperationCommandMenuItem(
   };
 }
 
-function buildOperationGroupMenuItems(
-  window: BrowserWindow,
-  group: OperationGroup,
-): MenuItemConstructorOptions[] {
-  return group.commands
-    .filter((command) => command.showInMenu)
-    .map((command) => buildOperationCommandMenuItem(window, command));
-}
-
-function joinMenuGroupsWithSeparators(
-  groups: ReadonlyArray<MenuItemConstructorOptions[]>,
-): MenuItemConstructorOptions[] {
-  const separator: MenuItemConstructorOptions = { type: "separator" };
-  return groups.flatMap((items, index) => (index === 0 ? items : [separator, ...items]));
-}
-
+// Operation menus are flat alphabetical lists with no separators: find an
+// operation by name. (File keeps its separators; its groups are workflows,
+// not an operation inventory.)
 function buildOperationMenu(
   window: BrowserWindow,
   menu: OperationMenu,
 ): MenuItemConstructorOptions {
-  const populatedGroups = menu.groups
-    .map((group) => buildOperationGroupMenuItems(window, group))
-    .filter((items) => items.length > 0);
-  return { label: menu.menuLabel, submenu: joinMenuGroupsWithSeparators(populatedGroups) };
+  const items = listMenuCommandsAlphabetically(menu).map((command) =>
+    buildOperationCommandMenuItem(window, command),
+  );
+  return { label: menu.menuLabel, submenu: items };
 }
 
 function buildOperationMenus(window: BrowserWindow): MenuItemConstructorOptions[] {
