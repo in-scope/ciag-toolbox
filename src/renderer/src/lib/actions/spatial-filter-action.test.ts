@@ -22,8 +22,12 @@ function makeTwoFlatBandStack(): RasterImage {
   };
 }
 
-function transformRaster(parameterValues: Record<string, number | string | boolean>): RasterImage {
-  const result = SPATIAL_FILTER_ACTION.transformSource!(
+// CT-219a: the transform is async (worker-backed in the app; vitest's node
+// environment has no Worker, so the inline reusable-grid path runs here).
+async function transformRaster(
+  parameterValues: Record<string, number | string | boolean>,
+): Promise<RasterImage> {
+  const result = await SPATIAL_FILTER_ACTION.transformSourceAsync!(
     { kind: "raster", raster: makeTwoFlatBandStack() },
     parameterValues,
   );
@@ -57,8 +61,8 @@ describe("readSpatialFilterSettings", () => {
 });
 
 describe("SPATIAL_FILTER_ACTION", () => {
-  it("filters every band under the default full-stack scope into a float32 stack", () => {
-    const raster = transformRaster({ mode: "highpass", highpassCutoff: 0.05 });
+  it("filters every band under the default full-stack scope into a float32 stack", async () => {
+    const raster = await transformRaster({ mode: "highpass", highpassCutoff: 0.05 });
     expect(raster.sampleFormat).toBe("float");
     expect(raster.bitsPerSample).toBe(32);
     expect(raster.bandCount).toBe(2);
@@ -68,8 +72,8 @@ describe("SPATIAL_FILTER_ACTION", () => {
     expectBandIsNumericallyZero(raster.bandPixels[1]!);
   });
 
-  it("filters only the entered bands under band-wise scope and carries the rest unchanged", () => {
-    const raster = transformRaster({
+  it("filters only the entered bands under band-wise scope and carries the rest unchanged", async () => {
+    const raster = await transformRaster({
       mode: "highpass",
       highpassCutoff: 0.05,
       scope: "band-wise",
@@ -79,21 +83,37 @@ describe("SPATIAL_FILTER_ACTION", () => {
     expectBandIsNumericallyZero(raster.bandPixels[1]!);
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", () => {
+  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
     const prepared = SPATIAL_FILTER_ACTION.prepareParameterValuesForApply!(
       { mode: "highpass", highpassCutoff: 0.05, scope: "band-wise" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
     );
-    const raster = transformRaster({ ...prepared });
+    const raster = await transformRaster({ ...prepared });
     expect(Array.from(raster.bandPixels[0]!)).toEqual(Array.from(new Float32Array(16).fill(100)));
     expectBandIsNumericallyZero(raster.bandPixels[1]!);
   });
 
-  it("rejects an invalid band range with a user-facing error", () => {
-    expect(() =>
+  it("rejects an invalid band range with a user-facing error", async () => {
+    await expect(
       transformRaster({ mode: "lowpass", scope: "band-wise", bandRange: "9" }),
-    ).toThrow(/band/i);
+    ).rejects.toThrow(/band/i);
+  });
+
+  it("pre-flights an oversized stack with a clear error before any panel is reserved", () => {
+    const hugeRaster = { ...makeTwoFlatBandStack(), width: 20000, height: 20000 };
+    expect(() =>
+      SPATIAL_FILTER_ACTION.assertCanApplyToSource!({ kind: "raster", raster: hugeRaster }, {}),
+    ).toThrow(/too large for the spatial filter/);
+  });
+
+  it("accepts a normal-size stack in the pre-flight check", () => {
+    expect(() =>
+      SPATIAL_FILTER_ACTION.assertCanApplyToSource!(
+        { kind: "raster", raster: makeTwoFlatBandStack() },
+        {},
+      ),
+    ).not.toThrow();
   });
 
   it("records mode, cutoff(s), and scope in the applied label for the audit trail", () => {

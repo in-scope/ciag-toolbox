@@ -117,4 +117,22 @@ describe("fft2dInPlace", () => {
       expect(grid.imag[index]).toBeCloseTo(0, 10);
     });
   });
+
+  // CT-219a: the spatial filter's working grid is float32 to halve its memory;
+  // the transform must round-trip within float32 precision on those buffers.
+  it("round-trips a float32 grid within float32 precision", () => {
+    const original = Array.from({ length: 16 }, (_unused, index) => index * 1.5 - 4);
+    const grid: ComplexGrid = {
+      real: Float32Array.from(original),
+      imag: new Float32Array(16),
+      width: 4,
+      height: 4,
+    };
+    fft2dInPlace(grid);
+    inverseFft2dInPlace(grid);
+    original.forEach((value, index) => {
+      expect(grid.real[index]).toBeCloseTo(value, 3);
+      expect(grid.imag[index]).toBeCloseTo(0, 3);
+    });
+  });
 });

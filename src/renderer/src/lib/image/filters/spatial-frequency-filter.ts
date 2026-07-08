@@ -10,6 +10,7 @@ import {
   inverseFft2dInPlace,
   nextPowerOfTwoAtLeast,
   type ComplexGrid,
+  type FftLineBuffer,
 } from "./fft";
 
 // CT-203: spatial frequency filtering WITHIN each band's picture (never across
@@ -18,6 +19,14 @@ import {
 // transfer function over the radial spatial frequency, inverse-transformed,
 // and cropped back. Mirror padding avoids the hard wrap-around edge a zero pad
 // would introduce at the image border.
+//
+// CT-219a: the padded working grid is the filter's dominant allocation (two
+// contiguous buffers at next-power-of-two dimensions, up to ~4x the band's
+// pixel count). The grid is float32 (the output is float32 anyway; the FFT
+// round-trip error is far below what survives the cast back), a single grid is
+// reused across bands via createReusableSpatialFilterGrid, and an oversized
+// stack is rejected up front with a clear error instead of the engine's raw
+// "Array buffer allocation failed".
 
 export type SpatialFrequencyFilterMode = "lowpass" | "highpass" | "bandpass";
 
@@ -31,18 +40,107 @@ export interface BandSpatialShape {
   readonly height: number;
 }
 
+export const SPATIAL_FILTER_GRID_BYTE_LIMIT = 1024 * 1024 * 1024;
+
+const COMPLEX_GRID_BYTES_PER_PADDED_PIXEL = Float32Array.BYTES_PER_ELEMENT * 2;
+
+export function estimateSpatialFilterGridBytes(shape: BandSpatialShape): number {
+  const paddedWidth = nextPowerOfTwoAtLeast(shape.width);
+  const paddedHeight = nextPowerOfTwoAtLeast(shape.height);
+  return paddedWidth * paddedHeight * COMPLEX_GRID_BYTES_PER_PADDED_PIXEL;
+}
+
+export function assertShapeFitsSpatialFilterGrid(shape: BandSpatialShape): void {
+  const gridBytes = estimateSpatialFilterGridBytes(shape);
+  if (gridBytes <= SPATIAL_FILTER_GRID_BYTE_LIMIT) return;
+  throw new Error(buildStackTooLargeForSpatialFilterMessage(shape, gridBytes));
+}
+
+function buildStackTooLargeForSpatialFilterMessage(
+  shape: BandSpatialShape,
+  gridBytes: number,
+): string {
+  const neededMegabytes = Math.ceil(gridBytes / (1024 * 1024));
+  const limitMegabytes = SPATIAL_FILTER_GRID_BYTE_LIMIT / (1024 * 1024);
+  return (
+    `This stack is too large for the spatial filter: each ${shape.width} x ${shape.height} ` +
+    `band needs a ${neededMegabytes} MB working grid and the limit is ${limitMegabytes} MB. ` +
+    `Crop the stack to a smaller region and try again.`
+  );
+}
+
+// One reusable working grid for a run over many bands: the two padded buffers
+// are allocated once and rewritten per band, so a whole-stack filter no longer
+// re-requests huge contiguous allocations under mounting fragmentation.
+export interface ReusableSpatialFilterGrid {
+  readonly filterBand: (
+    band: RasterTypedArray,
+    shape: BandSpatialShape,
+    settings: SpatialFrequencyFilterSettings,
+  ) => Float32Array;
+}
+
+export function createReusableSpatialFilterGrid(): ReusableSpatialFilterGrid {
+  const held: { grid: ComplexGrid | null } = { grid: null };
+  return {
+    filterBand: (band, shape, settings) => filterBandReusingHeldGrid(held, band, shape, settings),
+  };
+}
+
 export function applySpatialFrequencyFilterToBand(
   band: RasterTypedArray,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
 ): Float32Array {
+  return createReusableSpatialFilterGrid().filterBand(band, shape, settings);
+}
+
+function filterBandReusingHeldGrid(
+  held: { grid: ComplexGrid | null },
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  settings: SpatialFrequencyFilterSettings,
+): Float32Array {
+  assertShapeFitsSpatialFilterGrid(shape);
   assertGainIsComputableForSettings(settings);
   assertBandLengthMatchesShape(band, shape);
-  const grid = buildMirrorPaddedComplexGrid(band, shape);
-  fft2dInPlace(grid);
-  multiplyGridByButterworthTransfer(grid, settings);
-  inverseFft2dInPlace(grid);
-  return cropGridRealPartToShape(grid, shape);
+  held.grid = obtainGridMatchingPaddedShape(held.grid, shape);
+  fillGridByMirrorPaddingBand(held.grid, band, shape);
+  fft2dInPlace(held.grid);
+  multiplyGridByButterworthTransfer(held.grid, settings);
+  inverseFft2dInPlace(held.grid);
+  return cropGridRealPartToShape(held.grid, shape);
+}
+
+function obtainGridMatchingPaddedShape(
+  previous: ComplexGrid | null,
+  shape: BandSpatialShape,
+): ComplexGrid {
+  const width = nextPowerOfTwoAtLeast(shape.width);
+  const height = nextPowerOfTwoAtLeast(shape.height);
+  if (previous && previous.width === width && previous.height === height) return previous;
+  return allocateComplexGridOrThrowOutOfMemory(width, height);
+}
+
+function allocateComplexGridOrThrowOutOfMemory(width: number, height: number): ComplexGrid {
+  try {
+    return {
+      real: new Float32Array(width * height),
+      imag: new Float32Array(width * height),
+      width,
+      height,
+    };
+  } catch {
+    throw buildSpatialFilterOutOfMemoryError(width, height);
+  }
+}
+
+function buildSpatialFilterOutOfMemoryError(width: number, height: number): Error {
+  const megabytes = Math.ceil((width * height * COMPLEX_GRID_BYTES_PER_PADDED_PIXEL) / (1024 * 1024));
+  return new Error(
+    `Not enough memory for the spatial filter's ${megabytes} MB working grid. ` +
+      `Close other panels or crop the stack to a smaller region and try again.`,
+  );
 }
 
 // Bin k of an N-point FFT holds the spatial frequency min(k, N - k) / N in
@@ -76,18 +174,21 @@ function assertBandLengthMatchesShape(band: RasterTypedArray, shape: BandSpatial
   );
 }
 
-function buildMirrorPaddedComplexGrid(band: RasterTypedArray, shape: BandSpatialShape): ComplexGrid {
-  const width = nextPowerOfTwoAtLeast(shape.width);
-  const height = nextPowerOfTwoAtLeast(shape.height);
-  const real = new Float64Array(width * height);
-  for (let y = 0; y < height; y += 1) {
-    fillPaddedRowByMirroringSource(real, band, shape, width, y);
+// The mirror fill overwrites every real cell of the padded grid; only the
+// imaginary plane needs an explicit reset when the grid is reused.
+function fillGridByMirrorPaddingBand(
+  grid: ComplexGrid,
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+): void {
+  grid.imag.fill(0);
+  for (let y = 0; y < grid.height; y += 1) {
+    fillPaddedRowByMirroringSource(grid.real, band, shape, grid.width, y);
   }
-  return { real, imag: new Float64Array(width * height), width, height };
 }
 
 function fillPaddedRowByMirroringSource(
-  real: Float64Array,
+  real: FftLineBuffer,
   band: RasterTypedArray,
   shape: BandSpatialShape,
   paddedWidth: number,

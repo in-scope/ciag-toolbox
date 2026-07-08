@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySpatialFrequencyFilterToBand,
+  assertShapeFitsSpatialFilterGrid,
   butterworthGainForSettings,
+  createReusableSpatialFilterGrid,
+  estimateSpatialFilterGridBytes,
   fftBinFrequency,
+  SPATIAL_FILTER_GRID_BYTE_LIMIT,
   type BandSpatialShape,
 } from "./spatial-frequency-filter";
 
@@ -122,6 +126,58 @@ describe("applySpatialFrequencyFilterToBand", () => {
     expect(() =>
       applySpatialFrequencyFilterToBand(flat, { width: 3, height: 3 }, { mode: "lowpass", cutoff: 0.1 }),
     ).toThrow(/64 values/);
+  });
+});
+
+// CT-219a: one working grid is reused across a run over many bands; the reuse
+// must be invisible in the results (the imaginary plane resets, the real plane
+// is fully overwritten by the mirror fill, and a padded-shape change reallocates).
+describe("createReusableSpatialFilterGrid", () => {
+  const LOWPASS = { mode: "lowpass", cutoff: 0.1 } as const;
+
+  it("filters consecutive bands identically to fresh one-shot runs", () => {
+    const reusableGrid = createReusableSpatialFilterGrid();
+    const checkerboard = makeCheckerboardBand(0, 200);
+    const flat = makeFlatBand(150, SIDE * SIDE);
+    const reusedFirst = reusableGrid.filterBand(checkerboard, SQUARE, LOWPASS);
+    const reusedSecond = reusableGrid.filterBand(flat, SQUARE, LOWPASS);
+    expect(Array.from(reusedFirst)).toEqual(
+      Array.from(applySpatialFrequencyFilterToBand(checkerboard, SQUARE, LOWPASS)),
+    );
+    expect(Array.from(reusedSecond)).toEqual(
+      Array.from(applySpatialFrequencyFilterToBand(flat, SQUARE, LOWPASS)),
+    );
+  });
+
+  it("survives a shape change between bands by reallocating the grid", () => {
+    const reusableGrid = createReusableSpatialFilterGrid();
+    reusableGrid.filterBand(makeFlatBand(90, 15), { width: 5, height: 3 }, LOWPASS);
+    const filtered = reusableGrid.filterBand(makeFlatBand(150, SIDE * SIDE), SQUARE, LOWPASS);
+    expect(maxAbsoluteDeviationFrom(filtered, 150)).toBeLessThan(1e-6);
+  });
+
+  it("rejects an oversized shape before touching the band data", () => {
+    const reusableGrid = createReusableSpatialFilterGrid();
+    expect(() =>
+      reusableGrid.filterBand(new Float32Array(1), { width: 20000, height: 20000 }, LOWPASS),
+    ).toThrow(/too large for the spatial filter/);
+  });
+});
+
+describe("spatial filter grid size limit", () => {
+  it("estimates two float32 buffers at next-power-of-two dimensions", () => {
+    expect(estimateSpatialFilterGridBytes({ width: 5, height: 3 })).toBe(8 * 4 * 4 * 2);
+    expect(estimateSpatialFilterGridBytes({ width: 8, height: 8 })).toBe(8 * 8 * 4 * 2);
+  });
+
+  it("accepts the reference 8000 x 6000 scale and rejects a 150 MP stretch capture", () => {
+    expect(() => assertShapeFitsSpatialFilterGrid({ width: 8000, height: 6000 })).not.toThrow();
+    expect(estimateSpatialFilterGridBytes({ width: 8000, height: 6000 })).toBeLessThanOrEqual(
+      SPATIAL_FILTER_GRID_BYTE_LIMIT,
+    );
+    expect(() => assertShapeFitsSpatialFilterGrid({ width: 14000, height: 11000 })).toThrow(
+      /too large for the spatial filter.*Crop the stack/s,
+    );
   });
 });
 

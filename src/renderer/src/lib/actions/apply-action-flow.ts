@@ -9,7 +9,12 @@ import {
 } from "@/lib/actions/operation-loading-message";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
-import type { ViewportActionOutput, ViewportRenderingState } from "@/lib/actions/viewport-action";
+import {
+  actionTransformsSource,
+  runActionSourceTransform,
+  type ViewportActionOutput,
+  type ViewportRenderingState,
+} from "@/lib/actions/viewport-action";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
@@ -42,13 +47,15 @@ export function applyActionInPlaceAtSourceIndex(
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
-  if (action.transformSource) {
+  if (actionTransformsSource(action)) {
     void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
     return;
   }
   applyActionInPlaceWithoutBusyIndicator(action, parameterValues, sourceIndex, bindings);
 }
 
+// Only non-transforming actions land here (the transforming ones are routed to
+// the busy-indicator path above), so this path never touches the source.
 function applyActionInPlaceWithoutBusyIndicator(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
@@ -56,7 +63,6 @@ function applyActionInPlaceWithoutBusyIndicator(
   bindings: ApplyActionFlowBindings,
 ): void {
   try {
-    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -83,7 +89,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
-    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
+    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -104,16 +110,16 @@ function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function replaceSourceAtIndexWhenActionTransformsSource(
+async function replaceSourceAtIndexWithTransformedSource(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
-): void {
-  if (!action.transformSource) return;
+): Promise<void> {
+  if (!actionTransformsSource(action)) return;
   const content = bindings.imagesByIndex.get(sourceIndex);
   if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
-  const nextSource = action.transformSource(content.source, parameterValues);
+  const nextSource = await runActionSourceTransform(action, content.source, parameterValues);
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
   );
@@ -312,12 +318,12 @@ export async function runDuplicateAndApplyAtTargetIndex(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
-  const handle = action.transformSource
+  const handle = actionTransformsSource(action)
     ? registerResultPanelBusyEntry(action, targetIndex, bindings)
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
-    if (action.transformSource) {
+    if (actionTransformsSource(action)) {
       await placeTransformedDuplicateAtTargetIndex(
         action,
         parameterValues,
@@ -393,7 +399,7 @@ async function placeTransformedDuplicateAtTargetIndex(
 ): Promise<void> {
   const transformedContent = await cloneAndTransformSourceContent(
     sourceContent,
-    action.transformSource!,
+    action,
     parameterValues,
   );
   bindings.setImagesByIndex((previous) =>
@@ -403,11 +409,11 @@ async function placeTransformedDuplicateAtTargetIndex(
 
 async function cloneAndTransformSourceContent(
   sourceContent: ViewportCellContent,
-  transform: NonNullable<RegisteredViewportAction["transformSource"]>,
+  action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
 ): Promise<ViewportCellContent> {
   const clonedSource = await cloneViewportImageSource(sourceContent.source);
-  const transformedSource = transform(clonedSource, parameterValues);
+  const transformedSource = await runActionSourceTransform(action, clonedSource, parameterValues);
   return {
     fileName: sourceContent.fileName,
     source: transformedSource,

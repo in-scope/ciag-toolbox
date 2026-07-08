@@ -142,6 +142,16 @@ export type ViewportActionSourceTransform = (
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
 
+// CT-219a: a source transform may instead be asynchronous (the spatial filter
+// runs its FFT loop on a Web Worker so a large stack does not freeze the UI
+// thread). An action defines transformSource OR transformSourceAsync; the apply
+// flow gates and runs both kinds only through actionTransformsSource /
+// runActionSourceTransform below.
+export type ViewportActionAsyncSourceTransform = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+) => Promise<ViewportImageSource>;
+
 // CT-097: an operation may emit additional outputs beyond the primary in-place /
 // duplicated result. Each secondary output is placed in its own fresh viewport
 // and carries its own applied label so the audit trail records the extra step.
@@ -192,6 +202,21 @@ export interface ViewportAction {
     parameterValues: ParameterValuesById,
   ) => ViewportRenderingState;
   readonly transformSource?: ViewportActionSourceTransform;
+  readonly transformSourceAsync?: ViewportActionAsyncSourceTransform;
+}
+
+export function actionTransformsSource(action: ViewportAction): boolean {
+  return action.transformSource !== undefined || action.transformSourceAsync !== undefined;
+}
+
+export async function runActionSourceTransform(
+  action: ViewportAction,
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+): Promise<ViewportImageSource> {
+  if (action.transformSourceAsync) return action.transformSourceAsync(source, parameterValues);
+  if (action.transformSource) return action.transformSource(source, parameterValues);
+  return source;
 }
 
 export interface ApplyActionFailure {

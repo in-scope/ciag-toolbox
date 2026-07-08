@@ -1,9 +1,21 @@
 import { Grid3x3 } from "lucide-react";
 
-import { applySpatialFrequencyFilterToBand, type SpatialFrequencyFilterMode, type SpatialFrequencyFilterSettings } from "@/lib/image/filters/spatial-frequency-filter";
+import {
+  assertShapeFitsSpatialFilterGrid,
+  createReusableSpatialFilterGrid,
+  type BandSpatialShape,
+  type SpatialFrequencyFilterMode,
+  type SpatialFrequencyFilterSettings,
+} from "@/lib/image/filters/spatial-frequency-filter";
+import {
+  filterBandsOnDedicatedSpatialFilterWorker,
+  isSpatialFilterWorkerAvailable,
+  type SpatialFilterBandInput,
+} from "@/lib/image/filters/spatial-filter-worker-client";
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
-import type { RasterImage } from "@/lib/image/raster-image";
+import { getRasterBandPixelsOrThrow, type RasterImage } from "@/lib/image/raster-image";
+import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
   describeCubeScopeForAppliedLabel,
@@ -21,7 +33,7 @@ import {
   type ParameterValuesById,
 } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
-import type { ViewportActionSourceTransform, ViewportRenderingState } from "./viewport-action";
+import type { ViewportRenderingState } from "./viewport-action";
 
 // CT-203: spatial frequency filtering within each band's picture. The mode
 // selector picks the Butterworth transfer (high/low/bandpass); each mode shows
@@ -29,6 +41,11 @@ import type { ViewportActionSourceTransform, ViewportRenderingState } from "./vi
 // are filtered: Full stack filters every band, Band-wise filters only the
 // entered bands and carries the rest through unchanged, so the output stack
 // always keeps the source's dimensions (float32 via the Stage 3 float path).
+//
+// CT-219a: the FFT loop runs on a dedicated Web Worker (transformSourceAsync)
+// so a large stack does not freeze the UI thread, and the working-grid size is
+// pre-flighted in assertCanApplyToSource so an oversized stack fails with a
+// clear error before a result panel is reserved.
 
 export const SPATIAL_FILTER_ACTION_ID = "spatial-filter";
 export const SPATIAL_FILTER_MODE_PARAMETER_ID = "mode";
@@ -139,7 +156,8 @@ export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatSpatialFilterAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIntoSpatialFilterParameters,
   apply: (state) => state,
-  transformSource: createSpatialFilterSourceTransform(),
+  assertCanApplyToSource: assertSpatialFilterSourceFitsWorkingGrid,
+  transformSourceAsync: transformSourceThroughSpatialFilter,
 };
 
 // Band-wise scope with an empty range falls back to the band the user is
@@ -190,28 +208,80 @@ function readCutoffOrDefault(value: ParameterValue | undefined, fallback: number
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function createSpatialFilterSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
-    const source = coerceViewportSourceToRasterSource(rawSource);
-    const settings = readSpatialFilterSettings(parameterValues);
-    const filteredBandIndexes = resolveScopedBandIndexSet(
-      SPATIAL_FILTER_SCOPE_IDS,
-      parameterValues,
-      source.raster.bandCount,
-    );
-    return { kind: "raster", raster: filterBandsOfRaster(source.raster, filteredBandIndexes, settings) };
-  };
+function assertSpatialFilterSourceFitsWorkingGrid(source: ViewportImageSource): void {
+  if (source.kind !== "raster") return;
+  assertShapeFitsSpatialFilterGrid({ width: source.raster.width, height: source.raster.height });
 }
 
-function filterBandsOfRaster(
+async function transformSourceThroughSpatialFilter(
+  rawSource: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+): Promise<ViewportImageSource> {
+  const source = coerceViewportSourceToRasterSource(rawSource);
+  const settings = readSpatialFilterSettings(parameterValues);
+  const filteredBandIndexes = resolveScopedBandIndexSet(
+    SPATIAL_FILTER_SCOPE_IDS,
+    parameterValues,
+    source.raster.bandCount,
+  );
+  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings);
+  return { kind: "raster", raster };
+}
+
+async function filterBandsOfRaster(
   raster: RasterImage,
   filteredBandIndexes: ReadonlySet<number>,
   settings: SpatialFrequencyFilterSettings,
-): RasterImage {
+): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
-  return makeFloatRasterReusingUnchangedSourceBands(raster, filteredBandIndexes, (band) =>
-    applySpatialFrequencyFilterToBand(band, shape, settings),
+  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings);
+  return makeFloatRasterReusingUnchangedSourceBands(raster, filteredBandIndexes, (_band, index) =>
+    readFilteredBandOrThrow(filteredByIndex, index),
   );
+}
+
+function filterScopedBands(
+  raster: RasterImage,
+  filteredBandIndexes: ReadonlySet<number>,
+  shape: BandSpatialShape,
+  settings: SpatialFrequencyFilterSettings,
+): Promise<Map<number, Float32Array>> {
+  const bands = listScopedBandInputs(raster, filteredBandIndexes);
+  if (isSpatialFilterWorkerAvailable()) {
+    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings);
+  }
+  return Promise.resolve(filterBandsOnThisThread(bands, shape, settings));
+}
+
+function listScopedBandInputs(
+  raster: RasterImage,
+  filteredBandIndexes: ReadonlySet<number>,
+): SpatialFilterBandInput[] {
+  return [...filteredBandIndexes]
+    .sort((a, b) => a - b)
+    .map((bandIndex) => ({ bandIndex, pixels: getRasterBandPixelsOrThrow(raster, bandIndex) }));
+}
+
+// Vitest's node environment has no Web Worker; the same reusable-grid filter
+// runs inline there (and in any runtime without workers).
+function filterBandsOnThisThread(
+  bands: ReadonlyArray<SpatialFilterBandInput>,
+  shape: BandSpatialShape,
+  settings: SpatialFrequencyFilterSettings,
+): Map<number, Float32Array> {
+  const reusableGrid = createReusableSpatialFilterGrid();
+  return new Map(
+    bands.map((band) => [band.bandIndex, reusableGrid.filterBand(band.pixels, shape, settings)]),
+  );
+}
+
+function readFilteredBandOrThrow(
+  filteredByIndex: ReadonlyMap<number, Float32Array>,
+  bandIndex: number,
+): Float32Array {
+  const filtered = filteredByIndex.get(bandIndex);
+  if (filtered) return filtered;
+  throw new Error(`Spatial filter produced no result for band ${bandIndex + 1}`);
 }
 
 function formatSpatialFilterAppliedLabel(parameterValues: ParameterValuesById): string {
