@@ -58,6 +58,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "percentile-clip",
       "band-weighting",
       "band-selection",
+      "custom-transform",
     ]);
   });
 

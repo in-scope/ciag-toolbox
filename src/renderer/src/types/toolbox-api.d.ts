@@ -179,13 +179,17 @@ type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
   | { mode: "import" };
 
+type ToolboxRunUserScriptResultKind = "value" | "cube";
+
 interface ToolboxRunUserScriptRequest {
   cube: ToolboxRunUserScriptCube;
   source: ToolboxRunUserScriptSource;
+  resultKind?: ToolboxRunUserScriptResultKind;
 }
 
 type ToolboxRunUserScriptResult =
   | { status: "completed"; value: unknown; sourceName?: string }
+  | { status: "completed-cube"; shape: number[]; bands: Float32Array[]; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
 

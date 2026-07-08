@@ -411,4 +411,11 @@ export {
   clickImportBandSelectionScript,
   expectBandSelectionFunction,
 } from "./band-selection";
+export {
+  CUSTOM_TRANSFORM_OPERATION_LABEL,
+  expectCustomTransformEditorReady,
+  runCustomTransformFormula,
+  clickImportCustomTransformScript,
+  expectCustomTransformReady,
+} from "./custom-transform";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";

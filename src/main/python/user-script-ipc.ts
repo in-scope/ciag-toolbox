@@ -18,16 +18,18 @@ import {
   runUserScriptInPythonSubprocess,
   type PythonWorkerOutcome,
 } from "./python-worker";
-import type { JsonValue } from "./worker-protocol";
+import { wallClockTimeoutMsForUserScriptResultKind } from "./user-script-timeouts";
+import type { CubeResultShape, JsonValue, UserScriptResultKind } from "./worker-protocol";
 
 // CT-209/CT-210: the renderer's band-ops popups run a user formula or imported
 // tool against the current stack. The cube crosses IPC as Float32Array bands; the
 // interpreter selection, sandbox decision, import dialog, subprocess run, and temp
 // cleanup all live here so the renderer only sends the cube and gets weights/bands
 // back. Bundled mode is sandboxed; own-environment mode (CT-208e) runs trusted.
+// CT-216: a resultKind of 'cube' (the Custom transform) returns the transformed
+// whole cube as Float32Array bands and runs under the longer 120 s wall clock.
 
 const RUN_USER_SCRIPT_CHANNEL = "user-script:run";
-const USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS = 30_000;
 
 const IMPORTED_SCRIPT_FILE_FILTER: Electron.FileFilter = {
   name: "Python tool",
@@ -48,10 +50,12 @@ export type RunUserScriptIpcSource =
 export interface RunUserScriptIpcRequest {
   cube: RunUserScriptIpcCube;
   source: RunUserScriptIpcSource;
+  resultKind?: UserScriptResultKind;
 }
 
 export type RunUserScriptIpcResult =
   | { status: "completed"; value: JsonValue; sourceName?: string }
+  | { status: "completed-cube"; shape: CubeResultShape; bands: Float32Array[]; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
 
@@ -84,7 +88,7 @@ async function runUserScriptForRequest(
   const selection = resolveInterpreterSelectionOrThrow();
   const run = await prepareUserScriptInputOrCancel(window, request.source);
   if (run === null) return { status: "canceled" };
-  return runPreparedUserScript(selection, run, request.cube);
+  return runPreparedUserScript(selection, run, request.cube, request.resultKind ?? "value");
 }
 
 function resolveInterpreterSelectionOrThrow(): PythonInterpreterSelection {
@@ -131,17 +135,18 @@ async function runPreparedUserScript(
   selection: PythonInterpreterSelection,
   run: PreparedUserScriptRun,
   cube: RunUserScriptIpcCube,
+  resultKind: UserScriptResultKind,
 ): Promise<RunUserScriptIpcResult> {
   try {
     const outcome = await runUserScriptInPythonSubprocess({
       interpreterPath: selection.interpreterPath,
       input: run.prepared.input,
       cube: encodeCubeAsFloat32Payload(toCubeForUserScript(cube)),
-      resultKind: "value",
+      resultKind,
       sandbox: !selection.isOwnEnvironmentMode,
-      timeoutMs: USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS,
+      timeoutMs: wallClockTimeoutMsForUserScriptResultKind(resultKind),
     });
-    return mapWorkerOutcomeToIpcResult(outcome, run.sourceName);
+    return mapWorkerOutcomeToIpcResult(outcome, resultKind, run.sourceName);
   } finally {
     await run.prepared.releaseResources();
   }
@@ -158,12 +163,35 @@ function toCubeForUserScript(cube: RunUserScriptIpcCube): CubeForUserScript {
 
 function mapWorkerOutcomeToIpcResult(
   outcome: PythonWorkerOutcome,
+  resultKind: UserScriptResultKind,
   sourceName: string | null,
 ): RunUserScriptIpcResult {
   if (outcome.kind === "failed") return { status: "failed", message: outcome.userFacingMessage };
-  // This handler always requests resultKind "value"; a cube outcome here is a harness bug.
-  if (outcome.kind === "completed-cube") {
+  if (outcome.kind === "completed-cube") return mapCubeOutcomeToIpcResult(outcome, resultKind, sourceName);
+  return mapValueOutcomeToIpcResult(outcome, resultKind, sourceName);
+}
+
+// The worker's outcome kind is dictated by the requested resultKind, so a
+// mismatch here is a harness bug surfaced as a plain failure.
+function mapCubeOutcomeToIpcResult(
+  outcome: Extract<PythonWorkerOutcome, { kind: "completed-cube" }>,
+  resultKind: UserScriptResultKind,
+  sourceName: string | null,
+): RunUserScriptIpcResult {
+  if (resultKind !== "cube") {
     return { status: "failed", message: "The script returned an unexpected cube result." };
+  }
+  if (sourceName === null) return { status: "completed-cube", shape: outcome.shape, bands: outcome.bands };
+  return { status: "completed-cube", shape: outcome.shape, bands: outcome.bands, sourceName };
+}
+
+function mapValueOutcomeToIpcResult(
+  outcome: Extract<PythonWorkerOutcome, { kind: "completed" }>,
+  resultKind: UserScriptResultKind,
+  sourceName: string | null,
+): RunUserScriptIpcResult {
+  if (resultKind !== "value") {
+    return { status: "failed", message: "The script returned an unexpected non-cube result." };
   }
   if (sourceName === null) return { status: "completed", value: outcome.value };
   return { status: "completed", value: outcome.value, sourceName };

@@ -127,6 +127,8 @@ function applyUserScriptWeightsResult(
 ): void {
   if (result.status === "canceled") return;
   if (result.status === "failed") throw new Error(result.message);
+  // This editor always requests resultKind "value", so a cube result is a harness bug.
+  if (result.status !== "completed") throw new Error("The script returned an unexpected result.");
   setWeights(validateBandWeightVectorReturnValue(result.value, bandCount));
 }
 

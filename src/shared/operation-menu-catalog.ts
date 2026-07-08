@@ -148,12 +148,14 @@ const FILTERS_GROUP: OperationGroup = {
   ],
 };
 
-// Stage 5 band-combining operations gated behind the scripting worker (CT-209..CT-210).
+// Stage 5 band-combining and whole-cube operations gated behind the scripting
+// worker (CT-209, CT-210, CT-216).
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
   commands: [
     buildMenuAndToolbarCommand("band-weighting", "Band Weighting", "open-action-panel"),
     buildMenuAndToolbarCommand("band-selection", "Band Selection", "open-action-panel"),
+    buildMenuAndToolbarCommand("custom-transform", "Custom Transform", "open-action-panel"),
   ],
 };
 

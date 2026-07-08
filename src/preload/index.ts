@@ -179,13 +179,17 @@ export type RunUserScriptSource =
   | { mode: "formula"; expression: string }
   | { mode: "import" };
 
+export type RunUserScriptResultKind = "value" | "cube";
+
 export interface RunUserScriptRequest {
   cube: RunUserScriptCube;
   source: RunUserScriptSource;
+  resultKind?: RunUserScriptResultKind;
 }
 
 export type RunUserScriptResult =
   | { status: "completed"; value: unknown; sourceName?: string }
+  | { status: "completed-cube"; shape: number[]; bands: Float32Array[]; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
 

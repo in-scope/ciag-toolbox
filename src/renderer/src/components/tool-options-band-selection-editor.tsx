@@ -133,6 +133,8 @@ function rememberUserScriptBandResult(
 ): void {
   if (result.status === "canceled") return;
   if (result.status === "failed") throw new Error(result.message);
+  // This editor always requests resultKind "value", so a cube result is a harness bug.
+  if (result.status !== "completed") throw new Error("The script returned an unexpected result.");
   const rows = validateBandSelectionReturnValue(result.value, { height: raster.height, width: raster.width });
   const values = flattenBandMatrixToFloat32(rows, raster.width, raster.height);
   const token = rememberBandSelectionResult({ values, width: raster.width, height: raster.height });

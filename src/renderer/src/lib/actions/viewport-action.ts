@@ -11,6 +11,7 @@ import {
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
 import type { BandSelectionEditingState } from "@/lib/image/band-ops/band-selection";
+import type { CubeTransformEditingState } from "@/lib/image/band-ops/cube-transform-editing";
 import type { ThresholdOtsuCutoffs } from "@/lib/image/threshold/otsu-cutoffs";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
@@ -38,6 +39,7 @@ export interface ViewportRenderingState {
   readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
   readonly bandWeights: ReadonlyArray<number> | null;
   readonly bandSelection: BandSelectionEditingState | null;
+  readonly cubeTransform: CubeTransformEditingState | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -63,6 +65,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   thresholdOtsuCutoffs: null,
   bandWeights: null,
   bandSelection: null,
+  cubeTransform: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -120,6 +123,18 @@ export function hasBandSelectionEditingState(state: ViewportRenderingState): boo
 
 export function clearBandSelectionEditingState(state: ViewportRenderingState): ViewportRenderingState {
   return { ...state, bandSelection: null };
+}
+
+// CT-216: the Custom transform popup's ready transform (a result-store token plus
+// display strings, never band data) lives in rendering state, the same
+// editor-owned pattern as the band selection choice. Opening or closing the
+// panel and Apply clear it.
+export function hasCubeTransformEditingState(state: ViewportRenderingState): boolean {
+  return state.cubeTransform !== null;
+}
+
+export function clearCubeTransformEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, cubeTransform: null };
 }
 
 export type ViewportActionSourceTransform = (

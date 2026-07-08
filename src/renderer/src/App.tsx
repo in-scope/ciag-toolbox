@@ -34,6 +34,7 @@ import {
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsBandSelectionEditor } from "@/components/tool-options-band-selection-editor";
+import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
@@ -78,6 +79,7 @@ import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
 import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
+import { shouldEmbedCustomTransformEditorInOperationPanel } from "@/lib/actions/custom-transform-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -225,12 +227,14 @@ import {
 import {
   clearBandSelectionEditingState,
   clearBandWeightingEditingState,
+  clearCubeTransformEditingState,
   clearThresholdEditingState,
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   hasBandSelectionEditingState,
   hasBandWeightingEditingState,
+  hasCubeTransformEditingState,
   hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyScope,
@@ -646,7 +650,8 @@ function buildActiveOperationEmbeddedEditorOrNull(
     buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
+    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveCustomTransformEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
   );
 }
 
@@ -716,6 +721,24 @@ function buildActiveBandSelectionEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsBandSelectionEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveCustomTransformEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedCustomTransformEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsCustomTransformEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -1728,6 +1751,14 @@ function clearTransientOperationStateOnActiveSource(
   clearThresholdBoundsOnActiveSource(inputs);
   clearBandWeightsOnActiveSource(inputs);
   clearBandSelectionOnActiveSource(inputs);
+  clearCubeTransformOnActiveSource(inputs);
+}
+
+function clearCubeTransformOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasCubeTransformEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearCubeTransformEditingState(state));
 }
 
 function clearBandWeightsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
