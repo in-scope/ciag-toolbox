@@ -9,16 +9,21 @@ import {
   encodeRawBinaryFrame,
   encodeWorkerRequestFrame,
   WorkerResponseFrameDecoder,
+  type CubeResultShape,
   type JsonValue,
   type PythonWorkerResponse,
   type RunUserScriptRequest,
   type UserScriptInput,
+  type UserScriptResultKind,
 } from "./worker-protocol";
 
 export interface PythonWorkerRunRequest {
   interpreterPath: string;
   input: UserScriptInput;
   cube: EncodedCubePayload | null;
+  // 'value' returns JSON (weight vectors, bands); 'cube' returns a whole transformed
+  // cube as a raw float32 frame decoded into per-band Float32Arrays (CT-214).
+  resultKind: UserScriptResultKind;
   // True in bundled mode (the app's own interpreter, sandboxed); false in the
   // explicitly-trusted own-environment mode (CT-208e). The wall-clock kill applies either way.
   sandbox: boolean;
@@ -29,6 +34,7 @@ export type PythonWorkerFailureReason = "script-error" | "timeout" | "worker-cra
 
 export type PythonWorkerOutcome =
   | { kind: "completed"; value: JsonValue }
+  | { kind: "completed-cube"; shape: CubeResultShape; bands: Float32Array[] }
   | { kind: "failed"; reason: PythonWorkerFailureReason; userFacingMessage: string; detail?: string };
 
 const STDERR_DETAIL_LIMIT_BYTES = 8192;
@@ -72,12 +78,16 @@ function buildWorkerRequest(request: PythonWorkerRunRequest): RunUserScriptReque
     type: "run-user-script",
     input: request.input,
     cube: request.cube?.header ?? null,
+    resultKind: request.resultKind,
     sandbox: request.sandbox,
   };
 }
 
 function outcomeFromWorkerResponse(response: PythonWorkerResponse): PythonWorkerOutcome {
   if (response.type === "script-result") return { kind: "completed", value: response.value };
+  if (response.type === "cube-result") {
+    return { kind: "completed-cube", shape: response.shape, bands: response.bands };
+  }
   return {
     kind: "failed",
     reason: "script-error",

@@ -37,6 +37,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "script", scriptSource },
       cube: null,
+      resultKind: "value",
       sandbox: false,
       timeoutMs,
     });
@@ -48,6 +49,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "script", scriptSource },
       cube: null,
+      resultKind: "value",
       sandbox: true,
       timeoutMs,
     });
@@ -59,6 +61,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "formula", expression },
       cube: encodeCubeAsFloat32Payload(cube),
+      resultKind: "value",
       sandbox: true,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -70,6 +73,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "formula", expression },
       cube: encodeCubeAsFloat32Payload(cube),
+      resultKind: "value",
       sandbox: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -81,6 +85,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       interpreterPath,
       input: { kind: "script", scriptSource },
       cube: encodeCubeAsFloat32Payload(cube),
+      resultKind: "value",
       sandbox: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -97,6 +102,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
         interpreterPath,
         input: prepared.input,
         cube: encodeCubeAsFloat32Payload(cube),
+        resultKind: "value",
         sandbox: false,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
@@ -104,6 +110,30 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       await prepared.releaseResources();
       await fs.rm(workingDirectory, { recursive: true, force: true });
     }
+  }
+
+  function runFormulaForCubeResult(expression: string, cube: CubeForUserScript) {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: { kind: "formula", expression },
+      cube: encodeCubeAsFloat32Payload(cube),
+      resultKind: "cube",
+      sandbox: false,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
+  }
+
+  function runSandboxedCubeTransformScript(scriptSource: string, cube: CubeForUserScript) {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: { kind: "script", scriptSource },
+      cube: encodeCubeAsFloat32Payload(cube),
+      resultKind: "cube",
+      sandbox: true,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
   }
 
   const sampleCube: CubeForUserScript = {
@@ -267,6 +297,39 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       "def run():\n    import statistics\n    return statistics.mean([1, 2, 3])\n",
     );
     expect(outcome).toEqual({ kind: "completed", value: 2 });
+  }, 60_000);
+
+  it("returns a doubled cube from a cube-result formula, matching a pure-TS reference", async () => {
+    const outcome = await runFormulaForCubeResult("cube * 2", sampleCube);
+    const expectedBands = sampleCube.bands.map((band) => Float32Array.from(band, (value) => value * 2));
+    expect(outcome).toEqual({ kind: "completed-cube", shape: [2, 2, 2], bands: expectedBands });
+  }, 60_000);
+
+  it("rejects a 2-dimensional return from a cube-result run as a script error", async () => {
+    const outcome = await runFormulaForCubeResult("cube[0]", sampleCube);
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "script-error",
+      userFacingMessage: expect.stringContaining("(bands, height, width)"),
+    });
+  }, 60_000);
+
+  it("rejects a NaN-containing return from a cube-result run as a script error", async () => {
+    const outcome = await runFormulaForCubeResult("cube * float('nan')", sampleCube);
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "script-error",
+      userFacingMessage: expect.stringContaining("finite"),
+    });
+  }, 60_000);
+
+  it("still enforces the bundled sandbox for a cube-transform run", async () => {
+    const outcome = await runSandboxedCubeTransformScript(
+      "def run(cube, wavelengths=None):\n    open(r'C:/msi-sandbox-probe.txt', 'w').write('x')\n    return cube\n",
+      sampleCube,
+    );
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    expect((outcome as { userFacingMessage: string }).userFacingMessage).toContain("blocked in bundled mode");
   }, 60_000);
 
   it("still kills a runaway sandboxed script at the wall-clock limit", async () => {

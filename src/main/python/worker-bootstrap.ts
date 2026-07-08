@@ -3,7 +3,8 @@
 // cube reconstruction, dispatch, error capture); only the formula/script it executes is
 // user Python. It must mirror the frame layout in worker-protocol.ts exactly: the JSON
 // request frame is followed by a raw little-endian float32 cube frame when the request
-// header declares a cube.
+// header declares a cube, and a resultKind "cube" run responds with a JSON completed
+// header frame followed by one raw little-endian float32 cube frame (CT-214).
 import { PYTHON_SANDBOX_INSTALL_SOURCE } from "./sandbox-policy";
 
 export const PYTHON_WORKER_BOOTSTRAP_SOURCE = `
@@ -101,6 +102,33 @@ def invoke_run_function(run_function, cube, wavelengths):
     return run_function(cube, wavelengths)
 
 
+CUBE_RESULT_CONTRACT_MESSAGE = (
+    "A cube transform must return a 3-dimensional numeric array shaped "
+    "(bands, height, width) containing only finite values (no NaN or Inf)."
+)
+
+
+def is_numeric_array(array, np):
+    return np.issubdtype(array.dtype, np.floating) or np.issubdtype(array.dtype, np.integer)
+
+
+def coerce_result_to_finite_float32_cube(value):
+    import numpy as np
+    array = np.asarray(value)
+    if array.ndim != 3 or not is_numeric_array(array, np):
+        raise RuntimeError(CUBE_RESULT_CONTRACT_MESSAGE)
+    cube = array.astype("<f4")
+    if not np.all(np.isfinite(cube)):
+        raise RuntimeError(CUBE_RESULT_CONTRACT_MESSAGE)
+    return cube
+
+
+def encode_cube_result_frames(value):
+    cube = coerce_result_to_finite_float32_cube(value)
+    header = encode_response({"type": "completed", "cubeShape": list(cube.shape)})
+    return [header, cube.tobytes()]
+
+
 def make_json_safe(value):
     numpy = sys.modules.get("numpy")
     if numpy is None:
@@ -125,6 +153,12 @@ def sandbox_user_origin_prefixes(input_spec):
     return []
 
 
+def encode_result_frames(request, value):
+    if request.get("resultKind") == "cube":
+        return encode_cube_result_frames(value)
+    return [encode_response({"type": "script-result", "value": make_json_safe(value)})]
+
+
 def run_user_code(request, cube):
     input_spec = request.get("input")
     run_function = load_run_function(input_spec)
@@ -132,17 +166,17 @@ def run_user_code(request, cube):
         install_bundled_mode_sandbox(sandbox_user_origin_prefixes(input_spec))
     wavelengths = (request.get("cube") or {}).get("wavelengths")
     value = invoke_run_function(run_function, cube, wavelengths)
-    return encode_response({"type": "script-result", "value": make_json_safe(value)})
+    return encode_result_frames(request, value)
 
 
 def handle_request(request, cube):
     if not isinstance(request, dict) or request.get("type") != "run-user-script":
-        return encode_response({"type": "script-error", "message": "Malformed worker request."})
+        return [encode_response({"type": "script-error", "message": "Malformed worker request."})]
     try:
         return run_user_code(request, cube)
     except BaseException as error:
         message = str(error) or type(error).__name__
-        return encode_response({"type": "script-error", "message": message, "traceback": traceback.format_exc()})
+        return [encode_response({"type": "script-error", "message": message, "traceback": traceback.format_exc()})]
 
 
 def read_cube_if_present(request, stream):
@@ -165,7 +199,8 @@ def main():
     except BaseException as error:
         write_response_frame(encode_response({"type": "script-error", "message": str(error)}))
         return
-    write_response_frame(handle_request(request, cube))
+    for frame_payload in handle_request(request, cube):
+        write_response_frame(frame_payload)
 
 
 main()

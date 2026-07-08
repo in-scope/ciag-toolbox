@@ -137,6 +137,7 @@ async function runPreparedUserScript(
       interpreterPath: selection.interpreterPath,
       input: run.prepared.input,
       cube: encodeCubeAsFloat32Payload(toCubeForUserScript(cube)),
+      resultKind: "value",
       sandbox: !selection.isOwnEnvironmentMode,
       timeoutMs: USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS,
     });
@@ -159,7 +160,11 @@ function mapWorkerOutcomeToIpcResult(
   outcome: PythonWorkerOutcome,
   sourceName: string | null,
 ): RunUserScriptIpcResult {
-  if (outcome.kind !== "completed") return { status: "failed", message: outcome.userFacingMessage };
+  if (outcome.kind === "failed") return { status: "failed", message: outcome.userFacingMessage };
+  // This handler always requests resultKind "value"; a cube outcome here is a harness bug.
+  if (outcome.kind === "completed-cube") {
+    return { status: "failed", message: "The script returned an unexpected cube result." };
+  }
   if (sourceName === null) return { status: "completed", value: outcome.value };
   return { status: "completed", value: outcome.value, sourceName };
 }
