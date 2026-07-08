@@ -17,6 +17,11 @@ import {
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 import {
+  reportProgressFractionAndYield,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
+import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
@@ -30,7 +35,7 @@ import {
 import type { RegisteredActionIcon, RegisteredViewportAction } from "./registered-actions";
 import type {
   ApplyScope,
-  ViewportActionSourceTransform,
+  ViewportActionAsyncSourceTransform,
   ViewportRenderingState,
 } from "./viewport-action";
 
@@ -65,7 +70,15 @@ export interface DimensionReductionTransformConfig<Fit> {
   readonly loadingMessage?: string;
   readonly componentLabelPrefix: string;
   readonly fit: (samples: CubeSampleMatrix, bandCount: number) => Fit;
-  readonly project: (samples: CubeSampleMatrix, fit: Fit, keptCount: number) => ComponentProjection;
+  // CT-223: projection reports one progress tick per projected component (the last
+  // phase of the transform's phase-based progress). PCA/MNF/ICA all delegate to
+  // projectMeanCentredSamplesOntoComponentVectorsReportingProgress.
+  readonly project: (
+    samples: CubeSampleMatrix,
+    fit: Fit,
+    keptCount: number,
+    onProgress?: UnitProgressCallback,
+  ) => Promise<ComponentProjection>;
   readonly describeKeptComponentLabels?: (fit: Fit, keptCount: number) => ReadonlyArray<string>;
 }
 
@@ -85,7 +98,7 @@ export function registerDimensionReductionAction<Fit>(
     prepareParameterValuesForApply: buildDimensionReductionPrepareParameterValues(config.label),
     apply: clearOperationRegionFromState,
     clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-    transformSource: buildDimensionReductionSourceTransform(config),
+    transformSourceAsync: buildDimensionReductionSourceTransform(config),
   };
 }
 
@@ -140,22 +153,42 @@ function injectResolvedComponentCountForApply(
 
 function buildDimensionReductionSourceTransform<Fit>(
   config: DimensionReductionTransformConfig<Fit>,
-): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const raster = runDimensionReductionTransform(config, source.raster, parameterValues);
+    const raster = await runDimensionReductionTransform(config, source.raster, parameterValues, onProgress);
     return { kind: "raster", raster };
   };
 }
 
-function runDimensionReductionTransform<Fit>(
+// CT-223: phase-based progress. There is no per-band loop here, so the bar advances
+// through the transform's coarse phases: fit-sample extraction, the fit itself
+// (statistics + eigen), projection-sample extraction, then one tick per projected
+// component across the second half of the bar.
+const FIT_SAMPLES_EXTRACTED_FRACTION = 0.2;
+const FIT_COMPLETE_FRACTION = 0.4;
+const PROJECTION_SAMPLES_EXTRACTED_FRACTION = 0.5;
+
+async function runDimensionReductionTransform<Fit>(
   config: DimensionReductionTransformConfig<Fit>,
   raster: RasterImage,
   parameterValues: ParameterValuesById,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const keptCount = resolveComponentCount(readComponentCountInput(parameterValues), raster.bandCount);
-  const fit = config.fit(extractFitSamples(raster, parameterValues), raster.bandCount);
-  const projection = config.project(extractCubeSampleMatrixFromRaster(raster), fit, keptCount);
+  await reportProgressFractionAndYield(onProgress, 0);
+  const fitSamples = extractFitSamples(raster, parameterValues);
+  await reportProgressFractionAndYield(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION);
+  const fit = config.fit(fitSamples, raster.bandCount);
+  await reportProgressFractionAndYield(onProgress, FIT_COMPLETE_FRACTION);
+  const projectionSamples = extractCubeSampleMatrixFromRaster(raster);
+  await reportProgressFractionAndYield(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION);
+  const projection = await config.project(
+    projectionSamples,
+    fit,
+    keptCount,
+    scaleProgressToWindow(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION, 1),
+  );
   return makeComponentStackFromProjection(projection, buildStackMeta(config, fit, raster, keptCount));
 }
 

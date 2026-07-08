@@ -25,6 +25,17 @@ export async function reportCompletedUnitAndYieldSoProgressCanPaint(
   await yieldOnceSoTheBusyIndicatorCanPaint();
 }
 
+// CT-223: phase-structured work (sample extraction, fit, projection) reports each
+// phase boundary as an absolute fraction of the overall bar.
+export async function reportProgressFractionAndYield(
+  onProgress: UnitProgressCallback | undefined,
+  fraction: number,
+): Promise<void> {
+  if (!onProgress) return;
+  onProgress(fraction);
+  await yieldOnceSoTheBusyIndicatorCanPaint();
+}
+
 // CT-222: multi-phase work (e.g. brightness then contrast, normalize then invert)
 // maps each phase's own 0..1 fraction into a window of the overall bar.
 export function scaleProgressToWindow(

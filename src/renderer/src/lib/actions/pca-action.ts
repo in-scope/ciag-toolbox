@@ -1,6 +1,7 @@
 import { Component } from "lucide-react";
 
-import { applyPca, fitPca, varianceExplained, type PcaFit } from "@/lib/image/dimension-reduction/pca";
+import { fitPca, varianceExplained, type PcaFit } from "@/lib/image/dimension-reduction/pca";
+import { projectMeanCentredSamplesOntoComponentVectorsReportingProgress } from "@/lib/image/dimension-reduction/project-samples";
 
 import { registerDimensionReductionAction } from "./dimension-reduction-action";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -22,7 +23,8 @@ export const PCA_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   loadingMessage: "Computing principal components...",
   componentLabelPrefix: PCA_COMPONENT_LABEL_PREFIX,
   fit: fitPca,
-  project: applyPca,
+  project: (samples, fit, keptCount, onProgress) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.eigenvectors, keptCount, onProgress),
   describeKeptComponentLabels: describeKeptPrincipalComponentLabels,
 });
 

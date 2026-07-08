@@ -1,5 +1,9 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
+import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-183: PCA and MNF both turn a fitted set of component vectors into a
 // projection the same way: mean-centre every pixel with the fit means and dot it
@@ -15,6 +19,22 @@ export function projectMeanCentredSamplesOntoComponentVectors(
 ): ComponentProjection {
   return Array.from({ length: keptCount }, (_unused, component) =>
     projectEverySampleOntoComponentVector(samples, means, componentVectors[component]!),
+  );
+}
+
+// CT-223: the async twin of projectMeanCentredSamplesOntoComponentVectors. Identical
+// per-component math, one progress tick per projected component.
+export async function projectMeanCentredSamplesOntoComponentVectorsReportingProgress(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  componentVectors: ReadonlyArray<ReadonlyArray<number>>,
+  keptCount: number,
+  onProgress?: UnitProgressCallback,
+): Promise<ComponentProjection> {
+  return computeArrayReportingPerUnitProgress(
+    keptCount,
+    (component) => projectEverySampleOntoComponentVector(samples, means, componentVectors[component]!),
+    onProgress,
   );
 }
 

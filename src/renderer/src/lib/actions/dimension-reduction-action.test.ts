@@ -14,16 +14,17 @@ import {
   ROI_FIT_SCOPE,
   WHOLE_IMAGE_FIT_SCOPE,
 } from "./dimension-reduction-action";
+import { PCA_ACTION } from "./pca-action";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
 // A trivial "keep the first N bands" transform exercises the descriptor wiring
 // (count resolution, float output, audit label) without any real fit math.
-function keepLeadingBands(
+async function keepLeadingBands(
   samples: CubeSampleMatrix,
   _fit: null,
   keptCount: number,
-): ComponentProjection {
+): Promise<ComponentProjection> {
   return Array.from({ length: keptCount }, (_, index) => Float32Array.from(samples.bandValues[index]!));
 }
 
@@ -64,9 +65,9 @@ describe("registerDimensionReductionAction", () => {
     expect(action.parameters![0]!.id).toBe(COMPONENT_COUNT_PARAMETER_ID);
   });
 
-  it("produces a float32 stack whose band count equals the kept-component count", () => {
+  it("produces a float32 stack whose band count equals the kept-component count", async () => {
     const action = registerDimensionReductionAction(IDENTITY_CONFIG);
-    const result = action.transformSource!(rasterSource(makeFourBandRaster()), {
+    const result = await action.transformSourceAsync!(rasterSource(makeFourBandRaster()), {
       [COMPONENT_COUNT_PARAMETER_ID]: 2,
     });
     expect(result.kind).toBe("raster");
@@ -76,9 +77,9 @@ describe("registerDimensionReductionAction", () => {
     expect(raster.bitsPerSample).toBe(32);
   });
 
-  it("clamps a request above the band count down to the band count", () => {
+  it("clamps a request above the band count down to the band count", async () => {
     const action = registerDimensionReductionAction(IDENTITY_CONFIG);
-    const result = action.transformSource!(rasterSource(makeFourBandRaster()), {
+    const result = await action.transformSourceAsync!(rasterSource(makeFourBandRaster()), {
       [COMPONENT_COUNT_PARAMETER_ID]: 99,
     });
     expect((result as { raster: RasterImage }).raster.bandCount).toBe(4);
@@ -146,7 +147,7 @@ describe("registerDimensionReductionAction", () => {
     ).toThrow(/region/i);
   });
 
-  it("fits on only the in-ROI pixels yet still projects the whole cube", () => {
+  it("fits on only the in-ROI pixels yet still projects the whole cube", async () => {
     let fitSampleCount = -1;
     let projectSampleCount = -1;
     const action = registerDimensionReductionAction({
@@ -160,7 +161,7 @@ describe("registerDimensionReductionAction", () => {
         return keepLeadingBands(samples, null, keptCount);
       },
     });
-    action.transformSource!(rasterSource(makeFourBandRaster()), {
+    await action.transformSourceAsync!(rasterSource(makeFourBandRaster()), {
       [COMPONENT_COUNT_PARAMETER_ID]: 2,
       fitRegionImagePixelX0: 0,
       fitRegionImagePixelY0: 0,
@@ -184,18 +185,47 @@ describe("registerDimensionReductionAction", () => {
     expect(label).toBe("Test DR (2 of 4 components) fit on ROI (0, 0) - (1, 1)");
   });
 
-  it("lets a transform supply per-component strength labels", () => {
+  it("lets a transform supply per-component strength labels", async () => {
     const action = registerDimensionReductionAction({
       ...IDENTITY_CONFIG,
       describeKeptComponentLabels: (_fit, keptCount) =>
         Array.from({ length: keptCount }, (_, index) => `TC ${index + 1} (strong)`),
     });
-    const result = action.transformSource!(rasterSource(makeFourBandRaster()), {
+    const result = await action.transformSourceAsync!(rasterSource(makeFourBandRaster()), {
       [COMPONENT_COUNT_PARAMETER_ID]: 2,
     });
     expect((result as { raster: RasterImage }).raster.bandLabels).toEqual([
       "TC 1 (strong)",
       "TC 2 (strong)",
     ]);
+  });
+});
+
+// CT-223: the transform reports coarse phase progress (0, fit samples extracted,
+// fit complete, projection samples extracted) then one tick per projected
+// component across the second half of the bar.
+describe("dimension-reduction phase progress (CT-223)", () => {
+  it("reports the phase ticks then one tick per projected component", async () => {
+    const ticks: number[] = [];
+    await PCA_ACTION.transformSourceAsync!(
+      rasterSource(makeFourBandRaster()),
+      { [COMPONENT_COUNT_PARAMETER_ID]: 2 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 0.2, 0.4, 0.5, 0.5, 0.75, 1]);
+  });
+
+  it("stays monotonic non-decreasing from 0 to 1", async () => {
+    const ticks: number[] = [];
+    await PCA_ACTION.transformSourceAsync!(
+      rasterSource(makeFourBandRaster()),
+      { [COMPONENT_COUNT_PARAMETER_ID]: 4 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks[0]).toBe(0);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
   });
 });
