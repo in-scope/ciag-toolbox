@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, Palette, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
 import {
   EMPTY_PINNED_ROI_SPECTRA,
@@ -1689,7 +1689,7 @@ const REFLECTION_PARAMETER_SCHEMA: EnumParameterSchema = buildGeometricTransform
 export const ROTATE_ACTION: RegisteredViewportAction = {
   id: "rotate",
   label: "Rotate",
-  icon: RotateCw,
+  icon: RotateCwSquare,
   parameters: [ROTATION_PARAMETER_SCHEMA],
   successMessage: "Rotation applied",
   appliedLabel: "Rotate",
@@ -1702,7 +1702,7 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
 export const REFLECT_ACTION: RegisteredViewportAction = {
   id: "reflect",
   label: "Reflect",
-  icon: FlipHorizontal,
+  icon: FlipHorizontal2,
   parameters: [REFLECTION_PARAMETER_SCHEMA],
   successMessage: "Reflection applied",
   appliedLabel: "Reflect",

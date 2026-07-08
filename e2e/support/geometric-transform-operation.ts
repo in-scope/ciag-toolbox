@@ -3,7 +3,7 @@ import type { ElectronApplication, Locator, Page } from "@playwright/test";
 import {
   applicationToolbar,
   applyOperationInPlace,
-  openOperationFromImageMenu,
+  openOperationFromMenu,
   operationPanel,
 } from "./operations";
 
@@ -61,7 +61,7 @@ export function openGeometricTransformFromMenu(
   page: Page,
   choice: GeometricTransformChoice,
 ): Promise<Locator> {
-  return openOperationFromImageMenu(app, page, geometricTransformOperationLabel(choice));
+  return openOperationFromMenu(app, page, geometricTransformOperationLabel(choice));
 }
 
 export async function applyGeometricTransformInPlace(

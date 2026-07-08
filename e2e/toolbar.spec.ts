@@ -13,8 +13,25 @@ import {
 // Manual test script section 4 (CT-004): the toolbar strip, its controls,
 // accessible names, and the disabled-until-a-panel-is-loaded affordance.
 
-const OPERATION_APPLY_AFFORDANCE = "Bit Shift";
+const OPERATION_APPLY_AFFORDANCE = "Tone Curve";
 const FRESHLY_LOADED_PANEL = 1;
+
+// The toolbar rule (operation-menu-catalog.ts): mode toggles, zero-parameter
+// one-click applies, and the everyday panel-openers. Everything else is
+// menu-only, so this is the EXACT expected button set, in order.
+const EXPECTED_TOOLBAR_BUTTON_LABELS = [
+  "Open image",
+  "Grid layout",
+  "Select Region",
+  "Subset Bands",
+  "Crop to Region",
+  "Rotate 90° clockwise",
+  "Rotate 90° counterclockwise",
+  "Reflect horizontally",
+  "Reflect vertically",
+  "Tone Curve",
+  "Brightness & Contrast",
+];
 
 let launched: LaunchedApp;
 
@@ -36,6 +53,11 @@ test("exposes the Open Images, Grid Layout, and operation-apply controls", async
   await expect(operationApplyAffordance(launched)).toBeVisible();
 });
 
+test("the toolbar carries exactly the shortcut allowlist, in order", async () => {
+  const names = await readToolbarButtonBaseNames(launched);
+  expect(names).toEqual(EXPECTED_TOOLBAR_BUTTON_LABELS);
+});
+
 test("every toolbar button exposes an accessible name", async () => {
   const allButtons = applicationToolbar(launched.window).getByRole("button");
   const namedButtons = applicationToolbar(launched.window).getByRole("button", {
@@ -55,6 +77,16 @@ test("operation-apply controls disable on a fresh launch and enable once a panel
     await closeToolboxApp(fresh);
   }
 });
+
+async function readToolbarButtonBaseNames(app: LaunchedApp): Promise<string[]> {
+  const buttons = applicationToolbar(app.window).getByRole("button");
+  const accessibleNames = await buttons.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("aria-label") ?? ""),
+  );
+  // Accessible names carry state suffixes ("Grid layout (currently 2x2)",
+  // "Tone Curve (select a panel with a loaded stack)"); compare the stable prefix.
+  return accessibleNames.map((name) => name.replace(/ \(.*\)$/, ""));
+}
 
 function openImagesControl(app: LaunchedApp): Locator {
   return applicationToolbar(app.window).getByRole("button", { name: "Open image" });

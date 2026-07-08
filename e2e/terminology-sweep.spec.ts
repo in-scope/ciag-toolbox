@@ -114,7 +114,7 @@ async function fillEverySixPanelOfMaxGrid(app: LaunchedApp): Promise<void> {
 async function expectFreshLaunchUsesStackWordingNotImage(app: LaunchedApp): Promise<void> {
   await expect(panelCell(app.window, 1)).toContainText("No stack loaded");
   const disabledOperation = applicationToolbar(app.window).getByRole("button", {
-    name: /^Bit Shift \(select a panel with a loaded stack\)/,
+    name: /^Tone Curve \(select a panel with a loaded stack\)/,
   });
   await expect(disabledOperation).toBeVisible();
 }

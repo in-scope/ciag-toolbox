@@ -1,12 +1,16 @@
 import { expect } from "@playwright/test";
 import type { ElectronApplication, Locator, Page } from "@playwright/test";
 
-import { triggerImageMenuOperation } from "./main-process";
+import { listAllOperationCommands } from "../../src/shared/operation-menu-catalog";
+import { electronApplicationForWindow } from "./launch-app";
+import { triggerOperationMenuItem } from "./main-process";
 
-// Operations are launched from the application toolbar by their accessible name
-// (the action label, e.g. "Normalize", "Bit Shift", "Flat-field Correction").
-// Each opens a tool-options panel rendered as <aside aria-label="<label> options">
-// containing an "Apply" and a "Cancel" button.
+// Operations are launched from their REAL user entry point, decided by the
+// shared catalog: commands with a toolbar shortcut are clicked on the toolbar
+// by accessible name; menu-only commands are clicked in the native operation
+// menus (Edit, Image, Adjust, Process, Spectral). Each opens a tool-options
+// panel rendered as <aside aria-label="<label> options"> containing an "Apply"
+// and a "Cancel" button.
 
 export function applicationToolbar(page: Page): Locator {
   return page.getByRole("toolbar", { name: "Application toolbar" });
@@ -19,21 +23,40 @@ export function operationPanel(page: Page, operationLabel: string): Locator {
   return page.locator(`aside[aria-label="${operationLabel} options"]`);
 }
 
+function operationHasToolbarShortcut(operationLabel: string): boolean {
+  return listAllOperationCommands().some(
+    (command) => command.label === operationLabel && command.showInToolbar,
+  );
+}
+
+async function launchOperationFromItsEntryPoint(
+  page: Page,
+  operationLabel: string,
+): Promise<void> {
+  if (operationHasToolbarShortcut(operationLabel)) {
+    await applicationToolbar(page)
+      .getByRole("button", { name: operationLabel, exact: true })
+      .click();
+    return;
+  }
+  await triggerOperationMenuItem(electronApplicationForWindow(page), operationLabel);
+}
+
 export async function openOperation(page: Page, operationLabel: string): Promise<Locator> {
-  await applicationToolbar(page).getByRole("button", { name: operationLabel, exact: true }).click();
+  await launchOperationFromItsEntryPoint(page, operationLabel);
   const panel = operationPanel(page, operationLabel);
   await expect(panel).toBeVisible();
   return panel;
 }
 
-// Menu-only operations (e.g. the broad "Rotate" and "Reflect", whose toolbar slots are occupied
-// by narrow one-click variants) are launched from the native Image menu rather than the toolbar.
-export async function openOperationFromImageMenu(
+// Explicitly menu-driven launch (e.g. the broad "Rotate" and "Reflect", whose toolbar
+// slots are occupied by narrow one-click variants).
+export async function openOperationFromMenu(
   app: ElectronApplication,
   page: Page,
   operationLabel: string,
 ): Promise<Locator> {
-  await triggerImageMenuOperation(app, operationLabel);
+  await triggerOperationMenuItem(app, operationLabel);
   const panel = operationPanel(page, operationLabel);
   await expect(panel).toBeVisible();
   return panel;

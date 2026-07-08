@@ -17,6 +17,19 @@ export interface LaunchedApp {
   window: Page;
 }
 
+// Page-object helpers that only receive the window (e.g. openOperation) still
+// need the owning ElectronApplication to drive the native menu; launchToolboxApp
+// registers every window here so they can look it up.
+const electronApplicationByWindow = new WeakMap<Page, ElectronApplication>();
+
+export function electronApplicationForWindow(window: Page): ElectronApplication {
+  const app = electronApplicationByWindow.get(window);
+  if (app) return app;
+  throw new Error(
+    "No Electron application registered for this window; launch it via launchToolboxApp",
+  );
+}
+
 function resolveRendererDevServerUrl(): string {
   return process.env["MSI_E2E_RENDERER_URL"] ?? DEFAULT_RENDERER_DEV_SERVER_URL;
 }
@@ -114,6 +127,7 @@ export async function launchToolboxApp(): Promise<LaunchedApp> {
   await startTracingIfEnabled(app);
   const window = await waitForMainApplicationWindow(app);
   await window.waitForLoadState("domcontentloaded");
+  electronApplicationByWindow.set(window, app);
   return { app, window };
 }
 

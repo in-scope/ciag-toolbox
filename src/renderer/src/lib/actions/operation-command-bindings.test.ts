@@ -77,10 +77,20 @@ describe("operation menu catalog wiring", () => {
 });
 
 describe("toolbar operation groups", () => {
-  it("projects every catalog group that has toolbar commands", () => {
+  it("projects exactly the catalog groups that have toolbar commands", () => {
     const groups = buildToolbarOperationGroups(buildToolbarContext(buildHandlerSpies()));
-    const catalogGroupKeys = OPERATION_MENUS.flatMap((menu) => menu.groups).map((g) => g.key);
-    expect(groups.map((g) => g.key)).toEqual(catalogGroupKeys);
+    const catalogGroupKeysWithToolbarCommands = OPERATION_MENUS.flatMap((menu) => menu.groups)
+      .filter((group) => group.commands.some((command) => command.showInToolbar))
+      .map((group) => group.key);
+    expect(groups.map((g) => g.key)).toEqual(catalogGroupKeysWithToolbarCommands);
+  });
+
+  it("keeps menu-only pipeline operations off the toolbar", () => {
+    const groups = buildToolbarOperationGroups(buildToolbarContext(buildHandlerSpies()));
+    const projectedIds = groups.flatMap((group) => group.items).map((item) => item.id);
+    for (const menuOnlyId of ["pca", "normalize-data", "flat-field", "custom-transform"]) {
+      expect(projectedIds).not.toContain(menuOnlyId);
+    }
   });
 
   it("includes the four toolbar-only quick transform buttons in the transform group", () => {

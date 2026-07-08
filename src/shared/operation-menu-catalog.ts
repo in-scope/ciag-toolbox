@@ -1,10 +1,17 @@
-// Single source of truth for the Edit and Image operation menus.
+// Single source of truth for the operation menus (Edit, Image, Adjust,
+// Process, Spectral).
 //
 // Both the native application menu (main process) and the React toolbar
 // (renderer) derive their structure from this catalog so the two surfaces stay
 // in sync: every operation in the menu bar is reachable, and the toolbar is a
 // regrouped projection of the same commands plus a few toolbar-only quick
 // variants that apply directly without opening a side panel.
+//
+// Toolbar rule: a command is showInToolbar only if it is a mode toggle
+// (Select Region, Subset Bands), a one-click direct apply with zero
+// parameters (the quick rotate/flip variants), or an everyday panel-opener
+// used in essentially every session (Crop, Tone Curve, Brightness &
+// Contrast). Parameterized pipeline operations are menu-only.
 //
 // This module is intentionally pure data: no DOM, no Electron, no React. Icons
 // and behaviour bindings live in the renderer because they are environment
@@ -83,15 +90,23 @@ const ADJUST_GROUP: OperationGroup = {
   commands: [
     buildMenuAndToolbarCommand("tone-curve", "Tone Curve", "open-action-panel"),
     buildMenuAndToolbarCommand("brightness-contrast", "Brightness & Contrast", "open-action-panel"),
-    buildMenuAndToolbarCommand("invert", "Invert", "open-action-panel"),
+    buildMenuOnlyActionCommand("invert", "Invert"),
+  ],
+};
+
+const CLIP_GROUP: OperationGroup = {
+  key: "clip",
+  commands: [
+    buildMenuOnlyActionCommand("threshold", "Threshold"),
+    buildMenuOnlyActionCommand("percentile-clip", "Percentile Clip"),
   ],
 };
 
 const COLOR_GROUP: OperationGroup = {
   key: "color",
   commands: [
-    buildMenuAndToolbarCommand("rgb-to-grayscale", "RGB to Grayscale", "open-action-panel"),
-    buildMenuAndToolbarCommand("false-color", "False-color Composite", "open-action-panel"),
+    buildMenuOnlyActionCommand("rgb-to-grayscale", "RGB to Grayscale"),
+    buildMenuOnlyActionCommand("false-color", "False-color Composite"),
   ],
 };
 
@@ -113,50 +128,57 @@ const TRANSFORM_GROUP: OperationGroup = {
 const CALIBRATE_GROUP: OperationGroup = {
   key: "calibrate",
   commands: [
-    buildMenuAndToolbarCommand("flat-field", "Flat-field Correction", "open-action-panel"),
-    buildMenuAndToolbarCommand("spectralon", "Spectralon Calibration", "open-action-panel"),
+    buildMenuOnlyActionCommand("flat-field", "Flat-field Correction"),
+    buildMenuOnlyActionCommand("spectralon", "Spectralon Calibration"),
   ],
 };
 
 const DATA_GROUP: OperationGroup = {
   key: "data",
   commands: [
-    buildMenuAndToolbarCommand("bit-shift", "Bit Shift", "open-action-panel"),
-    buildMenuAndToolbarCommand("normalize-data", "Normalize", "open-action-panel"),
-    buildMenuAndToolbarCommand("standardize", "Standardize", "open-action-panel"),
+    buildMenuOnlyActionCommand("bit-shift", "Bit Shift"),
+    buildMenuOnlyActionCommand("normalize-data", "Normalize"),
+    buildMenuOnlyActionCommand("standardize", "Standardize"),
   ],
+};
+
+// Neighborhood filters (CT-200..CT-205 landed here).
+const FILTERS_GROUP: OperationGroup = {
+  key: "filters",
+  commands: [
+    buildMenuOnlyActionCommand("spatial-filter", "Spatial Filter"),
+    buildMenuOnlyActionCommand("denoise", "Denoise"),
+  ],
+};
+
+const SPECTRAL_DERIVATIVE_GROUP: OperationGroup = {
+  key: "spectral-derivative",
+  commands: [buildMenuOnlyActionCommand("spectral-derivative", "Spectral Derivative")],
 };
 
 const DIMENSION_REDUCTION_GROUP: OperationGroup = {
   key: "dimension-reduction",
   commands: [
-    buildMenuAndToolbarCommand("pca", "PCA", "open-action-panel"),
-    buildMenuAndToolbarCommand("mnf", "MNF", "open-action-panel"),
-    buildMenuAndToolbarCommand("ica", "ICA", "open-action-panel"),
+    buildMenuOnlyActionCommand("pca", "PCA"),
+    buildMenuOnlyActionCommand("mnf", "MNF"),
+    buildMenuOnlyActionCommand("ica", "ICA"),
   ],
 };
 
-// Stage 5 filters and per-pixel operations (CT-200..CT-205 land here).
-const FILTERS_GROUP: OperationGroup = {
-  key: "filters",
-  commands: [
-    buildMenuAndToolbarCommand("threshold", "Threshold", "open-action-panel"),
-    buildMenuAndToolbarCommand("spectral-derivative", "Spectral Derivative", "open-action-panel"),
-    buildMenuAndToolbarCommand("spatial-filter", "Spatial Filter", "open-action-panel"),
-    buildMenuAndToolbarCommand("denoise", "Denoise", "open-action-panel"),
-    buildMenuAndToolbarCommand("percentile-clip", "Percentile Clip", "open-action-panel"),
-  ],
-};
-
-// Stage 5 band-combining and whole-cube operations gated behind the scripting
-// worker (CT-209, CT-210, CT-216).
+// Stage 5 band-combining operations gated behind the scripting worker
+// (CT-209, CT-210).
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
   commands: [
-    buildMenuAndToolbarCommand("band-weighting", "Band Weighting", "open-action-panel"),
-    buildMenuAndToolbarCommand("band-selection", "Band Selection", "open-action-panel"),
-    buildMenuAndToolbarCommand("custom-transform", "Custom Transform", "open-action-panel"),
+    buildMenuOnlyActionCommand("band-weighting", "Band Weighting"),
+    buildMenuOnlyActionCommand("band-selection", "Band Selection"),
   ],
+};
+
+// Whole-cube user scripting (CT-216).
+const SCRIPTS_GROUP: OperationGroup = {
+  key: "scripts",
+  commands: [buildMenuOnlyActionCommand("custom-transform", "Custom Transform")],
 };
 
 export const EDIT_MENU: OperationMenu = {
@@ -164,21 +186,43 @@ export const EDIT_MENU: OperationMenu = {
   groups: [SELECTION_GROUP, EDIT_REGION_GROUP],
 };
 
+// Geometry and color representation: changes what the image IS, not its values.
 export const IMAGE_MENU: OperationMenu = {
   menuLabel: "Image",
+  groups: [TRANSFORM_GROUP, COLOR_GROUP],
+};
+
+// Per-pixel intensity mapping.
+export const ADJUST_MENU: OperationMenu = {
+  menuLabel: "Adjust",
+  groups: [ADJUST_GROUP, CLIP_GROUP],
+};
+
+// Correcting and conditioning data values: calibration, numeric conditioning,
+// neighborhood filtering.
+export const PROCESS_MENU: OperationMenu = {
+  menuLabel: "Process",
+  groups: [CALIBRATE_GROUP, DATA_GROUP, FILTERS_GROUP],
+};
+
+// Operations across the band dimension or the whole cube.
+export const SPECTRAL_MENU: OperationMenu = {
+  menuLabel: "Spectral",
   groups: [
-    ADJUST_GROUP,
-    COLOR_GROUP,
-    TRANSFORM_GROUP,
-    CALIBRATE_GROUP,
-    DATA_GROUP,
+    SPECTRAL_DERIVATIVE_GROUP,
     DIMENSION_REDUCTION_GROUP,
-    FILTERS_GROUP,
     BAND_OPS_GROUP,
+    SCRIPTS_GROUP,
   ],
 };
 
-export const OPERATION_MENUS: ReadonlyArray<OperationMenu> = [EDIT_MENU, IMAGE_MENU];
+export const OPERATION_MENUS: ReadonlyArray<OperationMenu> = [
+  EDIT_MENU,
+  IMAGE_MENU,
+  ADJUST_MENU,
+  PROCESS_MENU,
+  SPECTRAL_MENU,
+];
 
 export function listAllOperationCommands(): ReadonlyArray<OperationCommand> {
   return OPERATION_MENUS.flatMap((menu) => menu.groups).flatMap((group) => group.commands);

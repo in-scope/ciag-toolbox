@@ -1,4 +1,4 @@
-import { Sigma } from "lucide-react";
+import { ListChecks } from "lucide-react";
 
 import {
   reduceCubeToSelectedBand,
@@ -44,7 +44,7 @@ const PRESET_LABELS: Record<BandSelectionPreset, string> = {
 export const BAND_SELECTION_ACTION: RegisteredViewportAction = {
   id: BAND_SELECTION_ACTION_ID,
   label: "Band Selection",
-  icon: Sigma,
+  icon: ListChecks,
   successMessage: "Band selection applied",
   appliedLabel: "Band selection",
   loadingMessage: "Reducing to a single band...",

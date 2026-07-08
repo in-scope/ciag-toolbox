@@ -1,4 +1,4 @@
-import { Waves } from "lucide-react";
+import { Grid3x3 } from "lucide-react";
 
 import { applySpatialFrequencyFilterToBand, type SpatialFrequencyFilterMode, type SpatialFrequencyFilterSettings } from "@/lib/image/filters/spatial-frequency-filter";
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
@@ -125,7 +125,7 @@ const SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
 export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   id: SPATIAL_FILTER_ACTION_ID,
   label: "Spatial Filter",
-  icon: Waves,
+  icon: Grid3x3,
   parameters: [
     SPATIAL_FILTER_MODE_PARAMETER_SCHEMA,
     SPATIAL_FILTER_LOWPASS_CUTOFF_PARAMETER_SCHEMA,

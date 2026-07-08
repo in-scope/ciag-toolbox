@@ -1,5 +1,9 @@
 import type { ElectronApplication } from "@playwright/test";
 
+import { OPERATION_MENUS } from "../../src/shared/operation-menu-catalog";
+
+const OPERATION_MENU_LABELS = OPERATION_MENUS.map((menu) => menu.menuLabel);
+
 export interface MenuItemSummary {
   label: string;
   role: string | undefined;
@@ -96,21 +100,27 @@ function clickFileMenuItemWhoseLabelStartsWith(
   }, labelPrefix);
 }
 
-export function triggerImageMenuOperation(
+// Clicks an operation item in whichever operation menu (Edit, Image, Adjust,
+// Process, Spectral) carries it, and fails loudly when the label is missing so
+// a regrouped menu cannot silently no-op a spec.
+export function triggerOperationMenuItem(
   app: ElectronApplication,
   operationLabel: string,
 ): Promise<void> {
-  return app.evaluate(({ Menu }, label) => {
+  return app.evaluate(({ Menu }, { label, menuLabels }) => {
     interface RawMenuNode {
       label: string;
       click?: () => void;
       submenu?: { items: RawMenuNode[] };
     }
     const menu = Menu.getApplicationMenu() as unknown as { items: RawMenuNode[] } | null;
-    const image = (menu?.items ?? []).find((item) => item.label === "Image");
-    const target = image?.submenu?.items.find((item) => item.label === label);
-    target?.click?.();
-  }, operationLabel);
+    const operationMenus = (menu?.items ?? []).filter((item) => menuLabels.includes(item.label));
+    const target = operationMenus
+      .flatMap((topLevel) => topLevel.submenu?.items ?? [])
+      .find((item) => item.label === label);
+    if (!target?.click) throw new Error(`No menu item "${label}" in: ${menuLabels.join(", ")}`);
+    target.click();
+  }, { label: operationLabel, menuLabels: OPERATION_MENU_LABELS });
 }
 
 export function triggerSaveProjectMenuItem(app: ElectronApplication): Promise<void> {

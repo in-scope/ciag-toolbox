@@ -20,7 +20,7 @@ export {
   applicationToolbar,
   operationPanel,
   openOperation,
-  openOperationFromImageMenu,
+  openOperationFromMenu,
   applyOperation,
   applyOperationInPlace,
   setOpenInNewPanel,
