@@ -1,4 +1,5 @@
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { type DecodeUnitProgressCallback } from "@/lib/image/decode-progress";
 import {
   proposeGroupsForOpenedFiles,
   type OpenedFileForGrouping,
@@ -8,7 +9,10 @@ import type { BusyEntryHandle } from "@/state/busy-state-context";
 
 export type RunOpenImagesDialogResult =
   | { readonly kind: "canceled" }
-  | { readonly kind: "single-file"; readonly file: OpenedFileForGrouping }
+  // CT-220: the single-file fast path returns the METADATA only; the caller reads and
+  // decodes it via readAndDecodeSingleOpenedImageFile so decode progress can drive a
+  // busy entry on the destination viewport instead of the app-wide read modal.
+  | { readonly kind: "single-file"; readonly metadata: ToolboxOpenImagesDialogFileMetadataEntry }
   | { readonly kind: "review"; readonly proposal: OpenedFilesGroupingProposal };
 
 interface RunOpenImagesDialogOptions {
@@ -22,18 +26,9 @@ export async function runOpenImagesDialogPhase(
   if (dialogResult.canceled) return { kind: "canceled" };
   if (dialogResult.files.length === 0) return { kind: "canceled" };
   if (dialogResult.files.length === 1) {
-    return readSingleFileForFastPath(dialogResult.files[0]!, options.readPhaseBusyHandle);
+    return { kind: "single-file", metadata: dialogResult.files[0]! };
   }
   return readAllFilesAndProposeGroups(dialogResult.files, options.readPhaseBusyHandle);
-}
-
-async function readSingleFileForFastPath(
-  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
-  handle: BusyEntryHandle,
-): Promise<RunOpenImagesDialogResult> {
-  reportReadProgress(handle, 0, 1, metadata.fileName);
-  const file = await readAndDecodeSingleOpenedImageFile(metadata);
-  return { kind: "single-file", file };
 }
 
 async function readAllFilesAndProposeGroups(
@@ -52,29 +47,44 @@ async function readAndDecodeAllOpenedImageFilesSequentially(
   for (let index = 0; index < files.length; index++) {
     const metadata = files[index];
     if (metadata === undefined) continue;
-    reportReadProgress(handle, index, files.length, metadata.fileName);
-    decoded.push(await readAndDecodeSingleOpenedImageFile(metadata));
+    decoded.push(await readAndDecodeOneFileOfMany(metadata, index, files.length, handle));
   }
   return decoded;
 }
 
+async function readAndDecodeOneFileOfMany(
+  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
+  index: number,
+  totalCount: number,
+  handle: BusyEntryHandle,
+): Promise<OpenedFileForGrouping> {
+  reportReadProgress(handle, index, totalCount, metadata.fileName, 0);
+  return readAndDecodeSingleOpenedImageFile(metadata, (withinFileFraction) =>
+    reportReadProgress(handle, index, totalCount, metadata.fileName, withinFileFraction),
+  );
+}
+
+// CT-220: the fraction counts decode UNITS - one file in a multi-file open, refined by
+// the current file's own per-band/per-page decode fraction as it streams in.
 function reportReadProgress(
   handle: BusyEntryHandle,
   zeroBasedIndex: number,
   totalCount: number,
   fileName: string,
+  withinFileFraction: number,
 ): void {
   handle.update({
     label: `Reading ${zeroBasedIndex + 1} of ${totalCount}: ${fileName}...`,
-    progress: zeroBasedIndex / Math.max(1, totalCount),
+    progress: (zeroBasedIndex + withinFileFraction) / Math.max(1, totalCount),
   });
 }
 
-async function readAndDecodeSingleOpenedImageFile(
+export async function readAndDecodeSingleOpenedImageFile(
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
+  onDecodeProgress?: DecodeUnitProgressCallback,
 ): Promise<OpenedFileForGrouping> {
   const entry = await window.toolboxApi.readOpenedImageFile(metadata);
-  const decoded = await tryDecodeOpenedImageEntry(entry);
+  const decoded = await tryDecodeOpenedImageEntry(entry, onDecodeProgress);
   return buildOpenedFileForGroupingFromEntry(entry, decoded);
 }
 
@@ -85,13 +95,17 @@ interface DecodedSourceOrError {
 
 async function tryDecodeOpenedImageEntry(
   entry: ToolboxOpenedImagesFileEntry,
+  onDecodeProgress?: DecodeUnitProgressCallback,
 ): Promise<DecodedSourceOrError> {
   try {
-    const source = await decodeImageBytesToViewportSource({
-      fileName: entry.fileName,
-      bytes: entry.bytes,
-      ...(entry.sidecar ? { sidecarBytes: entry.sidecar.bytes } : {}),
-    });
+    const source = await decodeImageBytesToViewportSource(
+      {
+        fileName: entry.fileName,
+        bytes: entry.bytes,
+        ...(entry.sidecar ? { sidecarBytes: entry.sidecar.bytes } : {}),
+      },
+      onDecodeProgress,
+    );
     return { source, errorMessage: null };
   } catch (error) {
     return { source: null, errorMessage: convertUnknownErrorToMessage(error) };

@@ -119,10 +119,7 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
-import {
-  planOpenImagePlacement,
-  type OpenImagePlacementPlan,
-} from "@/lib/grid/plan-open-image";
+import { planOpenImagePlacement } from "@/lib/grid/plan-open-image";
 import {
   planOpenImagesPlacement,
   type OpenImagesPlacementPlan,
@@ -130,7 +127,10 @@ import {
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
-import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
+import {
+  readAndDecodeSingleOpenedImageFile,
+  runOpenImagesDialogPhase,
+} from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
 import type {
@@ -1007,57 +1007,82 @@ async function runOpenImagesDialogPhaseAndDispatchOutcome(
   const result = await runOpenImagesDialogPhase({ readPhaseBusyHandle: handle });
   if (result.kind === "canceled") return;
   if (result.kind === "single-file") {
-    await routeSingleFileFastPathThroughOpenImages(result.file, bindings);
+    handle.clear();
+    await readSingleFileShowingViewportProgressThenPlace(result.metadata, bindings);
     return;
   }
   bindings.setPendingOpenImagesReview(result.proposal);
 }
 
-async function routeSingleFileFastPathThroughOpenImages(
-  file: OpenedFileForGrouping,
+// CT-220: the single-file fast path reserves its destination cell FIRST so the read
+// and decode can report determinate progress on that viewport's busy overlay instead
+// of the app-wide read modal.
+async function readSingleFileShowingViewportProgressThenPlace(
+  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   bindings: OpenImagesBindings,
 ): Promise<void> {
-  if (file.decodeError !== null || file.source === null) {
-    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
-    return;
+  const targetIndex = reserveViewportCellForSingleFileOpen(bindings);
+  const handle = registerSingleFileReadBusyEntry(metadata.fileName, targetIndex, bindings);
+  try {
+    const file = await readAndDecodeSingleOpenedImageFile(metadata, (fraction) =>
+      handle.update({ progress: fraction }),
+    );
+    placeSingleDecodedFileIntoViewport(file, targetIndex, bindings);
+  } finally {
+    handle.clear();
   }
-  routeSingleSourceToViewportPlacement(
-    {
-      fileName: file.fileName,
-      source: file.source,
-      originalFilePath: file.filePath,
-      fileSizeBytes: file.fileSizeBytes,
-    },
-    bindings,
-  );
 }
 
-function routeSingleSourceToViewportPlacement(
-  pending: PendingOpenImageReplaceItem,
-  bindings: OpenImagesBindings,
-): void {
+function reserveViewportCellForSingleFileOpen(bindings: OpenImagesBindings): number | null {
   const plan = planOpenImagePlacement({
     currentLayout: bindings.gridLayoutRef.current,
     imagesByIndex: bindings.imagesByIndexRef.current,
   });
-  applyOpenImagePlacementPlan(plan, pending, bindings);
+  if (plan.kind === "promptReplace") return null;
+  if (plan.kind === "growGridAndPlace") bindings.setGridLayout(plan.expandedLayout);
+  return plan.targetIndex;
 }
 
-function applyOpenImagePlacementPlan(
-  plan: OpenImagePlacementPlan,
-  pending: PendingOpenImageReplaceItem,
+function registerSingleFileReadBusyEntry(
+  fileName: string,
+  targetIndex: number | null,
+  bindings: OpenImagesBindings,
+): BusyEntryHandle {
+  const label = `Reading ${fileName}...`;
+  if (targetIndex === null) {
+    return bindings.busyRegistrar.registerAppBusyEntry({ label });
+  }
+  return bindings.busyRegistrar.registerViewportBusyEntry({ label, viewportIndex: targetIndex });
+}
+
+function placeSingleDecodedFileIntoViewport(
+  file: OpenedFileForGrouping,
+  targetIndex: number | null,
   bindings: OpenImagesBindings,
 ): void {
-  if (plan.kind === "placeInExistingEmptyCell") {
-    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
+  if (file.decodeError !== null || file.source === null) {
+    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
     return;
   }
-  if (plan.kind === "growGridAndPlace") {
-    bindings.setGridLayout(plan.expandedLayout);
-    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
+  routeSingleDecodedSourceToCell(file, targetIndex, bindings);
+}
+
+function routeSingleDecodedSourceToCell(
+  file: OpenedFileForGrouping,
+  targetIndex: number | null,
+  bindings: OpenImagesBindings,
+): void {
+  const pending: PendingOpenImageReplaceItem = {
+    fileName: file.fileName,
+    source: file.source!,
+    originalFilePath: file.filePath,
+    fileSizeBytes: file.fileSizeBytes,
+  };
+  if (targetIndex === null) {
+    bindings.setPendingOpenImagesReplace({ items: [pending] });
     return;
   }
-  bindings.setPendingOpenImagesReplace({ items: [pending] });
+  applyLoadedImageAtIndex(targetIndex, pending, bindings);
 }
 
 interface ApplyLoadedImageBindings {
@@ -1604,11 +1629,14 @@ async function replaceViewportSourceWithReimportedFile(
   });
   try {
     const source = coerceViewportSourceToRasterSource(
-      await decodeImageBytesToViewportSource({
-        fileName: result.fileName,
-        bytes: result.bytes,
-        sidecarBytes: result.sidecar?.bytes,
-      }),
+      await decodeImageBytesToViewportSource(
+        {
+          fileName: result.fileName,
+          bytes: result.bytes,
+          sidecarBytes: result.sidecar?.bytes,
+        },
+        (fraction) => handle.update({ progress: fraction }),
+      ),
     );
     bindings.setImagesByIndex((previous) =>
       assignViewportContentAtIndex(previous, viewportIndex, {

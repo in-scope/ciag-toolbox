@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
 
+import { formatBusyProgressPercentText } from "@/state/busy-progress-percent";
 import {
   useMostRecentAppBusyEntry,
   useMostRecentViewportBusyEntry,
@@ -48,7 +49,18 @@ function BusyIndicatorCard({ entry }: { entry: BusyEntry }): JSX.Element {
     <div className="flex min-w-[240px] max-w-sm flex-col items-center gap-3 rounded-md border bg-card p-6 shadow-lg">
       <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
       <p className="text-center text-sm text-foreground">{entry.label}</p>
-      {entry.progress !== null ? <BusyProgressBar progress={entry.progress} /> : null}
+      {entry.progress !== null ? <BusyProgressRow progress={entry.progress} /> : null}
+    </div>
+  );
+}
+
+function BusyProgressRow({ progress }: { progress: number }): JSX.Element {
+  return (
+    <div className="flex w-full items-center gap-2">
+      <BusyProgressBar progress={progress} />
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {formatBusyProgressPercentText(progress)}
+      </span>
     </div>
   );
 }
@@ -62,7 +74,7 @@ function BusyProgressBar({ progress }: { progress: number }): JSX.Element {
       aria-valuemin={0}
       aria-valuemax={1}
       aria-valuenow={clamped}
-      className="h-2 w-full overflow-hidden rounded-full bg-muted"
+      className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
     >
       <div
         className="h-full bg-primary transition-[width] duration-150"

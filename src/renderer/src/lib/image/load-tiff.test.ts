@@ -50,7 +50,28 @@ describe("loadTiffAsRaster", () => {
     expect(raster.bandCount).toBe(3);
     expect(raster.colorInterpretation).toBeUndefined();
   });
+
+  it("reports a monotonic 0-to-1 progress tick per page on a multi-band stack (CT-220)", async () => {
+    const ticks: number[] = [];
+    await loadTiffAsRaster(buildThreePageScienceStackTiffBytes(), (fraction) => ticks.push(fraction));
+    expect(ticks).toEqual([0, 1 / 3, 2 / 3, 1]);
+    expectTicksAreMonotonicNonDecreasingFromZeroToOne(ticks);
+  });
+
+  it("reports no in-flight progress ticks for a single-page true-colour photo (single-shot decode)", async () => {
+    const ticks: number[] = [];
+    await loadTiffAsRaster(buildSyntheticRgbTiffBytes(), (fraction) => ticks.push(fraction));
+    expect(ticks).toEqual([]);
+  });
 });
+
+function expectTicksAreMonotonicNonDecreasingFromZeroToOne(ticks: ReadonlyArray<number>): void {
+  expect(ticks[0]).toBe(0);
+  expect(ticks[ticks.length - 1]).toBe(1);
+  for (let i = 1; i < ticks.length; i++) {
+    expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+  }
+}
 
 const RGB_TIFF_DIMENSION = 2;
 const RGB_FIRST_PIXEL_RED = 10;

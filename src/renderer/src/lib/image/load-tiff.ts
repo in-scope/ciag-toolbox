@@ -1,5 +1,10 @@
 import { fromArrayBuffer } from "geotiff";
 
+import {
+  reportCompletedDecodeUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitDecodeStarting,
+  type DecodeUnitProgressCallback,
+} from "@/lib/image/decode-progress";
 import type {
   RasterImage,
   RasterSampleFormat,
@@ -32,7 +37,10 @@ interface TiffPageHeader {
   readonly description: string | null;
 }
 
-export async function loadTiffAsRaster(bytes: Uint8Array): Promise<RasterImage> {
+export async function loadTiffAsRaster(
+  bytes: Uint8Array,
+  onDecodeProgress?: DecodeUnitProgressCallback,
+): Promise<RasterImage> {
   const arrayBuffer = extractArrayBufferWithoutCopyingWhenPossible(bytes);
   const tiff = await fromArrayBuffer(arrayBuffer);
   const pageCount = await tiff.getImageCount();
@@ -41,7 +49,7 @@ export async function loadTiffAsRaster(bytes: Uint8Array): Promise<RasterImage> 
   if (pageIsTrueColourRgb(firstPage)) {
     return readSinglePageRgbCompositeRaster(firstPage, firstHeader);
   }
-  return readRasterAcrossAllPages(tiff, firstHeader, pageCount);
+  return readRasterAcrossAllPages(tiff, firstHeader, pageCount, onDecodeProgress);
 }
 
 function pageIsTrueColourRgb(image: GeoTiffImage): boolean {
@@ -91,11 +99,14 @@ async function readRasterAcrossAllPages(
   tiff: GeoTiff,
   firstHeader: TiffPageHeader,
   pageCount: number,
+  onDecodeProgress?: DecodeUnitProgressCallback,
 ): Promise<RasterImage> {
   const bandPixels: RasterTypedArray[] = [];
   const bandLabels: string[] = [];
+  reportMultiUnitDecodeStarting(onDecodeProgress, pageCount);
   for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
     await readSingleTiffPageIntoBands(tiff, pageIndex, firstHeader, bandPixels, bandLabels);
+    await reportCompletedDecodeUnitAndYieldSoProgressCanPaint(onDecodeProgress, pageIndex + 1, pageCount);
   }
   return buildRasterImageFromBands(firstHeader, bandPixels, bandLabels);
 }

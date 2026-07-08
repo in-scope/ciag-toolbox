@@ -1,4 +1,5 @@
-import { loadEnviAsRaster } from "@/lib/image/load-envi";
+import { type DecodeUnitProgressCallback } from "@/lib/image/decode-progress";
+import { loadEnviAsRasterReportingPerBandProgress } from "@/lib/image/load-envi";
 import { loadRawAsRaster } from "@/lib/image/load-raw";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -22,35 +23,42 @@ const RAW_CAMERA_FILE_EXTENSIONS: ReadonlyArray<string> = [
 
 export async function decodeImageBytesToViewportSource(
   bundle: OpenedImageBundle,
+  onDecodeProgress?: DecodeUnitProgressCallback,
 ): Promise<ViewportImageSource> {
   if (looksLikeEnviHeaderFileName(bundle.fileName)) {
-    return decodeEnviHeaderAndBinaryAsRasterSource(bundle);
+    return decodeEnviHeaderAndBinaryAsRasterSource(bundle, onDecodeProgress);
   }
   if (looksLikeRawCameraFileName(bundle.fileName)) {
     return decodeRawCameraBytesAsRasterSource(bundle.bytes);
   }
   if (looksLikeTiffFileName(bundle.fileName) || looksLikeTiffByteHeader(bundle.bytes)) {
-    return decodeTiffBytesAsRasterSource(bundle.bytes);
+    return decodeTiffBytesAsRasterSource(bundle.bytes, onDecodeProgress);
   }
   return decodeBrowserImageBytesAsBitmapSource(bundle.bytes);
 }
 
-function decodeEnviHeaderAndBinaryAsRasterSource(
+async function decodeEnviHeaderAndBinaryAsRasterSource(
   bundle: OpenedImageBundle,
-): ViewportImageSource {
+  onDecodeProgress?: DecodeUnitProgressCallback,
+): Promise<ViewportImageSource> {
   if (!bundle.sidecarBytes) {
     throw new Error(
       `ENVI header ${bundle.fileName} requires a sibling binary file (.bin/.dat/.img) but none was provided`,
     );
   }
-  const raster = loadEnviAsRaster(bundle.bytes, bundle.sidecarBytes);
+  const raster = await loadEnviAsRasterReportingPerBandProgress(
+    bundle.bytes,
+    bundle.sidecarBytes,
+    onDecodeProgress,
+  );
   return { kind: "raster", raster };
 }
 
 async function decodeTiffBytesAsRasterSource(
   bytes: Uint8Array,
+  onDecodeProgress?: DecodeUnitProgressCallback,
 ): Promise<ViewportImageSource> {
-  const raster = await loadTiffAsRaster(bytes);
+  const raster = await loadTiffAsRaster(bytes, onDecodeProgress);
   return { kind: "raster", raster };
 }
 

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { loadEnviAsRaster } from "@/lib/image/load-envi";
+import {
+  loadEnviAsRaster,
+  loadEnviAsRasterReportingPerBandProgress,
+} from "@/lib/image/load-envi";
 import type { EnviInterleave } from "@/lib/image/parse-envi-header";
 
 const ENVI_DATA_TYPE_UINT16 = 12;
@@ -174,7 +177,36 @@ describe("loadEnviAsRaster", () => {
     const truncated = fixture.binaryBytes.slice(0, 4);
     expect(() => loadEnviAsRaster(fixture.headerBytes, truncated)).toThrow(/smaller than expected/);
   });
+
+  it("reports a monotonic 0-to-1 progress tick per band and decodes like the sync loader (CT-220)", async () => {
+    const fixture = buildThreeBandProgressFixture();
+    const ticks: number[] = [];
+    const raster = await loadEnviAsRasterReportingPerBandProgress(
+      fixture.headerBytes,
+      fixture.binaryBytes,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 3, 2 / 3, 1]);
+    const syncRaster = loadEnviAsRaster(fixture.headerBytes, fixture.binaryBytes);
+    expect(raster.bandPixels).toEqual(syncRaster.bandPixels);
+  });
 });
+
+function buildThreeBandProgressFixture(): EnviCubeFixture {
+  return buildSyntheticEnviCubeFixture({
+    samples: 2,
+    lines: 2,
+    bands: 3,
+    dataType: ENVI_DATA_TYPE_UINT16,
+    byteOrder: 0,
+    interleave: "bil",
+    bandPixels: [
+      [1, 2, 3, 4],
+      [5, 6, 7, 8],
+      [9, 10, 11, 12],
+    ],
+  });
+}
 
 interface EnviCubeFixture {
   readonly headerBytes: Uint8Array;

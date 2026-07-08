@@ -1,19 +1,40 @@
 import {
+  reportCompletedDecodeUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitDecodeStarting,
+  type DecodeUnitProgressCallback,
+} from "@/lib/image/decode-progress";
+import {
   describeSupportedEnviDataTypeOrThrow,
   type EnviDataTypeDescriptor,
 } from "@/lib/image/envi-data-type";
-import type { EnviHeader } from "@/lib/image/parse-envi-header";
+import type { EnviHeader, EnviInterleave } from "@/lib/image/parse-envi-header";
 import type { RasterTypedArray } from "@/lib/image/raster-image";
 
 export function readEnviBinaryAsBandPixels(
   header: EnviHeader,
   binary: Uint8Array,
 ): ReadonlyArray<RasterTypedArray> {
-  const descriptor = describeSupportedEnviDataTypeOrThrow(header.dataType);
-  rejectInsufficientBinarySize(header, binary, descriptor);
-  const bandPixels = allocateBandPixelsForHeader(header, descriptor);
-  fillBandPixelsAccordingToInterleave(header, binary, descriptor, bandPixels);
-  return bandPixels;
+  const read = prepareEnviBandRead(header, binary);
+  for (let bandIndex = 0; bandIndex < read.layout.bands; bandIndex++) {
+    fillSingleBandFromBinary(read, bandIndex);
+  }
+  return read.bandPixels;
+}
+
+// CT-220: the same decode with one progress tick (and a paint yield) per band, so a
+// large cube load can drive a determinate busy indicator.
+export async function readEnviBinaryAsBandPixelsReportingPerBandProgress(
+  header: EnviHeader,
+  binary: Uint8Array,
+  onDecodeProgress?: DecodeUnitProgressCallback,
+): Promise<ReadonlyArray<RasterTypedArray>> {
+  const read = prepareEnviBandRead(header, binary);
+  reportMultiUnitDecodeStarting(onDecodeProgress, read.layout.bands);
+  for (let bandIndex = 0; bandIndex < read.layout.bands; bandIndex++) {
+    fillSingleBandFromBinary(read, bandIndex);
+    await reportCompletedDecodeUnitAndYieldSoProgressCanPaint(onDecodeProgress, bandIndex + 1, read.layout.bands);
+  }
+  return read.bandPixels;
 }
 
 interface InterleaveLayout {
@@ -23,6 +44,25 @@ interface InterleaveLayout {
   readonly bytesPerSample: number;
   readonly headerOffset: number;
   readonly isLittleEndian: boolean;
+  readonly interleave: EnviInterleave;
+}
+
+interface PreparedEnviBandRead {
+  readonly view: DataView;
+  readonly layout: InterleaveLayout;
+  readonly descriptor: EnviDataTypeDescriptor;
+  readonly bandPixels: RasterTypedArray[];
+}
+
+function prepareEnviBandRead(header: EnviHeader, binary: Uint8Array): PreparedEnviBandRead {
+  const descriptor = describeSupportedEnviDataTypeOrThrow(header.dataType);
+  rejectInsufficientBinarySize(header, binary, descriptor);
+  return {
+    view: createBinaryDataView(binary),
+    layout: buildInterleaveLayoutFromHeader(header, descriptor),
+    descriptor,
+    bandPixels: allocateBandPixelsForHeader(header, descriptor),
+  };
 }
 
 function rejectInsufficientBinarySize(
@@ -58,25 +98,6 @@ function allocateBandPixelsForHeader(
   return bandPixels;
 }
 
-function fillBandPixelsAccordingToInterleave(
-  header: EnviHeader,
-  binary: Uint8Array,
-  descriptor: EnviDataTypeDescriptor,
-  bandPixels: RasterTypedArray[],
-): void {
-  const view = createBinaryDataView(binary);
-  const layout = buildInterleaveLayoutFromHeader(header, descriptor);
-  if (header.interleave === "bsq") {
-    fillFromBandSequentialBinary(view, layout, bandPixels, descriptor);
-    return;
-  }
-  if (header.interleave === "bil") {
-    fillFromBandInterleavedByLineBinary(view, layout, bandPixels, descriptor);
-    return;
-  }
-  fillFromBandInterleavedByPixelBinary(view, layout, bandPixels, descriptor);
-}
-
 function createBinaryDataView(binary: Uint8Array): DataView {
   return new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
 }
@@ -92,105 +113,73 @@ function buildInterleaveLayoutFromHeader(
     bytesPerSample: descriptor.bytesPerSample,
     headerOffset: header.headerOffset,
     isLittleEndian: header.byteOrder === 0,
+    interleave: header.interleave,
   };
 }
 
-function fillFromBandSequentialBinary(
-  view: DataView,
-  layout: InterleaveLayout,
-  bandPixels: RasterTypedArray[],
-  descriptor: EnviDataTypeDescriptor,
-): void {
-  const bandSampleCount = layout.samples * layout.lines;
-  for (let bandIndex = 0; bandIndex < layout.bands; bandIndex++) {
-    const band = bandPixels[bandIndex]!;
-    const baseByteOffset = layout.headerOffset + bandIndex * bandSampleCount * layout.bytesPerSample;
-    fillBandFromContiguousByteRun(view, baseByteOffset, layout, band, descriptor);
+function fillSingleBandFromBinary(read: PreparedEnviBandRead, bandIndex: number): void {
+  const band = read.bandPixels[bandIndex]!;
+  if (read.layout.interleave === "bsq") {
+    fillBandFromBandSequentialBinary(read, bandIndex, band);
+    return;
   }
+  if (read.layout.interleave === "bil") {
+    fillBandFromLineInterleavedBinary(read, bandIndex, band);
+    return;
+  }
+  fillBandFromPixelInterleavedBinary(read, bandIndex, band);
 }
 
-function fillBandFromContiguousByteRun(
-  view: DataView,
-  baseByteOffset: number,
-  layout: InterleaveLayout,
+function fillBandFromBandSequentialBinary(
+  read: PreparedEnviBandRead,
+  bandIndex: number,
   band: RasterTypedArray,
-  descriptor: EnviDataTypeDescriptor,
 ): void {
+  const { layout } = read;
+  const bandSampleCount = layout.samples * layout.lines;
+  const baseByteOffset = layout.headerOffset + bandIndex * bandSampleCount * layout.bytesPerSample;
   for (let i = 0; i < band.length; i++) {
     const byteOffset = baseByteOffset + i * layout.bytesPerSample;
-    band[i] = descriptor.readSampleAtByteOffset(view, byteOffset, layout.isLittleEndian);
+    band[i] = read.descriptor.readSampleAtByteOffset(read.view, byteOffset, layout.isLittleEndian);
   }
 }
 
-function fillFromBandInterleavedByLineBinary(
-  view: DataView,
-  layout: InterleaveLayout,
-  bandPixels: RasterTypedArray[],
-  descriptor: EnviDataTypeDescriptor,
+function fillBandFromLineInterleavedBinary(
+  read: PreparedEnviBandRead,
+  bandIndex: number,
+  band: RasterTypedArray,
 ): void {
-  const lineByteSize = layout.samples * layout.bytesPerSample;
-  for (let line = 0; line < layout.lines; line++) {
-    const lineBaseOffset = layout.headerOffset + line * layout.bands * lineByteSize;
-    fillLineRunForEachBand(view, lineBaseOffset, line, layout, bandPixels, descriptor);
-  }
-}
-
-function fillLineRunForEachBand(
-  view: DataView,
-  lineBaseOffset: number,
-  line: number,
-  layout: InterleaveLayout,
-  bandPixels: RasterTypedArray[],
-  descriptor: EnviDataTypeDescriptor,
-): void {
-  const lineByteSize = layout.samples * layout.bytesPerSample;
-  for (let bandIndex = 0; bandIndex < layout.bands; bandIndex++) {
-    const bandBaseOffset = lineBaseOffset + bandIndex * lineByteSize;
-    const band = bandPixels[bandIndex]!;
-    fillSamplesAlongOneBilLine(view, bandBaseOffset, line, layout, band, descriptor);
+  const lineByteSize = read.layout.samples * read.layout.bytesPerSample;
+  for (let line = 0; line < read.layout.lines; line++) {
+    const lineBaseOffset = read.layout.headerOffset + line * read.layout.bands * lineByteSize;
+    fillSamplesAlongOneBilLine(read, lineBaseOffset + bandIndex * lineByteSize, line, band);
   }
 }
 
 function fillSamplesAlongOneBilLine(
-  view: DataView,
-  bandBaseOffset: number,
+  read: PreparedEnviBandRead,
+  bandLineBaseOffset: number,
   line: number,
-  layout: InterleaveLayout,
   band: RasterTypedArray,
-  descriptor: EnviDataTypeDescriptor,
 ): void {
+  const { layout } = read;
   for (let sample = 0; sample < layout.samples; sample++) {
-    const byteOffset = bandBaseOffset + sample * layout.bytesPerSample;
+    const byteOffset = bandLineBaseOffset + sample * layout.bytesPerSample;
     const pixelIndex = line * layout.samples + sample;
-    band[pixelIndex] = descriptor.readSampleAtByteOffset(view, byteOffset, layout.isLittleEndian);
+    band[pixelIndex] = read.descriptor.readSampleAtByteOffset(read.view, byteOffset, layout.isLittleEndian);
   }
 }
 
-function fillFromBandInterleavedByPixelBinary(
-  view: DataView,
-  layout: InterleaveLayout,
-  bandPixels: RasterTypedArray[],
-  descriptor: EnviDataTypeDescriptor,
+function fillBandFromPixelInterleavedBinary(
+  read: PreparedEnviBandRead,
+  bandIndex: number,
+  band: RasterTypedArray,
 ): void {
+  const { layout } = read;
   const pixelByteStride = layout.bands * layout.bytesPerSample;
-  const totalPixels = layout.samples * layout.lines;
-  for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex++) {
-    const pixelBaseOffset = layout.headerOffset + pixelIndex * pixelByteStride;
-    fillBandsForOnePixel(view, pixelBaseOffset, pixelIndex, layout, bandPixels, descriptor);
-  }
-}
-
-function fillBandsForOnePixel(
-  view: DataView,
-  pixelBaseOffset: number,
-  pixelIndex: number,
-  layout: InterleaveLayout,
-  bandPixels: RasterTypedArray[],
-  descriptor: EnviDataTypeDescriptor,
-): void {
-  for (let bandIndex = 0; bandIndex < layout.bands; bandIndex++) {
-    const byteOffset = pixelBaseOffset + bandIndex * layout.bytesPerSample;
-    const band = bandPixels[bandIndex]!;
-    band[pixelIndex] = descriptor.readSampleAtByteOffset(view, byteOffset, layout.isLittleEndian);
+  const bandByteOffset = layout.headerOffset + bandIndex * layout.bytesPerSample;
+  for (let pixelIndex = 0; pixelIndex < band.length; pixelIndex++) {
+    const byteOffset = bandByteOffset + pixelIndex * pixelByteStride;
+    band[pixelIndex] = read.descriptor.readSampleAtByteOffset(read.view, byteOffset, layout.isLittleEndian);
   }
 }
