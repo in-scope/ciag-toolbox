@@ -2,6 +2,10 @@ import {
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-087: rotate (90/180/270 clockwise) and reflect (horizontal/vertical) the
 // whole cube. Every band is remapped together with one shared coordinate
@@ -83,6 +87,24 @@ export function applyGeometricTransformToRasterImage(
   const destinationHeight = definition.swapsDimensions ? raster.width : raster.height;
   const bandPixels = raster.bandPixels.map((band) =>
     remapBandToDestination(band, raster.width, raster.height, destinationWidth, definition),
+  );
+  return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
+}
+
+// CT-222: the async twin of applyGeometricTransformToRasterImage. Identical per-band
+// math, one progress tick per band.
+export async function applyGeometricTransformToRasterImageReportingProgress(
+  raster: RasterImage,
+  transform: GeometricTransform,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const definition = GEOMETRIC_TRANSFORM_DEFINITIONS[transform];
+  const destinationWidth = definition.swapsDimensions ? raster.height : raster.width;
+  const destinationHeight = definition.swapsDimensions ? raster.width : raster.height;
+  const bandPixels = await computeArrayReportingPerUnitProgress(
+    raster.bandPixels.length,
+    (index) => remapBandToDestination(raster.bandPixels[index]!, raster.width, raster.height, destinationWidth, definition),
+    onProgress,
   );
   return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
 }

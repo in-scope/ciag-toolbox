@@ -7,7 +7,7 @@ import {
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
   assertCubeHasEnoughBandsForSpectralDerivativeOrder,
-  computeSpectralDerivative,
+  computeSpectralDerivativeReportingProgress,
   describeSpectralDerivativeOrder,
   FIRST_ORDER_SPECTRAL_DERIVATIVE,
   SECOND_ORDER_SPECTRAL_DERIVATIVE,
@@ -19,7 +19,7 @@ import type { EnumParameterSchema, ParameterValuesById } from "./parameter-schem
 import type { RegisteredViewportAction } from "./registered-actions";
 import {
   EMPTY_REMOVED_BAND_INDEXES,
-  type ViewportActionSourceTransform,
+  type ViewportActionAsyncSourceTransform,
   type ViewportRenderingState,
 } from "./viewport-action";
 
@@ -59,7 +59,7 @@ export const SPECTRAL_DERIVATIVE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatSpectralDerivativeAppliedLabel,
   assertCanApplyToSource: assertSourceStackHasEnoughBandsForChosenOrder,
   apply: resetBandDependentStateForDerivativeOutput,
-  transformSource: createSpectralDerivativeSourceTransform(),
+  transformSourceAsync: createSpectralDerivativeSourceTransform(),
 };
 
 export function readSpectralDerivativeOrder(
@@ -81,11 +81,12 @@ function assertSourceStackHasEnoughBandsForChosenOrder(
   assertCubeHasEnoughBandsForSpectralDerivativeOrder(raster, readSpectralDerivativeOrder(parameterValues));
 }
 
-function createSpectralDerivativeSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createSpectralDerivativeSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const order = readSpectralDerivativeOrder(parameterValues);
-    return { kind: "raster", raster: computeSpectralDerivative(source.raster, order) };
+    const raster = await computeSpectralDerivativeReportingProgress(source.raster, order, onProgress);
+    return { kind: "raster", raster };
   };
 }
 

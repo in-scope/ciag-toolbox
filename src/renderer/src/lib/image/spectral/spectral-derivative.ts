@@ -1,5 +1,9 @@
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
 import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
+import {
   getRasterBandLabelOrDefault,
   getRasterBandPixelsOrThrow,
   type RasterImage,
@@ -30,6 +34,45 @@ export function computeSpectralDerivative(
     bandLabels: buildSpectralDerivativeBandLabels(cube, order),
   };
   return makeFloat32RasterFromBands(shape, computeDerivativeBandsForOrder(cube, order));
+}
+
+// CT-222: the async twin of computeSpectralDerivative. Identical per-band math,
+// one progress tick per OUTPUT derivative band.
+export async function computeSpectralDerivativeReportingProgress(
+  cube: RasterImage,
+  order: SpectralDerivativeOrder = DEFAULT_SPECTRAL_DERIVATIVE_ORDER,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  assertCubeHasEnoughBandsForSpectralDerivativeOrder(cube, order);
+  const shape = {
+    width: cube.width,
+    height: cube.height,
+    bandLabels: buildSpectralDerivativeBandLabels(cube, order),
+  };
+  const bands = await computeArrayReportingPerUnitProgress(
+    cube.bandCount - order,
+    (bandIndex) => computeSingleDerivativeBand(cube, order, bandIndex),
+    onProgress,
+  );
+  return makeFloat32RasterFromBands(shape, bands);
+}
+
+function computeSingleDerivativeBand(
+  cube: RasterImage,
+  order: SpectralDerivativeOrder,
+  bandIndex: number,
+): Float32Array {
+  if (order === SECOND_ORDER_SPECTRAL_DERIVATIVE) {
+    return secondDifferenceAroundCenterBand(
+      getRasterBandPixelsOrThrow(cube, bandIndex),
+      getRasterBandPixelsOrThrow(cube, bandIndex + 1),
+      getRasterBandPixelsOrThrow(cube, bandIndex + 2),
+    );
+  }
+  return subtractAdjacentBands(
+    getRasterBandPixelsOrThrow(cube, bandIndex + 1),
+    getRasterBandPixelsOrThrow(cube, bandIndex),
+  );
 }
 
 export function assertCubeHasEnoughBandsForSpectralDerivativeOrder(

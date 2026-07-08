@@ -8,6 +8,10 @@ import {
   clampViewportRoiToImageBounds,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
+import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 export const MIN_BIT_SHIFT_AMOUNT = 0;
 export const MAX_BIT_SHIFT_AMOUNT = 8;
@@ -39,6 +43,27 @@ export function applyBitShiftToRasterImage(
   const region = options.region ? readPixelRectangleFromRoiClampedToRaster(raster, options.region) : null;
   const shiftedBandPixels = raster.bandPixels.map((band) =>
     leftShiftBandValuesAndClampToTypeRange(band, shiftMultiplier, raster.sampleFormat, raster.width, region),
+  );
+  return { ...raster, bandPixels: shiftedBandPixels };
+}
+
+// CT-222: the async twin of applyBitShiftToRasterImage. Identical per-band math,
+// one progress tick per band.
+export async function applyBitShiftToRasterImageReportingProgress(
+  raster: RasterImage,
+  shiftAmount: number,
+  options: ApplyBitShiftOptions = {},
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  validateBitShiftAmountIsInSupportedRange(shiftAmount);
+  if (shiftAmount === 0) return cloneRasterImage(raster);
+  const shiftMultiplier = 2 ** shiftAmount;
+  const region = options.region ? readPixelRectangleFromRoiClampedToRaster(raster, options.region) : null;
+  const shiftedBandPixels = await computeArrayReportingPerUnitProgress(
+    raster.bandPixels.length,
+    (index) =>
+      leftShiftBandValuesAndClampToTypeRange(raster.bandPixels[index]!, shiftMultiplier, raster.sampleFormat, raster.width, region),
+    onProgress,
   );
   return { ...raster, bandPixels: shiftedBandPixels };
 }

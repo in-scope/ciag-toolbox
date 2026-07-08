@@ -10,11 +10,11 @@ import {
   formatKeptOriginalBandsHistoryLabel,
   mapKeptBandNumbersToCurrentPositions,
 } from "@/lib/image/apply-band-keep";
-import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
+import { applyBitShiftToRasterImageReportingProgress } from "@/lib/image/apply-bit-shift";
 import {
   applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
-  applyToneCurveToWholeStackPerBandMinMax,
+  applyToneCurveToWholeStackPerBandMinMaxReportingProgress,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -27,17 +27,17 @@ import {
   type ToneCurveChannelAnchors,
 } from "@/lib/image/tone-curve-channels";
 import {
-  applyBrightnessToRasterBands,
+  applyBrightnessToRasterBandsReportingProgress,
   brightnessDeltaForRangeFractionOfBand,
 } from "@/lib/image/apply-brightness";
-import { applyContrastToRasterBands } from "@/lib/image/apply-contrast";
-import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
+import { applyContrastToRasterBandsReportingProgress } from "@/lib/image/apply-contrast";
+import { applyCropToRasterImageReportingProgress } from "@/lib/image/apply-crop-to-roi";
 import {
   buildFalseColorComposite,
   type FalseColorBandAssignment,
 } from "@/lib/image/apply-false-color-composite";
 import {
-  applyGeometricTransformToRasterImage,
+  applyGeometricTransformToRasterImageReportingProgress,
   GEOMETRIC_TRANSFORM_LABELS,
   isGeometricTransform,
   isReflectionTransform,
@@ -48,9 +48,15 @@ import {
 import {
   autoNormalizeUnboundedRasterToUnitRange,
   isRasterDataRangeBoundedForInvert,
-  planInvertForRaster,
+  planInvertForRasterReportingProgress,
 } from "@/lib/image/apply-invert";
 import { applyFlatFieldToRasterImageReportingProgress } from "@/lib/image/apply-flat-field";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 import {
   applyNormalizeToRasterReportingProgress,
   MIN_MAX_NORMALIZE_METHOD,
@@ -225,7 +231,7 @@ export const BIT_SHIFT_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareBitShiftParameterValuesForScope,
   apply: clearOperationRegionFromState,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createBitShiftSourceTransform(),
+  transformSourceAsync: createBitShiftSourceTransform(),
 };
 
 const BIT_SHIFT_REGION_PARAMETER_IDS = {
@@ -245,15 +251,18 @@ function prepareBitShiftParameterValuesForScope(
   return injectOperationRegionCorners(rawParameterValues, region, BIT_SHIFT_REGION_PARAMETER_IDS);
 }
 
-function createBitShiftSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createBitShiftSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
     const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
-    return {
-      kind: "raster",
-      raster: applyBitShiftToRasterImage(source.raster, shiftAmount, region ? { region } : {}),
-    };
+    const raster = await applyBitShiftToRasterImageReportingProgress(
+      source.raster,
+      shiftAmount,
+      region ? { region } : {},
+      onProgress,
+    );
+    return { kind: "raster", raster };
   };
 }
 
@@ -319,7 +328,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
   apply: clearRegionAndStaleInspectionRoiAfterCrop,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createCropToRegionSourceTransform(),
+  transformSourceAsync: createCropToRegionSourceTransform(),
 };
 
 function clearRegionAndStaleInspectionRoiAfterCrop(
@@ -353,11 +362,12 @@ function prepareCropParameterValuesFromOperationRegion(
   return injectOperationRegionCorners(rawParameterValues, region, CROP_REGION_PARAMETER_IDS);
 }
 
-function createCropToRegionSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createCropToRegionSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const roi = readRoiFromCropParameterValues(parameterValues);
-    return { kind: "raster", raster: applyCropToRasterImage(source.raster, roi) };
+    const raster = await applyCropToRasterImageReportingProgress(source.raster, roi, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -678,7 +688,7 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
   apply: clearToneCurveAfterApply,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createToneCurveSourceTransform(),
+  transformSourceAsync: createToneCurveSourceTransform(),
 };
 
 function clearToneCurveAfterApply(state: ViewportRenderingState): ViewportRenderingState {
@@ -787,18 +797,18 @@ function parseSerializedToneCurveChannelAnchors(raw: string): ToneCurveChannelAn
   return Object.fromEntries(entries) as ToneCurveChannelAnchors;
 }
 
-function createToneCurveSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createToneCurveSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const region = readToneCurveRegionIfPresent(parameterValues);
     const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
     if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
-      return { kind: "raster", raster: bakeCompositeToneCurve(source.raster, channelAnchors, region) };
+      return { kind: "raster", raster: await bakeCompositeToneCurve(source.raster, channelAnchors, region, onProgress) };
     }
     if (isWholeStackToneCurveScope(parameterValues)) {
-      return { kind: "raster", raster: bakeWholeStackToneCurve(source.raster, parameterValues) };
+      return { kind: "raster", raster: await bakeWholeStackToneCurve(source.raster, parameterValues, onProgress) };
     }
-    return { kind: "raster", raster: bakeSingleBandToneCurve(source.raster, parameterValues, region) };
+    return { kind: "raster", raster: await bakeSingleBandToneCurve(source.raster, parameterValues, region, onProgress) };
   };
 }
 
@@ -811,35 +821,44 @@ function isWholeStackToneCurveScope(parameterValues: ParameterValuesById): boole
 function bakeWholeStackToneCurve(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const bandIndex = readToneCurveBandIndex(parameterValues);
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return applyToneCurveToWholeStackPerBandMinMax(raster, bandIndex, anchors);
+  return applyToneCurveToWholeStackPerBandMinMaxReportingProgress(raster, bandIndex, anchors, onProgress);
 }
 
-function bakeSingleBandToneCurve(
+async function bakeSingleBandToneCurve(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
   region: ViewportRoi | null,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const bandIndex = readToneCurveBandIndex(parameterValues);
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return applyToneCurveToRasterBand(raster, bandIndex, anchors, region ? { region } : {});
+  const baked = applyToneCurveToRasterBand(raster, bandIndex, anchors, region ? { region } : {});
+  await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, 1, 1);
+  return baked;
 }
 
 // CT-178: bake every R/G/B band, folding the rgb/Value curve over each channel's
 // own curve, so all channel edits commit together in a single operation.
-function bakeCompositeToneCurve(
+async function bakeCompositeToneCurve(
   raster: RasterImage,
   channelAnchors: ToneCurveChannelAnchors,
   region: ViewportRoi | null,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const valueAnchors = channelAnchors.rgb ?? null;
   const options = region ? { region } : {};
-  return COLOR_TONE_CURVE_CHANNELS.reduce((current, channel) => {
+  let current = raster;
+  reportMultiUnitWorkStarting(onProgress, COLOR_TONE_CURVE_CHANNELS.length);
+  for (const [completedBefore, channel] of COLOR_TONE_CURVE_CHANNELS.entries()) {
     const bandIndex = colorBandIndexForToneCurveChannel(channel) ?? 0;
-    return applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors, options);
-  }, raster);
+    current = applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors, options);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, COLOR_TONE_CURVE_CHANNELS.length);
+  }
+  return current;
 }
 
 function readToneCurveBandIndex(parameterValues: ParameterValuesById): number {
@@ -958,7 +977,7 @@ export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatBrightnessContrastAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForBrightnessContrast,
   apply: (state) => state,
-  transformSource: createBrightnessContrastSourceTransform(),
+  transformSourceAsync: createBrightnessContrastSourceTransform(),
 };
 
 function injectSelectedBandIndexForBrightnessContrast(
@@ -971,24 +990,38 @@ function injectSelectedBandIndexForBrightnessContrast(
   });
 }
 
-function createBrightnessContrastSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createBrightnessContrastSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveBrightnessContrastBandIndexes(parameterValues, source.raster);
-    return { kind: "raster", raster: adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues) };
+    const raster = await adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
-function adjustBrightnessThenContrast(
+// CT-222: the brightness pass fills the first half of the progress bar and the
+// contrast pass the second half, one tick per band inside each pass.
+async function adjustBrightnessThenContrast(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
   parameterValues: ParameterValuesById,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const brightnessFraction = readBrightnessPercent(parameterValues) / 100;
   const firstBand = getRasterBandPixelsOrThrow(raster, bandIndexes[0] ?? 0);
   const brightnessDelta = brightnessDeltaForRangeFractionOfBand(firstBand, raster.sampleFormat, brightnessFraction);
-  const brightened = applyBrightnessToRasterBands(raster, bandIndexes, brightnessDelta);
-  return applyContrastToRasterBands(brightened, bandIndexes, readContrastRatio(parameterValues));
+  const brightened = await applyBrightnessToRasterBandsReportingProgress(
+    raster,
+    bandIndexes,
+    brightnessDelta,
+    scaleProgressToWindow(onProgress, 0, 0.5),
+  );
+  return applyContrastToRasterBandsReportingProgress(
+    brightened,
+    bandIndexes,
+    readContrastRatio(parameterValues),
+    scaleProgressToWindow(onProgress, 0.5, 1),
+  );
 }
 
 function resolveBrightnessContrastBandIndexes(
@@ -1069,7 +1102,7 @@ export const INVERT_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatInvertAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForInvert,
   apply: (state) => state,
-  transformSource: createInvertSourceTransform(),
+  transformSourceAsync: createInvertSourceTransform(),
   transformSourceToSecondaryOutputs: createInvertSecondaryOutputsTransform(),
 };
 
@@ -1083,19 +1116,21 @@ function injectSelectedBandIndexForInvert(
   });
 }
 
-function createInvertSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createInvertSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveInvertBandIndexes(parameterValues, source.raster);
-    return { kind: "raster", raster: resolveInvertPrimaryRaster(source.raster, bandIndexes) };
+    const raster = await resolveInvertPrimaryRaster(source.raster, bandIndexes, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
-function resolveInvertPrimaryRaster(
+async function resolveInvertPrimaryRaster(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
-): RasterImage {
-  const outcome = planInvertForRaster(raster, bandIndexes);
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const outcome = await planInvertForRasterReportingProgress(raster, bandIndexes, onProgress);
   return outcome.kind === "direct" ? outcome.inverted : outcome.normalizedThenInverted;
 }
 
@@ -1708,7 +1743,7 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
-  transformSource: createGeometricTransformSourceTransform(),
+  transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
 export const REFLECT_ACTION: RegisteredViewportAction = {
@@ -1721,7 +1756,7 @@ export const REFLECT_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
-  transformSource: createGeometricTransformSourceTransform(),
+  transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
 export function findGeometricTransformActionForChoice(
@@ -1734,11 +1769,12 @@ function clearRegionAfterGeometricTransform(state: ViewportRenderingState): View
   return { ...state, roi: null };
 }
 
-function createGeometricTransformSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createGeometricTransformSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const transform = readGeometricTransformChoice(parameterValues);
-    return { kind: "raster", raster: applyGeometricTransformToRasterImage(source.raster, transform) };
+    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress);
+    return { kind: "raster", raster };
   };
 }
 

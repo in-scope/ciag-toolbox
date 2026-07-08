@@ -34,8 +34,8 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
     expect(readSpectralDerivativeOrder({ order: "2" })).toBe(2);
   });
 
-  it("emits a float32 stack of adjacent band differences for the first order", () => {
-    const result = SPECTRAL_DERIVATIVE_ACTION.transformSource!(
+  it("emits a float32 stack of adjacent band differences for the first order", async () => {
+    const result = await SPECTRAL_DERIVATIVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandCollinearStack() },
       { order: "1" },
     );
@@ -46,8 +46,8 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([800, 800]);
   });
 
-  it("emits the difference of differences for the second order", () => {
-    const result = SPECTRAL_DERIVATIVE_ACTION.transformSource!(
+  it("emits the difference of differences for the second order", async () => {
+    const result = await SPECTRAL_DERIVATIVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandCollinearStack() },
       { order: "2" },
     );
@@ -99,5 +99,17 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
     expect(next.removedBandIndexes).toEqual([]);
     expect(next.isBandSubsetEditModeActive).toBe(false);
     expect(next.pinnedSpectra).toEqual([]);
+  });
+});
+
+describe("SPECTRAL_DERIVATIVE_ACTION progress (CT-222)", () => {
+  it("ticks once per output derivative band", async () => {
+    const ticks: number[] = [];
+    await SPECTRAL_DERIVATIVE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeThreeBandCollinearStack() },
+      { order: "1" },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
   });
 });

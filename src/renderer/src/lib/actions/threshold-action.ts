@@ -25,6 +25,11 @@ import {
   applyManualThresholdAcrossBands,
   type ThresholdBounds,
 } from "@/lib/image/threshold/threshold";
+import {
+  computeArrayReportingPerUnitProgress,
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 import {
   BAND_WISE_SCOPE,
@@ -39,7 +44,7 @@ import type { RegisteredViewportAction } from "./registered-actions";
 import {
   clearThresholdEditingState,
   EMPTY_REMOVED_BAND_INDEXES,
-  type ViewportActionSourceTransform,
+  type ViewportActionAsyncSourceTransform,
   type ViewportRenderingState,
 } from "./viewport-action";
 
@@ -84,7 +89,7 @@ export const THRESHOLD_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: injectThresholdBoundsForApply,
   apply: resetStateForBinaryThresholdOutput,
   clearConsumedSourceStateAfterApply: clearThresholdEditingState,
-  transformSource: createThresholdSourceTransform(),
+  transformSourceAsync: createThresholdSourceTransform(),
 };
 
 function injectThresholdBoundsForApply(
@@ -129,16 +134,16 @@ function resetStateForBinaryThresholdOutput(
   };
 }
 
-function createThresholdSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createThresholdSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveThresholdScopeSelection(parameterValues, source.raster.bandCount);
     const otsuCutoffs = readThresholdOtsuCutoffsIfPresent(parameterValues);
     if (otsuCutoffs) {
-      return { kind: "raster", raster: buildOtsuThresholdStack(source.raster, otsuCutoffs, selection) };
+      return { kind: "raster", raster: await buildOtsuThresholdStack(source.raster, otsuCutoffs, selection, onProgress) };
     }
     const bounds = readThresholdBoundsOrThrow(parameterValues);
-    return { kind: "raster", raster: buildBinaryThresholdStack(source.raster, bounds, selection) };
+    return { kind: "raster", raster: await buildBinaryThresholdStack(source.raster, bounds, selection, onProgress) };
   };
 }
 
@@ -148,23 +153,28 @@ function buildOtsuThresholdStack(
   raster: RasterImage,
   cutoffs: ThresholdOtsuCutoffs,
   selection: ResolvedCubeScopeSelection,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   if (selection.scope === "full-cube") {
-    return makeCombinedBinaryStack(raster, cutoffs.combinedBounds);
+    return makeCombinedBinaryStack(raster, cutoffs.combinedBounds, onProgress);
   }
-  return makePerBandOtsuBinaryStack(raster, cutoffs, selection.bandIndexes);
+  return makePerBandOtsuBinaryStack(raster, cutoffs, selection.bandIndexes, onProgress);
 }
 
-function makePerBandOtsuBinaryStack(
+async function makePerBandOtsuBinaryStack(
   raster: RasterImage,
   cutoffs: ThresholdOtsuCutoffs,
   bandIndexes: ReadonlyArray<number>,
-): RasterImage {
-  const bands = bandIndexes.map((bandIndex) =>
-    applyManualThreshold(
-      getRasterBandPixelsOrThrow(raster, bandIndex),
-      otsuBoundsForBandOrThrow(cutoffs, bandIndex),
-    ),
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bands = await computeArrayReportingPerUnitProgress(
+    bandIndexes.length,
+    (position) =>
+      applyManualThreshold(
+        getRasterBandPixelsOrThrow(raster, bandIndexes[position]!),
+        otsuBoundsForBandOrThrow(cutoffs, bandIndexes[position]!),
+      ),
+    onProgress,
   );
   return makeBinaryStackFromBands(bands, {
     width: raster.width,
@@ -196,15 +206,23 @@ function buildBinaryThresholdStack(
   raster: RasterImage,
   bounds: ThresholdBounds,
   selection: ResolvedCubeScopeSelection,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   if (selection.scope === "full-cube") {
-    return makeCombinedBinaryStack(raster, bounds);
+    return makeCombinedBinaryStack(raster, bounds, onProgress);
   }
-  return makePerBandBinaryStack(raster, bounds, selection.bandIndexes);
+  return makePerBandBinaryStack(raster, bounds, selection.bandIndexes, onProgress);
 }
 
-function makeCombinedBinaryStack(raster: RasterImage, bounds: ThresholdBounds): RasterImage {
+// The combined output is a single band, so there is no leading 0 tick: the bar
+// only appears with the completion tick (the spinner covers the wait).
+async function makeCombinedBinaryStack(
+  raster: RasterImage,
+  bounds: ThresholdBounds,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const combined = applyManualThresholdAcrossBands(raster.bandPixels, bounds);
+  await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, 1, 1);
   return makeBinaryStackFromBands([combined], {
     width: raster.width,
     height: raster.height,
@@ -212,13 +230,16 @@ function makeCombinedBinaryStack(raster: RasterImage, bounds: ThresholdBounds): 
   });
 }
 
-function makePerBandBinaryStack(
+async function makePerBandBinaryStack(
   raster: RasterImage,
   bounds: ThresholdBounds,
   bandIndexes: ReadonlyArray<number>,
-): RasterImage {
-  const bands = bandIndexes.map((bandIndex) =>
-    applyManualThreshold(getRasterBandPixelsOrThrow(raster, bandIndex), bounds),
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bands = await computeArrayReportingPerUnitProgress(
+    bandIndexes.length,
+    (position) => applyManualThreshold(getRasterBandPixelsOrThrow(raster, bandIndexes[position]!), bounds),
+    onProgress,
   );
   return makeBinaryStackFromBands(bands, {
     width: raster.width,

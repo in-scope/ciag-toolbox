@@ -16,6 +16,11 @@ import {
   computeRasterBandRawValueExtents,
   type SingleBandScalarExtents,
 } from "@/lib/image/compute-image-channel-extents";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 export interface ToneCurveAnchor {
   readonly input: number;
@@ -189,6 +194,25 @@ export function applyToneCurveToWholeStackPerBandMinMax(
     (current, _band, bandIndex) => remapBandThroughShapeByOwnMinMax(current, bandIndex, shape),
     raster,
   );
+}
+
+// CT-222: the async twin of applyToneCurveToWholeStackPerBandMinMax. Identical
+// per-band math, one progress tick per band.
+export async function applyToneCurveToWholeStackPerBandMinMaxReportingProgress(
+  raster: RasterImage,
+  selectedBandIndex: number,
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const curve = buildMonotoneToneCurve(anchors);
+  const shape = buildNormalizedToneCurveShapeForBand(raster, selectedBandIndex, curve);
+  let current = raster;
+  reportMultiUnitWorkStarting(onProgress, raster.bandPixels.length);
+  for (let bandIndex = 0; bandIndex < raster.bandPixels.length; bandIndex += 1) {
+    current = remapBandThroughShapeByOwnMinMax(current, bandIndex, shape);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, bandIndex + 1, raster.bandPixels.length);
+  }
+  return current;
 }
 
 type NormalizedToneCurveShape = (normalizedInput: number) => number;

@@ -29,8 +29,10 @@ function makeTwoBandUint8Source(): ViewportImageSource {
   return { kind: "raster", raster };
 }
 
-function transformedRaster(parameterValues: Record<string, number | string>): RasterImage {
-  const output = THRESHOLD_ACTION.transformSource!(makeTwoBandUint8Source(), parameterValues);
+async function transformedRaster(
+  parameterValues: Record<string, number | string>,
+): Promise<RasterImage> {
+  const output = await THRESHOLD_ACTION.transformSourceAsync!(makeTwoBandUint8Source(), parameterValues);
   if (output.kind !== "raster") throw new Error("expected a raster output");
   return output.raster;
 }
@@ -41,8 +43,8 @@ const BOUNDS_PARAMS = {
 };
 
 describe("THRESHOLD_ACTION.transformSource", () => {
-  it("band-wise scope yields one binary band per entered band", () => {
-    const raster = transformedRaster({
+  it("band-wise scope yields one binary band per entered band", async () => {
+    const raster = await transformedRaster({
       ...BOUNDS_PARAMS,
       [THRESHOLD_SCOPE_PARAMETER_ID]: "band-wise",
       [THRESHOLD_BAND_RANGE_PARAMETER_ID]: "1-2",
@@ -54,8 +56,8 @@ describe("THRESHOLD_ACTION.transformSource", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([255, 0, 255, 0]);
   });
 
-  it("full-stack scope combines all bands into a single binary band", () => {
-    const raster = transformedRaster({
+  it("full-stack scope combines all bands into a single binary band", async () => {
+    const raster = await transformedRaster({
       ...BOUNDS_PARAMS,
       [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube",
     });
@@ -63,8 +65,8 @@ describe("THRESHOLD_ACTION.transformSource", () => {
     expect(Array.from(raster.bandPixels[0]!)).toEqual([255, 0, 0, 0]);
   });
 
-  it("throws when the bounds parameters are missing", () => {
-    expect(() => transformedRaster({ [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube" })).toThrow(
+  it("throws when the bounds parameters are missing", async () => {
+    await expect(transformedRaster({ [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube" })).rejects.toThrow(
       "Adjust the bounds first",
     );
   });
@@ -85,8 +87,8 @@ const OTSU_PARAMS = {
 };
 
 describe("THRESHOLD_ACTION.transformSource with Otsu cutoffs", () => {
-  it("band-wise scope thresholds each band with its own cutoff", () => {
-    const raster = transformedRaster({
+  it("band-wise scope thresholds each band with its own cutoff", async () => {
+    const raster = await transformedRaster({
       ...OTSU_PARAMS,
       [THRESHOLD_SCOPE_PARAMETER_ID]: "band-wise",
       [THRESHOLD_BAND_RANGE_PARAMETER_ID]: "1-2",
@@ -96,8 +98,8 @@ describe("THRESHOLD_ACTION.transformSource with Otsu cutoffs", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 0, 0, 255]);
   });
 
-  it("full-stack scope applies the single combined cutoff to every band", () => {
-    const raster = transformedRaster({
+  it("full-stack scope applies the single combined cutoff to every band", async () => {
+    const raster = await transformedRaster({
       ...OTSU_PARAMS,
       [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube",
     });
@@ -201,5 +203,31 @@ describe("THRESHOLD_ACTION applied label", () => {
       thresholdBounds: { lower: 1, upper: 2 },
     };
     expect(THRESHOLD_ACTION.clearConsumedSourceStateAfterApply!(state).thresholdBounds).toBeNull();
+  });
+});
+
+describe("THRESHOLD_ACTION progress (CT-222)", () => {
+  it("band-wise thresholding ticks once per entered band", async () => {
+    const ticks: number[] = [];
+    await THRESHOLD_ACTION.transformSourceAsync!(
+      makeTwoBandUint8Source(),
+      {
+        ...BOUNDS_PARAMS,
+        [THRESHOLD_SCOPE_PARAMETER_ID]: "band-wise",
+        [THRESHOLD_BAND_RANGE_PARAMETER_ID]: "1-2",
+      },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("the combined full-stack output reports a single completion tick", async () => {
+    const ticks: number[] = [];
+    await THRESHOLD_ACTION.transformSourceAsync!(
+      makeTwoBandUint8Source(),
+      { ...BOUNDS_PARAMS, [THRESHOLD_SCOPE_PARAMETER_ID]: "full-cube" },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([1]);
   });
 });

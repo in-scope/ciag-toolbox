@@ -25,6 +25,17 @@ export async function reportCompletedUnitAndYieldSoProgressCanPaint(
   await yieldOnceSoTheBusyIndicatorCanPaint();
 }
 
+// CT-222: multi-phase work (e.g. brightness then contrast, normalize then invert)
+// maps each phase's own 0..1 fraction into a window of the overall bar.
+export function scaleProgressToWindow(
+  onProgress: UnitProgressCallback | undefined,
+  windowStart: number,
+  windowEnd: number,
+): UnitProgressCallback | undefined {
+  if (!onProgress) return undefined;
+  return (fraction) => onProgress(windowStart + fraction * (windowEnd - windowStart));
+}
+
 export async function computeArrayReportingPerUnitProgress<T>(
   totalUnits: number,
   computeUnit: (index: number) => T,

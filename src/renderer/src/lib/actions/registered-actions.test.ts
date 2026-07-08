@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BIT_SHIFT_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
   CROP_TO_REGION_ACTION,
   FALSE_COLOR_ACTION,
@@ -82,14 +83,14 @@ function makeTwoBandUint8Raster(
 }
 
 describe("BRIGHTNESS_CONTRAST_ACTION", () => {
-  it("brightens only the selected band by a percentage of the data-type range", () => {
+  it("brightens only the selected band by a percentage of the data-type range", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
     const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
       { brightnessPercent: 10, contrastRatio: 1, applyToAllBands: false },
       state,
       "whole-image",
     );
-    const result = BRIGHTNESS_CONTRAST_ACTION.transformSource!(
+    const result = await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [0, 100]) },
       prepared,
     );
@@ -98,13 +99,13 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([26, 126]);
   });
 
-  it("applies to every band when the all-bands flag is set", () => {
+  it("applies to every band when the all-bands flag is set", async () => {
     const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
       { brightnessPercent: 0, contrastRatio: 0, applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = BRIGHTNESS_CONTRAST_ACTION.transformSource!(
+    const result = await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [40, 60]) },
       prepared,
     );
@@ -169,10 +170,10 @@ describe("TONE_CURVE_ACTION", () => {
     expect(prepared).toMatchObject({ targetBandIndex: 2, toneCurveAnchorsJson: "[[0,0],[128,255]]" });
   });
 
-  it("applies the 2-anchor curve as a linear black/white stretch on the selected band", () => {
+  it("applies the 2-anchor curve as a linear black/white stretch on the selected band", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    const result = TONE_CURVE_ACTION.transformSource!(
+    const result = await TONE_CURVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeSingleBandUint8Raster([0, 64, 128, 255]) },
       prepared,
     );
@@ -207,14 +208,14 @@ describe("TONE_CURVE_ACTION", () => {
     { input: 255, output: 128 },
   ];
 
-  it("bakes only the edited channel band on a composite, leaving the other channels untouched", () => {
+  it("bakes only the edited channel band on a composite, leaving the other channels untouched", async () => {
     const state = {
       ...DEFAULT_VIEWPORT_RENDERING_STATE,
       toneCurveActiveChannel: "red" as const,
       toneCurveAnchors: halveCurve,
     };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", makeRgbCompositeRaster());
-    const result = TONE_CURVE_ACTION.transformSource!(
+    const result = await TONE_CURVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeRgbCompositeRaster() },
       prepared,
     ) as { raster: RasterImage };
@@ -224,10 +225,10 @@ describe("TONE_CURVE_ACTION", () => {
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: Red)");
   });
 
-  it("folds an rgb/Value curve into every channel band on a composite", () => {
+  it("folds an rgb/Value curve into every channel band on a composite", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: halveCurve };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", makeRgbCompositeRaster());
-    const result = TONE_CURVE_ACTION.transformSource!(
+    const result = await TONE_CURVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeRgbCompositeRaster() },
       prepared,
     ) as { raster: RasterImage };
@@ -237,11 +238,11 @@ describe("TONE_CURVE_ACTION", () => {
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: RGB)");
   });
 
-  it("keeps the single-band path for a scientific stack even though it has three bands", () => {
+  it("keeps the single-band path for a scientific stack even though it has three bands", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: halveCurve };
     const scientific = makeThreeBandScientificStack();
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image", scientific);
-    const result = TONE_CURVE_ACTION.transformSource!({ kind: "raster", raster: scientific }, prepared) as {
+    const result = await TONE_CURVE_ACTION.transformSourceAsync!({ kind: "raster", raster: scientific }, prepared) as {
       raster: RasterImage;
     };
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
@@ -262,11 +263,11 @@ describe("TONE_CURVE_ACTION", () => {
     expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points) on Whole stack");
   });
 
-  it("bakes every band through the curve shape normalized by its own min/max under Whole stack scope", () => {
+  it("bakes every band through the curve shape normalized by its own min/max under Whole stack scope", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: doublingAnchors };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
     const stack = makeTwoBandScientificStack([0, 100], [10, 30]);
-    const result = TONE_CURVE_ACTION.transformSource!(
+    const result = await TONE_CURVE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: stack },
       prepared,
     ) as { raster: RasterImage };
@@ -419,14 +420,14 @@ function makeTwoBandFloatRaster(
 }
 
 describe("INVERT_ACTION", () => {
-  it("inverts only the selected uint8 band as 255 minus the value", () => {
+  it("inverts only the selected uint8 band as 255 minus the value", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: false },
       state,
       "whole-image",
     );
-    const result = INVERT_ACTION.transformSource!(
+    const result = await INVERT_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandUint8Raster([0, 255], [0, 100]) },
       prepared,
     );
@@ -435,13 +436,13 @@ describe("INVERT_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([255, 155]);
   });
 
-  it("inverts every band of a float [0,1] cube when the all-bands flag is set", () => {
+  it("inverts every band of a float [0,1] cube when the all-bands flag is set", async () => {
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = INVERT_ACTION.transformSource!(
+    const result = await INVERT_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandFloatRaster([0, 0.25], [0.75, 1]) },
       prepared,
     );
@@ -450,13 +451,13 @@ describe("INVERT_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([0.25, 0]);
   });
 
-  it("auto-normalizes unbounded float data then inverts instead of rejecting (CT-097)", () => {
+  it("auto-normalizes unbounded float data then inverts instead of rejecting (CT-097)", async () => {
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = INVERT_ACTION.transformSource!(
+    const result = await INVERT_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandFloatRaster([0, 2], [0, 1]) },
       prepared,
     );
@@ -487,13 +488,13 @@ describe("INVERT_ACTION", () => {
     expect(Array.from(normalized.bandPixels[0]!)).toEqual([0, 1]);
   });
 
-  it("promotes a browser-decoded colour source and inverts it instead of rejecting (CT-109/CT-172)", () => {
+  it("promotes a browser-decoded colour source and inverts it instead of rejecting (CT-109/CT-172)", async () => {
     const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
       { applyToAllBands: true },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = INVERT_ACTION.transformSource!(
+    const result = await INVERT_ACTION.transformSourceAsync!(
       // R/G/B differ, so CT-172 promotes this to a 3-band rgb raster (a grayscale pixel would
       // promote to a single band); invert on uint8 maps R 10 -> 245.
       { kind: "pixels", pixels: new Uint8ClampedArray([10, 20, 30, 255]), width: 1, height: 1 },
@@ -715,8 +716,8 @@ describe("ROTATE_ACTION", () => {
     expect(readEnumParameterOptionValues(ROTATE_ACTION)).toEqual(["rotate-90-cw", "rotate-180", "rotate-270-cw"]);
   });
 
-  it("rotates the whole cube and swaps the reported dimensions for a 90 degree rotation", () => {
-    const result = ROTATE_ACTION.transformSource!(
+  it("rotates the whole cube and swaps the reported dimensions for a 90 degree rotation", async () => {
+    const result = await ROTATE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandUint8Raster([1, 2], [3, 4], [5, 6]) },
       { transform: "rotate-90-cw" },
     );
@@ -752,5 +753,106 @@ describe("findGeometricTransformActionForChoice", () => {
     expect(findGeometricTransformActionForChoice("rotate-270-cw")).toBe(ROTATE_ACTION);
     expect(findGeometricTransformActionForChoice("flip-horizontal")).toBe(REFLECT_ACTION);
     expect(findGeometricTransformActionForChoice("flip-vertical")).toBe(REFLECT_ACTION);
+  });
+});
+
+// CT-222: every migrated per-band operation reports a monotonic tick sequence
+// through its transformSourceAsync onProgress callback.
+describe("CT-222 transform progress ticks", () => {
+  it("bit shift ticks once per band", async () => {
+    const ticks: number[] = [];
+    await BIT_SHIFT_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 10], [20, 30]) },
+      { shiftAmount: 1 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("crop ticks once per band", async () => {
+    const ticks: number[] = [];
+    await CROP_TO_REGION_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 10], [20, 30]) },
+      { imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 0, imagePixelY1: 0 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("rotate ticks once per band", async () => {
+    const ticks: number[] = [];
+    await ROTATE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([1, 2], [3, 4], [5, 6]) },
+      { transform: "rotate-90-cw" },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 3, 2 / 3, 1]);
+  });
+
+  it("brightness/contrast splits the bar between its two per-band passes", async () => {
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: 10, contrastRatio: 1, applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const ticks: number[] = [];
+    await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [0, 100]) },
+      prepared,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 0.25, 0.5, 0.5, 0.75, 1]);
+  });
+
+  it("a direct invert ticks once per band", async () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const ticks: number[] = [];
+    await INVERT_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 255], [0, 100]) },
+      prepared,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("an auto-normalized invert reports the normalize then the invert as bar halves", async () => {
+    const prepared = INVERT_ACTION.prepareParameterValuesForApply!(
+      { applyToAllBands: true },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+    );
+    const ticks: number[] = [];
+    await INVERT_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandFloatRaster([0, 2], [0, 1]) },
+      prepared,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 0.25, 0.5, 0.5, 0.75, 1]);
+  });
+
+  it("the whole-stack tone curve ticks once per band and the single-band path once total", async () => {
+    const anchors = [
+      { input: 0, output: 0 },
+      { input: 100, output: 200 },
+    ];
+    const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: anchors };
+    const wholeStackTicks: number[] = [];
+    await TONE_CURVE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [10, 30]) },
+      TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack"),
+      (fraction) => wholeStackTicks.push(fraction),
+    );
+    expect(wholeStackTicks).toEqual([0, 1 / 2, 1]);
+    const singleBandTicks: number[] = [];
+    await TONE_CURVE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [10, 30]) },
+      TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image"),
+      (fraction) => singleBandTicks.push(fraction),
+    );
+    expect(singleBandTicks).toEqual([1]);
   });
 });

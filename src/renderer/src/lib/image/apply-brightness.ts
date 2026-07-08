@@ -1,4 +1,5 @@
 import type { RasterImage, RasterSampleFormat, RasterTypedArray } from "@/lib/image/raster-image";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import {
   clampValueToDataTypeRangeRoundingIntegers,
   dataTypeValueRangeForBand,
@@ -7,6 +8,7 @@ import {
 import {
   mapBandValuesPreservingType,
   mapSelectedRasterBandsPreservingType,
+  mapSelectedRasterBandsPreservingTypeReportingProgress,
 } from "@/lib/image/map-band-values";
 
 export function applyBrightnessToRasterBands(
@@ -16,6 +18,22 @@ export function applyBrightnessToRasterBands(
 ): RasterImage {
   return mapSelectedRasterBandsPreservingType(raster, bandIndexes, (band) =>
     brightenBandClampedToTypeRange(band, brightnessDelta, raster.sampleFormat),
+  );
+}
+
+// CT-222: the async twin of applyBrightnessToRasterBands. Identical per-band math,
+// one progress tick per band.
+export async function applyBrightnessToRasterBandsReportingProgress(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+  brightnessDelta: number,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  return mapSelectedRasterBandsPreservingTypeReportingProgress(
+    raster,
+    bandIndexes,
+    (band) => brightenBandClampedToTypeRange(band, brightnessDelta, raster.sampleFormat),
+    onProgress,
   );
 }
 
