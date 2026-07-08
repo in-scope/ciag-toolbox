@@ -7,7 +7,8 @@ import {
   USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS,
 } from "./user-script-timeouts";
 
-// CT-217: successor to script-docs-content.test.ts. The scripting guide now
+// CT-217: successor to the in-app script-docs-content.test.ts (removed in
+// CT-218 along with the dialog it pinned). The scripting guide now
 // lives as a committed markdown file at docs/python-scripting.md (linked from
 // the app); this test pins that every required topic and template link
 // survives future edits.

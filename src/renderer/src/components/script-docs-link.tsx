@@ -1,19 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { useScriptDocsPage } from "@/state/script-docs-context";
+import { SCRIPTING_DOCS_URL } from "@/lib/python/scripting-docs-url";
 
-// The persistent "How to write a script" link the scripting tools (CT-209 band
-// weighting, CT-210 band selection) point at the CT-208f docs page.
+// The persistent "How to write a script" link in the scripting tools (band
+// weighting, band selection, custom transform). It opens the hosted guide in
+// the default browser: target="_blank" routes through the main process
+// setWindowOpenHandler, which hands the URL to shell.openExternal (CT-218).
 export function ScriptDocsLink(): JSX.Element {
-  const { openScriptDocsPage } = useScriptDocsPage();
   return (
-    <Button
-      type="button"
-      variant="link"
-      size="sm"
-      className="h-auto p-0 text-xs"
-      onClick={openScriptDocsPage}
-    >
-      How to write a script
+    <Button asChild variant="link" size="sm" className="h-auto p-0 text-xs">
+      <a href={SCRIPTING_DOCS_URL} target="_blank" rel="noreferrer">
+        How to write a script
+      </a>
     </Button>
   );
 }

@@ -23,8 +23,8 @@ import {
   type PixelDimensions,
 } from "./support/page-objects";
 
-// CT-213: the documented "write a script with imports" flow (script-docs-content.ts
-// tells users to write `import numpy as np`) was never exercised end to end - both
+// CT-213: the documented "write a script with imports" flow (the scripting guide,
+// now docs/python-scripting.md, tells users to write `import numpy as np`) was never exercised end to end - both
 // existing e2e fixtures (band-tool.py, weights-tool.py) contain zero imports. This
 // spec drives numpy-band-tool.py, which does an explicit `import numpy as np` and
 // returns np.mean(cube, axis=0), through the REAL Import script... flow of band

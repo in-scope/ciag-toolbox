@@ -14,8 +14,6 @@ import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
 import { PythonEnvironmentDialog } from "@/components/python-environment-dialog";
-import { ScriptDocsDialog } from "@/components/script-docs-dialog";
-import { ScriptDocsProvider } from "@/state/script-docs-context";
 import { AppBusyModal } from "@/components/busy-indicators";
 import { StatusBar } from "@/components/status-bar";
 import {
@@ -282,14 +280,11 @@ export function App(): JSX.Element {
                 <PixelReadoutProvider>
                   <BusyStateProvider>
                     <RightPanelCollapsedStateProvider>
-                      <ScriptDocsProvider>
-                        <ApplicationShell />
-                        <AboutDialog />
-                        <PythonEnvironmentDialog />
-                        <ScriptDocsDialog />
-                        <AppBusyModal />
-                        <Toaster />
-                      </ScriptDocsProvider>
+                      <ApplicationShell />
+                      <AboutDialog />
+                      <PythonEnvironmentDialog />
+                      <AppBusyModal />
+                      <Toaster />
                     </RightPanelCollapsedStateProvider>
                   </BusyStateProvider>
                 </PixelReadoutProvider>

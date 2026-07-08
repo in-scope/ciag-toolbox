@@ -1,9 +1,11 @@
 import {
   app,
   Menu,
+  shell,
   type BrowserWindow,
   type MenuItemConstructorOptions,
 } from "electron";
+import { SCRIPTING_DOCS_URL } from "../shared/scripting-docs-url";
 import {
   applyThemeModeFromMenu,
   getCurrentThemeMode,
@@ -230,12 +232,10 @@ function buildAboutMenuItem(
   };
 }
 
-function buildHowToWriteScriptMenuItem(
-  window: BrowserWindow,
-): MenuItemConstructorOptions {
+function buildHowToWriteScriptMenuItem(): MenuItemConstructorOptions {
   return {
     label: "How to Write a Custom Script",
-    click: () => sendMenuChannelToRenderer(window, "menu:script-docs"),
+    click: () => void shell.openExternal(SCRIPTING_DOCS_URL),
   };
 }
 
@@ -243,7 +243,7 @@ function buildHelpMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     role: "help",
     submenu: [
-      buildHowToWriteScriptMenuItem(window),
+      buildHowToWriteScriptMenuItem(),
       { type: "separator" },
       buildAboutMenuItem(window),
     ],

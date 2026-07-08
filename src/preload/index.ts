@@ -214,7 +214,6 @@ const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
-const MENU_SCRIPT_DOCS_CHANNEL = "menu:script-docs";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
@@ -331,12 +330,6 @@ function subscribeToPythonEnvironmentMenuEvent(
   return subscribeToMenuChannel(MENU_PYTHON_ENVIRONMENT_CHANNEL, listener);
 }
 
-function subscribeToScriptDocsMenuEvent(
-  listener: MenuEventListener,
-): UnsubscribeMenuListener {
-  return subscribeToMenuChannel(MENU_SCRIPT_DOCS_CHANNEL, listener);
-}
-
 function fetchPythonEnvironmentFromMainProcess(): Promise<PythonEnvironmentSnapshot> {
   return ipcRenderer.invoke(
     PYTHON_ENVIRONMENT_GET_CHANNEL,
@@ -407,7 +400,6 @@ const apiBridge = {
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
   onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
-  onMenuScriptDocs: subscribeToScriptDocsMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
