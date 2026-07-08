@@ -142,6 +142,11 @@ export type ViewportActionSourceTransform = (
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
 
+// CT-221: an async transform reports determinate progress (a 0..1 fraction, one
+// tick per completed band or equivalent unit) through this callback; the apply
+// flow forwards it to the busy entry so the overlay shows a percentage.
+export type TransformProgressCallback = (fraction: number) => void;
+
 // CT-219a: a source transform may instead be asynchronous (the spatial filter
 // runs its FFT loop on a Web Worker so a large stack does not freeze the UI
 // thread). An action defines transformSource OR transformSourceAsync; the apply
@@ -150,6 +155,7 @@ export type ViewportActionSourceTransform = (
 export type ViewportActionAsyncSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
+  onProgress?: TransformProgressCallback,
 ) => Promise<ViewportImageSource>;
 
 // CT-097: an operation may emit additional outputs beyond the primary in-place /
@@ -213,8 +219,11 @@ export async function runActionSourceTransform(
   action: ViewportAction,
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
+  onProgress?: TransformProgressCallback,
 ): Promise<ViewportImageSource> {
-  if (action.transformSourceAsync) return action.transformSourceAsync(source, parameterValues);
+  if (action.transformSourceAsync) {
+    return action.transformSourceAsync(source, parameterValues, onProgress);
+  }
   if (action.transformSource) return action.transformSource(source, parameterValues);
   return source;
 }

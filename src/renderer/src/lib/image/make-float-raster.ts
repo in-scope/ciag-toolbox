@@ -1,4 +1,8 @@
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
+import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-077: shared constructor for operation-produced float32 rasters. Operations
 // that emit fractional results (normalize, standardize, Spectralon, ...) compute
@@ -34,6 +38,22 @@ export function makeFloatRasterFromBandComputation(
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
 
+// CT-221: the async twin of makeFloatRasterFromBandComputation. One progress tick
+// (and a paint yield) per computed band, so a long per-band operation can drive a
+// determinate busy indicator. The per-band math is identical to the sync version.
+export async function makeFloatRasterFromBandComputationReportingProgress(
+  source: RasterImage,
+  computeFloatBand: ComputeFloatBandFromSource,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bandPixels = await computeArrayReportingPerUnitProgress(
+    source.bandPixels.length,
+    (index) => computeSingleFloatBandMatchingSourceLength(source.bandPixels[index]!, index, computeFloatBand),
+    onProgress,
+  );
+  return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
 // CT-103: a band-wise float op only allocates buffers for the bands it actually
 // changes; every unchanged float band is carried through BY REFERENCE, so a
 // single-band op on a large float cube no longer reallocates the whole cube.
@@ -42,12 +62,38 @@ export function makeFloatRasterReusingUnchangedSourceBands(
   changedBandIndexes: ReadonlySet<number>,
   computeChangedFloatBand: ComputeFloatBandFromSource,
 ): RasterImage {
-  const bandPixels = source.bandPixels.map((band, index) =>
-    changedBandIndexes.has(index)
-      ? computeSingleFloatBandMatchingSourceLength(band, index, computeChangedFloatBand)
-      : carryUnchangedBandThroughAsFloat32(band),
+  const bandPixels = source.bandPixels.map((_band, index) =>
+    computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index),
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
+// CT-221: the async twin of makeFloatRasterReusingUnchangedSourceBands. Every band
+// is a progress unit (carried-through bands tick instantly), so the fraction tracks
+// the whole output raster.
+export async function makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+  source: RasterImage,
+  changedBandIndexes: ReadonlySet<number>,
+  computeChangedFloatBand: ComputeFloatBandFromSource,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bandPixels = await computeArrayReportingPerUnitProgress(
+    source.bandPixels.length,
+    (index) => computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index),
+    onProgress,
+  );
+  return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
+function computeChangedBandOrCarryThrough(
+  source: RasterImage,
+  changedBandIndexes: ReadonlySet<number>,
+  computeChangedFloatBand: ComputeFloatBandFromSource,
+  index: number,
+): Float32Array {
+  const band = source.bandPixels[index]!;
+  if (!changedBandIndexes.has(index)) return carryUnchangedBandThroughAsFloat32(band);
+  return computeSingleFloatBandMatchingSourceLength(band, index, computeChangedFloatBand);
 }
 
 export function mapBandPixelsToFloat32(

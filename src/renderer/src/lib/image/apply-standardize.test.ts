@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applyStandardizeToRaster } from "./apply-standardize";
+import {
+  applyStandardizeToRaster,
+  applyStandardizeToRasterReportingProgress,
+} from "./apply-standardize";
 import type { RasterImage } from "./raster-image";
 
 function makeTwoBandUint8Raster(
@@ -91,5 +94,31 @@ describe("applyStandardizeToRaster", () => {
     const raster = makeTwoBandUint8Raster([10, 30], [40, 60]);
     applyStandardizeToRaster(raster, { scope: "full-cube" }, UNIT_TARGET);
     expect(Array.from(raster.bandPixels[0]!)).toEqual([10, 30]);
+  });
+});
+
+describe("applyStandardizeToRasterReportingProgress (CT-221)", () => {
+  it("matches the sync standardize and ticks once per band in both scopes", async () => {
+    const raster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const fullCubeTicks: number[] = [];
+    const fullCube = await applyStandardizeToRasterReportingProgress(
+      raster,
+      { scope: "full-cube" },
+      UNIT_TARGET,
+      (fraction) => fullCubeTicks.push(fraction),
+    );
+    expect(fullCube).toEqual(applyStandardizeToRaster(raster, { scope: "full-cube" }, UNIT_TARGET));
+    expect(fullCubeTicks).toEqual([0, 1 / 2, 1]);
+    const bandWiseTicks: number[] = [];
+    const bandWise = await applyStandardizeToRasterReportingProgress(
+      raster,
+      { scope: "band-wise", bandIndexes: [0] },
+      UNIT_TARGET,
+      (fraction) => bandWiseTicks.push(fraction),
+    );
+    expect(bandWise).toEqual(
+      applyStandardizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, UNIT_TARGET),
+    );
+    expect(bandWiseTicks).toEqual([0, 1 / 2, 1]);
   });
 });

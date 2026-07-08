@@ -1,4 +1,4 @@
-import { type DecodeUnitProgressCallback } from "@/lib/image/decode-progress";
+import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import { loadEnviAsRasterReportingPerBandProgress } from "@/lib/image/load-envi";
 import { loadRawAsRaster } from "@/lib/image/load-raw";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
@@ -23,7 +23,7 @@ const RAW_CAMERA_FILE_EXTENSIONS: ReadonlyArray<string> = [
 
 export async function decodeImageBytesToViewportSource(
   bundle: OpenedImageBundle,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<ViewportImageSource> {
   if (looksLikeEnviHeaderFileName(bundle.fileName)) {
     return decodeEnviHeaderAndBinaryAsRasterSource(bundle, onDecodeProgress);
@@ -39,7 +39,7 @@ export async function decodeImageBytesToViewportSource(
 
 async function decodeEnviHeaderAndBinaryAsRasterSource(
   bundle: OpenedImageBundle,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<ViewportImageSource> {
   if (!bundle.sidecarBytes) {
     throw new Error(
@@ -56,7 +56,7 @@ async function decodeEnviHeaderAndBinaryAsRasterSource(
 
 async function decodeTiffBytesAsRasterSource(
   bytes: Uint8Array,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<ViewportImageSource> {
   const raster = await loadTiffAsRaster(bytes, onDecodeProgress);
   return { kind: "raster", raster };

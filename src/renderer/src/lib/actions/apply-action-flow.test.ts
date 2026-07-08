@@ -479,6 +479,60 @@ function buildDuplicateFlowHarnessWithSourceRoi(
   };
 }
 
+describe("transform progress reaching the busy entry (CT-221)", () => {
+  it("forwards transformSourceAsync progress ticks to the busy entry as progress updates", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const progressUpdates: number[] = [];
+    const bindings = {
+      ...harness.bindings,
+      busyRegistrar: buildProgressRecordingBusyEntryRegistrar(progressUpdates),
+    };
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionReportingTransformProgress([0, 0.5, 1]),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      bindings,
+    );
+    expect(progressUpdates).toEqual([0, 0.5, 1]);
+  });
+});
+
+function buildProgressRecordingBusyEntryRegistrar(
+  progressUpdates: number[],
+): ApplyActionFlowBindings["busyRegistrar"] {
+  const handle = {
+    id: "test",
+    update: (next: { progress?: number | null }) => {
+      if (typeof next.progress === "number") progressUpdates.push(next.progress);
+    },
+    clear: () => undefined,
+  };
+  return { registerAppBusyEntry: () => handle, registerViewportBusyEntry: () => handle };
+}
+
+function buildActionReportingTransformProgress(
+  ticks: ReadonlyArray<number>,
+): RegisteredViewportAction {
+  return {
+    id: "progressive",
+    label: "Progressive",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Progressive",
+    apply: (state: ViewportRenderingState) => state,
+    transformSourceAsync: async (
+      _source: ViewportImageSource,
+      _parameterValues: unknown,
+      onProgress?: (fraction: number) => void,
+    ) => {
+      for (const tick of ticks) onProgress?.(tick);
+      return buildSinglePixelSource();
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
 function buildSampleRoi(): ViewportRoi {
   return { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 4, imagePixelY1: 6 };
 }

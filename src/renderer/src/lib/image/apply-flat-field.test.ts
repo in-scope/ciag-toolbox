@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import {
+  applyFlatFieldToRasterImage,
+  applyFlatFieldToRasterImageReportingProgress,
+} from "@/lib/image/apply-flat-field";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
 describe("applyFlatFieldToRasterImage", () => {
@@ -101,3 +104,19 @@ function buildRaster(
     bandCount: bandPixels.length,
   };
 }
+
+describe("applyFlatFieldToRasterImageReportingProgress (CT-221)", () => {
+  it("matches the sync correction and ticks once per band", async () => {
+    const target = buildRaster([new Uint8Array([4, 8]), new Uint8Array([6, 2])]);
+    const light = buildRaster([new Uint8Array([2, 6]), new Uint8Array([3, 1])]);
+    const ticks: number[] = [];
+    const result = await applyFlatFieldToRasterImageReportingProgress(
+      target,
+      light,
+      undefined,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(result).toEqual(applyFlatFieldToRasterImage(target, light));
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+});

@@ -1,4 +1,4 @@
-import { type DecodeUnitProgressCallback } from "@/lib/image/decode-progress";
+import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import { describeSupportedEnviDataTypeOrThrow } from "@/lib/image/envi-data-type";
 import {
   parseEnviHeaderText,
@@ -24,7 +24,7 @@ export function loadEnviAsRaster(
 export async function loadEnviAsRasterReportingPerBandProgress(
   headerBytes: Uint8Array,
   binaryBytes: Uint8Array,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
   const header = parseEnviHeaderText(decodeHeaderBytesAsUtf8Text(headerBytes));
   const bandPixels = await readEnviBinaryAsBandPixelsReportingPerBandProgress(

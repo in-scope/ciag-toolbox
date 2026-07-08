@@ -22,8 +22,10 @@ function makeTwoBandRampStack(): RasterImage {
   };
 }
 
-function transformRaster(parameterValues: Record<string, number | string | boolean>): RasterImage {
-  const result = PERCENTILE_CLIP_ACTION.transformSource!(
+async function transformRaster(
+  parameterValues: Record<string, number | string | boolean>,
+): Promise<RasterImage> {
+  const result = await PERCENTILE_CLIP_ACTION.transformSourceAsync!(
     { kind: "raster", raster: makeTwoBandRampStack() },
     parameterValues,
   );
@@ -44,8 +46,8 @@ describe("readPercentileClipBounds", () => {
 });
 
 describe("PERCENTILE_CLIP_ACTION", () => {
-  it("clips every band to one whole-stack cut-point pair under the default full-stack scope", () => {
-    const raster = transformRaster({ lowerPercentile: 25, upperPercentile: 75 });
+  it("clips every band to one whole-stack cut-point pair under the default full-stack scope", async () => {
+    const raster = await transformRaster({ lowerPercentile: 25, upperPercentile: 75 });
     expect(raster.sampleFormat).toBe("float");
     expect(raster.bitsPerSample).toBe(32);
     expect(raster.bandCount).toBe(2);
@@ -57,8 +59,8 @@ describe("PERCENTILE_CLIP_ACTION", () => {
     expect(raster.bandPixels[1]![15]).toBeCloseTo(107.25, 5);
   });
 
-  it("gives each entered band its own cut points under band-wise scope and carries the rest", () => {
-    const raster = transformRaster({
+  it("gives each entered band its own cut points under band-wise scope and carries the rest", async () => {
+    const raster = await transformRaster({
       lowerPercentile: 25,
       upperPercentile: 75,
       scope: "band-wise",
@@ -71,13 +73,13 @@ describe("PERCENTILE_CLIP_ACTION", () => {
     );
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", () => {
+  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
     const prepared = PERCENTILE_CLIP_ACTION.prepareParameterValuesForApply!(
       { lowerPercentile: 25, upperPercentile: 75, scope: "band-wise" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
     );
-    const raster = transformRaster({ ...prepared });
+    const raster = await transformRaster({ ...prepared });
     expect(Array.from(raster.bandPixels[0]!)).toEqual(
       Array.from({ length: 16 }, (_unused, index) => index),
     );
@@ -85,22 +87,22 @@ describe("PERCENTILE_CLIP_ACTION", () => {
     expect(raster.bandPixels[1]![15]).toBeCloseTo(111.25, 5);
   });
 
-  it("is a no-op at the 0/100 percentiles", () => {
-    const raster = transformRaster({ lowerPercentile: 0, upperPercentile: 100 });
+  it("is a no-op at the 0/100 percentiles", async () => {
+    const raster = await transformRaster({ lowerPercentile: 0, upperPercentile: 100 });
     expect(Array.from(raster.bandPixels[0]!)).toEqual(
       Array.from({ length: 16 }, (_unused, index) => index),
     );
   });
 
-  it("rejects an invalid band range with a user-facing error", () => {
-    expect(() => transformRaster({ scope: "band-wise", bandRange: "9" })).toThrow(/band/i);
+  it("rejects an invalid band range with a user-facing error", async () => {
+    await expect(transformRaster({ scope: "band-wise", bandRange: "9" })).rejects.toThrow(/band/i);
   });
 
-  it("rejects inverted or out-of-range percentiles with user-facing errors", () => {
-    expect(() => transformRaster({ lowerPercentile: 60, upperPercentile: 40 })).toThrow(
+  it("rejects inverted or out-of-range percentiles with user-facing errors", async () => {
+    await expect(transformRaster({ lowerPercentile: 60, upperPercentile: 40 })).rejects.toThrow(
       /upper percentile at or above the lower/i,
     );
-    expect(() => transformRaster({ lowerPercentile: -5, upperPercentile: 98 })).toThrow(
+    await expect(transformRaster({ lowerPercentile: -5, upperPercentile: 98 })).rejects.toThrow(
       /lower percentile between 0 and 100/i,
     );
   });
@@ -117,5 +119,27 @@ describe("PERCENTILE_CLIP_ACTION", () => {
         bandRange: "1-2",
       }),
     ).toBe("Percentile clip (5 - 95%, band-wise: bands 1-2)");
+  });
+});
+
+describe("PERCENTILE_CLIP_ACTION progress (CT-221)", () => {
+  it("reports one tick per band under the full-stack scope", async () => {
+    const ticks: number[] = [];
+    await PERCENTILE_CLIP_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandRampStack() },
+      { lowerPercentile: 25, upperPercentile: 75 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("reports one tick per band under the band-wise scope including carried-through bands", async () => {
+    const ticks: number[] = [];
+    await PERCENTILE_CLIP_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandRampStack() },
+      { lowerPercentile: 25, upperPercentile: 75, scope: "band-wise", bandRange: "1" },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
   });
 });

@@ -89,7 +89,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
-    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings);
+    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings, handle);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -115,14 +115,28 @@ async function replaceSourceAtIndexWithTransformedSource(
   parameterValues: ParameterValuesById,
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle,
 ): Promise<void> {
   if (!actionTransformsSource(action)) return;
   const content = bindings.imagesByIndex.get(sourceIndex);
   if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
-  const nextSource = await runActionSourceTransform(action, content.source, parameterValues);
+  const nextSource = await runActionSourceTransform(
+    action,
+    content.source,
+    parameterValues,
+    forwardTransformProgressToBusyEntry(busyHandle),
+  );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
   );
+}
+
+// CT-221: async transforms report per-band progress; forwarding it to the busy
+// entry turns the operation overlay's spinner into a percentage bar.
+function forwardTransformProgressToBusyEntry(
+  busyHandle: BusyEntryHandle,
+): (fraction: number) => void {
+  return (fraction) => busyHandle.update({ progress: fraction });
 }
 
 function writeAppliedRenderingStateInheritingFromSource(
@@ -323,13 +337,14 @@ export async function runDuplicateAndApplyAtTargetIndex(
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
-    if (actionTransformsSource(action)) {
+    if (actionTransformsSource(action) && handle) {
       await placeTransformedDuplicateAtTargetIndex(
         action,
         parameterValues,
         sourceContent,
         targetIndex,
         bindings,
+        handle,
       );
     } else {
       await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
@@ -396,11 +411,13 @@ async function placeTransformedDuplicateAtTargetIndex(
   sourceContent: ViewportCellContent,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle,
 ): Promise<void> {
   const transformedContent = await cloneAndTransformSourceContent(
     sourceContent,
     action,
     parameterValues,
+    busyHandle,
   );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, targetIndex, transformedContent),
@@ -411,9 +428,15 @@ async function cloneAndTransformSourceContent(
   sourceContent: ViewportCellContent,
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
+  busyHandle: BusyEntryHandle,
 ): Promise<ViewportCellContent> {
   const clonedSource = await cloneViewportImageSource(sourceContent.source);
-  const transformedSource = await runActionSourceTransform(action, clonedSource, parameterValues);
+  const transformedSource = await runActionSourceTransform(
+    action,
+    clonedSource,
+    parameterValues,
+    forwardTransformProgressToBusyEntry(busyHandle),
+  );
   return {
     fileName: sourceContent.fileName,
     source: transformedSource,

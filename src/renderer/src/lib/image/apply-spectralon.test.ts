@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
+import {
+  applySpectralonReflectanceCalibration,
+  applySpectralonReflectanceCalibrationReportingProgress,
+} from "@/lib/image/apply-spectralon";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
@@ -93,3 +96,21 @@ function build2x2Raster(bandPixels: ReadonlyArray<RasterTypedArray>): RasterImag
     bandCount: bandPixels.length,
   };
 }
+
+describe("applySpectralonReflectanceCalibrationReportingProgress (CT-221)", () => {
+  it("matches the sync calibration and ticks once per band", async () => {
+    const target = build2x2Raster([
+      new Uint16Array([50, 70, 10, 30]),
+      new Uint16Array([20, 60, 40, 80]),
+    ]);
+    const options = { brightRoi: WHOLE_IMAGE, reflectance: 1 };
+    const ticks: number[] = [];
+    const result = await applySpectralonReflectanceCalibrationReportingProgress(
+      target,
+      options,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(result).toEqual(applySpectralonReflectanceCalibration(target, options));
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+});

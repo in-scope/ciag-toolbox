@@ -22,8 +22,10 @@ function makeSpikedTwoBandStack(): RasterImage {
   };
 }
 
-function transformRaster(parameterValues: Record<string, number | string | boolean>): RasterImage {
-  const result = DENOISE_ACTION.transformSource!(
+async function transformRaster(
+  parameterValues: Record<string, number | string | boolean>,
+): Promise<RasterImage> {
+  const result = await DENOISE_ACTION.transformSourceAsync!(
     { kind: "raster", raster: makeSpikedTwoBandStack() },
     parameterValues,
   );
@@ -48,8 +50,8 @@ describe("readDenoiseSettings", () => {
 });
 
 describe("DENOISE_ACTION", () => {
-  it("median-denoises every band under the default full-stack scope into a float32 stack", () => {
-    const raster = transformRaster({ method: "median", medianRadius: 1 });
+  it("median-denoises every band under the default full-stack scope into a float32 stack", async () => {
+    const raster = await transformRaster({ method: "median", medianRadius: 1 });
     expect(raster.sampleFormat).toBe("float");
     expect(raster.bitsPerSample).toBe(32);
     expect(raster.bandCount).toBe(2);
@@ -59,16 +61,16 @@ describe("DENOISE_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual(Array.from(new Float32Array(16).fill(40)));
   });
 
-  it("Gaussian-denoises with a normalized kernel so a flat band stays flat", () => {
-    const raster = transformRaster({ method: "gaussian", gaussianSigma: 1 });
+  it("Gaussian-denoises with a normalized kernel so a flat band stays flat", async () => {
+    const raster = await transformRaster({ method: "gaussian", gaussianSigma: 1 });
     const spikedResult = raster.bandPixels[0]!;
     expect(spikedResult[5]).toBeGreaterThan(100);
     expect(spikedResult[5]).toBeLessThan(200);
     for (const value of raster.bandPixels[1]!) expect(value).toBeCloseTo(40, 4);
   });
 
-  it("denoises only the entered bands under band-wise scope and carries the rest unchanged", () => {
-    const raster = transformRaster({
+  it("denoises only the entered bands under band-wise scope and carries the rest unchanged", async () => {
+    const raster = await transformRaster({
       method: "median",
       medianRadius: 1,
       scope: "band-wise",
@@ -78,22 +80,22 @@ describe("DENOISE_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual(Array.from(new Float32Array(16).fill(40)));
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", () => {
+  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
     const prepared = DENOISE_ACTION.prepareParameterValuesForApply!(
       { method: "median", medianRadius: 1, scope: "band-wise" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
     );
-    const raster = transformRaster({ ...prepared });
+    const raster = await transformRaster({ ...prepared });
     const spikedCarriedThrough = raster.bandPixels[0]!;
     expect(spikedCarriedThrough[5]).toBe(255);
     expect(Array.from(raster.bandPixels[1]!)).toEqual(Array.from(new Float32Array(16).fill(40)));
   });
 
-  it("rejects an invalid band range with a user-facing error", () => {
-    expect(() =>
+  it("rejects an invalid band range with a user-facing error", async () => {
+    await expect(
       transformRaster({ method: "median", scope: "band-wise", bandRange: "9" }),
-    ).toThrow(/band/i);
+    ).rejects.toThrow(/band/i);
   });
 
   it("records method, parameter, and scope in the applied label for the audit trail", () => {
@@ -108,5 +110,17 @@ describe("DENOISE_ACTION", () => {
         bandRange: "1-2",
       }),
     ).toBe("Denoise (median, radius 2, band-wise: bands 1-2)");
+  });
+});
+
+describe("DENOISE_ACTION progress (CT-221)", () => {
+  it("reports a monotonic 0-to-1 tick sequence with one tick per band", async () => {
+    const ticks: number[] = [];
+    await DENOISE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeSpikedTwoBandStack() },
+      { method: "median", medianRadius: 1 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
   });
 });

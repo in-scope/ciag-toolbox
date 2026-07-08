@@ -50,9 +50,9 @@ import {
   isRasterDataRangeBoundedForInvert,
   planInvertForRaster,
 } from "@/lib/image/apply-invert";
-import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import { applyFlatFieldToRasterImageReportingProgress } from "@/lib/image/apply-flat-field";
 import {
-  applyNormalizeToRaster,
+  applyNormalizeToRasterReportingProgress,
   MIN_MAX_NORMALIZE_METHOD,
   type NormalizeRangeMethod,
 } from "@/lib/image/apply-normalize";
@@ -62,8 +62,8 @@ import {
   LUMINANCE_GRAYSCALE_WEIGHTS,
   type RgbToGrayscaleWeights,
 } from "@/lib/image/apply-rgb-to-grayscale";
-import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
-import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
+import { applySpectralonReflectanceCalibrationReportingProgress } from "@/lib/image/apply-spectralon";
+import { applyStandardizeToRasterReportingProgress } from "@/lib/image/apply-standardize";
 import {
   formatBandNumbersAsRangeText,
   parseBandRangeText,
@@ -113,6 +113,7 @@ import type {
   ViewportAction,
   ViewportActionOutput,
   ViewportActionSecondaryOutputsTransform,
+  ViewportActionAsyncSourceTransform,
   ViewportActionSourceApplicabilityCheck,
   ViewportActionSourceTransform,
 } from "./viewport-action";
@@ -502,15 +503,20 @@ export const FLAT_FIELD_ACTION: RegisteredViewportAction = {
   loadingMessage: "Applying flat-field correction...",
   formatAppliedLabel: formatFlatFieldAppliedLabel,
   apply: (state) => state,
-  transformSource: createFlatFieldSourceTransform(),
+  transformSourceAsync: createFlatFieldSourceTransform(),
 };
 
-function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createFlatFieldSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const lightReference = resolveRequiredLightReferenceOrThrow(parameterValues);
     const darkReference = resolveOptionalDarkReferenceOrThrow(parameterValues);
-    const raster = applyFlatFieldToRasterImage(source.raster, lightReference, darkReference ?? undefined);
+    const raster = await applyFlatFieldToRasterImageReportingProgress(
+      source.raster,
+      lightReference,
+      darkReference ?? undefined,
+      onProgress,
+    );
     return { kind: "raster", raster };
   };
 }
@@ -580,7 +586,7 @@ export const SPECTRALON_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareSpectralonBrightRegionFromOperationRegion,
   apply: clearOperationRegionFromState,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createSpectralonSourceTransform(),
+  transformSourceAsync: createSpectralonSourceTransform(),
 };
 
 const SPECTRALON_BRIGHT_REGION_PARAMETER_IDS = {
@@ -598,12 +604,16 @@ function prepareSpectralonBrightRegionFromOperationRegion(
   return injectOperationRegionCorners(rawParameterValues, region, SPECTRALON_BRIGHT_REGION_PARAMETER_IDS);
 }
 
-function createSpectralonSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createSpectralonSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const brightRoi = readSpectralonBrightRoiOrThrow(parameterValues);
     const reflectance = readSpectralonReflectanceFromParameterValues(parameterValues);
-    const raster = applySpectralonReflectanceCalibration(source.raster, { brightRoi, reflectance });
+    const raster = await applySpectralonReflectanceCalibrationReportingProgress(
+      source.raster,
+      { brightRoi, reflectance },
+      onProgress,
+    );
     return { kind: "raster", raster };
   };
 }
@@ -1224,7 +1234,7 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatNormalizeAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForNormalize,
   apply: (state) => state,
-  transformSource: createNormalizeSourceTransform(),
+  transformSourceAsync: createNormalizeSourceTransform(),
 };
 
 function injectSelectedBandIndexForNormalize(
@@ -1237,12 +1247,13 @@ function injectSelectedBandIndexForNormalize(
   });
 }
 
-function createNormalizeSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createNormalizeSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveNormalizeScopeSelection(parameterValues, source.raster.bandCount);
     const method = resolveNormalizeRangeMethod(parameterValues);
-    return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection, method) };
+    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -1401,7 +1412,7 @@ export const STANDARDIZE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatStandardizeAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForStandardize,
   apply: (state) => state,
-  transformSource: createStandardizeSourceTransform(),
+  transformSourceAsync: createStandardizeSourceTransform(),
 };
 
 function injectSelectedBandIndexForStandardize(
@@ -1414,12 +1425,13 @@ function injectSelectedBandIndexForStandardize(
   });
 }
 
-function createStandardizeSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createStandardizeSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveStandardizeScopeSelection(parameterValues, source.raster.bandCount);
     const target = readStandardizeTargetDistribution(parameterValues);
-    return { kind: "raster", raster: applyStandardizeToRaster(source.raster, selection, target) };
+    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress);
+    return { kind: "raster", raster };
   };
 }
 

@@ -1,5 +1,5 @@
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
-import { type DecodeUnitProgressCallback } from "@/lib/image/decode-progress";
+import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import {
   proposeGroupsForOpenedFiles,
   type OpenedFileForGrouping,
@@ -81,7 +81,7 @@ function reportReadProgress(
 
 export async function readAndDecodeSingleOpenedImageFile(
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<OpenedFileForGrouping> {
   const entry = await window.toolboxApi.readOpenedImageFile(metadata);
   const decoded = await tryDecodeOpenedImageEntry(entry, onDecodeProgress);
@@ -95,7 +95,7 @@ interface DecodedSourceOrError {
 
 async function tryDecodeOpenedImageEntry(
   entry: ToolboxOpenedImagesFileEntry,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<DecodedSourceOrError> {
   try {
     const source = await decodeImageBytesToViewportSource(

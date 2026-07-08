@@ -1,8 +1,8 @@
 import {
-  reportCompletedDecodeUnitAndYieldSoProgressCanPaint,
-  reportMultiUnitDecodeStarting,
-  type DecodeUnitProgressCallback,
-} from "@/lib/image/decode-progress";
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 import {
   describeSupportedEnviDataTypeOrThrow,
   type EnviDataTypeDescriptor,
@@ -26,13 +26,13 @@ export function readEnviBinaryAsBandPixels(
 export async function readEnviBinaryAsBandPixelsReportingPerBandProgress(
   header: EnviHeader,
   binary: Uint8Array,
-  onDecodeProgress?: DecodeUnitProgressCallback,
+  onDecodeProgress?: UnitProgressCallback,
 ): Promise<ReadonlyArray<RasterTypedArray>> {
   const read = prepareEnviBandRead(header, binary);
-  reportMultiUnitDecodeStarting(onDecodeProgress, read.layout.bands);
+  reportMultiUnitWorkStarting(onDecodeProgress, read.layout.bands);
   for (let bandIndex = 0; bandIndex < read.layout.bands; bandIndex++) {
     fillSingleBandFromBinary(read, bandIndex);
-    await reportCompletedDecodeUnitAndYieldSoProgressCanPaint(onDecodeProgress, bandIndex + 1, read.layout.bands);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onDecodeProgress, bandIndex + 1, read.layout.bands);
   }
   return read.bandPixels;
 }

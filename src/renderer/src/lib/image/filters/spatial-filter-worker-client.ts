@@ -1,4 +1,9 @@
 import type { RasterTypedArray } from "@/lib/image/raster-image";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 import type {
   BandSpatialShape,
@@ -28,10 +33,11 @@ export async function filterBandsOnDedicatedSpatialFilterWorker(
   bands: ReadonlyArray<SpatialFilterBandInput>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
 ): Promise<Map<number, Float32Array>> {
   const worker = spawnSpatialFilterWorker();
   try {
-    return await filterEachBandSequentially(worker, bands, shape, settings);
+    return await filterEachBandSequentially(worker, bands, shape, settings, onProgress);
   } finally {
     worker.terminate();
   }
@@ -48,11 +54,14 @@ async function filterEachBandSequentially(
   bands: ReadonlyArray<SpatialFilterBandInput>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
 ): Promise<Map<number, Float32Array>> {
   const filteredByBandIndex = new Map<number, Float32Array>();
+  reportMultiUnitWorkStarting(onProgress, bands.length);
   for (const [requestId, band] of bands.entries()) {
     const request = { requestId, band: band.pixels, shape, settings };
     filteredByBandIndex.set(band.bandIndex, await requestSingleBandFilter(worker, request));
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, requestId + 1, bands.length);
   }
   return filteredByBandIndex;
 }

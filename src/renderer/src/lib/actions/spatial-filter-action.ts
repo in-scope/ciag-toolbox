@@ -15,6 +15,11 @@ import {
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { getRasterBandPixelsOrThrow, type RasterImage } from "@/lib/image/raster-image";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -216,6 +221,7 @@ function assertSpatialFilterSourceFitsWorkingGrid(source: ViewportImageSource): 
 async function transformSourceThroughSpatialFilter(
   rawSource: ViewportImageSource,
   parameterValues: ParameterValuesById,
+  onProgress?: UnitProgressCallback,
 ): Promise<ViewportImageSource> {
   const source = coerceViewportSourceToRasterSource(rawSource);
   const settings = readSpatialFilterSettings(parameterValues);
@@ -224,7 +230,7 @@ async function transformSourceThroughSpatialFilter(
     parameterValues,
     source.raster.bandCount,
   );
-  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings);
+  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings, onProgress);
   return { kind: "raster", raster };
 }
 
@@ -232,25 +238,29 @@ async function filterBandsOfRaster(
   raster: RasterImage,
   filteredBandIndexes: ReadonlySet<number>,
   settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
-  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings);
+  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings, onProgress);
   return makeFloatRasterReusingUnchangedSourceBands(raster, filteredBandIndexes, (_band, index) =>
     readFilteredBandOrThrow(filteredByIndex, index),
   );
 }
 
+// CT-221: the progress fraction counts FILTERED bands (bands completed / bands to
+// filter), one tick as each band returns from the worker.
 function filterScopedBands(
   raster: RasterImage,
   filteredBandIndexes: ReadonlySet<number>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
 ): Promise<Map<number, Float32Array>> {
   const bands = listScopedBandInputs(raster, filteredBandIndexes);
   if (isSpatialFilterWorkerAvailable()) {
-    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings);
+    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings, onProgress);
   }
-  return Promise.resolve(filterBandsOnThisThread(bands, shape, settings));
+  return filterBandsOnThisThread(bands, shape, settings, onProgress);
 }
 
 function listScopedBandInputs(
@@ -263,16 +273,22 @@ function listScopedBandInputs(
 }
 
 // Vitest's node environment has no Web Worker; the same reusable-grid filter
-// runs inline there (and in any runtime without workers).
-function filterBandsOnThisThread(
+// runs inline there (and in any runtime without workers), with the same
+// per-band progress ticks and paint yields.
+async function filterBandsOnThisThread(
   bands: ReadonlyArray<SpatialFilterBandInput>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
-): Map<number, Float32Array> {
+  onProgress?: UnitProgressCallback,
+): Promise<Map<number, Float32Array>> {
   const reusableGrid = createReusableSpatialFilterGrid();
-  return new Map(
-    bands.map((band) => [band.bandIndex, reusableGrid.filterBand(band.pixels, shape, settings)]),
-  );
+  const filteredByBandIndex = new Map<number, Float32Array>();
+  reportMultiUnitWorkStarting(onProgress, bands.length);
+  for (const [completedBefore, band] of bands.entries()) {
+    filteredByBandIndex.set(band.bandIndex, reusableGrid.filterBand(band.pixels, shape, settings));
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length);
+  }
+  return filteredByBandIndex;
 }
 
 function readFilteredBandOrThrow(

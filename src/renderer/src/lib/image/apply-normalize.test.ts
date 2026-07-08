@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyNormalizeToRasterReportingProgress,
   applyNormalizeToRaster,
   clampValueToAbsoluteBounds,
   type NormalizeRangeMethod,
@@ -215,3 +216,46 @@ function makeThreeBandFloat32Raster(): RasterImage {
     bitsPerSample: 32,
   };
 }
+
+describe("applyNormalizeToRasterReportingProgress (CT-221)", () => {
+  it("matches the sync normalize and ticks once per band in full-cube scope", async () => {
+    const raster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const ticks: number[] = [];
+    const result = await applyNormalizeToRasterReportingProgress(
+      raster,
+      { scope: "full-cube" },
+      undefined,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(result).toEqual(applyNormalizeToRaster(raster, { scope: "full-cube" }));
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("matches the sync normalize and ticks once per band in band-wise scope", async () => {
+    const raster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const ticks: number[] = [];
+    const result = await applyNormalizeToRasterReportingProgress(
+      raster,
+      { scope: "band-wise", bandIndexes: [1] },
+      undefined,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(result).toEqual(applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [1] }));
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("matches the sync clip-by-value path and preserves the source data type", async () => {
+    const raster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const method = { kind: "clip-absolute", bounds: { lo: 50, hi: 150 } } as const;
+    const ticks: number[] = [];
+    const result = await applyNormalizeToRasterReportingProgress(
+      raster,
+      { scope: "full-cube" },
+      method,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(result).toEqual(applyNormalizeToRaster(raster, { scope: "full-cube" }, method));
+    expect(result.bandPixels[0]).toBeInstanceOf(Uint8Array);
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+});

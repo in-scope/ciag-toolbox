@@ -1,9 +1,10 @@
 import { Droplets } from "lucide-react";
 
 import { applyDenoiseToBand, type DenoiseMethod, type DenoiseSettings } from "@/lib/image/filters/denoise";
-import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
+import { makeFloatRasterReusingUnchangedSourceBandsReportingProgress } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 
 import {
   describeCubeScopeForAppliedLabel,
@@ -21,7 +22,7 @@ import {
   type ParameterValuesById,
 } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
-import type { ViewportActionSourceTransform, ViewportRenderingState } from "./viewport-action";
+import type { ViewportActionAsyncSourceTransform, ViewportRenderingState } from "./viewport-action";
 
 // CT-204: denoising within each band's picture. The method selector picks a
 // Gaussian blur (separable convolution, sigma) or a median rank filter
@@ -117,7 +118,7 @@ export const DENOISE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatDenoiseAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIntoDenoiseParameters,
   apply: (state) => state,
-  transformSource: createDenoiseSourceTransform(),
+  transformSourceAsync: createDenoiseSourceTransform(),
 };
 
 // Band-wise scope with an empty range falls back to the band the user is
@@ -161,8 +162,8 @@ function readFiniteNumberOrDefault(value: ParameterValue | undefined, fallback: 
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function createDenoiseSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createDenoiseSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const settings = readDenoiseSettings(parameterValues);
     const denoisedBandIndexes = resolveScopedBandIndexSet(
@@ -170,7 +171,8 @@ function createDenoiseSourceTransform(): ViewportActionSourceTransform {
       parameterValues,
       source.raster.bandCount,
     );
-    return { kind: "raster", raster: denoiseBandsOfRaster(source.raster, denoisedBandIndexes, settings) };
+    const raster = await denoiseBandsOfRaster(source.raster, denoisedBandIndexes, settings, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -178,10 +180,14 @@ function denoiseBandsOfRaster(
   raster: RasterImage,
   denoisedBandIndexes: ReadonlySet<number>,
   settings: DenoiseSettings,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
-  return makeFloatRasterReusingUnchangedSourceBands(raster, denoisedBandIndexes, (band) =>
-    applyDenoiseToBand(band, shape, settings),
+  return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+    raster,
+    denoisedBandIndexes,
+    (band) => applyDenoiseToBand(band, shape, settings),
+    onProgress,
   );
 }
 

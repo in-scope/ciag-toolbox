@@ -137,3 +137,25 @@ describe("SPATIAL_FILTER_ACTION", () => {
     ).toBe("Spatial filter (bandpass 0.05 - 0.25, full stack)");
   });
 });
+
+describe("SPATIAL_FILTER_ACTION progress (CT-221)", () => {
+  it("counts filtered bands only: the full stack ticks once per band", async () => {
+    const ticks: number[] = [];
+    await SPATIAL_FILTER_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoFlatBandStack() },
+      { mode: "highpass", highpassCutoff: 0.02 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+
+  it("counts filtered bands only: a single band-wise band reports one completion tick", async () => {
+    const ticks: number[] = [];
+    await SPATIAL_FILTER_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoFlatBandStack() },
+      { mode: "highpass", highpassCutoff: 0.02, scope: "band-wise", bandRange: "1" },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([1]);
+  });
+});

@@ -514,13 +514,13 @@ describe("INVERT_ACTION", () => {
 });
 
 describe("NORMALIZE_DATA_ACTION", () => {
-  it("normalizes the whole cube by one cube-wide min and max in full-cube scope", () => {
+  it("normalizes the whole cube by one cube-wide min and max in full-cube scope", async () => {
     const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
       { scope: "full-cube" },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = NORMALIZE_DATA_ACTION.transformSource!(
+    const result = await NORMALIZE_DATA_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
       prepared,
     );
@@ -528,14 +528,14 @@ describe("NORMALIZE_DATA_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual([0.5, 1]);
   });
 
-  it("normalizes only the selected band by its own min and max in band-wise scope", () => {
+  it("normalizes only the selected band by its own min and max in band-wise scope", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 };
     const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
       { scope: "band-wise" },
       state,
       "whole-image",
     );
-    const result = NORMALIZE_DATA_ACTION.transformSource!(
+    const result = await NORMALIZE_DATA_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
       prepared,
     );
@@ -552,8 +552,8 @@ describe("NORMALIZE_DATA_ACTION", () => {
     expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(bandWise)).toBe("Normalize to [0,1] (band-wise: bands 3)");
   });
 
-  it("normalizes the explicit band set from a band-range expression (CT-110)", () => {
-    const result = NORMALIZE_DATA_ACTION.transformSource!(
+  it("normalizes the explicit band set from a band-range expression (CT-110)", async () => {
+    const result = await NORMALIZE_DATA_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandUint8Raster([0, 100], [0, 50], [10, 30]) },
       { scope: "band-wise", bandRange: "1,3", targetBandIndex: 1 },
     );
@@ -574,23 +574,23 @@ describe("NORMALIZE_DATA_ACTION", () => {
     );
   });
 
-  it("throws a clear error for an out-of-range band expression (CT-110)", () => {
-    expect(() =>
-      NORMALIZE_DATA_ACTION.transformSource!(
+  it("throws a clear error for an out-of-range band expression (CT-110)", async () => {
+    await expect(
+      NORMALIZE_DATA_ACTION.transformSourceAsync!(
         { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
         { scope: "band-wise", bandRange: "5", targetBandIndex: 0 },
       ),
-    ).toThrow(/out of range/i);
+    ).rejects.toThrow(/out of range/i);
   });
 
-  it("stretches the bulk past the sparse outlier with the robust percentile method (CT-107)", () => {
+  it("stretches the bulk past the sparse outlier with the robust percentile method (CT-107)", async () => {
     const bulk = Array.from({ length: 99 }, (_unused, index) => index);
     const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
       { scope: "band-wise", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    const result = NORMALIZE_DATA_ACTION.transformSource!(
+    const result = await NORMALIZE_DATA_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeSingleBandUint16Raster([...bulk, 1000]) },
       prepared,
     );

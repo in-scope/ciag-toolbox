@@ -1,9 +1,12 @@
 import {
   makeFloatRasterFromBandComputation,
+  makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBands,
+  makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 
 // CT-084: data-changing standardize to a target mean and standard deviation.
 // Full cube uses one cube-wide mean/std; band-wise uses each selected band's own
@@ -33,6 +36,30 @@ export function applyStandardizeToRaster(
 ): RasterImage {
   if (selection.scope === "full-cube") return standardizeWholeCubeToTarget(raster, target);
   return standardizeSelectedBandsIndependentlyToTarget(raster, selection.bandIndexes, target);
+}
+
+// CT-221: the async twin of applyStandardizeToRaster. Identical per-band math, one
+// progress tick per band so a long standardize can drive a determinate indicator.
+export async function applyStandardizeToRasterReportingProgress(
+  raster: RasterImage,
+  selection: StandardizeScopeSelection,
+  target: StandardizeTargetDistribution,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  if (selection.scope === "full-cube") {
+    const cubeStatistics = computeCubeWideMeanAndStandardDeviation(raster);
+    return makeFloatRasterFromBandComputationReportingProgress(
+      raster,
+      (bandPixels) => standardizePixelsWithStatistics(bandPixels, cubeStatistics, target),
+      onProgress,
+    );
+  }
+  return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+    raster,
+    new Set(selection.bandIndexes),
+    (bandPixels) => standardizeSingleBandToTarget(bandPixels, target),
+    onProgress,
+  );
 }
 
 function standardizeWholeCubeToTarget(

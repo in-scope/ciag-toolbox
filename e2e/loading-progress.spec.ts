@@ -3,15 +3,15 @@ import { rm } from "node:fs/promises";
 import type { Locator, Page } from "@playwright/test";
 
 import {
+  constantBandStackValueForBand,
   LOADING_PROGRESS_STACK,
-  loadingProgressStackValueForBand,
-  writeTemporaryLoadingProgressStackTiff,
-} from "./support/generate-loading-progress-stack";
+  readAnyHoveredPixelValue,
+  writeTemporaryConstantBandStackTiff,
+} from "./support/constant-band-stack";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import { enqueueAndTriggerOpenImages } from "./support/open-images-flow";
-import { panelCanvas, panelGrid } from "./support/panels";
-import { statusBar } from "./support/pixel-readout";
+import { panelGrid } from "./support/panels";
 
 // CT-220: opening a large single multiband TIFF must show DETERMINATE progress (a
 // progress bar plus a percentage number) on the destination viewport's busy overlay
@@ -42,7 +42,7 @@ test.afterEach(async () => {
 test("a long single-file load shows percentage progress on the viewport overlay and loads true values", async () => {
   test.setTimeout(300_000);
   const page = launched.window;
-  const generated = await writeTemporaryLoadingProgressStackTiff();
+  const generated = await writeTemporaryConstantBandStackTiff(LOADING_PROGRESS_STACK);
   generatedDirectory = generated.directory;
   await enqueueAndTriggerOpenImages(page, [generated.filePath]);
   await expectViewportOverlayShowsPercentageProgress(page);
@@ -73,40 +73,5 @@ async function expectStackFinishesLoading(page: Page): Promise<void> {
 
 async function expectHoveredPixelReadsBandOneConstant(page: Page): Promise<void> {
   const value = await readAnyHoveredPixelValue(page, 1);
-  expect(value).toBe(loadingProgressStackValueForBand(0));
-}
-
-// Every pixel of a band holds the same value, so the oracle does not need an exact
-// pixel hover at this scale: whatever pixel the status bar reports must read the
-// band constant.
-async function readAnyHoveredPixelValue(page: Page, panelNumber: number): Promise<number> {
-  const box = await panelCanvas(page, panelNumber).boundingBox();
-  if (!box) throw new Error(`Panel ${panelNumber} canvas has no bounding box`);
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    await hoverNearCanvasCenter(page, box, attempt);
-    const value = await tryReadPixelReadoutValueOrNull(page);
-    if (value !== null) return value;
-  }
-  throw new Error("Pixel readout never populated while hovering the loaded panel");
-}
-
-interface CanvasBox {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-async function hoverNearCanvasCenter(page: Page, box: CanvasBox, attempt: number): Promise<void> {
-  const nudgeX = attempt % 5;
-  const nudgeY = Math.floor(attempt / 5) % 3;
-  await page.mouse.move(box.x + box.width / 2 + nudgeX, box.y + box.height / 2 + nudgeY);
-  await page.waitForTimeout(60);
-}
-
-async function tryReadPixelReadoutValueOrNull(page: Page): Promise<number | null> {
-  const valueField = statusBar(page).getByTestId("pixel-readout-value");
-  if ((await valueField.count()) === 0) return null;
-  const value = Number.parseFloat((await valueField.innerText()).trim().replace(/,/g, ""));
-  return Number.isFinite(value) ? value : null;
+  expect(value).toBe(constantBandStackValueForBand(0));
 }

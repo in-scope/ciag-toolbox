@@ -1,5 +1,6 @@
 import {
   makeFloatRasterFromBandComputation,
+  makeFloatRasterFromBandComputationReportingProgress,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
 import {
@@ -8,6 +9,7 @@ import {
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 
 // CT-078 / CT-111: flat-field correction. Per band C = m * (R - D) / (F - D),
 // where R is the target band, F the light reference band, D the optional dark
@@ -36,6 +38,26 @@ export function applyFlatFieldToRasterImage(
       targetBandPixels,
       bandIndex,
     ),
+  );
+}
+
+// CT-221: the async twin of applyFlatFieldToRasterImage. Identical per-band math,
+// one progress tick per band so a long correction can drive a determinate indicator.
+export async function applyFlatFieldToRasterImageReportingProgress(
+  target: RasterImage,
+  lightReference: RasterImage,
+  darkReference?: RasterImage,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  assertReferenceIsCompatibleWithTarget(target, lightReference, "Light reference");
+  if (darkReference) {
+    assertReferenceIsCompatibleWithTarget(target, darkReference, "Dark reference");
+  }
+  return makeFloatRasterFromBandComputationReportingProgress(
+    target,
+    (targetBandPixels, bandIndex) =>
+      correctSingleBandWithFlatField({ target, lightReference, darkReference }, targetBandPixels, bandIndex),
+    onProgress,
   );
 }
 
