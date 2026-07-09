@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyDenoiseToBand,
+  applyDenoiseToBandInChunksReportingProgress,
   applyGaussianDenoise,
   applyMedianDenoise,
   buildNormalizedGaussianKernel,
@@ -119,5 +120,72 @@ describe("applyDenoiseToBand", () => {
     expect(median[1 * SHAPE_8X8.width + 1]).toBe(10);
     expect(gaussian[1 * SHAPE_8X8.width + 1]).toBeGreaterThan(10);
     expect(gaussian[1 * SHAPE_8X8.width + 1]).toBeLessThan(255);
+  });
+});
+
+// CT-226: the chunked twins share the row-range workers with the sync functions,
+// so their outputs are identical; between chunks they tick a monotonic 0..1
+// within-band fraction (Gaussian: horizontal pass = first half, vertical = second).
+describe("applyDenoiseToBandInChunksReportingProgress (CT-226)", () => {
+  const SHAPE = { width: 4, height: 6 };
+  const ONE_ROW_PER_CHUNK = 4;
+
+  function makeRampBand(): Uint16Array {
+    return Uint16Array.from({ length: 24 }, (_unused, index) => (index * 37) % 211);
+  }
+
+  it("matches the sync median denoise exactly", async () => {
+    const chunked = await applyDenoiseToBandInChunksReportingProgress(
+      makeRampBand(),
+      SHAPE,
+      { method: "median", radius: 1 },
+      undefined,
+      ONE_ROW_PER_CHUNK,
+    );
+    expect(Array.from(chunked)).toEqual(
+      Array.from(applyMedianDenoise(makeRampBand(), SHAPE, 1)),
+    );
+  });
+
+  it("matches the sync Gaussian denoise exactly", async () => {
+    const chunked = await applyDenoiseToBandInChunksReportingProgress(
+      makeRampBand(),
+      SHAPE,
+      { method: "gaussian", sigma: 1 },
+      undefined,
+      ONE_ROW_PER_CHUNK,
+    );
+    expect(Array.from(chunked)).toEqual(
+      Array.from(applyGaussianDenoise(makeRampBand(), SHAPE, 1)),
+    );
+  });
+
+  it("ticks one within-band fraction per median row chunk", async () => {
+    const ticks: number[] = [];
+    await applyDenoiseToBandInChunksReportingProgress(
+      makeRampBand(),
+      SHAPE,
+      { method: "median", radius: 1 },
+      (fraction) => ticks.push(fraction),
+      ONE_ROW_PER_CHUNK,
+    );
+    expect(ticks).toEqual([1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]);
+  });
+
+  it("splits Gaussian ticks between the horizontal and vertical passes", async () => {
+    const ticks: number[] = [];
+    await applyDenoiseToBandInChunksReportingProgress(
+      makeRampBand(),
+      SHAPE,
+      { method: "gaussian", sigma: 1 },
+      (fraction) => ticks.push(fraction),
+      ONE_ROW_PER_CHUNK,
+    );
+    expect(ticks.length).toBe(12);
+    expect(ticks[5]).toBe(0.5);
+    expect(ticks[11]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
   });
 });

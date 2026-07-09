@@ -113,14 +113,21 @@ describe("DENOISE_ACTION", () => {
   });
 });
 
-describe("DENOISE_ACTION progress (CT-221)", () => {
-  it("reports a monotonic 0-to-1 tick sequence with one tick per band", async () => {
+// CT-221 per-band completions plus CT-226 within-band row-chunk fractions: the
+// sequence is monotonic 0..1 and crosses the between-bands boundary.
+describe("DENOISE_ACTION progress (CT-221/CT-226)", () => {
+  it("reports a monotonic 0-to-1 sequence with within-band fractions", async () => {
     const ticks: number[] = [];
     await DENOISE_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeSpikedTwoBandStack() },
       { method: "median", medianRadius: 1 },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([0, 1 / 2, 1]);
+    expect(ticks[0]).toBe(0);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    expect(ticks).toContain(1 / 2);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
   });
 });

@@ -1,4 +1,9 @@
 import type { RasterTypedArray } from "@/lib/image/raster-image";
+import {
+  runInChunksReportingProgress,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 import type { BandSpatialShape } from "./spatial-frequency-filter";
 
@@ -8,12 +13,22 @@ import type { BandSpatialShape } from "./spatial-frequency-filter";
 // denoising is a rank filter over a square neighborhood. Both clamp
 // neighborhood coordinates to the band's edges, so a flat band passes through
 // unchanged.
+//
+// CT-226: the ...InChunksReportingProgress twins run the SAME row loops in row
+// chunks with a paint yield and a progress tick between chunks, so a
+// minutes-long band advances the busy bar continuously on the main thread. The
+// sync functions and the chunked twins share the row-range workers, so their
+// results are identical.
 
 export type DenoiseMethod = "gaussian" | "median";
 
 export type DenoiseSettings =
   | { readonly method: "gaussian"; readonly sigma: number }
   | { readonly method: "median"; readonly radius: number };
+
+// Roughly 2M pixels of kernel work per chunk keeps each main-thread slice in the
+// tens-of-milliseconds range at any image width.
+const DENOISE_PIXELS_PER_CHUNK = 2_000_000;
 
 export function applyDenoiseToBand(
   band: RasterTypedArray,
@@ -22,6 +37,19 @@ export function applyDenoiseToBand(
 ): Float32Array {
   if (settings.method === "median") return applyMedianDenoise(band, shape, settings.radius);
   return applyGaussianDenoise(band, shape, settings.sigma);
+}
+
+export async function applyDenoiseToBandInChunksReportingProgress(
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  settings: DenoiseSettings,
+  onProgress?: UnitProgressCallback,
+  pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
+): Promise<Float32Array> {
+  if (settings.method === "median") {
+    return applyMedianDenoiseInChunksReportingProgress(band, shape, settings.radius, onProgress, pixelsPerChunk);
+  }
+  return applyGaussianDenoiseInChunksReportingProgress(band, shape, settings.sigma, onProgress, pixelsPerChunk);
 }
 
 export function applyGaussianDenoise(
@@ -35,6 +63,44 @@ export function applyGaussianDenoise(
   return convolveEachColumnWithKernel(rowsSmoothed, shape, kernel);
 }
 
+// The horizontal pass fills the first half of the band's fraction, the vertical
+// pass the second half.
+export async function applyGaussianDenoiseInChunksReportingProgress(
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  sigma: number,
+  onProgress?: UnitProgressCallback,
+  pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
+): Promise<Float32Array> {
+  assertBandLengthMatchesShape(band, shape);
+  const kernel = buildNormalizedGaussianKernel(sigma);
+  const rowsSmoothed = new Float32Array(shape.width * shape.height);
+  await runInChunksReportingProgress(
+    shape.height,
+    denoiseRowsPerChunk(shape, pixelsPerChunk),
+    (yStart, yEnd) => convolveRowRangeWithKernel(band, shape, kernel, rowsSmoothed, yStart, yEnd),
+    scaleProgressToWindow(onProgress, 0, 0.5),
+  );
+  return convolveColumnsInChunksReportingProgress(rowsSmoothed, shape, kernel, onProgress, pixelsPerChunk);
+}
+
+async function convolveColumnsInChunksReportingProgress(
+  rowsSmoothed: Float32Array,
+  shape: BandSpatialShape,
+  kernel: Float64Array,
+  onProgress?: UnitProgressCallback,
+  pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
+): Promise<Float32Array> {
+  const out = new Float32Array(shape.width * shape.height);
+  await runInChunksReportingProgress(
+    shape.height,
+    denoiseRowsPerChunk(shape, pixelsPerChunk),
+    (yStart, yEnd) => convolveColumnRangeWithKernel(rowsSmoothed, shape, kernel, out, yStart, yEnd),
+    scaleProgressToWindow(onProgress, 0.5, 1),
+  );
+  return out;
+}
+
 export function applyMedianDenoise(
   band: RasterTypedArray,
   shape: BandSpatialShape,
@@ -44,12 +110,48 @@ export function applyMedianDenoise(
   assertBandLengthMatchesShape(band, shape);
   const out = new Float32Array(shape.width * shape.height);
   const window = new Float64Array((2 * radius + 1) * (2 * radius + 1));
-  for (let y = 0; y < shape.height; y += 1) {
+  medianDenoiseRowRange(band, shape, radius, out, window, 0, shape.height);
+  return out;
+}
+
+export async function applyMedianDenoiseInChunksReportingProgress(
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  radius: number,
+  onProgress?: UnitProgressCallback,
+  pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
+): Promise<Float32Array> {
+  assertMedianRadiusIsUsable(radius);
+  assertBandLengthMatchesShape(band, shape);
+  const out = new Float32Array(shape.width * shape.height);
+  const window = new Float64Array((2 * radius + 1) * (2 * radius + 1));
+  await runInChunksReportingProgress(
+    shape.height,
+    denoiseRowsPerChunk(shape, pixelsPerChunk),
+    (yStart, yEnd) => medianDenoiseRowRange(band, shape, radius, out, window, yStart, yEnd),
+    onProgress,
+  );
+  return out;
+}
+
+function denoiseRowsPerChunk(shape: BandSpatialShape, pixelsPerChunk: number): number {
+  return Math.max(1, Math.floor(pixelsPerChunk / Math.max(1, shape.width)));
+}
+
+function medianDenoiseRowRange(
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  radius: number,
+  out: Float32Array,
+  window: Float64Array,
+  yStart: number,
+  yEnd: number,
+): void {
+  for (let y = yStart; y < yEnd; y += 1) {
     for (let x = 0; x < shape.width; x += 1) {
       out[y * shape.width + x] = medianOfClampedSquareNeighborhood(band, shape, x, y, radius, window);
     }
   }
-  return out;
 }
 
 // Truncating at three sigma keeps > 99.7% of the ideal kernel's mass; the
@@ -80,11 +182,7 @@ function convolveEachRowWithKernel(
   kernel: Float64Array,
 ): Float32Array {
   const out = new Float32Array(shape.width * shape.height);
-  for (let y = 0; y < shape.height; y += 1) {
-    for (let x = 0; x < shape.width; x += 1) {
-      out[y * shape.width + x] = convolveAlongClampedLine(band, y * shape.width, 1, shape.width, x, kernel);
-    }
-  }
+  convolveRowRangeWithKernel(band, shape, kernel, out, 0, shape.height);
   return out;
 }
 
@@ -94,12 +192,38 @@ function convolveEachColumnWithKernel(
   kernel: Float64Array,
 ): Float32Array {
   const out = new Float32Array(shape.width * shape.height);
-  for (let y = 0; y < shape.height; y += 1) {
+  convolveColumnRangeWithKernel(band, shape, kernel, out, 0, shape.height);
+  return out;
+}
+
+function convolveRowRangeWithKernel(
+  band: ArrayLike<number>,
+  shape: BandSpatialShape,
+  kernel: Float64Array,
+  out: Float32Array,
+  yStart: number,
+  yEnd: number,
+): void {
+  for (let y = yStart; y < yEnd; y += 1) {
+    for (let x = 0; x < shape.width; x += 1) {
+      out[y * shape.width + x] = convolveAlongClampedLine(band, y * shape.width, 1, shape.width, x, kernel);
+    }
+  }
+}
+
+function convolveColumnRangeWithKernel(
+  band: ArrayLike<number>,
+  shape: BandSpatialShape,
+  kernel: Float64Array,
+  out: Float32Array,
+  yStart: number,
+  yEnd: number,
+): void {
+  for (let y = yStart; y < yEnd; y += 1) {
     for (let x = 0; x < shape.width; x += 1) {
       out[y * shape.width + x] = convolveAlongClampedLine(band, x, shape.width, shape.height, y, kernel);
     }
   }
-  return out;
 }
 
 function convolveAlongClampedLine(

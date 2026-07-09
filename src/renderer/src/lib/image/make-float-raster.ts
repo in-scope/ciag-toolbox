@@ -1,6 +1,7 @@
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 import {
-  computeArrayReportingPerUnitProgress,
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
   type UnitProgressCallback,
 } from "@/lib/image/unit-progress";
 
@@ -38,17 +39,28 @@ export function makeFloatRasterFromBandComputation(
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
 
+// CT-226: an async per-band computation may itself be chunked, reporting its own
+// 0..1 within-band fraction (third argument), which the band loop folds into the
+// overall fraction as (completed bands + within-band fraction) / band count. A
+// plain sync ComputeFloatBandFromSource is assignable and simply never ticks
+// within a band.
+export type ComputeFloatBandFromSourceReportingProgress = (
+  sourceBandPixels: RasterTypedArray,
+  bandIndex: number,
+  onWithinBandProgress?: UnitProgressCallback,
+) => Float32Array | Promise<Float32Array>;
+
 // CT-221: the async twin of makeFloatRasterFromBandComputation. One progress tick
 // (and a paint yield) per computed band, so a long per-band operation can drive a
 // determinate busy indicator. The per-band math is identical to the sync version.
 export async function makeFloatRasterFromBandComputationReportingProgress(
   source: RasterImage,
-  computeFloatBand: ComputeFloatBandFromSource,
+  computeFloatBand: ComputeFloatBandFromSourceReportingProgress,
   onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
-  const bandPixels = await computeArrayReportingPerUnitProgress(
-    source.bandPixels.length,
-    (index) => computeSingleFloatBandMatchingSourceLength(source.bandPixels[index]!, index, computeFloatBand),
+  const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
+    source,
+    (index, onWithinBand) => computeFloatBand(source.bandPixels[index]!, index, onWithinBand),
     onProgress,
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
@@ -62,8 +74,10 @@ export function makeFloatRasterReusingUnchangedSourceBands(
   changedBandIndexes: ReadonlySet<number>,
   computeChangedFloatBand: ComputeFloatBandFromSource,
 ): RasterImage {
-  const bandPixels = source.bandPixels.map((_band, index) =>
-    computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index),
+  const bandPixels = source.bandPixels.map((band, index) =>
+    changedBandIndexes.has(index)
+      ? computeSingleFloatBandMatchingSourceLength(band, index, computeChangedFloatBand)
+      : carryUnchangedBandThroughAsFloat32(band),
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
@@ -74,12 +88,13 @@ export function makeFloatRasterReusingUnchangedSourceBands(
 export async function makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
   source: RasterImage,
   changedBandIndexes: ReadonlySet<number>,
-  computeChangedFloatBand: ComputeFloatBandFromSource,
+  computeChangedFloatBand: ComputeFloatBandFromSourceReportingProgress,
   onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
-  const bandPixels = await computeArrayReportingPerUnitProgress(
-    source.bandPixels.length,
-    (index) => computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index),
+  const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
+    source,
+    (index, onWithinBand) =>
+      computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index, onWithinBand),
     onProgress,
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
@@ -88,12 +103,46 @@ export async function makeFloatRasterReusingUnchangedSourceBandsReportingProgres
 function computeChangedBandOrCarryThrough(
   source: RasterImage,
   changedBandIndexes: ReadonlySet<number>,
-  computeChangedFloatBand: ComputeFloatBandFromSource,
+  computeChangedFloatBand: ComputeFloatBandFromSourceReportingProgress,
   index: number,
-): Float32Array {
+  onWithinBandProgress?: UnitProgressCallback,
+): Float32Array | Promise<Float32Array> {
   const band = source.bandPixels[index]!;
   if (!changedBandIndexes.has(index)) return carryUnchangedBandThroughAsFloat32(band);
-  return computeSingleFloatBandMatchingSourceLength(band, index, computeChangedFloatBand);
+  return computeChangedFloatBand(band, index, onWithinBandProgress);
+}
+
+// CT-226: the shared band loop behind both async twins. The within-band callback
+// for band i maps a 0..1 fraction to (i + fraction) / bandCount, so a chunked
+// band computation advances the bar continuously between per-band completion
+// ticks.
+async function computeFloatBandsFoldingWithinBandProgress(
+  source: RasterImage,
+  computeBand: (index: number, onWithinBand?: UnitProgressCallback) => Float32Array | Promise<Float32Array>,
+  onProgress?: UnitProgressCallback,
+): Promise<Float32Array[]> {
+  const totalBands = source.bandPixels.length;
+  reportMultiUnitWorkStarting(onProgress, totalBands);
+  const bandPixels: Float32Array[] = [];
+  for (let index = 0; index < totalBands; index += 1) {
+    const onWithinBand = onProgress
+      ? (fraction: number): void => onProgress((index + fraction) / totalBands)
+      : undefined;
+    bandPixels.push(await computeBandAssertingSourceLength(source, computeBand, index, onWithinBand));
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalBands);
+  }
+  return bandPixels;
+}
+
+async function computeBandAssertingSourceLength(
+  source: RasterImage,
+  computeBand: (index: number, onWithinBand?: UnitProgressCallback) => Float32Array | Promise<Float32Array>,
+  index: number,
+  onWithinBand?: UnitProgressCallback,
+): Promise<Float32Array> {
+  const result = await computeBand(index, onWithinBand);
+  assertComputedBandLengthMatchesSource(result, source.bandPixels[index]!, index);
+  return result;
 }
 
 export function mapBandPixelsToFloat32(

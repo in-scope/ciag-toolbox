@@ -64,6 +64,23 @@ export function throttleProgressToMinimumStep(
   };
 }
 
+// CT-226: chunked main-thread work (e.g. denoise rows) processes a range of
+// units per chunk and yields between chunks, so the busy bar paints WITHIN a
+// long unit of work instead of freezing until it completes.
+export async function runInChunksReportingProgress(
+  totalUnits: number,
+  unitsPerChunk: number,
+  processChunk: (startUnit: number, endUnit: number) => void,
+  onProgress?: UnitProgressCallback,
+): Promise<void> {
+  const chunkSize = Math.max(1, Math.floor(unitsPerChunk));
+  for (let start = 0; start < totalUnits; start += chunkSize) {
+    const end = Math.min(totalUnits, start + chunkSize);
+    processChunk(start, end);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, end, totalUnits);
+  }
+}
+
 export async function computeArrayReportingPerUnitProgress<T>(
   totalUnits: number,
   computeUnit: (index: number) => T,

@@ -1,6 +1,10 @@
 import { Droplets } from "lucide-react";
 
-import { applyDenoiseToBand, type DenoiseMethod, type DenoiseSettings } from "@/lib/image/filters/denoise";
+import {
+  applyDenoiseToBandInChunksReportingProgress,
+  type DenoiseMethod,
+  type DenoiseSettings,
+} from "@/lib/image/filters/denoise";
 import { makeFloatRasterReusingUnchangedSourceBandsReportingProgress } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -176,6 +180,9 @@ function createDenoiseSourceTransform(): ViewportActionAsyncSourceTransform {
   };
 }
 
+// CT-226: each band's kernel work runs in row chunks reporting a within-band
+// fraction, so the busy bar advances continuously through a slow band instead of
+// jumping once per band.
 function denoiseBandsOfRaster(
   raster: RasterImage,
   denoisedBandIndexes: ReadonlySet<number>,
@@ -186,7 +193,8 @@ function denoiseBandsOfRaster(
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
     raster,
     denoisedBandIndexes,
-    (band) => applyDenoiseToBand(band, shape, settings),
+    (band, _bandIndex, onWithinBandProgress) =>
+      applyDenoiseToBandInChunksReportingProgress(band, shape, settings, onWithinBandProgress),
     onProgress,
   );
 }

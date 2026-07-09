@@ -205,3 +205,20 @@ describe("makeFloatRasterReusingUnchangedSourceBandsReportingProgress (CT-221)",
     expect(ticks).toEqual([0, 1 / 2, 1]);
   });
 });
+
+// CT-226: an async per-band computation can report its own within-band fraction,
+// folded into the overall bar as (completed bands + fraction) / band count.
+describe("within-band progress composition (CT-226)", () => {
+  it("folds within-band fractions between the per-band completion ticks", async () => {
+    const ticks: number[] = [];
+    await makeFloatRasterFromBandComputationReportingProgress(
+      buildUint8Raster(),
+      async (band, _index, onWithinBand) => {
+        onWithinBand?.(0.5);
+        return mapBandPixelsToFloat32(band, (value) => value);
+      },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 0.25, 0.5, 0.75, 1]);
+  });
+});

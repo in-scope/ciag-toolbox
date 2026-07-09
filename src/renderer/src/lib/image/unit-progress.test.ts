@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeArrayReportingPerUnitProgress,
+  runInChunksReportingProgress,
   scaleProgressToWindow,
   throttleProgressToMinimumStep,
 } from "./unit-progress";
@@ -48,5 +49,26 @@ describe("computeArrayReportingPerUnitProgress", () => {
     );
     expect(results).toEqual([0, 10, 20]);
     expect(ticks).toEqual([0, 1 / 3, 2 / 3, 1]);
+  });
+});
+
+describe("runInChunksReportingProgress (CT-226)", () => {
+  it("processes every unit in order and ticks after each chunk", async () => {
+    const processed: Array<[number, number]> = [];
+    const ticks: number[] = [];
+    await runInChunksReportingProgress(
+      10,
+      4,
+      (start, end) => processed.push([start, end]),
+      (fraction) => ticks.push(fraction),
+    );
+    expect(processed).toEqual([[0, 4], [4, 8], [8, 10]]);
+    expect(ticks).toEqual([0.4, 0.8, 1]);
+  });
+
+  it("clamps a fractional or sub-1 chunk size up to one unit", async () => {
+    const processed: Array<[number, number]> = [];
+    await runInChunksReportingProgress(3, 0.2, (start, end) => processed.push([start, end]));
+    expect(processed).toEqual([[0, 1], [1, 2], [2, 3]]);
   });
 });
