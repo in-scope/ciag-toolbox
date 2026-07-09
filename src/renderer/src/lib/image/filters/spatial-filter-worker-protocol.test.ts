@@ -45,6 +45,23 @@ describe("computeSpatialFilterWorkerResponse", () => {
     );
   });
 
+  // CT-225: the handler streams within-band fractions through onProgress before
+  // settling with the filtered response.
+  it("forwards monotonic within-band progress fractions ending at 1", () => {
+    const fractions: number[] = [];
+    const response = computeSpatialFilterWorkerResponse(
+      makeRequest({}),
+      createReusableSpatialFilterGrid(),
+      (fraction) => fractions.push(fraction),
+    );
+    expect(response.kind).toBe("filtered");
+    expect(fractions.length).toBeGreaterThan(1);
+    expect(fractions[fractions.length - 1]).toBe(1);
+    for (let i = 1; i < fractions.length; i += 1) {
+      expect(fractions[i]!).toBeGreaterThanOrEqual(fractions[i - 1]!);
+    }
+  });
+
   it("turns a filter error into a failed response instead of throwing", () => {
     const response = computeSpatialFilterWorkerResponse(
       makeRequest({ settings: { mode: "lowpass", cutoff: 0 } }),

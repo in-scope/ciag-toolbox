@@ -56,14 +56,20 @@ export function inverseFftInPlace(real: FftLineBuffer, imag: FftLineBuffer): voi
   scaleValuesInPlace(imag, 1 / imag.length);
 }
 
-export function fft2dInPlace(grid: ComplexGrid): void {
-  transformEveryGridRow(grid, fftInPlace);
-  transformEveryGridColumn(grid, fftInPlace);
+// CT-225: a 2D transform is height row lines then width column lines; reporting
+// after each line lets a caller drive sub-band progress through a minutes-long
+// transform instead of sitting silent until the whole grid finishes.
+export type FftLineProgressCallback = (completedLines: number, totalLines: number) => void;
+
+export function fft2dInPlace(grid: ComplexGrid, onLineProgress?: FftLineProgressCallback): void {
+  transformGridInBothAxes(grid, fftInPlace, onLineProgress);
 }
 
-export function inverseFft2dInPlace(grid: ComplexGrid): void {
-  transformEveryGridRow(grid, inverseFftInPlace);
-  transformEveryGridColumn(grid, inverseFftInPlace);
+export function inverseFft2dInPlace(
+  grid: ComplexGrid,
+  onLineProgress?: FftLineProgressCallback,
+): void {
+  transformGridInBothAxes(grid, inverseFftInPlace, onLineProgress);
 }
 
 const FORWARD_TRANSFORM_SIGN = -1;
@@ -71,23 +77,47 @@ const INVERSE_TRANSFORM_SIGN = 1;
 
 type ComplexLineTransform = (real: FftLineBuffer, imag: FftLineBuffer) => void;
 
-function transformEveryGridRow(grid: ComplexGrid, transformLine: ComplexLineTransform): void {
+type CompletedLineCountCallback = (completedLines: number) => void;
+
+function transformGridInBothAxes(
+  grid: ComplexGrid,
+  transformLine: ComplexLineTransform,
+  onLineProgress?: FftLineProgressCallback,
+): void {
+  const totalLines = grid.height + grid.width;
+  transformEveryGridRow(grid, transformLine, (rows) => onLineProgress?.(rows, totalLines));
+  transformEveryGridColumn(grid, transformLine, (columns) =>
+    onLineProgress?.(grid.height + columns, totalLines),
+  );
+}
+
+function transformEveryGridRow(
+  grid: ComplexGrid,
+  transformLine: ComplexLineTransform,
+  onLineDone?: CompletedLineCountCallback,
+): void {
   for (let y = 0; y < grid.height; y += 1) {
     const rowStart = y * grid.width;
     transformLine(
       grid.real.subarray(rowStart, rowStart + grid.width),
       grid.imag.subarray(rowStart, rowStart + grid.width),
     );
+    onLineDone?.(y + 1);
   }
 }
 
-function transformEveryGridColumn(grid: ComplexGrid, transformLine: ComplexLineTransform): void {
+function transformEveryGridColumn(
+  grid: ComplexGrid,
+  transformLine: ComplexLineTransform,
+  onLineDone?: CompletedLineCountCallback,
+): void {
   const columnReal = allocateLineBufferMatching(grid.real, grid.height);
   const columnImag = allocateLineBufferMatching(grid.imag, grid.height);
   for (let x = 0; x < grid.width; x += 1) {
     copyGridColumnIntoLine(grid, x, columnReal, columnImag);
     transformLine(columnReal, columnImag);
     copyLineIntoGridColumn(grid, x, columnReal, columnImag);
+    onLineDone?.(x + 1);
   }
 }
 

@@ -49,6 +49,9 @@ function spawnSpatialFilterWorker(): Worker {
   });
 }
 
+// CT-225: within-band progress folds into the overall fraction as
+// (completed bands + within-band fraction) / bands to filter, so a minutes-long
+// band advances the bar continuously instead of jumping once per band.
 async function filterEachBandSequentially(
   worker: Worker,
   bands: ReadonlyArray<SpatialFilterBandInput>,
@@ -60,7 +63,12 @@ async function filterEachBandSequentially(
   reportMultiUnitWorkStarting(onProgress, bands.length);
   for (const [requestId, band] of bands.entries()) {
     const request = { requestId, band: band.pixels, shape, settings };
-    filteredByBandIndex.set(band.bandIndex, await requestSingleBandFilter(worker, request));
+    const onWithinBandProgress = (fraction: number): void =>
+      onProgress?.((requestId + fraction) / bands.length);
+    filteredByBandIndex.set(
+      band.bandIndex,
+      await requestSingleBandFilter(worker, request, onWithinBandProgress),
+    );
     await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, requestId + 1, bands.length);
   }
   return filteredByBandIndex;
@@ -69,10 +77,11 @@ async function filterEachBandSequentially(
 function requestSingleBandFilter(
   worker: Worker,
   request: SpatialFilterWorkerRequest,
+  onWithinBandProgress: UnitProgressCallback,
 ): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<SpatialFilterWorkerResponse>) =>
-      settleSingleBandFilter(event.data, request.requestId, resolve, reject);
+      settleSingleBandFilter(event.data, request.requestId, resolve, reject, onWithinBandProgress);
     worker.onerror = (event) => reject(new Error(event.message || "Spatial filter worker failed"));
     worker.postMessage(request);
   });
@@ -83,8 +92,13 @@ function settleSingleBandFilter(
   expectedRequestId: number,
   resolve: (values: Float32Array) => void,
   reject: (reason: Error) => void,
+  onWithinBandProgress: UnitProgressCallback,
 ): void {
   if (response.requestId !== expectedRequestId) return;
+  if (response.kind === "progress") {
+    onWithinBandProgress(response.fraction);
+    return;
+  }
   if (response.kind === "filtered") {
     resolve(response.values);
     return;

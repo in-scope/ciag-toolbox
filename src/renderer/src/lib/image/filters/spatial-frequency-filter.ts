@@ -1,4 +1,8 @@
 import type { RasterTypedArray } from "@/lib/image/raster-image";
+import {
+  throttleProgressToMinimumStep,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 import {
   butterworthBandpassGain,
@@ -78,18 +82,26 @@ function buildStackTooLargeForSpatialFilterMessage(
 // One reusable working grid for a run over many bands: the two padded buffers
 // are allocated once and rewritten per band, so a whole-stack filter no longer
 // re-requests huge contiguous allocations under mounting fragmentation.
+// CT-225: filterBand reports 0..1 progress WITHIN the band from the FFT line
+// loops (forward transform = the first half, inverse = the second), throttled
+// to whole-percent steps so callers can surface sub-band progress without a
+// message flood.
 export interface ReusableSpatialFilterGrid {
   readonly filterBand: (
     band: RasterTypedArray,
     shape: BandSpatialShape,
     settings: SpatialFrequencyFilterSettings,
+    onProgress?: UnitProgressCallback,
   ) => Float32Array;
 }
+
+const WITHIN_BAND_PROGRESS_MINIMUM_STEP = 0.01;
 
 export function createReusableSpatialFilterGrid(): ReusableSpatialFilterGrid {
   const held: { grid: ComplexGrid | null } = { grid: null };
   return {
-    filterBand: (band, shape, settings) => filterBandReusingHeldGrid(held, band, shape, settings),
+    filterBand: (band, shape, settings, onProgress) =>
+      filterBandReusingHeldGrid(held, band, shape, settings, onProgress),
   };
 }
 
@@ -106,16 +118,28 @@ function filterBandReusingHeldGrid(
   band: RasterTypedArray,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
 ): Float32Array {
   assertShapeFitsSpatialFilterGrid(shape);
   assertGainIsComputableForSettings(settings);
   assertBandLengthMatchesShape(band, shape);
   held.grid = obtainGridMatchingPaddedShape(held.grid, shape);
-  fillGridByMirrorPaddingBand(held.grid, band, shape);
-  fft2dInPlace(held.grid);
-  multiplyGridByButterworthTransfer(held.grid, settings);
-  inverseFft2dInPlace(held.grid);
-  return cropGridRealPartToShape(held.grid, shape);
+  return runFilterPipelineOnGrid(held.grid, band, shape, settings, onProgress);
+}
+
+function runFilterPipelineOnGrid(
+  grid: ComplexGrid,
+  band: RasterTypedArray,
+  shape: BandSpatialShape,
+  settings: SpatialFrequencyFilterSettings,
+  onProgress?: UnitProgressCallback,
+): Float32Array {
+  const reportWithinBand = throttleProgressToMinimumStep(onProgress, WITHIN_BAND_PROGRESS_MINIMUM_STEP);
+  fillGridByMirrorPaddingBand(grid, band, shape);
+  fft2dInPlace(grid, (done, total) => reportWithinBand?.((0.5 * done) / total));
+  multiplyGridByButterworthTransfer(grid, settings);
+  inverseFft2dInPlace(grid, (done, total) => reportWithinBand?.(0.5 + (0.5 * done) / total));
+  return cropGridRealPartToShape(grid, shape);
 }
 
 function obtainGridMatchingPaddedShape(

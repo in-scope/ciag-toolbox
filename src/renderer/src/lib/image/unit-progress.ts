@@ -47,6 +47,23 @@ export function scaleProgressToWindow(
   return (fraction) => onProgress(windowStart + fraction * (windowEnd - windowStart));
 }
 
+// CT-225: fine-grained sources (the FFT reports after every one of thousands of
+// line transforms) throttle to a minimum step so a worker is not flooded with
+// postMessage traffic; a fraction of exactly 1 always passes so completion is
+// never swallowed. The returned callback is stateful - build one per unit of work.
+export function throttleProgressToMinimumStep(
+  onProgress: UnitProgressCallback | undefined,
+  minimumStep: number,
+): UnitProgressCallback | undefined {
+  if (!onProgress) return undefined;
+  let lastReportedFraction = Number.NEGATIVE_INFINITY;
+  return (fraction) => {
+    if (fraction < 1 && fraction - lastReportedFraction < minimumStep) return;
+    lastReportedFraction = fraction;
+    onProgress(fraction);
+  };
+}
+
 export async function computeArrayReportingPerUnitProgress<T>(
   totalUnits: number,
   computeUnit: (index: number) => T,

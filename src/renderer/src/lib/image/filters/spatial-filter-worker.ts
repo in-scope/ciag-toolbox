@@ -11,8 +11,16 @@ import {
 
 const reusableGrid = createReusableSpatialFilterGrid();
 
+// CT-225: progress posts stream out mid-computation (postMessage queues to the
+// main thread immediately even while this worker keeps running), so the busy
+// bar advances within a band instead of only between bands.
 self.onmessage = (event: MessageEvent<SpatialFilterWorkerRequest>): void => {
-  postSpatialFilterWorkerResponse(computeSpatialFilterWorkerResponse(event.data, reusableGrid));
+  const request = event.data;
+  postSpatialFilterWorkerResponse(
+    computeSpatialFilterWorkerResponse(request, reusableGrid, (fraction) =>
+      self.postMessage({ requestId: request.requestId, kind: "progress", fraction }),
+    ),
+  );
 };
 
 function postSpatialFilterWorkerResponse(response: SpatialFilterWorkerResponse): void {

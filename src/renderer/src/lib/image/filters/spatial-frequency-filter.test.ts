@@ -164,6 +164,28 @@ describe("createReusableSpatialFilterGrid", () => {
   });
 });
 
+// CT-225: filterBand streams monotonic 0..1 fractions from the FFT line loops
+// (forward transform = first half, inverse = second half) so a minutes-long
+// band visibly advances the busy bar.
+describe("within-band filter progress (CT-225)", () => {
+  it("reports monotonic within-band fractions crossing the forward/inverse halves", () => {
+    const ticks: number[] = [];
+    createReusableSpatialFilterGrid().filterBand(
+      makeFlatBand(120, 16),
+      { width: 4, height: 4 },
+      { mode: "lowpass", cutoff: 0.1 },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks.length).toBeGreaterThan(2);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    expect(ticks.some((tick) => tick > 0 && tick <= 0.5)).toBe(true);
+    expect(ticks.some((tick) => tick > 0.5 && tick < 1)).toBe(true);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
+  });
+});
+
 describe("spatial filter grid size limit", () => {
   // CT-224: dimensions pad to the smallest 2/3/5-smooth size, not the next
   // power of two, so already-smooth dimensions (5, 3, 8) need no padding.

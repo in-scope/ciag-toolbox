@@ -20,16 +20,21 @@ export interface SpatialFilterWorkerRequest {
   readonly settings: SpatialFrequencyFilterSettings;
 }
 
+// CT-225: "progress" responses stream WHILE a band is filtering (0..1 within the
+// band, throttled at the source), then exactly one "filtered" or "failed"
+// response settles the request.
 export type SpatialFilterWorkerResponse =
+  | { readonly requestId: number; readonly kind: "progress"; readonly fraction: number }
   | { readonly requestId: number; readonly kind: "filtered"; readonly values: Float32Array }
   | { readonly requestId: number; readonly kind: "failed"; readonly message: string };
 
 export function computeSpatialFilterWorkerResponse(
   request: SpatialFilterWorkerRequest,
   reusableGrid: ReusableSpatialFilterGrid,
+  onProgress?: (fraction: number) => void,
 ): SpatialFilterWorkerResponse {
   try {
-    const values = reusableGrid.filterBand(request.band, request.shape, request.settings);
+    const values = reusableGrid.filterBand(request.band, request.shape, request.settings, onProgress);
     return { requestId: request.requestId, kind: "filtered", values };
   } catch (error) {
     return { requestId: request.requestId, kind: "failed", message: describeFilterError(error) };

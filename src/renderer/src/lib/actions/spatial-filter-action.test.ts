@@ -138,24 +138,42 @@ describe("SPATIAL_FILTER_ACTION", () => {
   });
 });
 
-describe("SPATIAL_FILTER_ACTION progress (CT-221)", () => {
-  it("counts filtered bands only: the full stack ticks once per band", async () => {
+// CT-221 per-band completions plus CT-225 within-band FFT-line fractions: the
+// sequence is monotonic 0..1 over FILTERED bands, crossing each band boundary.
+describe("SPATIAL_FILTER_ACTION progress (CT-221/CT-225)", () => {
+  it("advances monotonically through both filtered bands with within-band fractions", async () => {
     const ticks: number[] = [];
     await SPATIAL_FILTER_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoFlatBandStack() },
       { mode: "highpass", highpassCutoff: 0.02 },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([0, 1 / 2, 1]);
+    expectMonotonicZeroToOne(ticks);
+    expect(ticks).toContain(1 / 2);
+    expect(ticks.some((tick) => tick > 0 && tick < 1 / 2)).toBe(true);
+    expect(ticks.some((tick) => tick > 1 / 2 && tick < 1)).toBe(true);
   });
 
-  it("counts filtered bands only: a single band-wise band reports one completion tick", async () => {
+  it("counts filtered bands only: a single band-wise band spans the whole bar itself", async () => {
     const ticks: number[] = [];
     await SPATIAL_FILTER_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoFlatBandStack() },
       { mode: "highpass", highpassCutoff: 0.02, scope: "band-wise", bandRange: "1" },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([1]);
+    expectMonotonicZeroToOne(ticks);
+    expect(ticks.some((tick) => tick > 0 && tick < 1)).toBe(true);
   });
 });
+
+function expectMonotonicZeroToOne(ticks: ReadonlyArray<number>): void {
+  expect(ticks.length).toBeGreaterThan(2);
+  expect(ticks[ticks.length - 1]).toBe(1);
+  for (let i = 1; i < ticks.length; i += 1) {
+    expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+  }
+  for (const tick of ticks) {
+    expect(tick).toBeGreaterThanOrEqual(0);
+    expect(tick).toBeLessThanOrEqual(1);
+  }
+}

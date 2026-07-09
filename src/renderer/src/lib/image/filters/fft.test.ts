@@ -148,6 +148,29 @@ describe("mixed-radix FFT (CT-224)", () => {
   });
 });
 
+// CT-225: the 2D transform reports one tick per completed line (rows then
+// columns), which the spatial filter turns into within-band progress.
+describe("fft2dInPlace line progress (CT-225)", () => {
+  it("ticks once per row then once per column with a shared total", () => {
+    const grid = makeSquareGrid(Array.from({ length: 16 }, (_unused, index) => index), 4);
+    const ticks: Array<[number, number]> = [];
+    fft2dInPlace(grid, (completed, total) => ticks.push([completed, total]));
+    expect(ticks).toEqual([
+      [1, 8], [2, 8], [3, 8], [4, 8],
+      [5, 8], [6, 8], [7, 8], [8, 8],
+    ]);
+  });
+
+  it("reports the same line ticks through the inverse transform", () => {
+    const grid = makeSquareGrid(Array.from({ length: 16 }, (_unused, index) => index), 4);
+    fft2dInPlace(grid);
+    const ticks: Array<[number, number]> = [];
+    inverseFft2dInPlace(grid, (completed, total) => ticks.push([completed, total]));
+    expect(ticks.length).toBe(8);
+    expect(ticks[7]).toEqual([8, 8]);
+  });
+});
+
 function naiveDft(samples: ReadonlyArray<number>): { real: number[]; imag: number[] } {
   const n = samples.length;
   const real = new Array<number>(n).fill(0);

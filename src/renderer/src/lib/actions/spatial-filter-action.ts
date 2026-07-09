@@ -274,7 +274,7 @@ function listScopedBandInputs(
 
 // Vitest's node environment has no Web Worker; the same reusable-grid filter
 // runs inline there (and in any runtime without workers), with the same
-// per-band progress ticks and paint yields.
+// per-band completion ticks, within-band fractions (CT-225), and paint yields.
 async function filterBandsOnThisThread(
   bands: ReadonlyArray<SpatialFilterBandInput>,
   shape: BandSpatialShape,
@@ -285,7 +285,12 @@ async function filterBandsOnThisThread(
   const filteredByBandIndex = new Map<number, Float32Array>();
   reportMultiUnitWorkStarting(onProgress, bands.length);
   for (const [completedBefore, band] of bands.entries()) {
-    filteredByBandIndex.set(band.bandIndex, reusableGrid.filterBand(band.pixels, shape, settings));
+    const onWithinBandProgress = (fraction: number): void =>
+      onProgress?.((completedBefore + fraction) / bands.length);
+    filteredByBandIndex.set(
+      band.bandIndex,
+      reusableGrid.filterBand(band.pixels, shape, settings, onWithinBandProgress),
+    );
     await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length);
   }
   return filteredByBandIndex;
