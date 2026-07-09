@@ -165,9 +165,12 @@ describe("createReusableSpatialFilterGrid", () => {
 });
 
 describe("spatial filter grid size limit", () => {
-  it("estimates two float32 buffers at next-power-of-two dimensions", () => {
-    expect(estimateSpatialFilterGridBytes({ width: 5, height: 3 })).toBe(8 * 4 * 4 * 2);
+  // CT-224: dimensions pad to the smallest 2/3/5-smooth size, not the next
+  // power of two, so already-smooth dimensions (5, 3, 8) need no padding.
+  it("estimates two float32 buffers at the smallest smooth padded dimensions", () => {
+    expect(estimateSpatialFilterGridBytes({ width: 5, height: 3 })).toBe(5 * 3 * 4 * 2);
     expect(estimateSpatialFilterGridBytes({ width: 8, height: 8 })).toBe(8 * 8 * 4 * 2);
+    expect(estimateSpatialFilterGridBytes({ width: 7, height: 11 })).toBe(8 * 12 * 4 * 2);
   });
 
   it("accepts the reference 8000 x 6000 scale and rejects a 150 MP stretch capture", () => {
@@ -177,6 +180,15 @@ describe("spatial filter grid size limit", () => {
     );
     expect(() => assertShapeFitsSpatialFilterGrid({ width: 14000, height: 11000 })).toThrow(
       /too large for the spatial filter.*Crop the stack/s,
+    );
+  });
+
+  // CT-224: the 11608 x 8708 capture that hit the old 2048 MB power-of-two grid
+  // now pads to 11664 x 8748 (~779 MB) and passes the pre-flight.
+  it("accepts a 101 MP capture that the power-of-two padding used to reject", () => {
+    expect(() => assertShapeFitsSpatialFilterGrid({ width: 11608, height: 8708 })).not.toThrow();
+    expect(estimateSpatialFilterGridBytes({ width: 11608, height: 8708 })).toBe(
+      11664 * 8748 * 4 * 2,
     );
   });
 });

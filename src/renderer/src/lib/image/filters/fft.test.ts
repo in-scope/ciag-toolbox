@@ -6,7 +6,9 @@ import {
   inverseFft2dInPlace,
   inverseFftInPlace,
   isPowerOfTwo,
+  isSupportedFftLength,
   nextPowerOfTwoAtLeast,
+  smallestSupportedFftLengthAtLeast,
   type ComplexGrid,
 } from "./fft";
 
@@ -80,11 +82,85 @@ describe("fftInPlace (known transform pairs)", () => {
     });
   });
 
-  it("rejects a non-power-of-two length and mismatched buffers", () => {
-    expect(() => fftInPlace(new Float64Array(6), new Float64Array(6))).toThrow(/power of two/);
+  it("rejects an unsupported length and mismatched buffers", () => {
+    expect(() => fftInPlace(new Float64Array(7), new Float64Array(7))).toThrow(/2s, 3s, and 5s/);
     expect(() => fftInPlace(new Float64Array(4), new Float64Array(8))).toThrow(/match in length/);
   });
 });
+
+// CT-224: lengths with factors of 3 and 5 run the mixed-radix path; the naive
+// O(n^2) DFT is the ground truth for every supported non-power-of-two size.
+describe("mixed-radix FFT (CT-224)", () => {
+  it("classifies supported lengths as products of 2s, 3s, and 5s", () => {
+    expect(isSupportedFftLength(6)).toBe(true);
+    expect(isSupportedFftLength(45)).toBe(true);
+    expect(isSupportedFftLength(7)).toBe(false);
+    expect(isSupportedFftLength(0)).toBe(false);
+  });
+
+  it("rounds real capture dimensions up to nearby smooth sizes, not powers of two", () => {
+    expect(smallestSupportedFftLengthAtLeast(11608)).toBe(11664);
+    expect(smallestSupportedFftLengthAtLeast(8708)).toBe(8748);
+    expect(smallestSupportedFftLengthAtLeast(8000)).toBe(8000);
+    expect(smallestSupportedFftLengthAtLeast(6000)).toBe(6000);
+    expect(smallestSupportedFftLengthAtLeast(1)).toBe(1);
+  });
+
+  it.each([3, 5, 6, 9, 10, 12, 15, 20, 30, 45, 60])(
+    "matches the naive DFT at length %i",
+    (length) => {
+      const samples = Array.from({ length }, (_unused, n) => Math.sin(n * 1.7) + 0.3 * n);
+      const [real, imag] = makeComplexLine(samples);
+      fftInPlace(real, imag);
+      const expected = naiveDft(samples);
+      for (let bin = 0; bin < length; bin += 1) {
+        expect(real[bin]).toBeCloseTo(expected.real[bin]!, 8);
+        expect(imag[bin]).toBeCloseTo(expected.imag[bin]!, 8);
+      }
+    },
+  );
+
+  it.each([6, 12, 15, 45, 60])("round-trips through the inverse at length %i", (length) => {
+    const original = Array.from({ length }, (_unused, n) => Math.cos(n * 0.9) * 5 - n * 0.2);
+    const [real, imag] = makeComplexLine(original);
+    fftInPlace(real, imag);
+    inverseFftInPlace(real, imag);
+    original.forEach((value, index) => {
+      expect(real[index]).toBeCloseTo(value, 10);
+      expect(imag[index]).toBeCloseTo(0, 10);
+    });
+  });
+
+  it("round-trips a non-power-of-two float32 grid within float32 precision", () => {
+    const original = Array.from({ length: 12 * 18 }, (_unused, index) => (index % 37) * 0.5 - 4);
+    const grid: ComplexGrid = {
+      real: Float32Array.from(original),
+      imag: new Float32Array(original.length),
+      width: 12,
+      height: 18,
+    };
+    fft2dInPlace(grid);
+    inverseFft2dInPlace(grid);
+    original.forEach((value, index) => {
+      expect(grid.real[index]).toBeCloseTo(value, 3);
+      expect(grid.imag[index]).toBeCloseTo(0, 3);
+    });
+  });
+});
+
+function naiveDft(samples: ReadonlyArray<number>): { real: number[]; imag: number[] } {
+  const n = samples.length;
+  const real = new Array<number>(n).fill(0);
+  const imag = new Array<number>(n).fill(0);
+  for (let bin = 0; bin < n; bin += 1) {
+    for (let index = 0; index < n; index += 1) {
+      const angle = (-2 * Math.PI * bin * index) / n;
+      real[bin]! += samples[index]! * Math.cos(angle);
+      imag[bin]! += samples[index]! * Math.sin(angle);
+    }
+  }
+  return { real, imag };
+}
 
 describe("fft2dInPlace", () => {
   it("transforms a constant grid into a single DC bin holding the sum", () => {

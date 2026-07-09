@@ -8,25 +8,31 @@ import {
 import {
   fft2dInPlace,
   inverseFft2dInPlace,
-  nextPowerOfTwoAtLeast,
+  smallestSupportedFftLengthAtLeast,
   type ComplexGrid,
   type FftLineBuffer,
 } from "./fft";
 
 // CT-203: spatial frequency filtering WITHIN each band's picture (never across
-// the wavelength axis). The band is mirror-padded up to power-of-two
+// the wavelength axis). The band is mirror-padded up to FFT-supported
 // dimensions, transformed with the pure-TS 2D FFT, multiplied by a Butterworth
 // transfer function over the radial spatial frequency, inverse-transformed,
 // and cropped back. Mirror padding avoids the hard wrap-around edge a zero pad
 // would introduce at the image border.
 //
 // CT-219a: the padded working grid is the filter's dominant allocation (two
-// contiguous buffers at next-power-of-two dimensions, up to ~4x the band's
-// pixel count). The grid is float32 (the output is float32 anyway; the FFT
-// round-trip error is far below what survives the cast back), a single grid is
-// reused across bands via createReusableSpatialFilterGrid, and an oversized
-// stack is rejected up front with a clear error instead of the engine's raw
-// "Array buffer allocation failed".
+// contiguous buffers at padded dimensions). The grid is float32 (the output is
+// float32 anyway; the FFT round-trip error is far below what survives the cast
+// back), a single grid is reused across bands via
+// createReusableSpatialFilterGrid, and an oversized stack is rejected up front
+// with a clear error instead of the engine's raw "Array buffer allocation
+// failed".
+//
+// CT-224: padding targets the smallest 2/3/5-smooth size at or above each
+// dimension (the mixed-radix FFT handles those lengths), not the next power of
+// two. Real captures sit just above a power of two, so this routinely quarters
+// the grid: an 11608 x 8708 band pads to 11664 x 8748 (~779 MB) instead of
+// 16384 x 16384 (2048 MB), bringing it back under the 1 GiB pre-flight limit.
 
 export type SpatialFrequencyFilterMode = "lowpass" | "highpass" | "bandpass";
 
@@ -45,8 +51,8 @@ export const SPATIAL_FILTER_GRID_BYTE_LIMIT = 1024 * 1024 * 1024;
 const COMPLEX_GRID_BYTES_PER_PADDED_PIXEL = Float32Array.BYTES_PER_ELEMENT * 2;
 
 export function estimateSpatialFilterGridBytes(shape: BandSpatialShape): number {
-  const paddedWidth = nextPowerOfTwoAtLeast(shape.width);
-  const paddedHeight = nextPowerOfTwoAtLeast(shape.height);
+  const paddedWidth = smallestSupportedFftLengthAtLeast(shape.width);
+  const paddedHeight = smallestSupportedFftLengthAtLeast(shape.height);
   return paddedWidth * paddedHeight * COMPLEX_GRID_BYTES_PER_PADDED_PIXEL;
 }
 
@@ -116,8 +122,8 @@ function obtainGridMatchingPaddedShape(
   previous: ComplexGrid | null,
   shape: BandSpatialShape,
 ): ComplexGrid {
-  const width = nextPowerOfTwoAtLeast(shape.width);
-  const height = nextPowerOfTwoAtLeast(shape.height);
+  const width = smallestSupportedFftLengthAtLeast(shape.width);
+  const height = smallestSupportedFftLengthAtLeast(shape.height);
   if (previous && previous.width === width && previous.height === height) return previous;
   return allocateComplexGridOrThrowOutOfMemory(width, height);
 }
@@ -200,8 +206,9 @@ function fillPaddedRowByMirroringSource(
   }
 }
 
-// Reflects a padded index back into [0, size). Next-power-of-two padding never
-// reaches twice the source size, so a single reflection always suffices.
+// Reflects a padded index back into [0, size). Smooth-size padding never
+// reaches twice the source size (the next power of two is itself smooth and
+// already below 2x), so a single reflection always suffices.
 function mirrorIndexIntoRange(index: number, size: number): number {
   if (index < size) return index;
   return Math.max(0, 2 * size - 2 - index);
