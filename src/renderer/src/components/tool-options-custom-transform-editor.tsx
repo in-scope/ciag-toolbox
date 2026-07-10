@@ -18,7 +18,11 @@ import {
 } from "@/lib/image/band-ops/cube-transform-editing";
 import { rememberCubeTransformResult } from "@/lib/image/band-ops/cube-transform-result-store";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { buildUserScriptCubeFromRaster } from "@/lib/python/user-script-cube";
+import {
+  runUserScriptOnRasterShowingViewportBusy,
+  type UserScriptRunFlowBindings,
+} from "@/lib/python/run-user-script-flow";
+import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 
 // CT-216: the custom-transform controls embedded in the Custom Transform
@@ -38,7 +42,7 @@ export function ToolOptionsCustomTransformEditor(
   props: ToolOptionsCustomTransformEditorProps,
 ): JSX.Element {
   const binding = useCubeTransformBinding(props.viewportIndex);
-  const runner = useRunUserScriptForCubeTransform(props.raster, binding.setReadyTransform);
+  const runner = useRunUserScriptForCubeTransform(props.viewportIndex, props.raster, binding.setReadyTransform);
   return <LoadedCustomTransformEditor state={binding.state} runner={runner} />;
 }
 
@@ -67,15 +71,17 @@ interface UserScriptCubeTransformRunner {
 }
 
 function useRunUserScriptForCubeTransform(
+  viewportIndex: number,
   raster: RasterImage,
   setReadyTransform: (next: CubeTransformEditingState) => void,
 ): UserScriptCubeTransformRunner {
+  const busyRegistrar = useBusyEntryRegistrar();
   const [isRunning, setIsRunning] = useState(false);
   const run = useCallback(
     (source: ToolboxRunUserScriptSource) => {
-      void executeCubeTransformUserScript(raster, source, setReadyTransform, setIsRunning);
+      void executeCubeTransformUserScript({ busyRegistrar, viewportIndex }, raster, source, setReadyTransform, setIsRunning);
     },
-    [raster, setReadyTransform],
+    [busyRegistrar, viewportIndex, raster, setReadyTransform],
   );
   return {
     isRunning,
@@ -85,6 +91,7 @@ function useRunUserScriptForCubeTransform(
 }
 
 async function executeCubeTransformUserScript(
+  bindings: UserScriptRunFlowBindings,
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   setReadyTransform: (next: CubeTransformEditingState) => void,
@@ -92,24 +99,13 @@ async function executeCubeTransformUserScript(
 ): Promise<void> {
   setIsRunning(true);
   try {
-    const result = await runUserScriptForCubeTransform(raster, source);
+    const result = await runUserScriptOnRasterShowingViewportBusy(bindings, raster, source, "cube");
     rememberCubeTransformRunResult(result, raster, source, setReadyTransform);
   } catch (error) {
     toast.error(describeCubeTransformRunError(error));
   } finally {
     setIsRunning(false);
   }
-}
-
-function runUserScriptForCubeTransform(
-  raster: RasterImage,
-  source: ToolboxRunUserScriptSource,
-): Promise<ToolboxRunUserScriptResult> {
-  return window.toolboxApi.runUserScript({
-    cube: buildUserScriptCubeFromRaster(raster),
-    source,
-    resultKind: "cube",
-  });
 }
 
 function rememberCubeTransformRunResult(

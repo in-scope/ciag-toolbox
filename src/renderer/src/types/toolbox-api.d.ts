@@ -168,30 +168,66 @@ interface ToolboxPythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
-interface ToolboxRunUserScriptCube {
-  bands: Float32Array[];
-  height: number;
-  width: number;
-  wavelengths: number[] | null;
-}
-
 type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
   | { mode: "import" };
 
 type ToolboxRunUserScriptResultKind = "value" | "cube";
 
-interface ToolboxRunUserScriptRequest {
-  cube: ToolboxRunUserScriptCube;
-  source: ToolboxRunUserScriptSource;
-  resultKind?: ToolboxRunUserScriptResultKind;
-}
-
+// The assembled outcome of a chunked user-script run, produced by the renderer
+// orchestrator (lib/python/run-user-script-chunked.ts), not by one IPC call.
 type ToolboxRunUserScriptResult =
   | { status: "completed"; value: unknown; sourceName?: string }
   | { status: "completed-cube"; shape: number[]; bands: Float32Array[]; sourceName?: string }
   | { status: "canceled" }
   | { status: "failed"; message: string };
+
+// CT-219g chunked user-script run protocol (mirrors
+// src/shared/chunked-user-script-run-protocol.ts; keep in sync).
+interface ToolboxUserScriptRunCubeDescriptor {
+  bandCount: number;
+  height: number;
+  width: number;
+  wavelengths: number[] | null;
+}
+
+interface ToolboxUserScriptRunBeginRequest {
+  source: ToolboxRunUserScriptSource;
+  resultKind: ToolboxRunUserScriptResultKind;
+  cube: ToolboxUserScriptRunCubeDescriptor;
+}
+
+type ToolboxUserScriptRunBeginResult =
+  | { status: "canceled" }
+  | { status: "failed"; message: string }
+  | { status: "ready"; token: string; sourceName: string | null };
+
+interface ToolboxUserScriptRunCubeChunkRequest {
+  token: string;
+  bytes: Uint8Array;
+}
+
+interface ToolboxUserScriptRunExecuteRequest {
+  token: string;
+}
+
+type ToolboxUserScriptRunExecuteResult =
+  | { status: "completed"; value: unknown }
+  | { status: "completed-cube"; shape: [number, number, number]; totalBytes: number }
+  | { status: "failed"; message: string };
+
+interface ToolboxUserScriptRunResultChunkRequest {
+  token: string;
+}
+
+interface ToolboxUserScriptRunResultChunkResult {
+  done: boolean;
+  bytes: Uint8Array;
+}
+
+interface ToolboxUserScriptRunReleaseRequest {
+  token: string;
+}
 
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
@@ -263,9 +299,21 @@ interface ToolboxApi {
   setPythonEnvironment: (
     ownInterpreterPath: string | null,
   ) => Promise<ToolboxPythonEnvironmentSnapshot>;
-  runUserScript: (
-    request: ToolboxRunUserScriptRequest,
-  ) => Promise<ToolboxRunUserScriptResult>;
+  beginUserScriptRun: (
+    request: ToolboxUserScriptRunBeginRequest,
+  ) => Promise<ToolboxUserScriptRunBeginResult>;
+  sendUserScriptRunCubeChunk: (
+    request: ToolboxUserScriptRunCubeChunkRequest,
+  ) => Promise<void>;
+  executeUserScriptRun: (
+    request: ToolboxUserScriptRunExecuteRequest,
+  ) => Promise<ToolboxUserScriptRunExecuteResult>;
+  readUserScriptRunResultChunk: (
+    request: ToolboxUserScriptRunResultChunkRequest,
+  ) => Promise<ToolboxUserScriptRunResultChunkResult>;
+  releaseUserScriptRun: (
+    request: ToolboxUserScriptRunReleaseRequest,
+  ) => Promise<void>;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (
     listener: ToolboxThemeChangeListener,

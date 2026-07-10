@@ -1,8 +1,13 @@
-// Encodes the band cube for the Python worker: a raw little-endian float32 buffer
-// (band-major, row-major within each band) plus a small JSON header. The buffer is sent
-// as its own frame so the Python side reconstructs it with numpy.frombuffer/reshape
+// Encodes the band cube for the Python worker: raw little-endian float32 bytes
+// (band-major, row-major within each band) plus a small JSON header. The bytes are sent
+// as their own frame so the Python side reconstructs the cube with numpy.frombuffer/reshape
 // rather than parsing JSON-encoded arrays. All packaged targets are little-endian, so a
 // Float32Array's own bytes are already in the wire order.
+// CT-219g: the payload's bytes are exposed as an ASYNC SEGMENT STREAM, never one
+// concatenated Buffer - a reference-scale cube (~3 GB) cannot exist as a single
+// allocation in any Chromium process (the 2 GiB PartitionAlloc cap), and the
+// chunked-run session store streams the segments off a spooled temp file so the
+// main process never holds the uploaded cube in memory at all.
 import type { CubePayloadHeader } from "./worker-protocol";
 
 export interface CubeForUserScript {
@@ -14,12 +19,21 @@ export interface CubeForUserScript {
 
 export interface EncodedCubePayload {
   header: CubePayloadHeader;
-  buffer: Buffer;
+  totalByteLength: number;
+  readSegments: () => AsyncIterable<Buffer>;
 }
 
 export function encodeCubeAsFloat32Payload(cube: CubeForUserScript): EncodedCubePayload {
-  const contiguous = concatenateBandsInBandMajorOrder(cube.bands, cube.height * cube.width);
-  return { header: buildCubePayloadHeader(cube), buffer: littleEndianBufferOf(contiguous) };
+  const segments = cube.bands.map(littleEndianBufferOf);
+  return {
+    header: buildCubePayloadHeader(cube),
+    totalByteLength: segments.reduce((total, segment) => total + segment.length, 0),
+    readSegments: () => yieldEachSegment(segments),
+  };
+}
+
+async function* yieldEachSegment(segments: Buffer[]): AsyncIterable<Buffer> {
+  for (const segment of segments) yield segment;
 }
 
 function buildCubePayloadHeader(cube: CubeForUserScript): CubePayloadHeader {
@@ -28,12 +42,6 @@ function buildCubePayloadHeader(cube: CubeForUserScript): CubePayloadHeader {
     dtype: "float32",
     wavelengths: cube.wavelengths,
   };
-}
-
-function concatenateBandsInBandMajorOrder(bands: Float32Array[], bandLength: number): Float32Array {
-  const contiguous = new Float32Array(bands.length * bandLength);
-  bands.forEach((band, bandIndex) => contiguous.set(band, bandIndex * bandLength));
-  return contiguous;
 }
 
 function littleEndianBufferOf(values: Float32Array): Buffer {

@@ -1,25 +1,28 @@
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
-// CT-209/CT-210: builds the cube the scripting worker receives from the current
-// stack. Every band is converted to a Float32Array so the main process can send it
-// as one raw little-endian float32 frame (cube-payload.ts) regardless of the
-// source's integer/float sample format. This is pure so it is unit-testable
-// without the IPC bridge; the renderer hands the result to window.toolboxApi.runUserScript.
+import type { UserScriptRunCubeInput } from "./run-user-script-chunked";
 
-export interface UserScriptCube {
-  bands: Float32Array[];
-  height: number;
-  width: number;
-  wavelengths: number[] | null;
-}
+// CT-209/CT-210: describes the cube the scripting worker receives from the
+// current stack. CT-219g: the cube no longer crosses IPC whole; the chunked
+// orchestrator (run-user-script-chunked.ts) pulls bands one at a time through
+// getBandAsFloat32, so integer sources convert to float32 lazily per band
+// instead of materializing a second full-stack copy up front. This is pure so
+// it is unit-testable without the IPC bridge.
 
-export function buildUserScriptCubeFromRaster(raster: RasterImage): UserScriptCube {
+export function buildUserScriptRunCubeInputFromRaster(raster: RasterImage): UserScriptRunCubeInput {
   return {
-    bands: raster.bandPixels.map(toFloat32Band),
+    bandCount: raster.bandCount,
     height: raster.height,
     width: raster.width,
     wavelengths: null,
+    getBandAsFloat32: (bandIndex) => rasterBandAsFloat32(raster, bandIndex),
   };
+}
+
+function rasterBandAsFloat32(raster: RasterImage, bandIndex: number): Float32Array {
+  const band = raster.bandPixels[bandIndex];
+  if (band === undefined) throw new Error("The stack has no band at the requested index.");
+  return toFloat32Band(band);
 }
 
 function toFloat32Band(band: RasterTypedArray): Float32Array {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildUserScriptCubeFromRaster } from "./user-script-cube";
+import { buildUserScriptRunCubeInputFromRaster } from "./user-script-cube";
 import type { RasterImage } from "@/lib/image/raster-image";
 
 function makeUint16Raster(): RasterImage {
@@ -14,15 +14,15 @@ function makeUint16Raster(): RasterImage {
   };
 }
 
-describe("buildUserScriptCubeFromRaster", () => {
-  it("converts every band to Float32Array and carries the spatial dimensions", () => {
-    const cube = buildUserScriptCubeFromRaster(makeUint16Raster());
+describe("buildUserScriptRunCubeInputFromRaster", () => {
+  it("describes the stack shape and converts a requested band to Float32Array", () => {
+    const cube = buildUserScriptRunCubeInputFromRaster(makeUint16Raster());
     expect(cube.width).toBe(2);
     expect(cube.height).toBe(1);
+    expect(cube.bandCount).toBe(2);
     expect(cube.wavelengths).toBeNull();
-    expect(cube.bands).toHaveLength(2);
-    expect(cube.bands[0]).toBeInstanceOf(Float32Array);
-    expect(Array.from(cube.bands[1]!)).toEqual([800, 820]);
+    expect(cube.getBandAsFloat32(0)).toBeInstanceOf(Float32Array);
+    expect(Array.from(cube.getBandAsFloat32(1))).toEqual([800, 820]);
   });
 
   it("passes an existing float band through without re-copying its contents", () => {
@@ -35,6 +35,11 @@ describe("buildUserScriptCubeFromRaster", () => {
       sampleFormat: "float",
       bitsPerSample: 32,
     };
-    expect(buildUserScriptCubeFromRaster(raster).bands[0]).toBe(floatBand);
+    expect(buildUserScriptRunCubeInputFromRaster(raster).getBandAsFloat32(0)).toBe(floatBand);
+  });
+
+  it("rejects a band index outside the stack", () => {
+    const cube = buildUserScriptRunCubeInputFromRaster(makeUint16Raster());
+    expect(() => cube.getBandAsFloat32(2)).toThrow(/no band at the requested index/);
   });
 });

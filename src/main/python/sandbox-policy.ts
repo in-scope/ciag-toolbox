@@ -143,10 +143,21 @@ def _sandbox_path_is_within(path, allowed_prefixes):
     return any(path == prefix or path.startswith(prefix + _sandbox_os.sep) for prefix in allowed_prefixes)
 
 
+_SANDBOX_HARNESS_WRITE_PATHS = set()
+
+
+def _sandbox_permit_harness_write_path(path):
+    resolved = _sandbox_resolve_open_path(path)
+    if resolved is not None:
+        _SANDBOX_HARNESS_WRITE_PATHS.add(resolved)
+
+
 def _sandbox_guard_open(args, readable_prefixes):
+    resolved = _sandbox_resolve_open_path(args[0] if args else None)
+    if resolved is not None and resolved in _SANDBOX_HARNESS_WRITE_PATHS:
+        return
     if _sandbox_open_requests_write(args[1] if len(args) > 1 else None):
         _sandbox_reject("write to the filesystem")
-    resolved = _sandbox_resolve_open_path(args[0] if args else None)
     if resolved is None or not _sandbox_path_is_within(resolved, readable_prefixes):
         _sandbox_reject("read from the filesystem")
 
@@ -183,10 +194,15 @@ def _sandbox_make_audit_hook(readable_prefixes, user_origin_prefixes):
     return _sandbox_audit_hook
 
 
-def install_bundled_mode_sandbox(user_origin_prefixes):
+# harness_write_path: the ONE file the worker harness itself writes (the cube
+# result spool, CT-219g); user code cannot influence it, so exempting it keeps
+# the "no filesystem writes" guarantee for user-level operations intact.
+def install_bundled_mode_sandbox(user_origin_prefixes, harness_write_path=None):
     _sandbox_preimport_curated_stack()
     _sandbox_sys.dont_write_bytecode = True
     _sandbox_bound_address_space()
+    if harness_write_path:
+        _sandbox_permit_harness_write_path(harness_write_path)
     normalized = tuple(_sandbox_os.path.abspath(prefix) for prefix in user_origin_prefixes if prefix)
     readable_prefixes = _sandbox_readable_prefixes(user_origin_prefixes)
     _sandbox_sys.addaudithook(_sandbox_make_audit_hook(readable_prefixes, normalized))

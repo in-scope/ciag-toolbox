@@ -1,6 +1,21 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
+import {
+  USER_SCRIPT_RUN_BEGIN_CHANNEL,
+  USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
+  USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+  USER_SCRIPT_RUN_RELEASE_CHANNEL,
+  USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
+  type UserScriptRunBeginRequest,
+  type UserScriptRunBeginResult,
+  type UserScriptRunCubeChunkRequest,
+  type UserScriptRunExecuteRequest,
+  type UserScriptRunExecuteResult,
+  type UserScriptRunReleaseRequest,
+  type UserScriptRunResultChunkRequest,
+  type UserScriptRunResultChunkResult,
+} from "../shared/chunked-user-script-run-protocol";
 
 export interface AppInfo {
   name: string;
@@ -170,31 +185,6 @@ export interface PythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
-export interface RunUserScriptCube {
-  bands: Float32Array[];
-  height: number;
-  width: number;
-  wavelengths: number[] | null;
-}
-
-export type RunUserScriptSource =
-  | { mode: "formula"; expression: string }
-  | { mode: "import" };
-
-export type RunUserScriptResultKind = "value" | "cube";
-
-export interface RunUserScriptRequest {
-  cube: RunUserScriptCube;
-  source: RunUserScriptSource;
-  resultKind?: RunUserScriptResultKind;
-}
-
-export type RunUserScriptResult =
-  | { status: "completed"; value: unknown; sourceName?: string }
-  | { status: "completed-cube"; shape: number[]; bands: Float32Array[]; sourceName?: string }
-  | { status: "canceled" }
-  | { status: "failed"; message: string };
-
 export type MenuEventListener = () => void;
 export type MenuCommandListener = (commandId: string) => void;
 export type UnsubscribeMenuListener = () => void;
@@ -220,7 +210,6 @@ const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
 const PYTHON_ENVIRONMENT_GET_CHANNEL = "python-environment:get";
 const PYTHON_ENVIRONMENT_SET_CHANNEL = "python-environment:set";
-const RUN_USER_SCRIPT_CHANNEL = "user-script:run";
 
 function fetchAppInfoFromMainProcess(): Promise<AppInfo> {
   return ipcRenderer.invoke(GET_APP_INFO_CHANNEL) as Promise<AppInfo>;
@@ -348,13 +337,54 @@ function setPythonEnvironmentThroughMainProcess(
   ) as Promise<PythonEnvironmentSnapshot>;
 }
 
-function runUserScriptThroughMainProcess(
-  request: RunUserScriptRequest,
-): Promise<RunUserScriptResult> {
+// CT-219g: the user-script cube crosses IPC chunked (see
+// src/shared/chunked-user-script-run-protocol.ts); these five thin wrappers
+// keep each context-bridge crossing and each invoke far below the size that
+// wedged the renderer. The renderer orchestrator
+// (lib/python/run-user-script-chunked.ts) drives the sequence.
+function beginUserScriptRunThroughMainProcess(
+  request: UserScriptRunBeginRequest,
+): Promise<UserScriptRunBeginResult> {
   return ipcRenderer.invoke(
-    RUN_USER_SCRIPT_CHANNEL,
+    USER_SCRIPT_RUN_BEGIN_CHANNEL,
     request,
-  ) as Promise<RunUserScriptResult>;
+  ) as Promise<UserScriptRunBeginResult>;
+}
+
+function sendUserScriptRunCubeChunkToMainProcess(
+  request: UserScriptRunCubeChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function executeUserScriptRunInMainProcess(
+  request: UserScriptRunExecuteRequest,
+): Promise<UserScriptRunExecuteResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+    request,
+  ) as Promise<UserScriptRunExecuteResult>;
+}
+
+function readUserScriptRunResultChunkFromMainProcess(
+  request: UserScriptRunResultChunkRequest,
+): Promise<UserScriptRunResultChunkResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
+    request,
+  ) as Promise<UserScriptRunResultChunkResult>;
+}
+
+function releaseUserScriptRunInMainProcess(
+  request: UserScriptRunReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function subscribeToInvokeCommandMenuEvent(
@@ -406,7 +436,11 @@ const apiBridge = {
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
-  runUserScript: runUserScriptThroughMainProcess,
+  beginUserScriptRun: beginUserScriptRunThroughMainProcess,
+  sendUserScriptRunCubeChunk: sendUserScriptRunCubeChunkToMainProcess,
+  executeUserScriptRun: executeUserScriptRunInMainProcess,
+  readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
+  releaseUserScriptRun: releaseUserScriptRunInMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

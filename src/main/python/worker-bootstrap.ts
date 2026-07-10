@@ -3,8 +3,11 @@
 // cube reconstruction, dispatch, error capture); only the formula/script it executes is
 // user Python. It must mirror the frame layout in worker-protocol.ts exactly: the JSON
 // request frame is followed by a raw little-endian float32 cube frame when the request
-// header declares a cube, and a resultKind "cube" run responds with a JSON completed
-// header frame followed by one raw little-endian float32 cube frame (CT-214).
+// header declares a cube. A resultKind "cube" run WRITES its raw little-endian float32
+// result (band-major) to the request's cubeResultSpoolPath file and responds with ONE
+// JSON completed frame naming the shape and spooled byte length (CT-214 as amended by
+// CT-219g: a multi-gigabyte stdout frame makes the reading Electron main process
+// allocate one over-2GiB buffer for all available pipe bytes, a fatal native OOM).
 import { PYTHON_SANDBOX_INSTALL_SOURCE } from "./sandbox-policy";
 
 export const PYTHON_WORKER_BOOTSTRAP_SOURCE = `
@@ -117,16 +120,42 @@ def coerce_result_to_finite_float32_cube(value):
     array = np.asarray(value)
     if array.ndim != 3 or not is_numeric_array(array, np):
         raise RuntimeError(CUBE_RESULT_CONTRACT_MESSAGE)
-    cube = array.astype("<f4")
+    # copy=False + ascontiguousarray: a result that is already contiguous
+    # little-endian float32 (the common case) is sent as-is instead of being
+    # copied twice; at reference scale each avoided copy is ~3 GB (CT-219g).
+    cube = np.ascontiguousarray(array.astype("<f4", copy=False))
     if not np.all(np.isfinite(cube)):
         raise RuntimeError(CUBE_RESULT_CONTRACT_MESSAGE)
     return cube
 
 
-def encode_cube_result_frames(value):
+# CT-219g: the raw little-endian float32 result bytes (band-major) go straight
+# to the harness-provided spool file, never over stdout. A pipe delivery at
+# reference scale (~3 GB) makes the reading Electron main process allocate ONE
+# buffer for all available pipe bytes, which fatally exceeds its 2 GiB
+# single-allocation cap. Writes are sliced so no single OS write call
+# approaches the 2 GiB Windows CRT limit.
+CUBE_SPOOL_WRITE_SLICE_BYTES = 256 * 1024 * 1024
+
+
+def write_cube_result_to_spool(cube, spool_path):
+    view = cube.data.cast("B")
+    with open(spool_path, "wb") as spool:
+        for start in range(0, len(view), CUBE_SPOOL_WRITE_SLICE_BYTES):
+            spool.write(view[start:start + CUBE_SPOOL_WRITE_SLICE_BYTES])
+    return len(view)
+
+
+def encode_cube_result_frames(value, spool_path):
+    if not spool_path:
+        raise RuntimeError("The harness did not provide a cube result spool path.")
     cube = coerce_result_to_finite_float32_cube(value)
-    header = encode_response({"type": "completed", "cubeShape": list(cube.shape)})
-    return [header, cube.tobytes()]
+    spooled_byte_length = write_cube_result_to_spool(cube, spool_path)
+    return [encode_response({
+        "type": "completed",
+        "cubeShape": list(cube.shape),
+        "spooledByteLength": spooled_byte_length,
+    })]
 
 
 def make_json_safe(value):
@@ -155,7 +184,7 @@ def sandbox_user_origin_prefixes(input_spec):
 
 def encode_result_frames(request, value):
     if request.get("resultKind") == "cube":
-        return encode_cube_result_frames(value)
+        return encode_cube_result_frames(value, request.get("cubeResultSpoolPath"))
     return [encode_response({"type": "script-result", "value": make_json_safe(value)})]
 
 
@@ -163,7 +192,10 @@ def run_user_code(request, cube):
     input_spec = request.get("input")
     run_function = load_run_function(input_spec)
     if request.get("sandbox"):
-        install_bundled_mode_sandbox(sandbox_user_origin_prefixes(input_spec))
+        install_bundled_mode_sandbox(
+            sandbox_user_origin_prefixes(input_spec),
+            request.get("cubeResultSpoolPath"),
+        )
     wavelengths = (request.get("cube") or {}).get("wavelengths")
     value = invoke_run_function(run_function, cube, wavelengths)
     return encode_result_frames(request, value)

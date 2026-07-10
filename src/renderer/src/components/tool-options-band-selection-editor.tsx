@@ -20,7 +20,11 @@ import {
 import { rememberBandSelectionResult } from "@/lib/image/band-ops/band-selection-result-store";
 import { validateBandSelectionReturnValue } from "@/lib/image/band-ops/user-script-return-contract";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { buildUserScriptCubeFromRaster } from "@/lib/python/user-script-cube";
+import {
+  runUserScriptOnRasterShowingViewportBusy,
+  type UserScriptRunFlowBindings,
+} from "@/lib/python/run-user-script-flow";
+import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 
 // CT-210: the band-selection controls embedded in the Band Selection operation
@@ -41,7 +45,7 @@ export function ToolOptionsBandSelectionEditor(
   props: ToolOptionsBandSelectionEditorProps,
 ): JSX.Element {
   const binding = useBandSelectionBinding(props.viewportIndex);
-  const runner = useRunUserScriptForBand(props.raster, binding.setCustomResult);
+  const runner = useRunUserScriptForBand(props.viewportIndex, props.raster, binding.setCustomResult);
   useInitializeBandSelectionWhenAbsent(binding);
   return <LoadedBandSelectionEditor binding={binding} runner={runner} />;
 }
@@ -85,15 +89,17 @@ interface UserScriptBandRunner {
 }
 
 function useRunUserScriptForBand(
+  viewportIndex: number,
   raster: RasterImage,
   setCustomResult: (token: string, description: string) => void,
 ): UserScriptBandRunner {
+  const busyRegistrar = useBusyEntryRegistrar();
   const [isRunning, setIsRunning] = useState(false);
   const run = useCallback(
     (source: ToolboxRunUserScriptSource) => {
-      void executeUserScriptForBand(raster, source, setCustomResult, setIsRunning);
+      void executeUserScriptForBand({ busyRegistrar, viewportIndex }, raster, source, setCustomResult, setIsRunning);
     },
-    [raster, setCustomResult],
+    [busyRegistrar, viewportIndex, raster, setCustomResult],
   );
   return {
     isRunning,
@@ -103,6 +109,7 @@ function useRunUserScriptForBand(
 }
 
 async function executeUserScriptForBand(
+  bindings: UserScriptRunFlowBindings,
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   setCustomResult: (token: string, description: string) => void,
@@ -110,20 +117,13 @@ async function executeUserScriptForBand(
 ): Promise<void> {
   setIsRunning(true);
   try {
-    const result = await runUserScriptForCube(raster, source);
+    const result = await runUserScriptOnRasterShowingViewportBusy(bindings, raster, source);
     rememberUserScriptBandResult(result, raster, setCustomResult);
   } catch (error) {
     toast.error(describeBandScriptError(error));
   } finally {
     setIsRunning(false);
   }
-}
-
-function runUserScriptForCube(
-  raster: RasterImage,
-  source: ToolboxRunUserScriptSource,
-): Promise<ToolboxRunUserScriptResult> {
-  return window.toolboxApi.runUserScript({ cube: buildUserScriptCubeFromRaster(raster), source });
 }
 
 function rememberUserScriptBandResult(

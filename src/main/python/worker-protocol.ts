@@ -32,6 +32,12 @@ export interface RunUserScriptRequest {
   input: UserScriptInput;
   cube: CubePayloadHeader | null;
   resultKind: UserScriptResultKind;
+  // Where the worker writes a cube result's raw little-endian float32 bytes
+  // (band-major), CT-219g: a multi-gigabyte stdout frame makes the reading
+  // Electron main process allocate ONE buffer for all available pipe bytes,
+  // fatally exceeding its 2 GiB single-allocation cap, so the bulk bytes never
+  // ride the pipe. null for value-kind runs.
+  cubeResultSpoolPath: string | null;
   // Bundled mode (default for the app's own interpreter) is sandboxed; own-environment
   // mode (CT-208e) is explicitly trusted and passes false. The sandbox itself lives in
   // the Python bootstrap (sandbox-policy.ts); this flag only toggles installing it.
@@ -40,16 +46,18 @@ export interface RunUserScriptRequest {
 
 export type CubeResultShape = [number, number, number];
 
+// CT-219g: a cube result's bytes never cross stdout; the worker spools them to
+// the request's cubeResultSpoolPath and this response only announces shape and size.
 export type PythonWorkerResponse =
   | { type: "script-result"; value: JsonValue }
   | { type: "script-error"; message: string; traceback?: string }
-  | { type: "cube-result"; shape: CubeResultShape; bands: Float32Array[] };
+  | { type: "cube-result"; shape: CubeResultShape; totalBytes: number };
 
-// The wire header a cube-result run sends before its raw float32 frame; the decoder
-// folds the pair into a single in-memory cube-result response.
-interface CompletedCubeHeaderMessage {
+// The wire message a cube-result run sends after spooling its raw bytes.
+interface CompletedCubeMessage {
   type: "completed";
   cubeShape: CubeResultShape;
+  spooledByteLength: number;
 }
 
 export class MalformedWorkerResponseError extends Error {
@@ -60,11 +68,22 @@ export class MalformedWorkerResponseError extends Error {
 }
 
 const FRAME_LENGTH_HEADER_BYTES = 4;
+const MAX_FRAME_PAYLOAD_BYTES = 0xffff_ffff;
+
+// The frame prefix of a payload that is written as multiple segments (the
+// CT-219g cube path): a reference-scale cube cannot exist as one Buffer, so
+// the sender writes this prefix followed by each segment.
+export function encodeFrameLengthPrefix(payloadByteLength: number): Buffer {
+  if (payloadByteLength > MAX_FRAME_PAYLOAD_BYTES) {
+    throw new Error("The stack is too large to send to the script worker (4 GB frame limit).");
+  }
+  const header = Buffer.alloc(FRAME_LENGTH_HEADER_BYTES);
+  header.writeUInt32LE(payloadByteLength, 0);
+  return header;
+}
 
 function prefixWithLittleEndianByteLength(payload: Buffer): Buffer {
-  const header = Buffer.alloc(FRAME_LENGTH_HEADER_BYTES);
-  header.writeUInt32LE(payload.length, 0);
-  return Buffer.concat([header, payload]);
+  return Buffer.concat([encodeFrameLengthPrefix(payload.length), payload]);
 }
 
 export function encodeWorkerRequestFrame(request: RunUserScriptRequest): Buffer {
@@ -77,7 +96,7 @@ export function encodeRawBinaryFrame(payload: Buffer): Buffer {
   return prefixWithLittleEndianByteLength(payload);
 }
 
-function parseWorkerResponsePayload(payload: Buffer): PythonWorkerResponse | CompletedCubeHeaderMessage {
+function parseWorkerResponsePayload(payload: Buffer): PythonWorkerResponse {
   let parsed: unknown;
   try {
     parsed = JSON.parse(payload.toString("utf8"));
@@ -85,8 +104,16 @@ function parseWorkerResponsePayload(payload: Buffer): PythonWorkerResponse | Com
     throw new MalformedWorkerResponseError("payload is not valid JSON");
   }
   if (isScriptResultResponse(parsed) || isScriptErrorResponse(parsed)) return parsed;
-  if (isCompletedCubeHeaderMessage(parsed)) return parsed;
+  if (isCompletedCubeMessage(parsed)) return cubeResultFromCompletedMessage(parsed);
   throw new MalformedWorkerResponseError("payload is not a known response message");
+}
+
+function cubeResultFromCompletedMessage(message: CompletedCubeMessage): PythonWorkerResponse {
+  const [bandCount, height, width] = message.cubeShape;
+  if (bandCount * height * width * FLOAT32_BYTES !== message.spooledByteLength) {
+    throw new MalformedWorkerResponseError("cube payload length does not match its declared shape");
+  }
+  return { type: "cube-result", shape: message.cubeShape, totalBytes: message.spooledByteLength };
 }
 
 function isScriptResultResponse(candidate: unknown): candidate is PythonWorkerResponse {
@@ -107,12 +134,13 @@ function isScriptErrorResponse(candidate: unknown): candidate is PythonWorkerRes
   );
 }
 
-function isCompletedCubeHeaderMessage(candidate: unknown): candidate is CompletedCubeHeaderMessage {
+function isCompletedCubeMessage(candidate: unknown): candidate is CompletedCubeMessage {
   return (
     typeof candidate === "object" &&
     candidate !== null &&
     (candidate as { type?: unknown }).type === "completed" &&
-    isCubeResultShape((candidate as { cubeShape?: unknown }).cubeShape)
+    isCubeResultShape((candidate as { cubeShape?: unknown }).cubeShape) &&
+    Number.isInteger((candidate as { spooledByteLength?: unknown }).spooledByteLength)
   );
 }
 
@@ -126,64 +154,60 @@ function isCubeResultShape(candidate: unknown): candidate is CubeResultShape {
 
 const FLOAT32_BYTES = 4;
 
-function splitRawCubePayloadIntoBands(payload: Buffer, shape: CubeResultShape): Float32Array[] {
-  const [bandCount, height, width] = shape;
-  const bandByteLength = height * width * FLOAT32_BYTES;
-  if (payload.length !== bandCount * bandByteLength) {
-    throw new MalformedWorkerResponseError("cube payload length does not match its declared shape");
-  }
-  return Array.from({ length: bandCount }, (_, bandIndex) =>
-    copyLittleEndianBytesAsFloat32Array(payload, bandIndex * bandByteLength, height * width),
-  );
-}
-
-// Copies into a fresh Float32Array instead of viewing the buffer: frame payloads are
-// subarrays at arbitrary byte offsets, and Float32Array views require 4-byte alignment.
-function copyLittleEndianBytesAsFloat32Array(payload: Buffer, byteStart: number, floatCount: number): Float32Array {
-  const values = new Float32Array(floatCount);
-  new Uint8Array(values.buffer).set(payload.subarray(byteStart, byteStart + floatCount * FLOAT32_BYTES));
-  return values;
-}
-
 export class WorkerResponseFrameDecoder {
-  private bufferedBytes: Buffer = Buffer.alloc(0);
-  private pendingCubeShape: CubeResultShape | null = null;
+  // Frames buffer as a chunk list with ONE concatenation per COMPLETED frame,
+  // never per arriving chunk: at hundreds of megabytes (a JSON band result at
+  // reference scale) per-chunk concatenation is quadratic. Cube results are
+  // JSON-only on this pipe (the bulk bytes go to the spool file, CT-219g), so
+  // no frame here ever approaches the gigabyte danger zone.
+  private bufferedChunks: Buffer[] = [];
+  private bufferedByteLength = 0;
 
   appendChunkAndTakeCompletedResponses(chunk: Buffer): PythonWorkerResponse[] {
-    this.bufferedBytes = Buffer.concat([this.bufferedBytes, chunk]);
+    this.pushBufferedChunk(chunk);
     const responses: PythonWorkerResponse[] = [];
-    for (let payload = this.takeOneFramePayloadOrNull(); payload !== null; payload = this.takeOneFramePayloadOrNull()) {
-      const response = this.interpretFramePayload(payload);
-      if (response !== null) responses.push(response);
+    for (
+      let payload = this.takeOneBufferedFramePayloadOrNull();
+      payload !== null;
+      payload = this.takeOneBufferedFramePayloadOrNull()
+    ) {
+      responses.push(parseWorkerResponsePayload(payload));
     }
     return responses;
   }
 
-  // A completed-cube header only announces the raw float32 frame that follows; it
-  // yields null here and the pair surfaces as one cube-result on the next frame.
-  private interpretFramePayload(payload: Buffer): PythonWorkerResponse | null {
-    if (this.pendingCubeShape !== null) return this.finishPendingCubeResult(payload);
-    const parsed = parseWorkerResponsePayload(payload);
-    if (parsed.type === "completed") {
-      this.pendingCubeShape = parsed.cubeShape;
-      return null;
-    }
-    return parsed;
+  private pushBufferedChunk(input: Buffer): void {
+    if (input.length === 0) return;
+    this.bufferedChunks.push(input);
+    this.bufferedByteLength += input.length;
   }
 
-  private finishPendingCubeResult(payload: Buffer): PythonWorkerResponse {
-    const shape = this.pendingCubeShape as CubeResultShape;
-    this.pendingCubeShape = null;
-    return { type: "cube-result", shape, bands: splitRawCubePayloadIntoBands(payload, shape) };
-  }
-
-  private takeOneFramePayloadOrNull(): Buffer | null {
-    if (this.bufferedBytes.length < FRAME_LENGTH_HEADER_BYTES) return null;
-    const payloadLength = this.bufferedBytes.readUInt32LE(0);
+  private takeOneBufferedFramePayloadOrNull(): Buffer | null {
+    const payloadLength = this.peekFrameLengthOrNull();
+    if (payloadLength === null) return null;
     const frameEnd = FRAME_LENGTH_HEADER_BYTES + payloadLength;
-    if (this.bufferedBytes.length < frameEnd) return null;
-    const payload = this.bufferedBytes.subarray(FRAME_LENGTH_HEADER_BYTES, frameEnd);
-    this.bufferedBytes = this.bufferedBytes.subarray(frameEnd);
-    return payload;
+    if (this.bufferedByteLength < frameEnd) return null;
+    const all = this.takeAllBufferedBytes();
+    this.pushBufferedChunk(all.subarray(frameEnd));
+    return all.subarray(FRAME_LENGTH_HEADER_BYTES, frameEnd);
+  }
+
+  private peekFrameLengthOrNull(): number | null {
+    if (this.bufferedByteLength < FRAME_LENGTH_HEADER_BYTES) return null;
+    this.coalesceBufferedChunksWhenLengthPrefixIsSplit();
+    return this.bufferedChunks[0]!.readUInt32LE(0);
+  }
+
+  private coalesceBufferedChunksWhenLengthPrefixIsSplit(): void {
+    const first = this.bufferedChunks[0];
+    if (first === undefined || first.length >= FRAME_LENGTH_HEADER_BYTES) return;
+    this.bufferedChunks = [Buffer.concat(this.bufferedChunks)];
+  }
+
+  private takeAllBufferedBytes(): Buffer {
+    const all = this.bufferedChunks.length === 1 ? this.bufferedChunks[0]! : Buffer.concat(this.bufferedChunks);
+    this.bufferedChunks = [];
+    this.bufferedByteLength = 0;
+    return all;
   }
 }

@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import {
+  createChunkedUserScriptRunSessionStore,
+  type ChunkedUserScriptRunSessionStore,
+} from "./chunked-user-script-run";
 import { encodeCubeAsFloat32Payload, type CubeForUserScript } from "./cube-payload";
 import { resolveActivePythonInterpreterPath } from "./interpreter-resolver";
 import { runUserScriptInPythonSubprocess } from "./python-worker";
@@ -112,6 +116,15 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     }
   }
 
+  function nextCubeResultSpoolPath(): string {
+    return path.join(tmpdir(), `msi-worker-test-cube-result-${Date.now()}-${Math.floor(Math.random() * 1e9)}.bin`);
+  }
+
+  async function readSpooledFloats(spoolPath: string): Promise<number[]> {
+    const bytes = await fs.readFile(spoolPath);
+    return Array.from(new Float32Array(new Uint8Array(bytes).buffer));
+  }
+
   function runFormulaForCubeResult(expression: string, cube: CubeForUserScript) {
     if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
     return runUserScriptInPythonSubprocess({
@@ -119,6 +132,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       input: { kind: "formula", expression },
       cube: encodeCubeAsFloat32Payload(cube),
       resultKind: "cube",
+      cubeResultSpoolPath: nextCubeResultSpoolPath(),
       sandbox: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -131,6 +145,7 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
       input: { kind: "script", scriptSource },
       cube: encodeCubeAsFloat32Payload(cube),
       resultKind: "cube",
+      cubeResultSpoolPath: nextCubeResultSpoolPath(),
       sandbox: true,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -301,8 +316,12 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
 
   it("returns a doubled cube from a cube-result formula, matching a pure-TS reference", async () => {
     const outcome = await runFormulaForCubeResult("cube * 2", sampleCube);
-    const expectedBands = sampleCube.bands.map((band) => Float32Array.from(band, (value) => value * 2));
-    expect(outcome).toEqual({ kind: "completed-cube", shape: [2, 2, 2], bands: expectedBands });
+    if (outcome.kind !== "completed-cube") throw new Error(`unexpected outcome ${JSON.stringify(outcome)}`);
+    expect(outcome.shape).toEqual([2, 2, 2]);
+    expect(outcome.totalBytes).toBe(32);
+    const expectedValues = sampleCube.bands.flatMap((band) => Array.from(band, (value) => value * 2));
+    expect(await readSpooledFloats(outcome.spoolPath)).toEqual(expectedValues);
+    await fs.rm(outcome.spoolPath, { force: true });
   }, 60_000);
 
   it("rejects a 2-dimensional return from a cube-result run as a script error", async () => {
@@ -323,6 +342,45 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     });
   }, 60_000);
 
+  // CT-219g: proves the chunked transfer chain at a size spanning many chunks
+  // (~100 MB cube, byte-misaligned upload pieces, multi-chunk result pull),
+  // composing the session store with a real worker run exactly like the IPC layer.
+  it("round-trips a multi-chunk large cube through the chunked session store and the worker", async () => {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const bandCount = 6;
+    const height = 2048;
+    const width = 2048;
+    const store = createChunkedUserScriptRunSessionStore(8 * 1024 * 1024);
+    const token = await store.begin({
+      cube: { bandCount, height, width, wavelengths: null },
+      resultKind: "cube",
+      input: { kind: "formula", expression: "cube * 2" },
+      releaseInputResources: () => Promise.resolve(),
+      sourceName: null,
+      interpreterPath,
+      sandbox: true,
+    });
+    await uploadSyntheticBandsInMisalignedChunks(store, token, bandCount, height * width);
+    const run = store.takeExecutableRun(token);
+    const outcome = await runUserScriptInPythonSubprocess({
+      interpreterPath: run.interpreterPath,
+      input: run.input,
+      cube: run.cube,
+      resultKind: run.resultKind,
+      cubeResultSpoolPath: run.cubeResultSpoolPath,
+      sandbox: run.sandbox,
+      timeoutMs: 120_000,
+    });
+    if (outcome.kind !== "completed-cube") {
+      throw new Error(`unexpected outcome ${JSON.stringify(outcome)}`);
+    }
+    expect(outcome.shape).toEqual([bandCount, height, width]);
+    store.storeCubeResultForPull(token, outcome.shape, outcome.totalBytes);
+    const bands = await pullAllResultBandsFromStore(store, token, bandCount, height * width);
+    expectDoubledSyntheticSpotValues(bands, height * width);
+    await store.release(token);
+  }, 240_000);
+
   it("still enforces the bundled sandbox for a cube-transform run", async () => {
     const outcome = await runSandboxedCubeTransformScript(
       "def run(cube, wavelengths=None):\n    open(r'C:/msi-sandbox-probe.txt', 'w').write('x')\n    return cube\n",
@@ -341,6 +399,67 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     });
   }, 60_000);
 });
+
+const SYNTHETIC_VALUE_MODULUS = 977;
+const SYNTHETIC_UPLOAD_PIECE_BYTES = 7_000_003;
+
+function syntheticBandValue(bandIndex: number, pixelIndex: number): number {
+  return (bandIndex + 1) * 1000 + (pixelIndex % SYNTHETIC_VALUE_MODULUS);
+}
+
+function buildSyntheticBand(bandIndex: number, pixelCount: number): Float32Array {
+  const band = new Float32Array(pixelCount);
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
+    band[pixelIndex] = syntheticBandValue(bandIndex, pixelIndex);
+  }
+  return band;
+}
+
+// Piece size is deliberately NOT a multiple of 4, so chunk boundaries fall
+// inside float32 samples and across band boundaries, like real IPC chunks may.
+async function uploadSyntheticBandsInMisalignedChunks(
+  store: ChunkedUserScriptRunSessionStore,
+  token: string,
+  bandCount: number,
+  pixelCount: number,
+): Promise<void> {
+  for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+    const bytes = new Uint8Array(buildSyntheticBand(bandIndex, pixelCount).buffer);
+    for (let offset = 0; offset < bytes.byteLength; offset += SYNTHETIC_UPLOAD_PIECE_BYTES) {
+      await store.appendCubeChunk(token, bytes.subarray(offset, offset + SYNTHETIC_UPLOAD_PIECE_BYTES));
+    }
+  }
+}
+
+async function pullAllResultBandsFromStore(
+  store: ChunkedUserScriptRunSessionStore,
+  token: string,
+  bandCount: number,
+  pixelCount: number,
+): Promise<Float32Array[]> {
+  const combined = new Uint8Array(bandCount * pixelCount * 4);
+  let offset = 0;
+  let done = false;
+  while (!done) {
+    const chunk = await store.readNextResultChunk(token);
+    combined.set(chunk.bytes, offset);
+    offset += chunk.bytes.byteLength;
+    done = chunk.done;
+  }
+  expect(offset).toBe(combined.byteLength);
+  return Array.from({ length: bandCount }, (_, bandIndex) =>
+    new Float32Array(combined.buffer, bandIndex * pixelCount * 4, pixelCount),
+  );
+}
+
+function expectDoubledSyntheticSpotValues(bands: Float32Array[], pixelCount: number): void {
+  const spots = [0, 1, SYNTHETIC_VALUE_MODULUS - 1, SYNTHETIC_VALUE_MODULUS, Math.floor(pixelCount / 2), pixelCount - 1];
+  bands.forEach((band, bandIndex) => {
+    for (const pixelIndex of spots) {
+      expect(band[pixelIndex]).toBe(2 * syntheticBandValue(bandIndex, pixelIndex));
+    }
+  });
+}
 
 function combinePerPixelReference(
   cube: CubeForUserScript,

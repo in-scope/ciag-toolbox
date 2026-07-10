@@ -11,7 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { validateBandWeightVectorReturnValue } from "@/lib/image/band-ops/user-script-return-contract";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { buildUserScriptCubeFromRaster } from "@/lib/python/user-script-cube";
+import {
+  runUserScriptOnRasterShowingViewportBusy,
+  type UserScriptRunFlowBindings,
+} from "@/lib/python/run-user-script-flow";
+import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 
 // CT-209: the per-band weight editor embedded in the Band Weighting operation
@@ -32,7 +36,7 @@ export function ToolOptionsBandWeightingEditor(
   props: ToolOptionsBandWeightingEditorProps,
 ): JSX.Element {
   const binding = useBandWeightsBinding(props.viewportIndex, props.raster.bandCount);
-  const runner = useRunUserScriptForWeights(props.raster, binding.setWeights);
+  const runner = useRunUserScriptForWeights(props.viewportIndex, props.raster, binding.setWeights);
   useInitializeBandWeightsWhenAbsent(props.raster.bandCount, binding);
   if (!binding.weights) return <BandWeightingEditorLoading />;
   return (
@@ -79,15 +83,17 @@ interface UserScriptWeightsRunner {
 }
 
 function useRunUserScriptForWeights(
+  viewportIndex: number,
   raster: RasterImage,
   setWeights: (next: ReadonlyArray<number>) => void,
 ): UserScriptWeightsRunner {
+  const busyRegistrar = useBusyEntryRegistrar();
   const [isRunning, setIsRunning] = useState(false);
   const run = useCallback(
     (source: ToolboxRunUserScriptSource) => {
-      void executeUserScriptForWeights(raster, source, setWeights, setIsRunning);
+      void executeUserScriptForWeights({ busyRegistrar, viewportIndex }, raster, source, setWeights, setIsRunning);
     },
-    [raster, setWeights],
+    [busyRegistrar, viewportIndex, raster, setWeights],
   );
   return {
     isRunning,
@@ -97,6 +103,7 @@ function useRunUserScriptForWeights(
 }
 
 async function executeUserScriptForWeights(
+  bindings: UserScriptRunFlowBindings,
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   setWeights: (next: ReadonlyArray<number>) => void,
@@ -104,20 +111,13 @@ async function executeUserScriptForWeights(
 ): Promise<void> {
   setIsRunning(true);
   try {
-    const result = await runUserScriptForCube(raster, source);
+    const result = await runUserScriptOnRasterShowingViewportBusy(bindings, raster, source);
     applyUserScriptWeightsResult(result, raster.bandCount, setWeights);
   } catch (error) {
     toast.error(describeWeightsScriptError(error));
   } finally {
     setIsRunning(false);
   }
-}
-
-function runUserScriptForCube(
-  raster: RasterImage,
-  source: ToolboxRunUserScriptSource,
-): Promise<ToolboxRunUserScriptResult> {
-  return window.toolboxApi.runUserScript({ cube: buildUserScriptCubeFromRaster(raster), source });
 }
 
 function applyUserScriptWeightsResult(

@@ -24,10 +24,13 @@ describe("encodeCubeAsFloat32Payload", () => {
     });
   });
 
-  it("packs the bands band-major as raw little-endian float32 bytes (no JSON arrays)", () => {
-    const { buffer } = encodeCubeAsFloat32Payload(cube);
-    expect(buffer.length).toBe(2 * 4 * 4);
-    expect(readAllFloat32(buffer)).toEqual([1, 2, 3, 4, 10, 20, 30, 40]);
+  it("packs the bands band-major as streamed raw little-endian float32 segments", async () => {
+    const { readSegments, totalByteLength } = encodeCubeAsFloat32Payload(cube);
+    const segments: Buffer[] = [];
+    for await (const segment of readSegments()) segments.push(segment);
+    expect(segments).toHaveLength(2);
+    expect(totalByteLength).toBe(2 * 4 * 4);
+    expect(readAllFloat32(Buffer.concat(segments))).toEqual([1, 2, 3, 4, 10, 20, 30, 40]);
   });
 
   it("carries a null wavelengths header when the cube has none", () => {
