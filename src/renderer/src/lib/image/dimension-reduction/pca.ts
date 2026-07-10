@@ -1,7 +1,9 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
+import { buildSquareMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 
 // CT-181: Principal Component Analysis. fitPca mean-centres the cube, builds the
 // band-by-band covariance matrix, and eigendecomposes it (eigenpairs sorted
@@ -20,6 +22,30 @@ export interface PcaFit {
 export function fitPca(samples: CubeSampleMatrix, bandCount: number): PcaFit {
   const means = computePerBandMeans(samples, bandCount);
   const covariance = computeBandCovarianceMatrix(samples, means, bandCount);
+  return decomposeCovarianceIntoPcaFit(means, covariance);
+}
+
+// CT-227: the async twin of fitPca. Identical per-pair covariance math, one
+// progress tick and paint yield per band pair so the fit stretch of the phase
+// bar advances while the covariance sweeps run.
+export async function fitPcaReportingProgress(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  onProgress?: UnitProgressCallback,
+): Promise<PcaFit> {
+  const means = computePerBandMeans(samples, bandCount);
+  const covariance = await buildSquareMatrixInPairChunksReportingProgress(
+    bandCount,
+    (row, column) => covarianceBetweenBands(samples, means, row, column),
+    onProgress,
+  );
+  return decomposeCovarianceIntoPcaFit(means, covariance);
+}
+
+function decomposeCovarianceIntoPcaFit(
+  means: ReadonlyArray<number>,
+  covariance: ReadonlyArray<ReadonlyArray<number>>,
+): PcaFit {
   const decomposition = decomposeSymmetricMatrix(covariance);
   return { means, eigenvalues: decomposition.eigenvalues, eigenvectors: decomposition.eigenvectors };
 }

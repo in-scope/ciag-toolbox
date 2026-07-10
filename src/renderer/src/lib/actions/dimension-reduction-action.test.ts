@@ -34,7 +34,7 @@ const IDENTITY_CONFIG = {
   icon: Layers,
   successMessage: "Test DR applied",
   componentLabelPrefix: "TC",
-  fit: (): null => null,
+  fit: async (): Promise<null> => null,
   project: keepLeadingBands,
 };
 
@@ -152,7 +152,7 @@ describe("registerDimensionReductionAction", () => {
     let projectSampleCount = -1;
     const action = registerDimensionReductionAction({
       ...IDENTITY_CONFIG,
-      fit: (samples): null => {
+      fit: async (samples): Promise<null> => {
         fitSampleCount = samples.sampleCount;
         return null;
       },
@@ -203,16 +203,21 @@ describe("registerDimensionReductionAction", () => {
 
 // CT-223: the transform reports coarse phase progress (0, fit samples extracted,
 // fit complete, projection samples extracted) then one tick per projected
-// component across the second half of the bar.
-describe("dimension-reduction phase progress (CT-223)", () => {
-  it("reports the phase ticks then one tick per projected component", async () => {
+// component across the second half of the bar. CT-227 refined the fit stretch
+// with within-fit ticks, so the assertions are structural (phase boundaries plus
+// intermediate fit fractions), not an exact pinned sequence.
+describe("dimension-reduction phase progress (CT-223 / CT-227)", () => {
+  it("reports the phase boundaries plus within-fit ticks between 0.2 and 0.4", async () => {
     const ticks: number[] = [];
     await PCA_ACTION.transformSourceAsync!(
       rasterSource(makeFourBandRaster()),
       { [COMPONENT_COUNT_PARAMETER_ID]: 2 },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([0, 0.2, 0.4, 0.5, 0.5, 0.75, 1]);
+    expect(ticks).toContain(0.2);
+    expect(ticks).toContain(0.4);
+    expect(ticks).toContain(0.5);
+    expect(ticks.some((fraction) => fraction > 0.2 && fraction < 0.4)).toBe(true);
   });
 
   it("stays monotonic non-decreasing from 0 to 1", async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyIca, fitIca } from "./ica";
+import { applyIca, fitIca, fitIcaReportingProgress } from "./ica";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
@@ -117,5 +117,31 @@ describe("fitIca / applyIca", () => {
     const everyEntry = fit.componentVectors.flat();
     expect(everyEntry).toHaveLength(4);
     expect(everyEntry.every((value) => Number.isFinite(value))).toBe(true);
+  });
+});
+
+// CT-227: the async twin runs the exact sync steps (whitening covariance,
+// whitened projections, FastICA fixed-point updates), reporting the whitening
+// into the first half of the fit window and one tick per fixed-point iteration
+// (against the iteration cap) into the second.
+describe("fitIcaReportingProgress (CT-227)", () => {
+  it("produces a fit identical to the sync fitIca", async () => {
+    expect(await fitIcaReportingProgress(MIXED_CUBE, 2)).toEqual(fitIca(MIXED_CUBE, 2));
+  });
+
+  it("matches the sync fit on near-Gaussian data where the iteration cap bites", async () => {
+    const gaussianCube = makeSampleMatrix([approximatelyGaussianStream(1), approximatelyGaussianStream(98765)]);
+    expect(await fitIcaReportingProgress(gaussianCube, 2)).toEqual(fitIca(gaussianCube, 2));
+  });
+
+  it("ticks monotonically within 0..1 with whitening ticks then per-iteration ticks", async () => {
+    const ticks: number[] = [];
+    await fitIcaReportingProgress(MIXED_CUBE, 2, (fraction) => ticks.push(fraction));
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
+    expect(ticks.some((fraction) => fraction <= 0.5)).toBe(true);
+    expect(ticks.some((fraction) => fraction > 0.5 && fraction < 1)).toBe(true);
   });
 });

@@ -69,7 +69,14 @@ export interface DimensionReductionTransformConfig<Fit> {
   readonly successMessage: string;
   readonly loadingMessage?: string;
   readonly componentLabelPrefix: string;
-  readonly fit: (samples: CubeSampleMatrix, bandCount: number) => Fit;
+  // CT-227: the fit reports its own 0..1 progress (PCA/MNF per covariance band
+  // pair, ICA whitening then per FastICA iteration), windowed into the 0.2..0.4
+  // stretch of the phase bar by runDimensionReductionTransform.
+  readonly fit: (
+    samples: CubeSampleMatrix,
+    bandCount: number,
+    onProgress?: UnitProgressCallback,
+  ) => Promise<Fit>;
   // CT-223: projection reports one progress tick per projected component (the last
   // phase of the transform's phase-based progress). PCA/MNF/ICA all delegate to
   // projectMeanCentredSamplesOntoComponentVectorsReportingProgress.
@@ -179,7 +186,11 @@ async function runDimensionReductionTransform<Fit>(
   await reportProgressFractionAndYield(onProgress, 0);
   const fitSamples = extractFitSamples(raster, parameterValues);
   await reportProgressFractionAndYield(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION);
-  const fit = config.fit(fitSamples, raster.bandCount);
+  const fit = await config.fit(
+    fitSamples,
+    raster.bandCount,
+    scaleProgressToWindow(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION, FIT_COMPLETE_FRACTION),
+  );
   await reportProgressFractionAndYield(onProgress, FIT_COMPLETE_FRACTION);
   const projectionSamples = extractCubeSampleMatrixFromRaster(raster);
   await reportProgressFractionAndYield(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION);

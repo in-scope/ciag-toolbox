@@ -1,7 +1,14 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
+import { buildSquareMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
+import {
+  computeArrayReportingPerUnitProgress,
+  reportProgressFractionAndYield,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-184: Independent Component Analysis. fitIca first WHITENS the cube via PCA
 // (mean-centre, decorrelate, scale each principal axis to unit variance), then
@@ -37,6 +44,52 @@ export function fitIca(samples: CubeSampleMatrix, components: number): IcaFit {
   const whitened = whitenCentredSamples(samples, means, whitening);
   const unmixing = orderUnmixingByRecoveredSourceVariance(estimateUnmixingMatrix(whitened), whitened);
   return { means, componentVectors: multiplyMatrices(unmixing, whitening) };
+}
+
+// CT-227: the async twin of fitIca. The whitening covariance (per band pair)
+// and the whitened-sample projections (per axis) fill the first half of the fit
+// window; the FastICA estimation fills the second with one tick per fixed-point
+// iteration against the iteration cap. Every step reuses the sync math.
+const ICA_WHITENING_MATRIX_END_FRACTION = 0.35;
+const ICA_WHITENED_SAMPLES_END_FRACTION = 0.5;
+
+export async function fitIcaReportingProgress(
+  samples: CubeSampleMatrix,
+  components: number,
+  onProgress?: UnitProgressCallback,
+): Promise<IcaFit> {
+  const means = computePerBandMeans(samples, samples.bandCount);
+  const { whitening, whitened } = await whitenCubeReportingProgress(samples, means, components, onProgress);
+  const unmixing = await estimateUnmixingMatrixReportingProgress(
+    whitened,
+    scaleProgressToWindow(onProgress, ICA_WHITENED_SAMPLES_END_FRACTION, 1),
+  );
+  return { means, componentVectors: multiplyMatrices(orderUnmixingByRecoveredSourceVariance(unmixing, whitened), whitening) };
+}
+
+interface WhitenedCube {
+  readonly whitening: number[][];
+  readonly whitened: Float64Array[];
+}
+
+async function whitenCubeReportingProgress(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  components: number,
+  onProgress?: UnitProgressCallback,
+): Promise<WhitenedCube> {
+  const whitening = await buildWhiteningMatrixReportingProgress(
+    samples,
+    means,
+    components,
+    scaleProgressToWindow(onProgress, 0, ICA_WHITENING_MATRIX_END_FRACTION),
+  );
+  const whitened = await computeArrayReportingPerUnitProgress(
+    whitening.length,
+    (axis) => projectEveryCentredSampleOntoVector(samples, means, whitening[axis]!),
+    scaleProgressToWindow(onProgress, ICA_WHITENING_MATRIX_END_FRACTION, ICA_WHITENED_SAMPLES_END_FRACTION),
+  );
+  return { whitening, whitened };
 }
 
 // ICA imposes no natural component order, but a rank-deficient cube (e.g.
@@ -97,11 +150,32 @@ function buildWhiteningMatrix(
   means: ReadonlyArray<number>,
   components: number,
 ): number[][] {
-  const { eigenvalues, eigenvectors } = decomposeSymmetricMatrix(
-    computeBandCovarianceMatrix(samples, means, samples.bandCount),
+  const covariance = computeBandCovarianceMatrix(samples, means, samples.bandCount);
+  return whiteningRowsFromCovariance(covariance, samples.bandCount, components);
+}
+
+async function buildWhiteningMatrixReportingProgress(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  components: number,
+  onProgress?: UnitProgressCallback,
+): Promise<number[][]> {
+  const covariance = await buildSquareMatrixInPairChunksReportingProgress(
+    samples.bandCount,
+    (row, column) => covarianceBetweenBands(samples, means, row, column),
+    onProgress,
   );
+  return whiteningRowsFromCovariance(covariance, samples.bandCount, components);
+}
+
+function whiteningRowsFromCovariance(
+  covariance: ReadonlyArray<ReadonlyArray<number>>,
+  bandCount: number,
+  components: number,
+): number[][] {
+  const { eigenvalues, eigenvectors } = decomposeSymmetricMatrix(covariance);
   const floor = eigenvalueFloor(eigenvalues);
-  const keep = Math.min(components, samples.bandCount);
+  const keep = Math.min(components, bandCount);
   return Array.from({ length: keep }, (_unused, axis) =>
     scaleVector(eigenvectors[axis]!, 1 / Math.sqrt(Math.max(eigenvalues[axis]!, floor))),
   );
@@ -183,6 +257,22 @@ function estimateUnmixingMatrix(whitened: ReadonlyArray<Float64Array>): number[]
   return found;
 }
 
+// CT-227: the async twin of estimateUnmixingMatrix. Each component owns an equal
+// window of the estimation's fraction and ticks once per fixed-point iteration
+// against the iteration cap (with a completion tick when it converges early), so
+// the bar advances during the sample-sweeping FastICA updates.
+async function estimateUnmixingMatrixReportingProgress(
+  whitened: ReadonlyArray<Float64Array>,
+  onProgress?: UnitProgressCallback,
+): Promise<number[][]> {
+  const found: number[][] = [];
+  for (let index = 0; index < whitened.length; index += 1) {
+    const componentWindow = scaleProgressToWindow(onProgress, index / whitened.length, (index + 1) / whitened.length);
+    found.push(await extractSingleIndependentComponentReportingProgress(whitened, found, index, componentWindow));
+  }
+  return found;
+}
+
 function extractSingleIndependentComponent(
   whitened: ReadonlyArray<Float64Array>,
   alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
@@ -190,11 +280,43 @@ function extractSingleIndependentComponent(
 ): number[] {
   let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.length, index), alreadyFound);
   for (let iteration = 0; iteration < MAX_FAST_ICA_ITERATIONS; iteration += 1) {
-    const next = decorrelateAndNormalize(fastIcaFixedPointUpdate(whitened, vector), alreadyFound);
+    const next = runSingleFastIcaIterationStep(whitened, alreadyFound, vector);
     if (hasFastIcaConverged(next, vector)) return next;
     vector = next;
   }
   return vector;
+}
+
+async function extractSingleIndependentComponentReportingProgress(
+  whitened: ReadonlyArray<Float64Array>,
+  alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
+  index: number,
+  onProgress?: UnitProgressCallback,
+): Promise<number[]> {
+  let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.length, index), alreadyFound);
+  for (let iteration = 0; iteration < MAX_FAST_ICA_ITERATIONS; iteration += 1) {
+    const next = runSingleFastIcaIterationStep(whitened, alreadyFound, vector);
+    await reportProgressFractionAndYield(onProgress, (iteration + 1) / MAX_FAST_ICA_ITERATIONS);
+    if (hasFastIcaConverged(next, vector)) return finishComponentReportingCompletion(next, onProgress);
+    vector = next;
+  }
+  return vector;
+}
+
+async function finishComponentReportingCompletion(
+  vector: number[],
+  onProgress?: UnitProgressCallback,
+): Promise<number[]> {
+  await reportProgressFractionAndYield(onProgress, 1);
+  return vector;
+}
+
+function runSingleFastIcaIterationStep(
+  whitened: ReadonlyArray<Float64Array>,
+  alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
+  vector: ReadonlyArray<number>,
+): number[] {
+  return decorrelateAndNormalize(fastIcaFixedPointUpdate(whitened, vector), alreadyFound);
 }
 
 // A fixed, index-derived seed (no Math.random) keeps the iteration deterministic

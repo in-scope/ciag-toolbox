@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyPca, fitPca, varianceExplained } from "./pca";
+import { applyPca, fitPca, fitPcaReportingProgress, varianceExplained } from "./pca";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
@@ -43,6 +43,26 @@ describe("fitPca", () => {
   it("mean-centres each band", () => {
     const fit = fitPca(DOMINANT_AXIS_CUBE, 2);
     expect(fit.means).toEqual([2.5, 5]);
+  });
+});
+
+// CT-227: the async twin shares the sync fit's per-pair covariance math exactly
+// and reports one tick per band pair, so the fit stretch of the phase bar
+// advances while the covariance sweeps run.
+describe("fitPcaReportingProgress (CT-227)", () => {
+  it("produces a fit identical to the sync fitPca", async () => {
+    expect(await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2)).toEqual(fitPca(DOMINANT_AXIS_CUBE, 2));
+  });
+
+  it("ticks monotonically within 0..1, ending at 1, with one tick per band pair", async () => {
+    const ticks: number[] = [];
+    await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2, (fraction) => ticks.push(fraction));
+    expect(ticks).toEqual([0.25, 0.5, 0.75, 1]);
+  });
+
+  it("works without a progress callback", async () => {
+    const fit = await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2);
+    expect(fit.eigenvalues[0]!).toBeGreaterThan(fit.eigenvalues[1]!);
   });
 });
 

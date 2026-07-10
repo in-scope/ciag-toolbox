@@ -1,7 +1,13 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
+import { buildSquareMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
+import {
+  runInChunksReportingProgress,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-183: Minimum Noise Fraction. fitMnf estimates the band noise covariance by
 // the shift-difference method (neighbour-pixel differencing), noise-whitens the
@@ -34,6 +40,55 @@ export function fitMnf(samples: CubeSampleMatrix, bandCount: number): MnfFit {
   const means = computePerBandMeans(samples.bandValues, samples.sampleCount, bandCount);
   const whitening = buildNoiseWhiteningMatrix(estimateShiftDifferenceNoiseCovariance(samples, bandCount));
   const dataCovariance = computeCovarianceFromMeans(samples.bandValues, means, samples.sampleCount, bandCount);
+  return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, whitening, bandCount);
+}
+
+// CT-227: the async twin of fitMnf. The noise-covariance pass (streaming over
+// every neighbour pair) fills the first half of the fit window and the data
+// covariance pass (one sweep per band pair) fills the second, each chunked with
+// paint yields; the per-pair math is identical to the sync fit.
+const MNF_NOISE_COVARIANCE_PASS_END_FRACTION = 0.5;
+
+export async function fitMnfReportingProgress(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  onProgress?: UnitProgressCallback,
+): Promise<MnfFit> {
+  const means = computePerBandMeans(samples.bandValues, samples.sampleCount, bandCount);
+  const noiseCovariance = await estimateShiftDifferenceNoiseCovarianceReportingProgress(
+    samples,
+    bandCount,
+    scaleProgressToWindow(onProgress, 0, MNF_NOISE_COVARIANCE_PASS_END_FRACTION),
+  );
+  const dataCovariance = await computeDataCovarianceInPairChunks(
+    samples,
+    means,
+    bandCount,
+    scaleProgressToWindow(onProgress, MNF_NOISE_COVARIANCE_PASS_END_FRACTION, 1),
+  );
+  return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, buildNoiseWhiteningMatrix(noiseCovariance), bandCount);
+}
+
+function computeDataCovarianceInPairChunks(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  bandCount: number,
+  onProgress?: UnitProgressCallback,
+): Promise<number[][]> {
+  return buildSquareMatrixInPairChunksReportingProgress(
+    bandCount,
+    (row, col) =>
+      covarianceOfBands(samples.bandValues[row]!, samples.bandValues[col]!, means[row]!, means[col]!, samples.sampleCount),
+    onProgress,
+  );
+}
+
+function decomposeWhitenedCovarianceIntoMnfFit(
+  means: ReadonlyArray<number>,
+  dataCovariance: ReadonlyArray<ReadonlyArray<number>>,
+  whitening: ReadonlyArray<ReadonlyArray<number>>,
+  bandCount: number,
+): MnfFit {
   const decomposition = decomposeSymmetricMatrix(whitenDataCovariance(dataCovariance, whitening));
   const componentVectors = mapWhitenedVectorsIntoDataSpace(decomposition.eigenvectors, whitening, bandCount);
   return { means, eigenvalues: decomposition.eigenvalues, componentVectors };
@@ -101,6 +156,38 @@ function covarianceOfBands(
 export function estimateShiftDifferenceNoiseCovariance(samples: CubeSampleMatrix, bandCount: number): number[][] {
   const horizontal = accumulateDirectionCentredCrossSum(samples, bandCount, horizontalNeighbourDirection(samples));
   const vertical = accumulateDirectionCentredCrossSum(samples, bandCount, verticalNeighbourDirection(samples));
+  return poolDirectionsIntoNoiseCovariance(horizontal, vertical);
+}
+
+// CT-227: the async twin of estimateShiftDifferenceNoiseCovariance. The
+// horizontal pass fills the first half of its window and the vertical pass the
+// second; each pass streams the SAME row-range accumulator as the sync path in
+// row chunks with a paint yield between chunks, so the accumulation order (and
+// therefore every float) is unchanged.
+export async function estimateShiftDifferenceNoiseCovarianceReportingProgress(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  onProgress?: UnitProgressCallback,
+): Promise<number[][]> {
+  const horizontal = await accumulateDirectionCentredCrossSumInRowChunks(
+    samples,
+    bandCount,
+    horizontalNeighbourDirection(samples),
+    scaleProgressToWindow(onProgress, 0, 0.5),
+  );
+  const vertical = await accumulateDirectionCentredCrossSumInRowChunks(
+    samples,
+    bandCount,
+    verticalNeighbourDirection(samples),
+    scaleProgressToWindow(onProgress, 0.5, 1),
+  );
+  return poolDirectionsIntoNoiseCovariance(horizontal, vertical);
+}
+
+function poolDirectionsIntoNoiseCovariance(
+  horizontal: DirectionCrossSum,
+  vertical: DirectionCrossSum,
+): number[][] {
   const pooledPairCount = Math.max(1, horizontal.pairCount + vertical.pairCount);
   return scaleMatrix(addMatrices(horizontal.centredCrossSum, vertical.centredCrossSum), 0.5 / pooledPairCount);
 }
@@ -130,25 +217,61 @@ function accumulateDirectionCentredCrossSum(
   bandCount: number,
   direction: NeighbourDirection,
 ): DirectionCrossSum {
-  const rawCrossSums = new Float64Array(bandCount * bandCount);
-  const differenceSums = new Float64Array(bandCount);
-  const pairCount = streamNeighbourDifferencesIntoCrossSums(samples, bandCount, direction, rawCrossSums, differenceSums);
-  return { centredCrossSum: centreCrossSums(rawCrossSums, differenceSums, pairCount, bandCount), pairCount };
+  const accumulators = makeDirectionAccumulators(bandCount);
+  const pairCount = streamRowRangeOfNeighbourDifferences(samples, bandCount, direction, 0, direction.firstRows, accumulators);
+  return { centredCrossSum: centreCrossSums(accumulators.rawCrossSums, accumulators.differenceSums, pairCount, bandCount), pairCount };
 }
 
-function streamNeighbourDifferencesIntoCrossSums(
+// Sized so each main-thread chunk stays in the tens of milliseconds at
+// reference scale (the CT-226 denoise chunking convention).
+const NOISE_ESTIMATE_PIXELS_PER_CHUNK = 2_000_000;
+
+async function accumulateDirectionCentredCrossSumInRowChunks(
   samples: CubeSampleMatrix,
   bandCount: number,
   direction: NeighbourDirection,
-  rawCrossSums: Float64Array,
-  differenceSums: Float64Array,
-): number {
-  const differenceBuffer = new Float64Array(bandCount);
+  onProgress?: UnitProgressCallback,
+): Promise<DirectionCrossSum> {
+  const accumulators = makeDirectionAccumulators(bandCount);
   let pairCount = 0;
-  for (let row = 0; row < direction.firstRows; row += 1) {
+  await runInChunksReportingProgress(
+    direction.firstRows,
+    Math.max(1, Math.floor(NOISE_ESTIMATE_PIXELS_PER_CHUNK / Math.max(1, direction.firstColumns))),
+    (startRow, endRow) => {
+      pairCount += streamRowRangeOfNeighbourDifferences(samples, bandCount, direction, startRow, endRow, accumulators);
+    },
+    onProgress,
+  );
+  return { centredCrossSum: centreCrossSums(accumulators.rawCrossSums, accumulators.differenceSums, pairCount, bandCount), pairCount };
+}
+
+interface DirectionAccumulators {
+  readonly rawCrossSums: Float64Array;
+  readonly differenceSums: Float64Array;
+  readonly differenceBuffer: Float64Array;
+}
+
+function makeDirectionAccumulators(bandCount: number): DirectionAccumulators {
+  return {
+    rawCrossSums: new Float64Array(bandCount * bandCount),
+    differenceSums: new Float64Array(bandCount),
+    differenceBuffer: new Float64Array(bandCount),
+  };
+}
+
+function streamRowRangeOfNeighbourDifferences(
+  samples: CubeSampleMatrix,
+  bandCount: number,
+  direction: NeighbourDirection,
+  startRow: number,
+  endRow: number,
+  accumulators: DirectionAccumulators,
+): number {
+  let pairCount = 0;
+  for (let row = startRow; row < endRow; row += 1) {
     const rowStart = row * direction.rowStride;
     for (let column = 0; column < direction.firstColumns; column += 1) {
-      addNeighbourPairToCrossSums(samples.bandValues, bandCount, rowStart + column, direction, rawCrossSums, differenceSums, differenceBuffer);
+      addNeighbourPairToCrossSums(samples.bandValues, bandCount, rowStart + column, direction, accumulators.rawCrossSums, accumulators.differenceSums, accumulators.differenceBuffer);
       pairCount += 1;
     }
   }
