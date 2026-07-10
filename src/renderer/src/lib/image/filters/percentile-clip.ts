@@ -66,7 +66,11 @@ function assertPercentileIsWithinRange(percentile: number, sideName: string): vo
 }
 
 function assertValuesAreNotEmpty(values: ArrayLike<number>): void {
-  if (values.length > 0) return;
+  assertPercentileValueCountIsNotEmpty(values.length);
+}
+
+export function assertPercentileValueCountIsNotEmpty(valueCount: number): void {
+  if (valueCount > 0) return;
   throw new Error("The stack has no pixel values to compute percentiles from.");
 }
 
@@ -77,14 +81,44 @@ function sortValuesAscending(values: ArrayLike<number>): Float64Array {
 }
 
 // numpy's default "linear" percentile: rank p/100 * (n - 1) interpolates
-// between the two nearest order statistics of the sorted data.
+// between the two nearest order statistics of the sorted data. The rank and
+// interpolation helpers are exported so whole-stack-percentile.ts computes the
+// SAME cut points from order statistics without materializing one sorted copy
+// of the concatenated stack (CT-219c).
 function interpolatePercentileFromSortedValues(sorted: Float64Array, percentile: number): number {
-  const rank = (percentile / 100) * (sorted.length - 1);
+  const rank = describePercentileOrderStatisticRank(sorted.length, percentile);
+  return interpolatePercentileBetweenOrderStatistics(
+    sorted[rank.lowerIndex] ?? 0,
+    sorted[rank.upperIndex] ?? 0,
+    rank.fractionBetween,
+  );
+}
+
+export interface PercentileOrderStatisticRank {
+  readonly lowerIndex: number;
+  readonly upperIndex: number;
+  readonly fractionBetween: number;
+}
+
+export function describePercentileOrderStatisticRank(
+  valueCount: number,
+  percentile: number,
+): PercentileOrderStatisticRank {
+  const rank = (percentile / 100) * (valueCount - 1);
   const lowerIndex = Math.floor(rank);
-  const upperIndex = Math.min(lowerIndex + 1, sorted.length - 1);
-  const lowerValue = sorted[lowerIndex] ?? 0;
-  const upperValue = sorted[upperIndex] ?? 0;
-  return lowerValue + (rank - lowerIndex) * (upperValue - lowerValue);
+  return {
+    lowerIndex,
+    upperIndex: Math.min(lowerIndex + 1, valueCount - 1),
+    fractionBetween: rank - lowerIndex,
+  };
+}
+
+export function interpolatePercentileBetweenOrderStatistics(
+  lowerValue: number,
+  upperValue: number,
+  fractionBetween: number,
+): number {
+  return lowerValue + fractionBetween * (upperValue - lowerValue);
 }
 
 function clampValueToRange(value: number, min: number, max: number): number {

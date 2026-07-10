@@ -122,15 +122,21 @@ describe("PERCENTILE_CLIP_ACTION", () => {
   });
 });
 
-describe("PERCENTILE_CLIP_ACTION progress (CT-221)", () => {
-  it("reports one tick per band under the full-stack scope", async () => {
+describe("PERCENTILE_CLIP_ACTION progress (CT-221 / CT-219c)", () => {
+  // CT-219c split the full-stack bar into a cut-point phase (first half) and
+  // the clamp loop (second half), so this asserts structure, not exact ticks.
+  it("advances through both the cut-point and clamp phases under the full-stack scope", async () => {
     const ticks: number[] = [];
     await PERCENTILE_CLIP_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoBandRampStack() },
       { lowerPercentile: 25, upperPercentile: 75 },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([0, 1 / 2, 1]);
+    expect(ticks[0]).toBe(0);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    expect(ticks.every((tick, index) => index === 0 || tick >= ticks[index - 1]!)).toBe(true);
+    expect(ticks.some((tick) => tick > 0 && tick < 0.5)).toBe(true);
+    expect(ticks.some((tick) => tick > 0.5 && tick < 1)).toBe(true);
   });
 
   it("reports one tick per band under the band-wise scope including carried-through bands", async () => {

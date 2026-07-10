@@ -4,16 +4,16 @@ import {
   applyPercentileClip,
   assertPercentileClipBoundsAreValid,
   clampValuesToCutPoints,
-  computePercentileCutPoints,
   type PercentileClipBounds,
 } from "@/lib/image/filters/percentile-clip";
+import { computeWholeStackPercentileCutPoints } from "@/lib/image/filters/whole-stack-percentile";
 import {
   makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
 } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
-import type { UnitProgressCallback } from "@/lib/image/unit-progress";
+import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/unit-progress";
 
 import {
   describeCubeScopeForAppliedLabel,
@@ -152,16 +152,25 @@ function clipRasterBandsToPercentiles(
   return clipEachBandToItsOwnCutPoints(raster, clippedBandIndexes, bounds, onProgress);
 }
 
-function clipEveryBandToWholeStackCutPoints(
+// CT-219c: the cut points come from whole-stack-percentile.ts (no stack
+// concatenation, so reference-scale stacks no longer fail allocation); the cut
+// point phase fills the first half of the busy bar, the clamp loop the second.
+const CUT_POINT_PHASE_END_FRACTION = 0.5;
+
+async function clipEveryBandToWholeStackCutPoints(
   raster: RasterImage,
   bounds: PercentileClipBounds,
   onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
-  const cutPoints = computePercentileCutPoints(concatenateAllBandValues(raster), bounds);
+  const cutPoints = await computeWholeStackPercentileCutPoints(
+    raster.bandPixels,
+    bounds,
+    scaleProgressToWindow(onProgress, 0, CUT_POINT_PHASE_END_FRACTION),
+  );
   return makeFloatRasterFromBandComputationReportingProgress(
     raster,
     (band) => clampValuesToCutPoints(band, cutPoints),
-    onProgress,
+    scaleProgressToWindow(onProgress, CUT_POINT_PHASE_END_FRACTION, 1),
   );
 }
 
@@ -177,15 +186,6 @@ function clipEachBandToItsOwnCutPoints(
     (band) => applyPercentileClip(band, bounds),
     onProgress,
   );
-}
-
-function concatenateAllBandValues(raster: RasterImage): Float64Array {
-  const pixelsPerBand = raster.width * raster.height;
-  const allValues = new Float64Array(pixelsPerBand * raster.bandCount);
-  raster.bandPixels.forEach((band, bandIndex) => {
-    allValues.set(band, bandIndex * pixelsPerBand);
-  });
-  return allValues;
 }
 
 function readPercentileClipScopeChoice(parameterValues: ParameterValuesById): string {
