@@ -4,6 +4,7 @@ import type { ElectronApplication, Locator, Page } from "@playwright/test";
 import { listAllOperationCommands } from "../../src/shared/operation-menu-catalog";
 import { electronApplicationForWindow } from "./launch-app";
 import { triggerOperationMenuItem } from "./main-process";
+import { runAsStoryboardStep } from "./storyboard-step";
 
 // Operations are launched from their REAL user entry point, decided by the
 // shared catalog: commands with a toolbar shortcut are clicked on the toolbar
@@ -43,10 +44,12 @@ async function launchOperationFromItsEntryPoint(
 }
 
 export async function openOperation(page: Page, operationLabel: string): Promise<Locator> {
-  await launchOperationFromItsEntryPoint(page, operationLabel);
-  const panel = operationPanel(page, operationLabel);
-  await expect(panel).toBeVisible();
-  return panel;
+  return runAsStoryboardStep(page, `Open the ${operationLabel} panel from its entry point`, async () => {
+    await launchOperationFromItsEntryPoint(page, operationLabel);
+    const panel = operationPanel(page, operationLabel);
+    await expect(panel).toBeVisible();
+    return panel;
+  });
 }
 
 // Explicitly menu-driven launch (e.g. the broad "Rotate" and "Reflect", whose toolbar
@@ -56,10 +59,12 @@ export async function openOperationFromMenu(
   page: Page,
   operationLabel: string,
 ): Promise<Locator> {
-  await triggerOperationMenuItem(app, operationLabel);
-  const panel = operationPanel(page, operationLabel);
-  await expect(panel).toBeVisible();
-  return panel;
+  return runAsStoryboardStep(page, `Open the ${operationLabel} panel from the menu`, async () => {
+    await triggerOperationMenuItem(app, operationLabel);
+    const panel = operationPanel(page, operationLabel);
+    await expect(panel).toBeVisible();
+    return panel;
+  });
 }
 
 // CT-221/222/223: transforming operations run asynchronously (per-band progress
@@ -70,12 +75,18 @@ export async function openOperationFromMenu(
 const OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS = 60_000;
 
 export async function applyOperation(page: Page, operationLabel: string): Promise<void> {
-  const panel = operationPanel(page, operationLabel);
-  await panel.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(panel).toBeHidden();
-  await expect(operationBusyOverlays(page)).toHaveCount(0, {
-    timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
-  });
+  await runAsStoryboardStep(
+    page,
+    `Apply ${operationLabel} and wait for the result panel to settle`,
+    async () => {
+      const panel = operationPanel(page, operationLabel);
+      await panel.getByRole("button", { name: "Apply", exact: true }).click();
+      await expect(panel).toBeHidden();
+      await expect(operationBusyOverlays(page)).toHaveCount(0, {
+        timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
+      });
+    },
+  );
 }
 
 function operationBusyOverlays(page: Page): Locator {
@@ -98,10 +109,16 @@ export async function setOpenInNewPanel(
   operationLabel: string,
   shouldOpenInNewPanel: boolean,
 ): Promise<void> {
-  const toggle = openInNewPanelSwitch(page, operationLabel);
-  const isChecked = (await toggle.getAttribute("aria-checked")) === "true";
-  if (isChecked !== shouldOpenInNewPanel) await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", String(shouldOpenInNewPanel));
+  await runAsStoryboardStep(
+    page,
+    `Set ${operationLabel}'s "Open in a new panel" switch to ${shouldOpenInNewPanel ? "on" : "off"}`,
+    async () => {
+      const toggle = openInNewPanelSwitch(page, operationLabel);
+      const isChecked = (await toggle.getAttribute("aria-checked")) === "true";
+      if (isChecked !== shouldOpenInNewPanel) await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", String(shouldOpenInNewPanel));
+    },
+  );
 }
 
 export async function applyOperationInPlace(page: Page, operationLabel: string): Promise<void> {
@@ -118,9 +135,17 @@ export async function setOperationNumberParameter(
   parameterLabel: string,
   value: number,
 ): Promise<void> {
-  const field = operationPanel(page, operationLabel).getByLabel(parameterLabel, { exact: true });
-  await field.fill(String(value));
-  await expect(field).toHaveValue(String(value));
+  await runAsStoryboardStep(
+    page,
+    `Set ${parameterLabel} to ${value} in the ${operationLabel} panel`,
+    async () => {
+      const field = operationPanel(page, operationLabel).getByLabel(parameterLabel, {
+        exact: true,
+      });
+      await field.fill(String(value));
+      await expect(field).toHaveValue(String(value));
+    },
+  );
 }
 
 // Enum parameter fields (e.g. Normalize's "Method") render one native <select> in the panel;
@@ -131,13 +156,21 @@ export async function setOperationEnumParameter(
   operationLabel: string,
   optionValue: string,
 ): Promise<void> {
-  await operationPanel(page, operationLabel).locator("select").selectOption(optionValue);
+  await runAsStoryboardStep(
+    page,
+    `Choose the ${optionValue} option in the ${operationLabel} panel`,
+    async () => {
+      await operationPanel(page, operationLabel).locator("select").selectOption(optionValue);
+    },
+  );
 }
 
 export async function cancelOperation(page: Page, operationLabel: string): Promise<void> {
-  const panel = operationPanel(page, operationLabel);
-  await panel.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(panel).toBeHidden();
+  await runAsStoryboardStep(page, `Cancel the ${operationLabel} panel`, async () => {
+    const panel = operationPanel(page, operationLabel);
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(panel).toBeHidden();
+  });
 }
 
 export function isApplyEnabled(page: Page, operationLabel: string): Promise<boolean> {

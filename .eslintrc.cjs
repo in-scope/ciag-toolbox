@@ -23,7 +23,7 @@ module.exports = {
   settings: {
     react: { version: "detect" },
   },
-  ignorePatterns: ["out/", "dist/", "node_modules/", "*.cjs"],
+  ignorePatterns: ["out/", "dist/", "node_modules/", "*.cjs", "test-results/"],
   rules: {
     "@typescript-eslint/consistent-type-imports": "error",
     "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],

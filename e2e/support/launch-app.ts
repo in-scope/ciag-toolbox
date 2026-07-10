@@ -3,6 +3,9 @@ import type { ElectronApplication, Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { runAsStoryboardStep, tracingIsEnabled } from "./storyboard-step";
+import { composeTraceRunFolderLabel, composeTraceZipFileName } from "./trace-run-label";
+
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 // Launch against the project root (not out/main/index.js directly) so Electron
 // resolves the real package.json: app.getVersion()/getName() then report the
@@ -82,9 +85,12 @@ async function waitForMainApplicationWindow(
   throw new Error("Timed out waiting for the MSI Toolbox main window");
 }
 
-function tracingIsEnabled(): boolean {
-  return process.env["MSI_E2E_TRACE"] === "1";
-}
+// Traces from successive runs land in distinct per-process run folders so
+// nothing is ever overwritten (the opt-out rule lives in storyboard-step.ts).
+const TRACE_RUN_FOLDER_LABEL = composeTraceRunFolderLabel(
+  process.env["MSI_E2E_TRACE_LABEL"],
+  new Date(),
+);
 
 async function startTracingIfEnabled(app: ElectronApplication): Promise<void> {
   if (!tracingIsEnabled()) return;
@@ -95,43 +101,61 @@ async function startTracingIfEnabled(app: ElectronApplication): Promise<void> {
 
 async function stopTracingIfEnabled(app: ElectronApplication): Promise<void> {
   if (!tracingIsEnabled()) return;
-  await app.context().tracing.stop({ path: nextTraceOutputPath() });
+  const tracePath = nextTraceOutputPath();
+  await app.context().tracing.stop({ path: tracePath });
+  await attachTraceZipToCurrentTest(tracePath);
 }
 
 let savedTraceCount = 0;
 
 function nextTraceOutputPath(): string {
   savedTraceCount += 1;
-  const fileName = `${currentTraceLabel(savedTraceCount)}.zip`;
-  return resolve(APPLICATION_ROOT_PATH, "test-results", "electron-traces", fileName);
+  const fileName = composeTraceZipFileName(currentTestTitleLabel(), savedTraceCount);
+  return resolve(
+    APPLICATION_ROOT_PATH,
+    "test-results",
+    "electron-traces",
+    TRACE_RUN_FOLDER_LABEL,
+    fileName,
+  );
 }
 
-function currentTraceLabel(sequence: number): string {
+function currentTestTitleLabel(): string {
   try {
-    const fromTitle = sanitizeForFileName(test.info().titlePath.join("-"));
-    return fromTitle.length > 0 ? fromTitle : `trace-${sequence}`;
+    return test.info().titlePath.join("-");
   } catch {
-    return `trace-${sequence}`;
+    return "";
   }
 }
 
-function sanitizeForFileName(rawLabel: string): string {
-  return rawLabel.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+// The attachment gives the HTML report a per-test trace-viewer link.
+async function attachTraceZipToCurrentTest(tracePath: string): Promise<void> {
+  try {
+    await test
+      .info()
+      .attach("trace", { path: tracePath, contentType: "application/zip" });
+  } catch {
+    // Trace saved outside a running test; there is no report entry to attach to.
+  }
 }
 
 export async function launchToolboxApp(): Promise<LaunchedApp> {
-  const app = await electron.launch({
-    args: [APPLICATION_ROOT_PATH],
-    env: buildElectronLaunchEnvironment(),
+  return runAsStoryboardStep(null, "Launch the app and wait for the main window", async () => {
+    const app = await electron.launch({
+      args: [APPLICATION_ROOT_PATH],
+      env: buildElectronLaunchEnvironment(),
+    });
+    await startTracingIfEnabled(app);
+    const window = await waitForMainApplicationWindow(app);
+    await window.waitForLoadState("domcontentloaded");
+    electronApplicationByWindow.set(window, app);
+    return { app, window };
   });
-  await startTracingIfEnabled(app);
-  const window = await waitForMainApplicationWindow(app);
-  await window.waitForLoadState("domcontentloaded");
-  electronApplicationByWindow.set(window, app);
-  return { app, window };
 }
 
 export async function closeToolboxApp(launched: LaunchedApp): Promise<void> {
-  await stopTracingIfEnabled(launched.app);
-  await launched.app.close();
+  await runAsStoryboardStep(null, "Close the app and save its trace", async () => {
+    await stopTracingIfEnabled(launched.app);
+    await launched.app.close();
+  });
 }
