@@ -1,5 +1,6 @@
 import { USER_SCRIPT_RUN_CHUNK_BYTES } from "@shared/chunked-user-script-run-protocol";
 
+import { describeElectronInvokeFailure } from "@/lib/ipc/electron-invoke-error";
 import { createCubeResultChunkAssembler } from "./cube-result-chunk-assembler";
 
 // CT-219g: drives the chunked user-script run protocol from the renderer. The
@@ -168,12 +169,6 @@ function attachSourceName(
   return { ...result, sourceName };
 }
 
-// ipcMain.handle rejections reach the renderer wrapped as
-// "Error invoking remote method '<channel>': Error: <message>"; strip that
-// harness prefix so toasts show only the human message.
-const ELECTRON_INVOKE_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/;
-
 export function describeUserScriptRunTransferFailure(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(ELECTRON_INVOKE_ERROR_PREFIX, "");
+  return describeElectronInvokeFailure(error);
 }

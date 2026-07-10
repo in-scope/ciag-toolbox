@@ -17,7 +17,7 @@ import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
 import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
-import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
+import { registerSaveBundleDialogIpcHandlers } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 import { initializePythonEnvironmentControllerFromDisk } from "./python/python-environment-controller";
@@ -155,7 +155,7 @@ app.whenReady().then(() => {
   registerChunkedOpenedImageReadIpcHandlers();
   registerSaveImageDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
-  registerSaveBundleDialogIpcHandler();
+  registerSaveBundleDialogIpcHandlers();
   registerE2eDialogStubTestChannelsWhenEnabled();
   const splash = createSplashWindow();
   createMainWindow(splash);

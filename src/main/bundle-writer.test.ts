@@ -48,15 +48,18 @@ function buildExternalAssetViewport(
   };
 }
 
-function buildBakedTiffAssetViewport(
+// CT-219e: baked assets reach the writer as spool FILE PATHS (the chunked save
+// protocol spools their bytes to disk), so the fixtures write part files first.
+async function buildBakedTiffAssetViewport(
   index: number,
   fileName: string,
   bytes: Uint8Array,
-): BundleDraftViewportEntry {
+): Promise<BundleDraftViewportEntry> {
+  const spool = await writeSpoolPartFixture(`baked-${index}-${fileName}.primary`, bytes);
   return {
     index,
     fileName,
-    asset: { kind: "baked", bytes, extension: "tif" },
+    asset: { kind: "baked", primary: { absolutePath: spool, extension: "tif" } },
     renderingState: {
       normalizationEnabled: false,
       selectedBandIndex: 0,
@@ -66,20 +69,21 @@ function buildBakedTiffAssetViewport(
   };
 }
 
-function buildBakedEnviAssetViewport(
+async function buildBakedEnviAssetViewport(
   index: number,
   fileName: string,
   headerBytes: Uint8Array,
   binaryBytes: Uint8Array,
-): BundleDraftViewportEntry {
+): Promise<BundleDraftViewportEntry> {
+  const headerSpool = await writeSpoolPartFixture(`baked-${index}-${fileName}.primary`, headerBytes);
+  const binarySpool = await writeSpoolPartFixture(`baked-${index}-${fileName}.sidecar`, binaryBytes);
   return {
     index,
     fileName,
     asset: {
       kind: "baked",
-      bytes: headerBytes,
-      extension: "hdr",
-      sidecar: { extension: "bin", bytes: binaryBytes },
+      primary: { absolutePath: headerSpool, extension: "hdr" },
+      sidecar: { absolutePath: binarySpool, extension: "bin" },
     },
     renderingState: {
       normalizationEnabled: false,
@@ -88,6 +92,12 @@ function buildBakedEnviAssetViewport(
     },
     operationHistory: [],
   };
+}
+
+async function writeSpoolPartFixture(name: string, bytes: Uint8Array): Promise<string> {
+  const absolutePath = join(workspaceDir, name.replace(/[^a-z0-9.-]/gi, "_"));
+  await writeFile(absolutePath, bytes);
+  return absolutePath;
 }
 
 function buildDraftFromViewports(
@@ -126,7 +136,7 @@ describe("writeProjectBundleAtPath round-trip", () => {
   it("writes a zip with project.json plus a baked asset and rewritten path", async () => {
     const tifBytes = new TextEncoder().encode("fake-tiff-bytes");
     const draft = buildDraftFromViewports([
-      buildBakedTiffAssetViewport(0, "sample.tif", tifBytes),
+      await buildBakedTiffAssetViewport(0, "sample.tif", tifBytes),
     ]);
     const bundlePath = join(workspaceDir, "baked.ctbundle");
     await writeProjectBundleAtPath(bundlePath, draft);
@@ -149,7 +159,7 @@ describe("writeProjectBundleAtPath round-trip", () => {
     const headerBytes = new TextEncoder().encode("hdr-bytes");
     const binaryBytes = new TextEncoder().encode("bin-bytes");
     const draft = buildDraftFromViewports([
-      buildBakedEnviAssetViewport(0, "cube.hdr", headerBytes, binaryBytes),
+      await buildBakedEnviAssetViewport(0, "cube.hdr", headerBytes, binaryBytes),
     ]);
     const bundlePath = join(workspaceDir, "envi.ctbundle");
     await writeProjectBundleAtPath(bundlePath, draft);
@@ -207,7 +217,7 @@ describe("writeProjectBundleAtPath round-trip", () => {
   it("persists the rgb colour interpretation flag for a baked true-colour photo", async () => {
     const tifBytes = new TextEncoder().encode("fake-photo-bytes");
     const draft = buildDraftFromViewports([
-      { ...buildBakedTiffAssetViewport(0, "photo.png", tifBytes), colorInterpretation: "rgb" },
+      { ...(await buildBakedTiffAssetViewport(0, "photo.png", tifBytes)), colorInterpretation: "rgb" },
     ]);
     const bundlePath = join(workspaceDir, "photo.ctbundle");
     await writeProjectBundleAtPath(bundlePath, draft);
@@ -219,7 +229,7 @@ describe("writeProjectBundleAtPath round-trip", () => {
     const headerBytes = new TextEncoder().encode("hdr-bytes");
     const binaryBytes = new TextEncoder().encode("bin-bytes");
     const draft = buildDraftFromViewports([
-      buildBakedEnviAssetViewport(0, "cube.hdr", headerBytes, binaryBytes),
+      await buildBakedEnviAssetViewport(0, "cube.hdr", headerBytes, binaryBytes),
     ]);
     const bundlePath = join(workspaceDir, "stack.ctbundle");
     await writeProjectBundleAtPath(bundlePath, draft);
@@ -231,8 +241,8 @@ describe("writeProjectBundleAtPath round-trip", () => {
     const tifBytes = new TextEncoder().encode("fake-tiff-bytes");
     const draft = buildDraftFromViewports(
       [
-        buildBakedTiffAssetViewport(0, "a.tif", tifBytes),
-        buildBakedTiffAssetViewport(2, "b.tif", tifBytes),
+        await buildBakedTiffAssetViewport(0, "a.tif", tifBytes),
+        await buildBakedTiffAssetViewport(2, "b.tif", tifBytes),
       ],
       { gridLayout: "2x2", selectedViewportIndices: [0, 2] },
     );

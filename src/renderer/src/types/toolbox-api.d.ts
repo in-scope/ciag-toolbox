@@ -84,53 +84,76 @@ interface ToolboxSaveBundleDraftOperationHistoryEntry {
   timestampMs: number;
 }
 
-interface ToolboxSaveBundleDraftBakedAssetSidecar {
+// Chunked project-save protocol (CT-219e), mirroring
+// src/shared/chunked-save-bundle-protocol.ts: baked asset bytes cross as
+// byte-length descriptors at begin and follow as small asset chunks.
+type ToolboxSaveBundleAssetPart = "primary" | "sidecar";
+
+interface ToolboxSaveBundleBakedPartDescriptor {
   extension: string;
-  bytes: Uint8Array;
+  byteLength: number;
 }
 
-interface ToolboxSaveBundleDraftBakedAsset {
+interface ToolboxSaveBundleBakedAssetDescriptor {
   kind: "baked";
-  bytes: Uint8Array;
-  extension: string;
-  sidecar?: ToolboxSaveBundleDraftBakedAssetSidecar;
+  primary: ToolboxSaveBundleBakedPartDescriptor;
+  sidecar?: ToolboxSaveBundleBakedPartDescriptor;
 }
 
-interface ToolboxSaveBundleDraftExternalAsset {
+interface ToolboxSaveBundleExternalAssetDescriptor {
   kind: "external";
   absolutePath: string;
   extension: string;
 }
 
-type ToolboxSaveBundleDraftAsset =
-  | ToolboxSaveBundleDraftBakedAsset
-  | ToolboxSaveBundleDraftExternalAsset;
+type ToolboxSaveBundleAssetDescriptor =
+  | ToolboxSaveBundleBakedAssetDescriptor
+  | ToolboxSaveBundleExternalAssetDescriptor;
 
-interface ToolboxSaveBundleDraftViewportEntry {
+interface ToolboxSaveBundleViewportHeaderEntry {
   index: number;
   fileName: string;
-  asset: ToolboxSaveBundleDraftAsset;
+  asset: ToolboxSaveBundleAssetDescriptor;
   renderingState: ToolboxSaveBundleDraftRenderingState;
   operationHistory: ReadonlyArray<ToolboxSaveBundleDraftOperationHistoryEntry>;
   colorInterpretation?: "rgb";
 }
 
-interface ToolboxSaveBundleDraft {
+interface ToolboxSaveBundleDraftHeader {
   formatVersion: number;
   gridLayout: string;
   selectedViewportIndices: ReadonlyArray<number>;
-  viewports: ReadonlyArray<ToolboxSaveBundleDraftViewportEntry>;
+  viewports: ReadonlyArray<ToolboxSaveBundleViewportHeaderEntry>;
 }
 
-interface ToolboxSaveBundleDialogRequest {
-  draft: ToolboxSaveBundleDraft;
+interface ToolboxSaveBundleBeginRequest {
+  header: ToolboxSaveBundleDraftHeader;
   currentProjectFilePath: string | null;
   saveAs: boolean;
 }
 
-type ToolboxSaveBundleDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
+type ToolboxSaveBundleBeginResult =
+  | { status: "canceled" }
+  | { status: "ready"; token: string };
+
+interface ToolboxSaveBundleAssetChunkRequest {
+  token: string;
+  viewportIndex: number;
+  part: ToolboxSaveBundleAssetPart;
+  bytes: Uint8Array;
+}
+
+interface ToolboxSaveBundleFinishRequest {
+  token: string;
+}
+
+interface ToolboxSaveBundleFinishResult {
+  filePath: string;
+}
+
+interface ToolboxSaveBundleReleaseRequest {
+  token: string;
+}
 
 type ToolboxOpenBundleDialogResult =
   | { canceled: true }
@@ -268,9 +291,18 @@ interface ToolboxApi {
   readProjectBundleAsset: (
     request: ToolboxReadBundleAssetRequest,
   ) => Promise<ToolboxReadBundleAssetResult>;
-  saveProjectBundleDialog: (
-    request: ToolboxSaveBundleDialogRequest,
-  ) => Promise<ToolboxSaveBundleDialogResult>;
+  beginSaveProjectBundle: (
+    request: ToolboxSaveBundleBeginRequest,
+  ) => Promise<ToolboxSaveBundleBeginResult>;
+  sendSaveProjectBundleAssetChunk: (
+    request: ToolboxSaveBundleAssetChunkRequest,
+  ) => Promise<void>;
+  finishSaveProjectBundle: (
+    request: ToolboxSaveBundleFinishRequest,
+  ) => Promise<ToolboxSaveBundleFinishResult>;
+  releaseSaveProjectBundle: (
+    request: ToolboxSaveBundleReleaseRequest,
+  ) => Promise<void>;
   onMenuOpenImage: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;

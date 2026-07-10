@@ -2,6 +2,18 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
+  SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
+  SAVE_BUNDLE_BEGIN_CHANNEL,
+  SAVE_BUNDLE_FINISH_CHANNEL,
+  SAVE_BUNDLE_RELEASE_CHANNEL,
+  type SaveBundleAssetChunkRequest,
+  type SaveBundleBeginRequest,
+  type SaveBundleBeginResult,
+  type SaveBundleFinishRequest,
+  type SaveBundleFinishResult,
+  type SaveBundleReleaseRequest,
+} from "../shared/chunked-save-bundle-protocol";
+import {
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
@@ -85,70 +97,6 @@ export type SaveImageDialogResult =
   | { canceled: true }
   | { canceled: false; filePath: string };
 
-export interface SaveBundleDraftRenderingState {
-  normalizationEnabled: boolean;
-  selectedBandIndex: number;
-  lastAppliedOperationLabel: string | null;
-}
-
-export type SaveBundleDraftOperationHistoryParameterValue = number | string | boolean;
-
-export interface SaveBundleDraftOperationHistoryEntry {
-  actionId: string;
-  actionLabel: string;
-  appliedLabel: string;
-  parameterValues: Readonly<Record<string, SaveBundleDraftOperationHistoryParameterValue>>;
-  timestampMs: number;
-}
-
-export interface SaveBundleDraftBakedAssetSidecar {
-  extension: string;
-  bytes: Uint8Array;
-}
-
-export interface SaveBundleDraftBakedAsset {
-  kind: "baked";
-  bytes: Uint8Array;
-  extension: string;
-  sidecar?: SaveBundleDraftBakedAssetSidecar;
-}
-
-export interface SaveBundleDraftExternalAsset {
-  kind: "external";
-  absolutePath: string;
-  extension: string;
-}
-
-export type SaveBundleDraftAsset =
-  | SaveBundleDraftBakedAsset
-  | SaveBundleDraftExternalAsset;
-
-export interface SaveBundleDraftViewportEntry {
-  index: number;
-  fileName: string;
-  asset: SaveBundleDraftAsset;
-  renderingState: SaveBundleDraftRenderingState;
-  operationHistory: ReadonlyArray<SaveBundleDraftOperationHistoryEntry>;
-  colorInterpretation?: "rgb";
-}
-
-export interface SaveBundleDraft {
-  formatVersion: number;
-  gridLayout: string;
-  selectedViewportIndices: ReadonlyArray<number>;
-  viewports: ReadonlyArray<SaveBundleDraftViewportEntry>;
-}
-
-export interface SaveBundleDialogRequest {
-  draft: SaveBundleDraft;
-  currentProjectFilePath: string | null;
-  saveAs: boolean;
-}
-
-export type SaveBundleDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
-
 export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
@@ -197,7 +145,6 @@ const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
-const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
@@ -262,13 +209,43 @@ function readBundleAssetThroughMainProcess(
   ) as Promise<ReadBundleAssetResult>;
 }
 
-function showSaveBundleDialogThroughMainProcess(
-  request: SaveBundleDialogRequest,
-): Promise<SaveBundleDialogResult> {
+// Chunked project-save protocol (CT-219e, see
+// src/shared/chunked-save-bundle-protocol.ts); these four thin wrappers keep
+// every context-bridge crossing and invoke far below the serializer danger zone.
+function beginSaveBundleThroughMainProcess(
+  request: SaveBundleBeginRequest,
+): Promise<SaveBundleBeginResult> {
   return ipcRenderer.invoke(
-    SAVE_BUNDLE_DIALOG_CHANNEL,
+    SAVE_BUNDLE_BEGIN_CHANNEL,
     request,
-  ) as Promise<SaveBundleDialogResult>;
+  ) as Promise<SaveBundleBeginResult>;
+}
+
+function sendSaveBundleAssetChunkToMainProcess(
+  request: SaveBundleAssetChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function finishSaveBundleInMainProcess(
+  request: SaveBundleFinishRequest,
+): Promise<SaveBundleFinishResult> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_FINISH_CHANNEL,
+    request,
+  ) as Promise<SaveBundleFinishResult>;
+}
+
+function releaseSaveBundleInMainProcess(
+  request: SaveBundleReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function subscribeToMenuChannel(
@@ -425,7 +402,10 @@ const apiBridge = {
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   readProjectBundleAsset: readBundleAssetThroughMainProcess,
-  saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
+  beginSaveProjectBundle: beginSaveBundleThroughMainProcess,
+  sendSaveProjectBundleAssetChunk: sendSaveBundleAssetChunkToMainProcess,
+  finishSaveProjectBundle: finishSaveBundleInMainProcess,
+  releaseSaveProjectBundle: releaseSaveBundleInMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,

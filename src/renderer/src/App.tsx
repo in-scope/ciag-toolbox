@@ -2606,13 +2606,9 @@ async function letBusyIndicatorPaintBeforeHeavySaveWork(
 
 function updateSaveBundleProgressOnHandle(
   handle: BusyEntryHandle,
-  event: { bakedAssetCount: number; totalAssetCount: number },
+  event: { fraction: number },
 ): void {
-  const fraction = event.totalAssetCount === 0 ? 1 : event.bakedAssetCount / event.totalAssetCount;
-  handle.update({
-    label: `Saving project... asset ${event.bakedAssetCount} of ${event.totalAssetCount}`,
-    progress: fraction,
-  });
+  handle.update({ label: "Saving project...", progress: event.fraction });
 }
 
 function handleSaveProjectFlowOutcome(

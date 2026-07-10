@@ -15,11 +15,12 @@ export interface BundleAssetBakedSidecar {
   readonly bytes: Uint8Array;
 }
 
-// A baked asset is copied into renderer memory and then structured-cloned
-// across the IPC boundary to the main process. Past roughly the V8 structured
-// clone ceiling (~2 GiB) that copy crashes the renderer (white screen, CT-061),
-// so a raster that must be re-encoded (because it was modified and no longer
-// matches its on-disk file) is rejected with a catchable error instead.
+// A baked asset materializes in renderer memory as ONE Uint8Array here, and on
+// project REOPEN its bytes come back in ONE project:read-bundle-asset reply,
+// which is only safe up to ~2 GiB (the CT-219b serializer ceiling; the reply is
+// bytes-last already). The CT-219e chunked save protocol removed the save-side
+// limit, so this cap now guards the single-buffer encode and the reopen read:
+// a raster that would bake bigger is rejected with a catchable error instead.
 const MAX_BAKED_BUNDLE_ASSET_BYTES = 1_800_000_000;
 
 export function encodeBakedBundleAssetForRasterSource(
