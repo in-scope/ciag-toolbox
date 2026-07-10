@@ -67,12 +67,14 @@ async function buildOpenImageResultFromPath(
   const bytes = await readImageFileAsBytes(filePath);
   const contentHash = computeSha256HexFromBytes(bytes);
   const sidecar = await findSidecarForOpenedImageFile(filePath);
+  // Large buffers stay LAST: serializing fields after a ~1 GiB buffer kills
+  // this process (see src/shared/chunked-opened-image-read-protocol.ts).
   return {
     canceled: false,
     filePath,
     fileName: basename(filePath),
-    bytes,
     contentHash,
+    bytes,
     ...(sidecar ? { sidecar } : {}),
   };
 }

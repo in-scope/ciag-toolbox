@@ -89,6 +89,8 @@ async function readBundleAssetWithSidecar(
 ): Promise<ReadBundleAssetResult> {
   const bytes = await readFileAsBytes(absolutePath);
   const sidecar = await findEnviBinarySidecarIfApplicable(absolutePath);
+  // Large buffers stay LAST: serializing fields after a ~1 GiB buffer kills
+  // this process (see src/shared/chunked-opened-image-read-protocol.ts).
   return {
     kind: "found",
     absolutePath,

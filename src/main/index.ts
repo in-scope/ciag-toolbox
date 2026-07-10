@@ -15,12 +15,14 @@ import {
 } from "./e2e-dialog-stub";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
+import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
 import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
 import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
 import { initializePythonEnvironmentControllerFromDisk } from "./python/python-environment-controller";
 import { registerRunUserScriptIpcHandler } from "./python/user-script-ipc";
+import { registerRendererCrashLogging } from "./renderer-crash-logging";
 import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -142,6 +144,7 @@ function quitWhenAllWindowsClosed(): void {
 }
 
 app.whenReady().then(() => {
+  registerRendererCrashLogging();
   setWindowsAppUserModelIdForTaskbarGrouping();
   initializeThemeControllerFromDisk();
   initializePythonEnvironmentControllerFromDisk();
@@ -149,6 +152,7 @@ app.whenReady().then(() => {
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerOpenImagesDialogIpcHandlers();
+  registerChunkedOpenedImageReadIpcHandlers();
   registerSaveImageDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandler();

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
+import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -202,7 +204,6 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
-const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
@@ -237,13 +238,15 @@ function showOpenImagesDialogThroughMainProcess(): Promise<OpenImagesDialogResul
   ) as Promise<OpenImagesDialogResult>;
 }
 
+// CT-219b: file bytes stream from main in chunks; one whole-file IPC reply
+// killed the main process for files of roughly 1 GiB and above.
 function readSingleOpenedImageFileThroughMainProcess(
   metadata: OpenImagesDialogFileMetadataEntry,
 ): Promise<OpenedImagesFileEntry> {
-  return ipcRenderer.invoke(
-    OPEN_IMAGES_READ_FILE_CHANNEL,
+  return readOpenedImageFileThroughChunkedProtocol(
+    (channel, payload) => ipcRenderer.invoke(channel, payload),
     metadata,
-  ) as Promise<OpenedImagesFileEntry>;
+  );
 }
 
 function showSaveImageDialogThroughMainProcess(
