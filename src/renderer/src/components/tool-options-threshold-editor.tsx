@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { toast } from "sonner";
+
 import {
   HistogramCanvas,
   HistogramSkeleton,
@@ -21,7 +23,10 @@ import {
   formatRasterBandIdentityText,
   type RasterImage,
 } from "@/lib/image/raster-image";
-import { computeOtsuCutoffsForRaster } from "@/lib/image/threshold/otsu-cutoffs";
+import {
+  deriveOtsuCutoffsShowingViewportBusyOrNotifyFailure,
+  type OtsuAutoThresholdFlowBindings,
+} from "@/lib/image/threshold/otsu-auto-flow";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import {
   buildDefaultThresholdBounds,
@@ -34,7 +39,11 @@ import {
   formatToneCurveFieldValue,
   parseToneCurveFieldValueOrNull,
 } from "@/lib/image/tone-curve-anchor-fields";
-import { useViewportRendering } from "@/state/viewport-rendering-context";
+import { useBusyEntryRegistrar } from "@/state/busy-state-context";
+import {
+  useViewportRendering,
+  type ViewportRenderingApi,
+} from "@/state/viewport-rendering-context";
 
 // CT-200: the interactive threshold bounds editor embedded in the Threshold
 // operation panel. The live bounds ride in ViewportRenderingState (the same
@@ -106,22 +115,46 @@ function useThresholdBoundsBinding(viewportIndex: number): ThresholdBoundsBindin
 // CT-201: Auto derives an Otsu cutoff per band (and one over the combined
 // data) and shows the CURRENT band's bounds; the live preview and Apply reuse
 // the CT-200 paths unchanged, with band-wise Apply reading each band's own
-// cutoff from the stored set.
+// cutoff from the stored set. CT-219d: the derivation runs asynchronously
+// behind a viewport busy entry with per-band progress, failures surface as an
+// error toast instead of vanishing in the click handler, and a second click
+// is ignored while a derivation is in flight.
 function useApplyOtsuAutoThresholdBounds(
   viewportIndex: number,
   raster: RasterImage,
   bandIndex: number,
 ): () => void {
   const renderingApi = useViewportRendering();
+  const busyRegistrar = useBusyEntryRegistrar();
+  const [isDeriving, setIsDeriving] = useState(false);
   return useCallback(() => {
-    const cutoffs = computeOtsuCutoffsForRaster(raster);
-    const current = renderingApi.getRenderingState(viewportIndex);
-    renderingApi.setRenderingState(viewportIndex, {
-      ...current,
-      thresholdBounds: cutoffs.perBandBounds[bandIndex] ?? current.thresholdBounds,
-      thresholdOtsuCutoffs: cutoffs,
-    });
-  }, [renderingApi, viewportIndex, raster, bandIndex]);
+    if (isDeriving) return;
+    setIsDeriving(true);
+    const bindings = { busyRegistrar, viewportIndex, notifyError: notifyOtsuAutoFailureToast };
+    void deriveOtsuBoundsAndStoreThem(bindings, renderingApi, raster, bandIndex).finally(() =>
+      setIsDeriving(false),
+    );
+  }, [isDeriving, busyRegistrar, renderingApi, viewportIndex, raster, bandIndex]);
+}
+
+function notifyOtsuAutoFailureToast(message: string): void {
+  toast.error(message);
+}
+
+async function deriveOtsuBoundsAndStoreThem(
+  bindings: OtsuAutoThresholdFlowBindings,
+  renderingApi: ViewportRenderingApi,
+  raster: RasterImage,
+  bandIndex: number,
+): Promise<void> {
+  const cutoffs = await deriveOtsuCutoffsShowingViewportBusyOrNotifyFailure(bindings, raster);
+  if (cutoffs === null) return;
+  const current = renderingApi.getRenderingState(bindings.viewportIndex);
+  renderingApi.setRenderingState(bindings.viewportIndex, {
+    ...current,
+    thresholdBounds: cutoffs.perBandBounds[bandIndex] ?? current.thresholdBounds,
+    thresholdOtsuCutoffs: cutoffs,
+  });
 }
 
 function useSelectedBandIndexForThreshold(viewportIndex: number, raster: RasterImage): number {
