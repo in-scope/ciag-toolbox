@@ -3,14 +3,15 @@ import {
   readRgbaBytesFromBrowserSource,
 } from "@/lib/image/encode-canvas";
 import {
-  encodeRasterImageAsEnviFiles,
-  encodeRasterImageAsFloat32EnviFiles,
+  encodeRasterImageAsEnviFilesReportingProgress,
+  encodeRasterImageAsFloat32EnviFilesReportingProgress,
+  type EnviEncodedFiles,
 } from "@/lib/image/encode-envi";
 import {
-  encodeRasterBandAsFloat32TiffBytes,
-  encodeRasterBandAsSingleChannelTiffBytes,
-  encodeRgbaBytesAsRgbTiffBytes,
-  encodeRgbRasterAsRgbTiffBytes,
+  encodeRasterBandAsFloat32TiffBytesReportingProgress,
+  encodeRasterBandAsSingleChannelTiffBytesReportingProgress,
+  encodeRgbaBytesAsRgbTiffBytesReportingProgress,
+  encodeRgbRasterAsRgbTiffBytesReportingProgress,
 } from "@/lib/image/encode-tiff";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
@@ -19,12 +20,16 @@ import {
   type SaveImageFormatKind,
   type SaveImageSampleFormat,
 } from "@/lib/image/save-image-formats";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface EncodeSavedImageInput {
   readonly source: ViewportImageSource;
   readonly selectedBandIndex: number;
   readonly formatId: SaveImageFormatId;
+  // CT-219f: TIFF and ENVI encodes report determinate 0..1 progress; the canvas
+  // formats (PNG, JPEG) are single-shot and keep the indeterminate spinner.
+  readonly onProgress?: UnitProgressCallback;
 }
 
 export interface EncodedSavedImageSidecarFile {
@@ -71,52 +76,72 @@ async function encodeViewportSourceAsTiff(
   targetSampleFormat: SaveImageSampleFormat,
 ): Promise<EncodedSavedImage> {
   if (input.source.kind === "raster") {
-    const bytes = encodeRasterBandAsTiffBytes(
+    const bytes = await encodeRasterBandAsTiffBytesReportingProgress(
       input.source.raster,
       input.selectedBandIndex,
       targetBitDepth,
       targetSampleFormat,
+      input.onProgress,
     );
     return { bytes };
   }
   const rgba = await readRgbaBytesFromBrowserSource(input.source);
-  const bytes = encodeRgbaBytesAsRgbTiffBytes(rgba.rgba, rgba.width, rgba.height, targetBitDepth);
+  const bytes = await encodeRgbaBytesAsRgbTiffBytesReportingProgress(
+    rgba.rgba,
+    rgba.width,
+    rgba.height,
+    targetBitDepth,
+    input.onProgress,
+  );
   return { bytes };
 }
 
-function encodeRasterBandAsTiffBytes(
+async function encodeRasterBandAsTiffBytesReportingProgress(
   raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
   selectedBandIndex: number,
   targetBitDepth: 8 | 16,
   targetSampleFormat: SaveImageSampleFormat,
-): Uint8Array {
+  onProgress: UnitProgressCallback | undefined,
+): Promise<Uint8Array> {
   if (targetSampleFormat === "float") {
-    return encodeRasterBandAsFloat32TiffBytes(raster, selectedBandIndex);
+    return encodeRasterBandAsFloat32TiffBytesReportingProgress(raster, selectedBandIndex, onProgress);
   }
   if (shouldRenderRasterAsRgbComposite(raster)) {
-    return encodeRgbRasterAsRgbTiffBytes(raster, targetBitDepth);
+    return encodeRgbRasterAsRgbTiffBytesReportingProgress(raster, targetBitDepth, onProgress);
   }
-  return encodeRasterBandAsSingleChannelTiffBytes(raster, selectedBandIndex, targetBitDepth);
+  return encodeRasterBandAsSingleChannelTiffBytesReportingProgress(
+    raster,
+    selectedBandIndex,
+    targetBitDepth,
+    onProgress,
+  );
 }
 
-function encodeViewportSourceAsEnviFiles(
+async function encodeViewportSourceAsEnviFiles(
   input: EncodeSavedImageInput,
   targetSampleFormat: SaveImageSampleFormat,
-): EncodedSavedImage {
+): Promise<EncodedSavedImage> {
   rejectNonRasterSourceForEnviWrite(input.source);
-  const encoded = encodeEnviFilesForSampleFormat(input.source.raster, targetSampleFormat);
+  const encoded = await encodeEnviFilesForSampleFormatReportingProgress(
+    input.source.raster,
+    targetSampleFormat,
+    input.onProgress,
+  );
   return {
     bytes: encoded.headerBytes,
     sidecar: { extension: "bin", bytes: encoded.binaryBytes },
   };
 }
 
-function encodeEnviFilesForSampleFormat(
+async function encodeEnviFilesForSampleFormatReportingProgress(
   raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
   targetSampleFormat: SaveImageSampleFormat,
-): ReturnType<typeof encodeRasterImageAsEnviFiles> {
-  if (targetSampleFormat === "float") return encodeRasterImageAsFloat32EnviFiles(raster);
-  return encodeRasterImageAsEnviFiles(raster);
+  onProgress: UnitProgressCallback | undefined,
+): Promise<EnviEncodedFiles> {
+  if (targetSampleFormat === "float") {
+    return encodeRasterImageAsFloat32EnviFilesReportingProgress(raster, onProgress);
+  }
+  return encodeRasterImageAsEnviFilesReportingProgress(raster, onProgress);
 }
 
 function rejectNonRasterSourceForEnviWrite(

@@ -6,6 +6,7 @@ import {
   findSaveImageFormatOptionOrThrow,
   type SaveImageFormatId,
 } from "@/lib/image/save-image-formats";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface SaveImageFlowInput {
@@ -13,6 +14,8 @@ export interface SaveImageFlowInput {
   readonly selectedBandIndex: number;
   readonly originalFileName: string;
   readonly formatId: SaveImageFormatId;
+  // CT-219f: forwarded to the encoder so the save busy entry shows a determinate bar.
+  readonly onProgress?: UnitProgressCallback;
 }
 
 export type SaveImageFlowResult =
@@ -26,6 +29,7 @@ export async function runSaveImageFlowThroughMainProcess(
     source: input.source,
     selectedBandIndex: input.selectedBandIndex,
     formatId: input.formatId,
+    onProgress: input.onProgress,
   });
   const formatOption = findSaveImageFormatOptionOrThrow(input.formatId);
   const suggestedFileName = buildSuggestedSavedFileName(input.originalFileName, formatOption.extension);

@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   encodeRasterBandAsFloat32TiffBytes,
+  encodeRasterBandAsFloat32TiffBytesReportingProgress,
   encodeRasterBandAsSingleChannelTiffBytes,
+  encodeRasterBandAsSingleChannelTiffBytesReportingProgress,
   encodeRgbaBytesAsRgbTiffBytes,
+  encodeRgbaBytesAsRgbTiffBytesReportingProgress,
   encodeRgbRasterAsRgbTiffBytes,
+  encodeRgbRasterAsRgbTiffBytesReportingProgress,
 } from "@/lib/image/encode-tiff";
 import type { RasterImage } from "@/lib/image/raster-image";
 
@@ -130,6 +134,64 @@ describe("encodeRgbRasterAsRgbTiffBytes", () => {
     const samples = await decodeRgbTiffBytesAsInterleavedTypedArray(tiffBytes);
     expect(samples).toBeInstanceOf(Uint16Array);
     expect(Array.from(samples)).toEqual([0, 32896, 65535]);
+  });
+});
+
+// CT-219f: the ...ReportingProgress twins must produce byte-identical files to the sync
+// encoders while writing the sample section in chunks. A tiny samplesPerChunk forces
+// several chunks so the equivalence covers chunk boundaries.
+describe("chunked TIFF encoding twins (CT-219f)", () => {
+  const FORCED_SAMPLES_PER_CHUNK = 3;
+
+  it("uint16 single-band output is byte-identical to the sync encoder", async () => {
+    const raster = buildSingleBandUint16Raster([0, 977, 1954, 32768, 40000, 65535, 7, 12345]);
+    const chunked = await encodeRasterBandAsSingleChannelTiffBytesReportingProgress(
+      raster, 0, 16, undefined, FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 16));
+  });
+
+  it("uint8 single-band output is byte-identical to the sync encoder", async () => {
+    const raster = buildSingleBandUint16Raster([0, 977, 1954, 32768, 40000, 65535, 7]);
+    const chunked = await encodeRasterBandAsSingleChannelTiffBytesReportingProgress(
+      raster, 0, 8, undefined, FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRasterBandAsSingleChannelTiffBytes(raster, 0, 8));
+  });
+
+  it("float32 output including NaN and out-of-range values is byte-identical", async () => {
+    const raster = buildSingleBandFloat32Raster([-1.5, 0, Number.NaN, 0.25, 2.75, Number.POSITIVE_INFINITY, 9]);
+    const chunked = await encodeRasterBandAsFloat32TiffBytesReportingProgress(
+      raster, 0, undefined, FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRasterBandAsFloat32TiffBytes(raster, 0));
+  });
+
+  it("RGB raster output is byte-identical at both bit depths", async () => {
+    const raster = buildThreeBandRgbUint8Raster([200, 10, 3], [100, 20, 5], [50, 30, 7]);
+    for (const bitDepth of [8, 16] as const) {
+      const chunked = await encodeRgbRasterAsRgbTiffBytesReportingProgress(
+        raster, bitDepth, undefined, FORCED_SAMPLES_PER_CHUNK,
+      );
+      expect(chunked).toEqual(encodeRgbRasterAsRgbTiffBytes(raster, bitDepth));
+    }
+  });
+
+  it("RGBA byte input output is byte-identical to the sync encoder", async () => {
+    const rgba = Uint8Array.from([255, 128, 0, 255, 0, 64, 192, 255, 9, 8, 7, 255]);
+    const chunked = await encodeRgbaBytesAsRgbTiffBytesReportingProgress(
+      rgba, 3, 1, 16, undefined, FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRgbaBytesAsRgbTiffBytes(rgba, 3, 1, 16));
+  });
+
+  it("reports one monotonic tick per chunk ending at exactly 1", async () => {
+    const raster = buildSingleBandUint16Raster([1, 2, 3, 4, 5, 6, 7, 8]);
+    const fractions: number[] = [];
+    await encodeRasterBandAsSingleChannelTiffBytesReportingProgress(
+      raster, 0, 16, (fraction) => fractions.push(fraction), FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(fractions).toEqual([3 / 8, 6 / 8, 1]);
   });
 });
 

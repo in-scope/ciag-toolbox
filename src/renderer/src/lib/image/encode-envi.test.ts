@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   encodeRasterImageAsEnviFiles,
+  encodeRasterImageAsEnviFilesReportingProgress,
   encodeRasterImageAsFloat32EnviFiles,
+  encodeRasterImageAsFloat32EnviFilesReportingProgress,
 } from "@/lib/image/encode-envi";
 import { loadEnviAsRaster } from "@/lib/image/load-envi";
 import { parseEnviHeaderText } from "@/lib/image/parse-envi-header";
@@ -143,6 +145,82 @@ describe("encodeRasterImageAsEnviFiles", () => {
     const reloaded = loadEnviAsRaster(encoded.headerBytes, encoded.binaryBytes);
     expect(reloaded.bandLabels).toEqual(["Red", "Green"]);
     expect(reloaded.bandWavelengths).toEqual([620, 540]);
+  });
+});
+
+// CT-219f: the ...ReportingProgress twins must produce identical files to the sync
+// encoders while filling the binary in chunks. A tiny samplesPerChunk forces one unit
+// (one band-row or one image line) per chunk so the equivalence covers chunk boundaries.
+describe("chunked ENVI encoding twins (CT-219f)", () => {
+  const FORCED_SAMPLES_PER_CHUNK = 1;
+
+  it.each(["bsq", "bil", "bip"] as const)(
+    "%s output is identical to the sync encoder",
+    async (interleave) => {
+      const raster = buildRasterFixture({ sourceInterleave: interleave });
+      const chunked = await encodeRasterImageAsEnviFilesReportingProgress(
+        raster,
+        undefined,
+        FORCED_SAMPLES_PER_CHUNK,
+      );
+      expect(chunked).toEqual(encodeRasterImageAsEnviFiles(raster));
+    },
+  );
+
+  it("float32 coercion of a uint16 raster is identical to the sync float encoder", async () => {
+    const raster = buildRasterFixture({ sourceInterleave: "bsq" });
+    const chunked = await encodeRasterImageAsFloat32EnviFilesReportingProgress(
+      raster,
+      undefined,
+      FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRasterImageAsFloat32EnviFiles(raster));
+  });
+
+  it("an already-float32 raster skips the conversion window and matches the sync encoder", async () => {
+    const raster: RasterImage = {
+      bandPixels: [new Float32Array([1.5, 2.25, 3.5, 4.0])],
+      width: 2,
+      height: 2,
+      bandCount: 1,
+      bitsPerSample: 32,
+      sampleFormat: "float",
+      sourceInterleave: "bsq",
+    };
+    const fractions: number[] = [];
+    const chunked = await encodeRasterImageAsFloat32EnviFilesReportingProgress(
+      raster,
+      (fraction) => fractions.push(fraction),
+      FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(chunked).toEqual(encodeRasterImageAsFloat32EnviFiles(raster));
+    expect(fractions).toEqual([1 / 2, 1]);
+  });
+
+  it("reports one monotonic tick per chunked unit ending at exactly 1", async () => {
+    const raster = buildRasterFixture({ sourceInterleave: "bil" });
+    const fractions: number[] = [];
+    await encodeRasterImageAsEnviFilesReportingProgress(
+      raster,
+      (fraction) => fractions.push(fraction),
+      FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(fractions).toEqual([1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]);
+  });
+
+  it("the float coercion path folds conversion ticks into the 0..0.2 window before the fill", async () => {
+    const raster = buildRasterFixture({ sourceInterleave: "bsq" });
+    const fractions: number[] = [];
+    await encodeRasterImageAsFloat32EnviFilesReportingProgress(
+      raster,
+      (fraction) => fractions.push(fraction),
+      FORCED_SAMPLES_PER_CHUNK,
+    );
+    expect(fractions[0]).toBe(0);
+    expect(fractions.at(-1)).toBe(1);
+    const sorted = [...fractions].sort((a, b) => a - b);
+    expect(fractions).toEqual(sorted);
+    expect(fractions.some((fraction) => fraction > 0 && fraction <= 0.2)).toBe(true);
   });
 });
 

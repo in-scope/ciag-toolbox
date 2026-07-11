@@ -927,7 +927,10 @@ async function runSaveImageFlowAndShowToast(
     label: `Saving ${input.originalFileName}...`,
   });
   try {
-    const result = await runSaveImageFlowThroughMainProcess(input);
+    const result = await runSaveImageFlowThroughMainProcess({
+      ...input,
+      onProgress: (fraction) => handle.update({ progress: fraction }),
+    });
     if (result.canceled) return;
     toast.success(`Saved to ${result.filePath}`);
   } catch (error) {
