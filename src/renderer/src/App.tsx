@@ -2715,9 +2715,12 @@ async function runOpenProjectFlowAndShowToast(
 
 function updateOpenBundleProgressOnHandle(
   handle: BusyEntryHandle,
-  event: { readAssetCount: number; totalAssetCount: number },
+  event: { readAssetCount: number; totalAssetCount: number; currentAssetFraction: number },
 ): void {
-  const fraction = event.totalAssetCount === 0 ? 1 : event.readAssetCount / event.totalAssetCount;
+  const fraction =
+    event.totalAssetCount === 0
+      ? 1
+      : (event.readAssetCount + event.currentAssetFraction) / event.totalAssetCount;
   handle.update({
     label: `Opening project... asset ${event.readAssetCount} of ${event.totalAssetCount}`,
     progress: fraction,

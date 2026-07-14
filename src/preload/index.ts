@@ -101,25 +101,16 @@ export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
 
-export interface ReadBundleAssetRequest {
+// CT-236: the bundle-asset reply is metadata only; asset bytes stream through
+// the chunked-read wrappers below (same rule as the open-image dialogs).
+export interface ResolveBundleAssetRequest {
   projectFilePath: string;
   relativePath: string;
 }
 
-export interface ReadBundleAssetSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-export type ReadBundleAssetResult =
+export type ResolveBundleAssetResult =
   | { kind: "missing"; relativePath: string }
-  | {
-      kind: "found";
-      absolutePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      sidecar?: ReadBundleAssetSidecar;
-    };
+  | { kind: "found"; file: OpenImagesDialogFileMetadataEntry };
 
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -144,7 +135,7 @@ const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
 const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
-const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
+const RESOLVE_BUNDLE_ASSET_CHANNEL = "project:resolve-bundle-asset";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
@@ -239,13 +230,13 @@ function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResul
   ) as Promise<OpenBundleDialogResult>;
 }
 
-function readBundleAssetThroughMainProcess(
-  request: ReadBundleAssetRequest,
-): Promise<ReadBundleAssetResult> {
+function resolveBundleAssetThroughMainProcess(
+  request: ResolveBundleAssetRequest,
+): Promise<ResolveBundleAssetResult> {
   return ipcRenderer.invoke(
-    READ_BUNDLE_ASSET_CHANNEL,
+    RESOLVE_BUNDLE_ASSET_CHANNEL,
     request,
-  ) as Promise<ReadBundleAssetResult>;
+  ) as Promise<ResolveBundleAssetResult>;
 }
 
 // Chunked project-save protocol (CT-219e, see
@@ -444,7 +435,7 @@ const apiBridge = {
   abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
-  readProjectBundleAsset: readBundleAssetThroughMainProcess,
+  resolveProjectBundleAsset: resolveBundleAssetThroughMainProcess,
   beginSaveProjectBundle: beginSaveBundleThroughMainProcess,
   sendSaveProjectBundleAssetChunk: sendSaveBundleAssetChunkToMainProcess,
   finishSaveProjectBundle: finishSaveBundleInMainProcess,

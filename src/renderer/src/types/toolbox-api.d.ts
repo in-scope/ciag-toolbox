@@ -186,25 +186,16 @@ type ToolboxOpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
 
-interface ToolboxReadBundleAssetRequest {
+// CT-236: the bundle-asset reply is metadata only; asset bytes stream through
+// the chunked opened-image read protocol like every other file open.
+interface ToolboxResolveBundleAssetRequest {
   projectFilePath: string;
   relativePath: string;
 }
 
-interface ToolboxReadBundleAssetSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-type ToolboxReadBundleAssetResult =
+type ToolboxResolveBundleAssetResult =
   | { kind: "missing"; relativePath: string }
-  | {
-      kind: "found";
-      absolutePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      sidecar?: ToolboxReadBundleAssetSidecar;
-    };
+  | { kind: "found"; file: ToolboxOpenImagesDialogFileMetadataEntry };
 
 type ToolboxThemeMode = "system" | "light" | "dark";
 
@@ -327,9 +318,9 @@ interface ToolboxApi {
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;
   openProjectBundleDialog: () => Promise<ToolboxOpenBundleDialogResult>;
-  readProjectBundleAsset: (
-    request: ToolboxReadBundleAssetRequest,
-  ) => Promise<ToolboxReadBundleAssetResult>;
+  resolveProjectBundleAsset: (
+    request: ToolboxResolveBundleAssetRequest,
+  ) => Promise<ToolboxResolveBundleAssetResult>;
   beginSaveProjectBundle: (
     request: ToolboxSaveBundleBeginRequest,
   ) => Promise<ToolboxSaveBundleBeginResult>;

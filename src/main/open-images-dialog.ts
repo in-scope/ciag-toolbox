@@ -1,8 +1,15 @@
 import { BrowserWindow, ipcMain } from "electron";
-import { stat } from "node:fs/promises";
-import { basename } from "node:path";
 
 import { showOpenDialogOrStub } from "./e2e-dialog-stub";
+import {
+  readFileMetadataForOpenedImagePath,
+  type OpenedImageFileMetadataEntry,
+} from "./opened-image-file-metadata";
+
+export {
+  readFileMetadataForOpenedImagePath,
+  type OpenedImageFileMetadataEntry,
+} from "./opened-image-file-metadata";
 
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
 
@@ -26,13 +33,6 @@ const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   ],
 };
 
-export interface OpenedImageFileMetadataEntry {
-  fileName: string;
-  filePath: string;
-  fileSizeBytes: number;
-  mtimeMs: number;
-}
-
 export type OpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenedImageFileMetadataEntry> };
@@ -45,18 +45,6 @@ async function showImagesOpenDialogAllowingMultiSelect(
     properties: ["openFile", "multiSelections"],
     filters: [SUPPORTED_IMAGE_FILTER],
   });
-}
-
-export async function readFileMetadataForOpenedImagePath(
-  filePath: string,
-): Promise<OpenedImageFileMetadataEntry> {
-  const stats = await stat(filePath);
-  return {
-    fileName: basename(filePath),
-    filePath,
-    fileSizeBytes: stats.size,
-    mtimeMs: stats.mtimeMs,
-  };
 }
 
 async function collectMetadataForAllSelectedImagePaths(
