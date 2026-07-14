@@ -164,7 +164,16 @@ const NOT_ENOUGH_DISK_SPACE_MESSAGE =
   "There is not enough disk space to save this project. Free up space and try again.";
 
 export function rethrowDescribingDiskFullSaveFailure(error: unknown): never {
-  if (isDiskFullError(error)) throw new Error(NOT_ENOUGH_DISK_SPACE_MESSAGE);
+  rethrowDescribingDiskFullFailure(error, NOT_ENOUGH_DISK_SPACE_MESSAGE);
+}
+
+// CT-237: the image-save session store surfaces the same failure with its own
+// vocabulary ("this image" instead of "this project").
+export function rethrowDescribingDiskFullFailure(
+  error: unknown,
+  describedMessage: string,
+): never {
+  if (isDiskFullError(error)) throw new Error(describedMessage);
   throw error;
 }
 
@@ -188,8 +197,9 @@ function requireSpooledPart(
 }
 
 // FileHandle.write may write fewer bytes than asked; an unchecked short write
-// leaves silent holes in the spool file (the CT-219g lesson).
-async function writeExactLengthAtOffset(
+// leaves silent holes in the spool file (the CT-219g lesson). Exported for the
+// CT-237 image-save session store, which appends chunks the same way.
+export async function writeExactLengthAtOffset(
   handle: FileHandle,
   bytes: Uint8Array,
   offsetBytes: number,

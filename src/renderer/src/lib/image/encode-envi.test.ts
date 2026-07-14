@@ -5,6 +5,7 @@ import {
   encodeRasterImageAsEnviFilesReportingProgress,
   encodeRasterImageAsFloat32EnviFiles,
   encodeRasterImageAsFloat32EnviFilesReportingProgress,
+  planFloat32EnviFilesChunkedEncoding,
 } from "@/lib/image/encode-envi";
 import { loadEnviAsRaster } from "@/lib/image/load-envi";
 import { parseEnviHeaderText } from "@/lib/image/parse-envi-header";
@@ -223,6 +224,69 @@ describe("chunked ENVI encoding twins (CT-219f)", () => {
     expect(fractions.some((fraction) => fraction > 0 && fraction <= 0.2)).toBe(true);
   });
 });
+
+// CT-237: the float32 chunked plan backs the ENVI (32-bit float) export. It
+// narrows samples as chunks are built instead of converting the cube up front,
+// so its concatenated output must be byte-identical to the sync float encoder.
+describe("planFloat32EnviFilesChunkedEncoding (CT-237)", () => {
+  it.each(["bsq", "bil", "bip"] as const)(
+    "%s chunks concatenate byte-identically to the sync float32 encoder",
+    async (interleave) => {
+      const raster = buildRasterFixture({ sourceInterleave: interleave });
+      const sync = encodeRasterImageAsFloat32EnviFiles(raster);
+      const plan = planFloat32EnviFilesChunkedEncoding(raster);
+      expect(plan.headerBytes).toEqual(sync.headerBytes);
+      expect(plan.binaryByteLength).toBe(sync.binaryBytes.byteLength);
+      for (const chunkBytes of [1, 3, 7, 1024]) {
+        expect(await collectEmittedChunks(plan.emitBinaryChunksInOrder, chunkBytes)).toEqual(
+          sync.binaryBytes,
+        );
+      }
+    },
+  );
+
+  it("narrows a float64 source exactly like the sync encoder's Float32Array conversion", async () => {
+    const raster: RasterImage = {
+      bandPixels: [new Float64Array([0.1, 1 / 3, 2.5, -7.75])],
+      width: 2,
+      height: 2,
+      bandCount: 1,
+      bitsPerSample: 64,
+      sampleFormat: "float",
+      sourceInterleave: "bsq",
+    };
+    const sync = encodeRasterImageAsFloat32EnviFiles(raster);
+    const plan = planFloat32EnviFilesChunkedEncoding(raster);
+    expect(await collectEmittedChunks(plan.emitBinaryChunksInOrder, 5)).toEqual(sync.binaryBytes);
+  });
+
+  it("declares the binary byte length from dimensions alone (4 bytes per sample)", () => {
+    const raster = buildRasterFixture({ sourceInterleave: "bil" });
+    const plan = planFloat32EnviFilesChunkedEncoding(raster);
+    expect(plan.binaryByteLength).toBe(raster.width * raster.height * raster.bandCount * 4);
+  });
+});
+
+async function collectEmittedChunks(
+  emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: (bytes: Uint8Array) => Promise<void>,
+  ) => Promise<void>,
+  maxChunkBytes: number,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  await emitChunksInOrder(maxChunkBytes, async (bytes) => {
+    chunks.push(bytes);
+  });
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+}
 
 interface RasterFixtureOverrides {
   readonly sourceInterleave: RasterSourceInterleave | undefined;

@@ -145,7 +145,10 @@ import {
   removePinnedSpectrumById,
   removeRoiSpectrumById,
 } from "@/lib/image/spectrum-entry";
-import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
+import {
+  buildSaveImageFailureToastText,
+  runSaveImageFlowThroughMainProcess,
+} from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
   findLowestIndexEmptyViewport,
@@ -934,7 +937,7 @@ async function runSaveImageFlowAndShowToast(
     if (result.canceled) return;
     toast.success(`Saved to ${result.filePath}`);
   } catch (error) {
-    toast.error(`Could not save ${input.originalFileName}: ${describeUnknownError(error)}`);
+    toast.error(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
   } finally {
     handle.clear();
   }

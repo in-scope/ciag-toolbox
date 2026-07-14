@@ -255,17 +255,45 @@ export function planEnviFilesChunkedEncoding(raster: RasterImage): EnviChunkedEn
     binaryByteLength: layout.totalByteSize,
     interleave,
     emitBinaryChunksInOrder: (maxChunkBytes, onChunk) =>
-      emitEnviBinaryChunksInOrder(raster, interleave, maxChunkBytes, onChunk),
+      emitEnviBinaryChunksInOrder(buildEnviWritePlanForRaster(raster, interleave), maxChunkBytes, onChunk),
   };
 }
 
-async function emitEnviBinaryChunksInOrder(
+// CT-237: float32 twin of the plan above for the ENVI (32-bit float) export.
+// The source raster is NOT converted up front (a full float32 copy of a 10 GB
+// stack would double resident memory); the float writer narrows each sample as
+// the chunk is built, which matches Float32Array.set narrowing, so the output
+// is byte-identical to encodeRasterImageAsFloat32EnviFiles.
+export function planFloat32EnviFilesChunkedEncoding(raster: RasterImage): EnviChunkedEncoding {
+  const interleave = pickEnviInterleaveFromRasterSource(raster);
+  const layout = buildBinaryLayoutForRaster(raster, FLOAT32_BYTES_PER_SAMPLE);
+  const headerText = buildEnviHeaderTextForRaster(raster, interleave, FLOAT32_ENVI_DATA_TYPE_CODE);
+  return {
+    headerBytes: encodeUtf8Text(headerText),
+    binaryByteLength: layout.totalByteSize,
+    interleave,
+    emitBinaryChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitEnviBinaryChunksInOrder(buildFloat32EnviWritePlanForRaster(raster, interleave), maxChunkBytes, onChunk),
+  };
+}
+
+const FLOAT32_ENVI_DATA_TYPE_CODE = 4;
+const FLOAT32_BYTES_PER_SAMPLE = 4;
+
+function buildFloat32EnviWritePlanForRaster(
   raster: RasterImage,
   interleave: RasterSourceInterleave,
+): EnviInterleaveWritePlan {
+  const layout = buildBinaryLayoutForRaster(raster, FLOAT32_BYTES_PER_SAMPLE);
+  const writer = SAMPLE_WRITERS_BY_FORMAT_KEY.get("float:32")!;
+  return buildEnviInterleaveWritePlan(raster, interleave, layout, writer);
+}
+
+async function emitEnviBinaryChunksInOrder(
+  plan: EnviInterleaveWritePlan,
   maxChunkBytes: number,
   onChunk: (bytes: Uint8Array) => Promise<void>,
 ): Promise<void> {
-  const plan = buildEnviWritePlanForRaster(raster, interleave);
   const unitsPerChunk = Math.max(1, Math.floor(maxChunkBytes / plan.unitByteSize));
   for (let startUnit = 0; startUnit < plan.totalUnits; startUnit += unitsPerChunk) {
     const endUnit = Math.min(plan.totalUnits, startUnit + unitsPerChunk);
@@ -324,8 +352,11 @@ interface BinaryLayout {
   readonly totalByteSize: number;
 }
 
-function buildBinaryLayoutForRaster(raster: RasterImage): BinaryLayout {
-  const bytesPerSample = readBytesPerSampleFromBandPixelsOrThrow(raster);
+function buildBinaryLayoutForRaster(
+  raster: RasterImage,
+  bytesPerSampleOverride?: number,
+): BinaryLayout {
+  const bytesPerSample = bytesPerSampleOverride ?? readBytesPerSampleFromBandPixelsOrThrow(raster);
   const totalSamples = raster.width * raster.height * raster.bandCount;
   return {
     samples: raster.width,

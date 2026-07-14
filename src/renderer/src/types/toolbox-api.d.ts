@@ -72,26 +72,49 @@ interface ToolboxOpenedImageChunkedReadAbortRequest {
   token: string;
 }
 
-interface ToolboxSaveImageDialogFilter {
+interface ToolboxSaveImageFileFilter {
   name: string;
   extensions: ReadonlyArray<string>;
 }
 
-interface ToolboxSaveImageDialogSidecar {
+// CT-237: the save-image export streams through the chunked protocol
+// (src/shared/chunked-save-image-protocol.ts); no invoke carries the encoded
+// payload whole.
+type ToolboxSaveImagePart = "primary" | "sidecar";
+
+interface ToolboxSaveImageSidecarDescriptor {
   extension: string;
-  bytes: Uint8Array;
+  byteLength: number;
 }
 
-interface ToolboxSaveImageDialogRequest {
+interface ToolboxSaveImageBeginRequest {
   suggestedFileName: string;
-  bytes: Uint8Array;
-  fileFilter: ToolboxSaveImageDialogFilter;
-  sidecar?: ToolboxSaveImageDialogSidecar;
+  fileFilter: ToolboxSaveImageFileFilter;
+  primaryByteLength: number;
+  sidecar?: ToolboxSaveImageSidecarDescriptor;
 }
 
-type ToolboxSaveImageDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
+type ToolboxSaveImageBeginResult =
+  | { status: "canceled" }
+  | { status: "ready"; token: string };
+
+interface ToolboxSaveImageChunkRequest {
+  token: string;
+  part: ToolboxSaveImagePart;
+  bytes: Uint8Array;
+}
+
+interface ToolboxSaveImageFinishRequest {
+  token: string;
+}
+
+interface ToolboxSaveImageFinishResult {
+  filePath: string;
+}
+
+interface ToolboxSaveImageReleaseRequest {
+  token: string;
+}
 
 interface ToolboxSaveBundleDraftRenderingState {
   normalizationEnabled: boolean;
@@ -314,9 +337,14 @@ interface ToolboxApi {
   abortOpenedImageChunkedRead: (
     request: ToolboxOpenedImageChunkedReadAbortRequest,
   ) => Promise<void>;
-  saveImageDialog: (
-    request: ToolboxSaveImageDialogRequest,
-  ) => Promise<ToolboxSaveImageDialogResult>;
+  beginSaveImage: (
+    request: ToolboxSaveImageBeginRequest,
+  ) => Promise<ToolboxSaveImageBeginResult>;
+  sendSaveImageChunk: (request: ToolboxSaveImageChunkRequest) => Promise<void>;
+  finishSaveImage: (
+    request: ToolboxSaveImageFinishRequest,
+  ) => Promise<ToolboxSaveImageFinishResult>;
+  releaseSaveImage: (request: ToolboxSaveImageReleaseRequest) => Promise<void>;
   openProjectBundleDialog: () => Promise<ToolboxOpenBundleDialogResult>;
   resolveProjectBundleAsset: (
     request: ToolboxResolveBundleAssetRequest,

@@ -1,10 +1,17 @@
 import {
+  emitBufferInBoundedSlicesInOrder,
+  type ByteChunkConsumer,
+} from "@/lib/image/emit-byte-chunks";
+import {
   encodeViewportSourceAsCanvasBlobBytes,
   readRgbaBytesFromBrowserSource,
 } from "@/lib/image/encode-canvas";
 import {
   encodeRasterImageAsEnviFilesReportingProgress,
   encodeRasterImageAsFloat32EnviFilesReportingProgress,
+  planEnviFilesChunkedEncoding,
+  planFloat32EnviFilesChunkedEncoding,
+  type EnviChunkedEncoding,
   type EnviEncodedFiles,
 } from "@/lib/image/encode-envi";
 import {
@@ -47,6 +54,79 @@ export async function encodeViewportSourceForSaving(
 ): Promise<EncodedSavedImage> {
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
   return dispatchEncodingByFormatKind(input, details.kind, details.targetBitDepth, details.targetSampleFormat);
+}
+
+// CT-237: the save flow uploads the encoded export through the chunked
+// save-image protocol, so it consumes chunk-emitting PLANS instead of whole
+// buffers. TIFF/PNG/JPEG encodes stay eager (single band or view, small) and
+// are re-emitted in bounded slices; ENVI plans emit their multi-gigabyte
+// binary on demand (CT-235 emitters), so no whole-sidecar buffer ever exists.
+export interface SaveImageUploadPartPlan {
+  readonly byteLength: number;
+  readonly emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: ByteChunkConsumer,
+  ) => Promise<void>;
+}
+
+export interface SaveImageUploadSidecarPlan {
+  readonly extension: string;
+  readonly plan: SaveImageUploadPartPlan;
+}
+
+export interface SaveImageUploadPlan {
+  readonly primary: SaveImageUploadPartPlan;
+  readonly sidecar?: SaveImageUploadSidecarPlan;
+}
+
+export async function planViewportSourceSaveUpload(
+  input: EncodeSavedImageInput,
+): Promise<SaveImageUploadPlan> {
+  const details = readSaveImageFormatTechnicalDetails(input.formatId);
+  if (details.kind === "envi") {
+    return planEnviSaveUploadWithoutMaterializingBinary(input, details.targetSampleFormat);
+  }
+  const encoded = await dispatchEncodingByFormatKind(
+    input,
+    details.kind,
+    details.targetBitDepth,
+    details.targetSampleFormat,
+  );
+  return { primary: wrapEncodedBytesAsUploadPartPlan(encoded.bytes) };
+}
+
+function planEnviSaveUploadWithoutMaterializingBinary(
+  input: EncodeSavedImageInput,
+  targetSampleFormat: SaveImageSampleFormat,
+): SaveImageUploadPlan {
+  rejectNonRasterSourceForEnviWrite(input.source);
+  const encoding = planEnviEncodingForSampleFormat(input.source.raster, targetSampleFormat);
+  return {
+    primary: wrapEncodedBytesAsUploadPartPlan(encoding.headerBytes),
+    sidecar: {
+      extension: "bin",
+      plan: {
+        byteLength: encoding.binaryByteLength,
+        emitChunksInOrder: encoding.emitBinaryChunksInOrder,
+      },
+    },
+  };
+}
+
+function planEnviEncodingForSampleFormat(
+  raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
+  targetSampleFormat: SaveImageSampleFormat,
+): EnviChunkedEncoding {
+  if (targetSampleFormat === "float") return planFloat32EnviFilesChunkedEncoding(raster);
+  return planEnviFilesChunkedEncoding(raster);
+}
+
+function wrapEncodedBytesAsUploadPartPlan(bytes: Uint8Array): SaveImageUploadPartPlan {
+  return {
+    byteLength: bytes.byteLength,
+    emitChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitBufferInBoundedSlicesInOrder(bytes, maxChunkBytes, onChunk),
+  };
 }
 
 async function dispatchEncodingByFormatKind(

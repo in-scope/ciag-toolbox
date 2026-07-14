@@ -27,6 +27,18 @@ import {
   type SaveBundleReleaseRequest,
 } from "../shared/chunked-save-bundle-protocol";
 import {
+  SAVE_IMAGE_BEGIN_CHANNEL,
+  SAVE_IMAGE_CHUNK_CHANNEL,
+  SAVE_IMAGE_FINISH_CHANNEL,
+  SAVE_IMAGE_RELEASE_CHANNEL,
+  type SaveImageBeginRequest,
+  type SaveImageBeginResult,
+  type SaveImageChunkRequest,
+  type SaveImageFinishRequest,
+  type SaveImageFinishResult,
+  type SaveImageReleaseRequest,
+} from "../shared/chunked-save-image-protocol";
+import {
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
@@ -76,27 +88,6 @@ export interface OpenedImagesFileEntry {
   mtimeMs: number;
 }
 
-export interface SaveImageDialogFilter {
-  name: string;
-  extensions: ReadonlyArray<string>;
-}
-
-export interface SaveImageDialogSidecar {
-  extension: string;
-  bytes: Uint8Array;
-}
-
-export interface SaveImageDialogRequest {
-  suggestedFileName: string;
-  bytes: Uint8Array;
-  fileFilter: SaveImageDialogFilter;
-  sidecar?: SaveImageDialogSidecar;
-}
-
-export type SaveImageDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
-
 export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
@@ -133,7 +124,6 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
-const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const RESOLVE_BUNDLE_ASSET_CHANNEL = "project:resolve-bundle-asset";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
@@ -215,13 +205,43 @@ function abortOpenedImageChunkedReadInMainProcess(
   ) as Promise<void>;
 }
 
-function showSaveImageDialogThroughMainProcess(
-  request: SaveImageDialogRequest,
-): Promise<SaveImageDialogResult> {
+// Chunked save-image protocol (CT-237, see
+// src/shared/chunked-save-image-protocol.ts); these four thin wrappers keep
+// every context-bridge crossing and invoke far below the serializer danger zone.
+function beginSaveImageThroughMainProcess(
+  request: SaveImageBeginRequest,
+): Promise<SaveImageBeginResult> {
   return ipcRenderer.invoke(
-    SAVE_IMAGE_DIALOG_CHANNEL,
+    SAVE_IMAGE_BEGIN_CHANNEL,
     request,
-  ) as Promise<SaveImageDialogResult>;
+  ) as Promise<SaveImageBeginResult>;
+}
+
+function sendSaveImageChunkToMainProcess(
+  request: SaveImageChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function finishSaveImageInMainProcess(
+  request: SaveImageFinishRequest,
+): Promise<SaveImageFinishResult> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_FINISH_CHANNEL,
+    request,
+  ) as Promise<SaveImageFinishResult>;
+}
+
+function releaseSaveImageInMainProcess(
+  request: SaveImageReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
@@ -433,7 +453,10 @@ const apiBridge = {
   readOpenedImageChunk: readOpenedImageChunkFromMainProcess,
   finishOpenedImageChunkedRead: finishOpenedImageChunkedReadInMainProcess,
   abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
-  saveImageDialog: showSaveImageDialogThroughMainProcess,
+  beginSaveImage: beginSaveImageThroughMainProcess,
+  sendSaveImageChunk: sendSaveImageChunkToMainProcess,
+  finishSaveImage: finishSaveImageInMainProcess,
+  releaseSaveImage: releaseSaveImageInMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   resolveProjectBundleAsset: resolveBundleAssetThroughMainProcess,
   beginSaveProjectBundle: beginSaveBundleThroughMainProcess,

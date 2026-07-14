@@ -1,52 +1,37 @@
 import { BrowserWindow, ipcMain } from "electron";
-import { unlink, writeFile } from "node:fs/promises";
 import { extname } from "node:path";
 
+import { createSaveImageSessionStore } from "./chunked-save-image";
 import { showSaveDialogOrStub } from "./e2e-dialog-stub";
+import {
+  SAVE_IMAGE_BEGIN_CHANNEL,
+  SAVE_IMAGE_CHUNK_CHANNEL,
+  SAVE_IMAGE_FINISH_CHANNEL,
+  SAVE_IMAGE_RELEASE_CHANNEL,
+  type SaveImageBeginRequest,
+  type SaveImageBeginResult,
+  type SaveImageChunkRequest,
+  type SaveImageFinishRequest,
+  type SaveImageFinishResult,
+  type SaveImageReleaseRequest,
+} from "../shared/chunked-save-image-protocol";
 
-export interface SaveImageDialogSidecar {
-  readonly extension: string;
-  readonly bytes: Uint8Array;
-}
+// CT-237: the save-image export streams through the chunked protocol in
+// src/shared/chunked-save-image-protocol.ts; the old whole-payload
+// image:save-dialog invoke is gone. This module owns the save dialog and the
+// channel registration; chunked-save-image.ts owns the transfer state.
 
-export interface SaveImageDialogRequest {
-  readonly suggestedFileName: string;
-  readonly bytes: Uint8Array;
-  readonly fileFilter: { readonly name: string; readonly extensions: ReadonlyArray<string> };
-  readonly sidecar?: SaveImageDialogSidecar;
-}
-
-export type SaveImageDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
-
-const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
+const saveImageSessions = createSaveImageSessionStore();
 
 async function showImageSaveDialog(
   window: BrowserWindow,
-  request: SaveImageDialogRequest,
+  request: SaveImageBeginRequest,
 ): Promise<Electron.SaveDialogReturnValue> {
   return showSaveDialogOrStub(window, {
     title: "Save Image",
     defaultPath: request.suggestedFileName,
     filters: [{ name: request.fileFilter.name, extensions: [...request.fileFilter.extensions] }],
   });
-}
-
-async function writeImageBytesToChosenPath(
-  filePath: string,
-  bytes: Uint8Array,
-): Promise<void> {
-  await writeFile(filePath, bytes);
-}
-
-async function writeSidecarFileNextToPrimary(
-  primaryFilePath: string,
-  sidecar: SaveImageDialogSidecar,
-): Promise<string> {
-  const sidecarPath = buildSidecarPathFromPrimary(primaryFilePath, sidecar.extension);
-  await writeFile(sidecarPath, sidecar.bytes);
-  return sidecarPath;
 }
 
 function buildSidecarPathFromPrimary(
@@ -58,62 +43,60 @@ function buildSidecarPathFromPrimary(
   return `${stem}.${sidecarExtension}`;
 }
 
-async function writePrimaryAndSidecarAtomically(
-  primaryFilePath: string,
-  request: SaveImageDialogRequest,
-): Promise<void> {
-  await writeImageBytesToChosenPath(primaryFilePath, request.bytes);
-  if (!request.sidecar) return;
-  await writeSidecarOrRollbackPrimary(primaryFilePath, request.sidecar);
-}
-
-async function writeSidecarOrRollbackPrimary(
-  primaryFilePath: string,
-  sidecar: SaveImageDialogSidecar,
-): Promise<void> {
-  try {
-    await writeSidecarFileNextToPrimary(primaryFilePath, sidecar);
-  } catch (error) {
-    await tryRemoveFileIgnoringErrors(primaryFilePath);
-    throw error;
-  }
-}
-
-async function tryRemoveFileIgnoringErrors(filePath: string): Promise<void> {
-  try {
-    await unlink(filePath);
-  } catch {
-    // best-effort rollback; primary may already be gone
-  }
-}
-
-async function chooseAndWriteImageToDisk(
-  window: BrowserWindow,
-  request: SaveImageDialogRequest,
-): Promise<SaveImageDialogResult> {
+// The save dialog resolves HERE, before any encoded bytes move, so a cancel
+// transfers nothing (the CT-219e/CT-219g begin pattern).
+async function handleSaveImageBeginIpc(
+  event: Electron.IpcMainInvokeEvent,
+  request: SaveImageBeginRequest,
+): Promise<SaveImageBeginResult> {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return { status: "canceled" };
   const dialogResult = await showImageSaveDialog(window, request);
-  if (dialogResult.canceled || !dialogResult.filePath) {
-    return { canceled: true };
-  }
-  await writePrimaryAndSidecarAtomically(dialogResult.filePath, request);
-  return { canceled: false, filePath: dialogResult.filePath };
+  if (dialogResult.canceled || !dialogResult.filePath) return { status: "canceled" };
+  return { status: "ready", token: await beginWriteSession(dialogResult.filePath, request) };
 }
 
-function findWindowForIpcEvent(
-  event: Electron.IpcMainInvokeEvent,
-): BrowserWindow | null {
-  return BrowserWindow.fromWebContents(event.sender);
+async function beginWriteSession(
+  primaryFilePath: string,
+  request: SaveImageBeginRequest,
+): Promise<string> {
+  return saveImageSessions.begin({
+    primary: { filePath: primaryFilePath, byteLength: request.primaryByteLength },
+    ...(request.sidecar
+      ? {
+          sidecar: {
+            filePath: buildSidecarPathFromPrimary(primaryFilePath, request.sidecar.extension),
+            byteLength: request.sidecar.byteLength,
+          },
+        }
+      : {}),
+  });
 }
 
-async function handleSaveImageDialogIpc(
-  event: Electron.IpcMainInvokeEvent,
-  request: SaveImageDialogRequest,
-): Promise<SaveImageDialogResult> {
-  const window = findWindowForIpcEvent(event);
-  if (!window) return { canceled: true };
-  return chooseAndWriteImageToDisk(window, request);
+async function handleSaveImageChunkIpc(
+  _event: Electron.IpcMainInvokeEvent,
+  request: SaveImageChunkRequest,
+): Promise<void> {
+  await saveImageSessions.appendChunk(request.token, request.part, request.bytes);
 }
 
-export function registerSaveImageDialogIpcHandler(): void {
-  ipcMain.handle(SAVE_IMAGE_DIALOG_CHANNEL, handleSaveImageDialogIpc);
+async function handleSaveImageFinishIpc(
+  _event: Electron.IpcMainInvokeEvent,
+  request: SaveImageFinishRequest,
+): Promise<SaveImageFinishResult> {
+  return { filePath: await saveImageSessions.finishKeepingWrittenFiles(request.token) };
+}
+
+async function handleSaveImageReleaseIpc(
+  _event: Electron.IpcMainInvokeEvent,
+  request: SaveImageReleaseRequest,
+): Promise<void> {
+  await saveImageSessions.releaseDeletingPartialFiles(request.token);
+}
+
+export function registerSaveImageDialogIpcHandlers(): void {
+  ipcMain.handle(SAVE_IMAGE_BEGIN_CHANNEL, handleSaveImageBeginIpc);
+  ipcMain.handle(SAVE_IMAGE_CHUNK_CHANNEL, handleSaveImageChunkIpc);
+  ipcMain.handle(SAVE_IMAGE_FINISH_CHANNEL, handleSaveImageFinishIpc);
+  ipcMain.handle(SAVE_IMAGE_RELEASE_CHANNEL, handleSaveImageReleaseIpc);
 }
