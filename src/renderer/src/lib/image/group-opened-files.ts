@@ -5,6 +5,9 @@ import { classifyDecodedViewportSourceForOpenImagesFlow } from "./classify-opene
 
 // CT-231: an ENVI header's binary sibling streams through the chunked decoder
 // and is never held as bytes; rows carry its SIZE (for display) and file name.
+// CT-232: no raw file bytes are retained AT ALL once decode completes - identity
+// and re-import work from contentHash and filePath, so steady-state memory after
+// an open is one cube, not cube plus file.
 export interface OpenedFileForGrouping {
   readonly fileName: string;
   readonly filePath: string;
@@ -15,7 +18,6 @@ export interface OpenedFileForGrouping {
   readonly contentHash: string;
   readonly sidecarFileName?: string;
   readonly sidecarSizeBytes?: number;
-  readonly bytes: Uint8Array;
 }
 
 export interface GroupedOpenedFileRow {
@@ -30,7 +32,6 @@ export interface GroupedOpenedFileRow {
   readonly contentHash: string;
   readonly sidecarFileName?: string;
   readonly sidecarSizeBytes?: number;
-  readonly bytes: Uint8Array;
 }
 
 export type OpenedFilesGroupMode = "stack" | "singles";
@@ -123,7 +124,6 @@ function buildRowFromFileAndSuggestion(
     differentiatingSubstring:
       suggestion.differentiatingSubstringByFileName.get(file.fileName) ?? file.fileName,
     contentHash: file.contentHash,
-    bytes: file.bytes,
     ...(file.sidecarSizeBytes !== undefined ? { sidecarSizeBytes: file.sidecarSizeBytes } : {}),
     ...(file.sidecarFileName ? { sidecarFileName: file.sidecarFileName } : {}),
   };
@@ -147,7 +147,6 @@ function buildSingleImageGroupFromFile(
         wavelength: null,
         differentiatingSubstring: file.fileName,
         contentHash: file.contentHash,
-        bytes: file.bytes,
         ...(file.sidecarSizeBytes !== undefined ? { sidecarSizeBytes: file.sidecarSizeBytes } : {}),
         ...(file.sidecarFileName ? { sidecarFileName: file.sidecarFileName } : {}),
       },

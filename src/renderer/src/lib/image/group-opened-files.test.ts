@@ -47,7 +47,6 @@ function buildStackableFile(fileName: string): OpenedFileForGrouping {
     source: buildSingleBandRasterSource(),
     decodeError: null,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 
@@ -60,7 +59,6 @@ function buildMultiBandFile(fileName: string, bandCount: number): OpenedFileForG
     source: buildMultiBandRasterSource(bandCount),
     decodeError: null,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 
@@ -73,7 +71,6 @@ function buildDecodeFailedFile(fileName: string, message: string): OpenedFileFor
     source: null,
     decodeError: message,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 

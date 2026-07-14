@@ -138,6 +138,9 @@ function convertUnknownErrorToMessage(error: unknown): string {
   return String(error);
 }
 
+// CT-232: the grouping entry deliberately omits entry.bytes so the raw file
+// buffer becomes collectable as soon as this entry's decode completes; identity
+// and re-import key off contentHash and filePath instead.
 function buildOpenedFileForGroupingFromEntry(
   entry: ToolboxOpenedImagesFileEntry,
   decoded: DecodedSourceOrError,
@@ -150,6 +153,5 @@ function buildOpenedFileForGroupingFromEntry(
     source: decoded.source,
     decodeError: decoded.errorMessage,
     contentHash: entry.contentHash,
-    bytes: entry.bytes,
   };
 }

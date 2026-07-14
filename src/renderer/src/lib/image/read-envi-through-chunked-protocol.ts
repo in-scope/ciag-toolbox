@@ -65,7 +65,7 @@ async function pullHeaderThenStreamDecodeBinary(
     decoder,
     onDecodeProgress,
   );
-  return finishSessionAndBuildDecodedEntry(api, { begun, metadata, headerBytes, header, decoder, sidecar });
+  return finishSessionAndBuildDecodedEntry(api, { begun, metadata, header, decoder, sidecar });
 }
 
 function requireEnviBinarySidecarInfo(
@@ -155,7 +155,6 @@ function formatBytesAsGigabytes(bytes: number): string {
 interface DecodedEnviSessionParts {
   readonly begun: ChunkedOpenedImageReadBeginResult;
   readonly metadata: ToolboxOpenImagesDialogFileMetadataEntry;
-  readonly headerBytes: Uint8Array;
   readonly header: EnviHeader;
   readonly decoder: ChunkFedEnviBandDecoder;
   readonly sidecar: { fileName: string; sizeBytes: number };
@@ -178,7 +177,6 @@ async function finishSessionAndBuildDecodedEntry(
     source: { kind: "raster", raster },
     decodeError: null,
     contentHash: finished.contentHash,
-    bytes: parts.headerBytes,
     sidecarFileName: parts.sidecar.fileName,
     sidecarSizeBytes: parts.sidecar.sizeBytes,
   };
@@ -196,6 +194,5 @@ function buildEntryForFailedEnviDecode(
     source: null,
     decodeError: error instanceof Error ? error.message : String(error),
     contentHash: "",
-    bytes: new Uint8Array(0),
   };
 }

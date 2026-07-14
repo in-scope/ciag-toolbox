@@ -96,11 +96,11 @@ describe("readAndDecodeEnviHeaderFileStreamingChunks", () => {
     expect(raster!.bandCount).toBe(2);
   });
 
-  it("carries the protocol content hash, the header bytes, and the sidecar identity", async () => {
+  it("carries the protocol content hash and the sidecar identity without retaining any bytes", async () => {
     const fake = createFakeChunkedReadApi();
     const entry = await readAndDecodeEnviHeaderFileStreamingChunks(fake.api, METADATA);
     expect(entry.contentHash).toBe("hash-of-header");
-    expect(entry.bytes).toEqual(HEADER_BYTES);
+    expect("bytes" in entry).toBe(false);
     expect(entry.sidecarFileName).toBe("stack.raw");
     expect(entry.sidecarSizeBytes).toBe(BINARY_BYTES.byteLength);
     expect(entry.fileName).toBe("stack.hdr");
