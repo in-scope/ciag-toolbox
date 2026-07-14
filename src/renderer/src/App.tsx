@@ -124,11 +124,11 @@ import {
   planOpenImagesPlacement,
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
-import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
   readAndDecodeSingleOpenedImageFile,
+  readAndDecodeSingleOpenedImageFileOrThrow,
   runOpenImagesDialogPhase,
 } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
@@ -1609,7 +1609,7 @@ async function runReimportSourceFromDiskFlow(
 ): Promise<void> {
   const result = await invokeOpenImageDialogForReimportSafely();
   if (!result || result.canceled) return;
-  await replaceViewportSourceWithReimportedFile(viewportIndex, result, bindings);
+  await replaceViewportSourceWithReimportedFile(viewportIndex, result.file, bindings);
 }
 
 async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImageDialogResult | null> {
@@ -1621,38 +1621,35 @@ async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImag
   }
 }
 
+// CT-234: the dialog reply is metadata only; the file's bytes stream through
+// the chunked opened-image read protocol (the same path as the main open flow),
+// so a re-import works at any size the 16 GiB openable limit allows.
 async function replaceViewportSourceWithReimportedFile(
   viewportIndex: number,
-  result: Extract<ToolboxOpenImageDialogResult, { canceled: false }>,
+  file: ToolboxOpenImagesDialogFileMetadataEntry,
   bindings: ViewportReimportApiBindings,
 ): Promise<void> {
   const handle = bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex,
-    label: `Re-importing ${result.fileName}...`,
+    label: `Re-importing ${file.fileName}...`,
   });
   try {
-    const source = coerceViewportSourceToRasterSource(
-      await decodeImageBytesToViewportSource(
-        {
-          fileName: result.fileName,
-          bytes: result.bytes,
-          sidecarBytes: result.sidecar?.bytes,
-        },
-        (fraction) => handle.update({ progress: fraction }),
-      ),
+    const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(file, (fraction) =>
+      handle.update({ progress: fraction }),
     );
+    const source = coerceViewportSourceToRasterSource(decoded.source);
     bindings.setImagesByIndex((previous) =>
       assignViewportContentAtIndex(previous, viewportIndex, {
-        fileName: result.fileName,
+        fileName: file.fileName,
         source,
-        originalFilePath: result.filePath,
-        fileSizeBytes: result.bytes.length,
+        originalFilePath: file.filePath,
+        fileSizeBytes: file.fileSizeBytes,
       }),
     );
     bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
-    toast.success(`Re-imported ${result.fileName}`);
+    toast.success(`Re-imported ${file.fileName}`);
   } catch (error) {
-    toast.error(`Could not re-import ${result.fileName}: ${describeUnknownError(error)}`);
+    toast.error(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }

@@ -419,3 +419,4 @@ export {
   expectCustomTransformReady,
 } from "./custom-transform";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
+export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";

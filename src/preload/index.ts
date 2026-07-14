@@ -47,22 +47,6 @@ export interface AppInfo {
   version: string;
 }
 
-export interface OpenImageDialogSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-export type OpenImageDialogResult =
-  | { canceled: true }
-  | {
-      canceled: false;
-      filePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: OpenImageDialogSidecar;
-    };
-
 export interface OpenImagesDialogFileMetadataEntry {
   fileName: string;
   filePath: string;
@@ -73,6 +57,12 @@ export interface OpenImagesDialogFileMetadataEntry {
 export type OpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenImagesDialogFileMetadataEntry> };
+
+// CT-234: the single-file dialog reply is metadata only; file bytes stream
+// through the chunked-read wrappers below (same rule as the multi-file dialog).
+export type OpenImageDialogResult =
+  | { canceled: true }
+  | { canceled: false; file: OpenImagesDialogFileMetadataEntry };
 
 // CT-231: an ENVI header's binary sibling never crosses as assembled bytes;
 // the renderer streams it through the chunked-read wrappers below, so the

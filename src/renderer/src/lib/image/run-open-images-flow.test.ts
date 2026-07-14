@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readAndDecodeSingleOpenedImageFile,
+  readAndDecodeSingleOpenedImageFileOrThrow,
   runOpenImagesDialogPhase,
 } from "@/lib/image/run-open-images-flow";
 import type { BusyEntryHandle } from "@/state/busy-state-context";
@@ -143,6 +144,28 @@ describe("run-open-images-flow byte release (CT-232)", () => {
       expect(row.decodeError).toBeNull();
       expect(row.source?.kind).toBe("raster");
     }
+  });
+
+  it("readAndDecodeSingleOpenedImageFileOrThrow returns the decoded entry with a non-null source", async () => {
+    const metadata = buildFixtureMetadataEntry("capture_single.tif");
+    installFakeToolboxApiServingFixtureBytes([metadata]);
+    const file = await readAndDecodeSingleOpenedImageFileOrThrow(metadata);
+    expect(file.source.kind).toBe("raster");
+    expect(file.contentHash).toBe("hash-capture_single.tif");
+  });
+
+  it("readAndDecodeSingleOpenedImageFileOrThrow throws the decode error for undecodable bytes", async () => {
+    const metadata = buildFixtureMetadataEntry("capture_single.tif");
+    vi.stubGlobal("window", {
+      toolboxApi: {
+        readOpenedImageFile: async () => ({
+          ...metadata,
+          bytes: new Uint8Array([9, 9, 9, 9]),
+          contentHash: "hash-garbage",
+        }),
+      },
+    });
+    await expect(readAndDecodeSingleOpenedImageFileOrThrow(metadata)).rejects.toThrow();
   });
 
   it("returns a single decoded file entry that holds no reference to the input byte array", async () => {

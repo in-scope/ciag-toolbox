@@ -104,6 +104,24 @@ export async function readAndDecodeSingleOpenedImageFile(
   return buildOpenedFileForGroupingFromEntry(entry, decoded);
 }
 
+// CT-234: single-file consumers (re-import, reference pick) want a decoded
+// source, not a grouping row; a decode failure becomes a thrown Error so their
+// dialog-driven flows surface it as a toast.
+export type DecodedOpenedImageFile = OpenedFileForGrouping & {
+  readonly source: NonNullable<OpenedFileForGrouping["source"]>;
+};
+
+export async function readAndDecodeSingleOpenedImageFileOrThrow(
+  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
+  onDecodeProgress?: UnitProgressCallback,
+): Promise<DecodedOpenedImageFile> {
+  const entry = await readAndDecodeSingleOpenedImageFile(metadata, onDecodeProgress);
+  if (entry.source === null) {
+    throw new Error(entry.decodeError ?? `Could not decode ${metadata.fileName}`);
+  }
+  return { ...entry, source: entry.source };
+}
+
 function buildChunkedOpenedImageReadApiFromToolboxBridge(): ChunkedOpenedImageReadApi {
   return {
     begin: (request) => window.toolboxApi.beginOpenedImageChunkedRead(request),

@@ -1,29 +1,18 @@
 import { BrowserWindow, ipcMain } from "electron";
-import { basename } from "node:path";
 
-import { computeSha256HexFromBytes } from "./content-hash";
 import { showOpenDialogOrStub } from "./e2e-dialog-stub";
 import {
-  findEnviBinarySiblingPathOrNull,
-  isEnviHeaderFilePath,
-} from "./envi-binary-sibling";
-import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
+  readFileMetadataForOpenedImagePath,
+  type OpenedImageFileMetadataEntry,
+} from "./open-images-dialog";
 
-export interface OpenImageSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
+// CT-234: this dialog reply carries METADATA ONLY. File bytes never cross this
+// channel; the renderer reads them through the chunked opened-image protocol
+// (chunked-opened-image-read-ipc.ts), which also enforces the 16 GiB openable
+// limit, resolves ENVI binary siblings, and computes the content hash.
 export type OpenImageResult =
   | { canceled: true }
-  | {
-      canceled: false;
-      filePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: OpenImageSidecar;
-    };
+  | { canceled: false; file: OpenedImageFileMetadataEntry };
 
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 
@@ -57,51 +46,7 @@ async function showImageOpenDialog(
   });
 }
 
-async function readImageFileAsBytes(filePath: string): Promise<Uint8Array> {
-  return readFileWithinOpenableSizeLimitOrThrow(filePath);
-}
-
-async function buildOpenImageResultFromPath(
-  filePath: string,
-): Promise<OpenImageResult> {
-  const bytes = await readImageFileAsBytes(filePath);
-  const contentHash = computeSha256HexFromBytes(bytes);
-  const sidecar = await findSidecarForOpenedImageFile(filePath);
-  // Large buffers stay LAST: serializing fields after a ~1 GiB buffer kills
-  // this process (see src/shared/chunked-opened-image-read-protocol.ts).
-  return {
-    canceled: false,
-    filePath,
-    fileName: basename(filePath),
-    contentHash,
-    bytes,
-    ...(sidecar ? { sidecar } : {}),
-  };
-}
-
-async function findSidecarForOpenedImageFile(
-  filePath: string,
-): Promise<OpenImageSidecar | undefined> {
-  if (!isEnviHeaderFilePath(filePath)) return undefined;
-  return readEnviBinarySiblingOrThrow(filePath);
-}
-
-async function readEnviBinarySiblingOrThrow(
-  headerPath: string,
-): Promise<OpenImageSidecar> {
-  const siblingPath = await findEnviBinarySiblingPathOrNull(headerPath);
-  if (!siblingPath) {
-    throw new Error(
-      `Could not find ENVI binary sibling for ${basename(headerPath)} (looked for .bin/.dat/.img/.raw or extensionless match)`,
-    );
-  }
-  return {
-    fileName: basename(siblingPath),
-    bytes: await readImageFileAsBytes(siblingPath),
-  };
-}
-
-async function chooseAndReadImageFromDialog(
+async function chooseImageAndCollectMetadata(
   window: BrowserWindow,
 ): Promise<OpenImageResult> {
   const dialogResult = await showImageOpenDialog(window);
@@ -109,7 +54,7 @@ async function chooseAndReadImageFromDialog(
   if (dialogResult.canceled || firstPath === undefined) {
     return { canceled: true };
   }
-  return buildOpenImageResultFromPath(firstPath);
+  return { canceled: false, file: await readFileMetadataForOpenedImagePath(firstPath) };
 }
 
 function findWindowForIpcEvent(
@@ -123,7 +68,7 @@ async function handleOpenImageDialogIpc(
 ): Promise<OpenImageResult> {
   const window = findWindowForIpcEvent(event);
   if (!window) return { canceled: true };
-  return chooseAndReadImageFromDialog(window);
+  return chooseImageAndCollectMetadata(window);
 }
 
 export function registerOpenImageDialogIpcHandler(): void {

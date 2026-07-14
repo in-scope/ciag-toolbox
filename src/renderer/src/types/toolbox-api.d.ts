@@ -3,21 +3,11 @@ interface ToolboxAppInfo {
   version: string;
 }
 
-interface ToolboxOpenImageDialogSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
+// CT-234: the single-file dialog reply is metadata only; file bytes stream
+// through the chunked-read methods below (same rule as the multi-file dialog).
 type ToolboxOpenImageDialogResult =
   | { canceled: true }
-  | {
-      canceled: false;
-      filePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: ToolboxOpenImageDialogSidecar;
-    };
+  | { canceled: false; file: ToolboxOpenImagesDialogFileMetadataEntry };
 
 interface ToolboxOpenImagesDialogFileMetadataEntry {
   fileName: string;

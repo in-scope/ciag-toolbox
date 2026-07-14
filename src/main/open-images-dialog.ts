@@ -47,7 +47,7 @@ async function showImagesOpenDialogAllowingMultiSelect(
   });
 }
 
-async function readFileMetadataForOpenedImagePath(
+export async function readFileMetadataForOpenedImagePath(
   filePath: string,
 ): Promise<OpenedImageFileMetadataEntry> {
   const stats = await stat(filePath);
