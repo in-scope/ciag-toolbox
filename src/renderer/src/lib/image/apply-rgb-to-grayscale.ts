@@ -3,6 +3,7 @@ import {
   dataTypeValueRangeForBand,
   isFloatTypedArray,
 } from "@/lib/image/data-type-value-range";
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
@@ -83,8 +84,7 @@ function readRgbBandTriple(
 }
 
 function makeEmptyBandMatchingType(band: RasterTypedArray): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  return new Constructor(band.length);
+  return allocateTypedArrayLikeBandOrThrow(band, band.length);
 }
 
 function buildSingleBandGrayscaleRaster(

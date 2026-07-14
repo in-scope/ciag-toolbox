@@ -12,6 +12,10 @@ import type { OpenedFileForGrouping } from "@/lib/image/group-opened-files";
 import { buildRasterImageFromEnviHeaderAndBandPixels } from "@/lib/image/load-envi";
 import { parseEnviHeaderText, type EnviHeader } from "@/lib/image/parse-envi-header";
 import {
+  assertAllocationFitsRemainingBudget,
+  buildOpenSingleImageMemoryRefusalMessage,
+} from "@/lib/image/raster-memory-budget";
+import {
   createChunkFedEnviBandDecoder,
   type ChunkFedEnviBandDecoder,
 } from "@/lib/image/read-envi-binary-from-chunks";
@@ -35,14 +39,19 @@ export interface ChunkedOpenedImageReadApi {
   abort(request: ChunkedOpenedImageReadAbortRequest): Promise<void>;
 }
 
+export interface EnviStreamingBudgetOptions {
+  readonly remainingRasterBudgetBytes?: number;
+}
+
 export async function readAndDecodeEnviHeaderFileStreamingChunks(
   api: ChunkedOpenedImageReadApi,
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   onDecodeProgress?: UnitProgressCallback,
+  budgetOptions: EnviStreamingBudgetOptions = {},
 ): Promise<OpenedFileForGrouping> {
   const begun = await api.begin({ filePath: metadata.filePath });
   try {
-    return await pullHeaderThenStreamDecodeBinary(api, begun, metadata, onDecodeProgress);
+    return await pullHeaderThenStreamDecodeBinary(api, begun, metadata, onDecodeProgress, budgetOptions);
   } catch (error) {
     await api.abort({ token: begun.token }).catch(() => undefined);
     return buildEntryForFailedEnviDecode(metadata, error);
@@ -54,9 +63,11 @@ async function pullHeaderThenStreamDecodeBinary(
   begun: ChunkedOpenedImageReadBeginResult,
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   onDecodeProgress?: UnitProgressCallback,
+  budgetOptions: EnviStreamingBudgetOptions = {},
 ): Promise<OpenedFileForGrouping> {
   const headerBytes = await pullWholeHeaderFileTarget(api, begun, metadata.fileName);
   const sidecar = requireEnviBinarySidecarInfo(begun, metadata.fileName);
+  assertEnviCubeFitsMemoryBudget(sidecar.sizeBytes, metadata.fileName, budgetOptions);
   const header = parseEnviHeaderText(new TextDecoder("utf-8").decode(headerBytes));
   const decoder = createDecoderMappingAllocationFailure(header, sidecar.sizeBytes, sidecar.fileName);
   await streamSidecarChunksIntoDecoder(
@@ -66,6 +77,23 @@ async function pullHeaderThenStreamDecodeBinary(
     onDecodeProgress,
   );
   return finishSessionAndBuildDecodedEntry(api, { begun, metadata, header, decoder, sidecar });
+}
+
+// CT-239: the sidecar's byte count IS the decoded cube's byte count (the
+// per-band arrays hold exactly the binary's samples), so the memory-budget
+// check here is exact where the dialog-level file-size proxy could not be
+// (an opened .hdr is a few hundred bytes; its data lives in the sibling).
+function assertEnviCubeFitsMemoryBudget(
+  sidecarSizeBytes: number,
+  fileName: string,
+  budgetOptions: EnviStreamingBudgetOptions,
+): void {
+  if (budgetOptions.remainingRasterBudgetBytes === undefined) return;
+  assertAllocationFitsRemainingBudget(
+    sidecarSizeBytes,
+    budgetOptions.remainingRasterBudgetBytes,
+    buildOpenSingleImageMemoryRefusalMessage(fileName),
+  );
 }
 
 function requireEnviBinarySidecarInfo(

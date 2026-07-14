@@ -105,7 +105,7 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
-import { rememberReferenceRaster } from "@/lib/image/reference-raster-store";
+import { replaceRememberedPanelReferenceRasters } from "@/lib/image/reference-raster-store";
 import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
@@ -126,6 +126,13 @@ import {
 } from "@/lib/grid/plan-open-images";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import {
+  DUPLICATE_MEMORY_REFUSAL_MESSAGE,
+  rasterAllocationExceedsMemoryBudget,
+  remainingRasterMemoryBudgetBytes,
+  sumLiveRasterBytesAcrossSources,
+} from "@/lib/image/raster-memory-budget";
+import { estimateSourceCloneBytes } from "@/lib/actions/estimate-apply-allocation";
 import {
   readAndDecodeSingleOpenedImageFile,
   readAndDecodeSingleOpenedImageFileOrThrow,
@@ -478,6 +485,7 @@ function ApplicationShell(): JSX.Element {
     replaceSelection,
   });
   const reimportApi = useViewportReimportApi({
+    imagesByIndexRef,
     setImagesByIndex,
     setRenderingState: renderingApi.setRenderingState,
     busyRegistrar,
@@ -1010,7 +1018,10 @@ async function runOpenImagesDialogPhaseAndDispatchOutcome(
   bindings: OpenImagesBindings,
   handle: BusyEntryHandle,
 ): Promise<void> {
-  const result = await runOpenImagesDialogPhase({ readPhaseBusyHandle: handle });
+  const result = await runOpenImagesDialogPhase({
+    readPhaseBusyHandle: handle,
+    remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current),
+  });
   if (result.kind === "canceled") return;
   if (result.kind === "single-file") {
     handle.clear();
@@ -1018,6 +1029,14 @@ async function runOpenImagesDialogPhaseAndDispatchOutcome(
     return;
   }
   bindings.setPendingOpenImagesReview(result.proposal);
+}
+
+// CT-239: how much of the renderer's ArrayBuffer pool the panels currently
+// open leave for a new allocation (opens, duplicates, re-imports).
+function remainingRasterBudgetBytesForViewports(imagesByIndex: ImagesByIndexMap): number {
+  return remainingRasterMemoryBudgetBytes(
+    sumLiveRasterBytesAcrossSources([...imagesByIndex.values()].map((content) => content.source)),
+  );
 }
 
 // CT-220: the single-file fast path reserves its destination cell FIRST so the read
@@ -1030,8 +1049,10 @@ async function readSingleFileShowingViewportProgressThenPlace(
   const targetIndex = reserveViewportCellForSingleFileOpen(bindings);
   const handle = registerSingleFileReadBusyEntry(metadata.fileName, targetIndex, bindings);
   try {
-    const file = await readAndDecodeSingleOpenedImageFile(metadata, (fraction) =>
-      handle.update({ progress: fraction }),
+    const file = await readAndDecodeSingleOpenedImageFile(
+      metadata,
+      (fraction) => handle.update({ progress: fraction }),
+      { remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current) },
     );
     placeSingleDecodedFileIntoViewport(file, targetIndex, bindings);
   } finally {
@@ -1417,9 +1438,27 @@ function routeDuplicateRequest(
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
+  if (reportDuplicateExceedsMemoryBudget(bindings, sourceContent)) return;
   if (placeDuplicateInExistingEmptyViewport(bindings, sourceContent, sourceIndex)) return;
   if (placeDuplicateByExpandingGrid(bindings, sourceContent, sourceIndex)) return;
   bindings.setPendingDuplicate({ sourceIndex, sourceContent });
+}
+
+// CT-239: a duplicate deep-clones the whole cube; refuse before allocating when
+// the clone cannot fit in the renderer's ArrayBuffer pool alongside the panels
+// already open.
+function reportDuplicateExceedsMemoryBudget(
+  bindings: ViewportDuplicationApiBindings,
+  sourceContent: ViewportCellContent,
+): boolean {
+  const liveBytes = sumLiveRasterBytesAcrossSources(
+    [...bindings.imagesByIndex.values()].map((content) => content.source),
+  );
+  if (!rasterAllocationExceedsMemoryBudget(estimateSourceCloneBytes(sourceContent.source), liveBytes)) {
+    return false;
+  }
+  toast.error(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
+  return true;
 }
 
 function placeDuplicateInExistingEmptyViewport(
@@ -1582,6 +1621,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
 }
 
 interface ViewportReimportApiBindings {
+  imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
   setImagesByIndex: SetImagesByIndex;
   setRenderingState: ViewportRenderingApi["setRenderingState"];
   busyRegistrar: BusyEntryRegistrar;
@@ -1590,10 +1630,10 @@ interface ViewportReimportApiBindings {
 function useViewportReimportApi(
   bindings: ViewportReimportApiBindings,
 ): ViewportReimportApi {
-  const { setImagesByIndex, setRenderingState, busyRegistrar } = bindings;
+  const { imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar } = bindings;
   return useMemo(
-    () => buildViewportReimportApi({ setImagesByIndex, setRenderingState, busyRegistrar }),
-    [setImagesByIndex, setRenderingState, busyRegistrar],
+    () => buildViewportReimportApi({ imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar }),
+    [imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar],
   );
 }
 
@@ -1637,8 +1677,12 @@ async function replaceViewportSourceWithReimportedFile(
     label: `Re-importing ${file.fileName}...`,
   });
   try {
-    const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(file, (fraction) =>
-      handle.update({ progress: fraction }),
+    // The replaced panel's cube stays alive until the decode lands, so the
+    // budget counts it: the transient peak really is old cube plus new cube.
+    const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(
+      file,
+      (fraction) => handle.update({ progress: fraction }),
+      { remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current) },
     );
     const source = coerceViewportSourceToRasterSource(decoded.source);
     bindings.setImagesByIndex((previous) =>
@@ -1892,8 +1936,10 @@ function useLoadedReferenceCandidates(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],
   );
+  // CT-239: SYNC the store (evicting closed panels' entries) instead of
+  // accumulating - the remember-only loop pinned every closed panel's cube.
   useEffect(() => {
-    for (const candidate of candidates) rememberReferenceRaster(candidate.token, candidate.raster);
+    replaceRememberedPanelReferenceRasters(candidates);
   }, [candidates]);
   return candidates;
 }

@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   cloneRasterImage,
   type RasterImage,
@@ -117,8 +118,7 @@ function copyBandPixelsForShift(
   region: PixelRectangle | null,
 ): RasterTypedArray {
   if (!region) return createEmptyTypedArrayMatchingBand(band);
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  const copy = new Constructor(band.length);
+  const copy = allocateTypedArrayLikeBandOrThrow(band, band.length);
   copy.set(band as never);
   return copy;
 }
@@ -153,8 +153,7 @@ function getTypedArrayValueRangeForSampleFormat(
 }
 
 function createEmptyTypedArrayMatchingBand(band: RasterTypedArray): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  return new Constructor(band.length);
+  return allocateTypedArrayLikeBandOrThrow(band, band.length);
 }
 
 function clampValueToRange(value: number, range: TypedArrayValueRange): number {

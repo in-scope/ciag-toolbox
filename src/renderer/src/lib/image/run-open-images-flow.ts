@@ -9,10 +9,23 @@ import {
   type OpenedFilesGroupingProposal,
 } from "@/lib/image/group-opened-files";
 import {
+  assertAllocationFitsRemainingBudget,
+  buildOpenSingleImageMemoryRefusalMessage,
+  OPEN_IMAGES_MEMORY_REFUSAL_MESSAGE,
+} from "@/lib/image/raster-memory-budget";
+import {
   readAndDecodeEnviHeaderFileStreamingChunks,
   type ChunkedOpenedImageReadApi,
 } from "@/lib/image/read-envi-through-chunked-protocol";
 import type { BusyEntryHandle } from "@/state/busy-state-context";
+
+// CT-239: opens are gated against the renderer's ArrayBuffer pool. The cost
+// proxy is the file size on disk (exact for uncompressed band TIFFs and ENVI
+// binaries, a floor for compressed formats); the ENVI streaming path re-checks
+// with the exact sidecar byte count once the header names it.
+export interface OpenAllocationBudgetOptions {
+  readonly remainingRasterBudgetBytes?: number;
+}
 
 export type RunOpenImagesDialogResult =
   | { readonly kind: "canceled" }
@@ -22,7 +35,7 @@ export type RunOpenImagesDialogResult =
   | { readonly kind: "single-file"; readonly metadata: ToolboxOpenImagesDialogFileMetadataEntry }
   | { readonly kind: "review"; readonly proposal: OpenedFilesGroupingProposal };
 
-interface RunOpenImagesDialogOptions {
+interface RunOpenImagesDialogOptions extends OpenAllocationBudgetOptions {
   readonly readPhaseBusyHandle: BusyEntryHandle;
 }
 
@@ -35,7 +48,21 @@ export async function runOpenImagesDialogPhase(
   if (dialogResult.files.length === 1) {
     return { kind: "single-file", metadata: dialogResult.files[0]! };
   }
+  assertOpenedFilesFitMemoryBudget(dialogResult.files, options);
   return readAllFilesAndProposeGroups(dialogResult.files, options.readPhaseBusyHandle);
+}
+
+function assertOpenedFilesFitMemoryBudget(
+  files: ReadonlyArray<ToolboxOpenImagesDialogFileMetadataEntry>,
+  options: OpenAllocationBudgetOptions,
+): void {
+  if (options.remainingRasterBudgetBytes === undefined) return;
+  const totalFileBytes = files.reduce((sum, file) => sum + file.fileSizeBytes, 0);
+  assertAllocationFitsRemainingBudget(
+    totalFileBytes,
+    options.remainingRasterBudgetBytes,
+    OPEN_IMAGES_MEMORY_REFUSAL_MESSAGE,
+  );
 }
 
 async function readAllFilesAndProposeGroups(
@@ -89,6 +116,7 @@ function reportReadProgress(
 export async function readAndDecodeSingleOpenedImageFile(
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   onDecodeProgress?: UnitProgressCallback,
+  budgetOptions: OpenAllocationBudgetOptions = {},
 ): Promise<OpenedFileForGrouping> {
   // CT-231: an ENVI header streams its binary sibling chunk-by-chunk into the
   // decoder; the whole-binary reassembly path below never sees it.
@@ -97,11 +125,25 @@ export async function readAndDecodeSingleOpenedImageFile(
       buildChunkedOpenedImageReadApiFromToolboxBridge(),
       metadata,
       onDecodeProgress,
+      budgetOptions,
     );
   }
+  assertSingleOpenedFileFitsMemoryBudget(metadata, budgetOptions);
   const entry = await window.toolboxApi.readOpenedImageFile(metadata);
   const decoded = await tryDecodeOpenedImageEntry(entry, onDecodeProgress);
   return buildOpenedFileForGroupingFromEntry(entry, decoded);
+}
+
+function assertSingleOpenedFileFitsMemoryBudget(
+  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
+  budgetOptions: OpenAllocationBudgetOptions,
+): void {
+  if (budgetOptions.remainingRasterBudgetBytes === undefined) return;
+  assertAllocationFitsRemainingBudget(
+    metadata.fileSizeBytes,
+    budgetOptions.remainingRasterBudgetBytes,
+    buildOpenSingleImageMemoryRefusalMessage(metadata.fileName),
+  );
 }
 
 // CT-234: single-file consumers (re-import, reference pick) want a decoded
@@ -114,8 +156,9 @@ export type DecodedOpenedImageFile = OpenedFileForGrouping & {
 export async function readAndDecodeSingleOpenedImageFileOrThrow(
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   onDecodeProgress?: UnitProgressCallback,
+  budgetOptions: OpenAllocationBudgetOptions = {},
 ): Promise<DecodedOpenedImageFile> {
-  const entry = await readAndDecodeSingleOpenedImageFile(metadata, onDecodeProgress);
+  const entry = await readAndDecodeSingleOpenedImageFile(metadata, onDecodeProgress, budgetOptions);
   if (entry.source === null) {
     throw new Error(entry.decodeError ?? `Could not decode ${metadata.fileName}`);
   }

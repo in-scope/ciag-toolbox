@@ -1,3 +1,7 @@
+import {
+  buildRasterMemoryAllocationErrorForByteLength,
+  RasterMemoryAllocationError,
+} from "@/lib/image/raster-allocation";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 import {
   reportCompletedUnitAndYieldSoProgressCanPaint,
@@ -19,15 +23,9 @@ export type ComputeFloatBandFromSource = (
   bandIndex: number,
 ) => Float32Array;
 
-// CT-103: a clear, actionable typed error for a failed band allocation, so the
-// apply-action-flow toast names the memory needed instead of surfacing the raw
-// engine "Array buffer allocation failed".
-export class RasterMemoryAllocationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RasterMemoryAllocationError";
-  }
-}
+// CT-239: the error class moved to raster-allocation.ts (the shared mapped
+// allocator); re-exported here for the existing importers.
+export { RasterMemoryAllocationError };
 
 export function makeFloatRasterFromBandComputation(
   source: RasterImage,
@@ -176,11 +174,7 @@ function allocateFloat32ArrayOrThrow(length: number): Float32Array {
 }
 
 function buildRasterMemoryAllocationErrorForLength(length: number): RasterMemoryAllocationError {
-  const megabytes = Math.ceil((length * Float32Array.BYTES_PER_ELEMENT) / (1024 * 1024));
-  return new RasterMemoryAllocationError(
-    `Not enough memory to allocate ${megabytes} MB for this operation. ` +
-      `Free memory or run it on fewer bands and try again.`,
-  );
+  return buildRasterMemoryAllocationErrorForByteLength(length * Float32Array.BYTES_PER_ELEMENT);
 }
 
 function computeSingleFloatBandMatchingSourceLength(

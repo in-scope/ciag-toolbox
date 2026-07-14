@@ -1,4 +1,5 @@
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
   computeArrayReportingPerUnitProgress,
   type UnitProgressCallback,
@@ -122,7 +123,7 @@ function subtractAdjacentBands(
   nextBand: RasterTypedArray,
   currentBand: RasterTypedArray,
 ): Float32Array {
-  const out = new Float32Array(currentBand.length);
+  const out = allocateFloat32ArrayOrThrow(currentBand.length);
   for (let i = 0; i < out.length; i += 1) {
     out[i] = (nextBand[i] ?? 0) - (currentBand[i] ?? 0);
   }
@@ -134,7 +135,7 @@ function secondDifferenceAroundCenterBand(
   centerBand: RasterTypedArray,
   nextBand: RasterTypedArray,
 ): Float32Array {
-  const out = new Float32Array(centerBand.length);
+  const out = allocateFloat32ArrayOrThrow(centerBand.length);
   for (let i = 0; i < out.length; i += 1) {
     out[i] = (nextBand[i] ?? 0) - 2 * (centerBand[i] ?? 0) + (previousBand[i] ?? 0);
   }

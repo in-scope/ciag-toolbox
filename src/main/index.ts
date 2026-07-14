@@ -28,6 +28,19 @@ import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// CT-239 test surface (MSI_E2E only, like the dialog stubs): expose window.gc
+// in every renderer so the scale10 sweep can deterministically release closed
+// panels' cubes between full-scale applies. The renderer's ArrayBuffer pool is
+// a hard ~17 GB cap and V8 does not run a last-resort collection when a
+// backing-store allocation fails, so tests cannot rely on collection timing.
+// No effect on production launches.
+function exposeGarbageCollectionForE2eTestMode(): void {
+  if (!isE2eTestModeEnabled()) return;
+  app.commandLine.appendSwitch("js-flags", "--expose-gc");
+}
+
+exposeGarbageCollectionForE2eTestMode();
+
 function buildPreloadScriptPath(): string {
   return join(__dirname, "../preload/index.js");
 }

@@ -21,7 +21,7 @@ import {
 } from "./support/image-pixel-canvas-mapping";
 import { confirmReviewModal, openImagesReviewModal } from "./support/open-images-flow";
 import { applicationToolbar, operationPanel } from "./support/operations";
-import { panelCanvas, panelGrid } from "./support/panels";
+import { panelCanvas, panelCell, panelGrid } from "./support/panels";
 import { statusBar } from "./support/pixel-readout";
 import { runAsStoryboardStep } from "./support/storyboard-step";
 
@@ -97,6 +97,24 @@ export function recordScale10Result(entry: Scale10Record): void {
   const line = JSON.stringify({ recordedAt: new Date().toISOString(), ...entry });
   appendFileSync(RESULTS_PATH, `${line}\n`);
   console.log(`SCALE10 ${line}`);
+}
+
+// --- deterministic memory release ---------------------------------------------------
+
+// The renderer's ArrayBuffer pool is a hard ~17 GB cap and V8 does not run a
+// last-resort collection when a backing-store allocation fails, so a sweep
+// that opens gigabytes (decode transients) or closes a full-scale result must
+// force collection before the next full-scale allocation. window.gc exists
+// only under the MSI_E2E test surface (main appends --expose-gc); two passes
+// let weakly-held externals fully release.
+export async function forceRendererGarbageCollection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const collect = (window as unknown as { gc?: () => void }).gc;
+    if (!collect) return;
+    collect();
+    collect();
+  });
+  await page.waitForTimeout(1_000);
 }
 
 // --- rAF heartbeat (UI-gap measurement) --------------------------------------------
@@ -179,10 +197,45 @@ export async function readVisibleToastTexts(page: Page): Promise<string[]> {
   return page.locator("[data-sonner-toast]").allInnerTexts();
 }
 
+// CT-239: the sweep bar covers dialogs too, so this scans both surfaces.
 export async function expectNoRawAllocationFailureToast(page: Page): Promise<void> {
   const toasts = await readVisibleToastTexts(page);
-  const leaked = toasts.filter((text) => text.toLowerCase().includes("allocation failed"));
+  const dialogs = await page.locator('[role="alertdialog"]').allInnerTexts().catch(() => []);
+  const leaked = [...toasts, ...dialogs].filter((text) => text.toLowerCase().includes("allocation failed"));
   expect(leaked, `raw allocator strings must never surface: ${JSON.stringify(leaked)}`).toHaveLength(0);
+}
+
+// --- panel management ------------------------------------------------------------------------
+
+export function countGridPanels(page: Page): Promise<number> {
+  return panelGrid(page).getByRole("gridcell").count();
+}
+
+// Frees a result panel's cube (float32 outputs are ~20 GB at scale10) so a
+// second apply in the same instance never holds two full-scale results at once.
+export async function closeGridPanel(page: Page, panelNumber: number): Promise<void> {
+  const before = await countGridPanels(page);
+  await page.getByRole("button", { name: `Close panel ${panelNumber}`, exact: true }).click();
+  await expect.poll(() => countGridPanels(page)).toBe(before - 1);
+}
+
+// The page-level band-navigator helper (support/band-navigator.ts) is ambiguous
+// once a result panel joins the source panel, so scale10 specs target the
+// navigator inside one panel cell. A SINGLE-BAND panel (e.g. the band-wise
+// threshold's one-band mask) renders no navigator at all; selecting band 1
+// there is a no-op, any other band is a real error.
+export async function selectActiveBandNumberInPanel(
+  page: Page,
+  panelNumber: number,
+  oneBasedBandNumber: number,
+): Promise<void> {
+  const input = panelCell(page, panelNumber).getByRole("textbox", { name: "Go to band number" });
+  if ((await input.count()) === 0) {
+    if (oneBasedBandNumber === 1) return;
+    throw new Error(`Panel ${panelNumber} has no band navigator but band ${oneBasedBandNumber} was requested`);
+  }
+  await input.fill(String(oneBasedBandNumber));
+  await input.press("Enter");
 }
 
 // --- opening the capture ----------------------------------------------------------------------
@@ -229,11 +282,19 @@ async function expectFileLoadedIntoPanelGrid(
   await expect(panelGrid(page).locator('[role="status"]')).toHaveCount(0, { timeout: budgetMs });
 }
 
-// Groups the 100 per-band scale10 TIFFs into ONE 100-band stack through the
+// Groups the first bandCount per-band scale10 TIFFs into ONE stack through the
 // Review-stacks modal; each file crosses IPC through the 64 MiB chunked read.
-export async function openScale10GroupedBandFiles(page: Page, budgetMs: number): Promise<TimedLoad> {
-  return runAsStoryboardStep(page, "Open the 100 grouped band files as one stack", async () => {
-    await enqueueOpenDialogPaths(page, [...SCALE10_BAND_FILE_PATHS]);
+// CT-239 opens a 50-band (5 GB) subset for operation tests: the renderer's
+// measured ~16 GiB ArrayBuffer pool cannot hold the 10 GB source AND a
+// full-stack float32 result (20 GB) at once, so 50 bands is the largest scale
+// at which every whole-stack operation can genuinely succeed.
+export async function openScale10GroupedBandFiles(
+  page: Page,
+  budgetMs: number,
+  bandCount: number = SCALE10_BAND_COUNT,
+): Promise<TimedLoad> {
+  return runAsStoryboardStep(page, `Open ${bandCount} grouped band files as one stack`, async () => {
+    await enqueueOpenDialogPaths(page, SCALE10_BAND_FILE_PATHS.slice(0, bandCount));
     const startedAt = Date.now();
     await applicationToolbar(page).getByRole("button", { name: "Open image" }).click();
     await confirmScale10ReviewModal(page);
@@ -324,6 +385,41 @@ export function expectValueCloseTo(
   if (Math.abs(actual - expected) > tolerance) {
     throw new Error(`${label}: read ${actual}, expected ${expected} (tolerance ${tolerance})`);
   }
+}
+
+// The status bar displays FLOAT band values via toPrecision(4)
+// (formatSinglePixelReadoutValue), so a float oracle is exact only at readout
+// precision: the stored value is fround(expected) and the display rounds to 4
+// significant figures (half-ulp <= ~5e-4 relative).
+export function expectFloatReadoutCloseTo(
+  actual: number,
+  expectedTrueValue: number,
+  label: string,
+  extraTolerance = 0,
+): void {
+  const stored = Math.fround(expectedTrueValue);
+  const displayRoundingTolerance = Math.abs(stored) * 6e-4 + 1e-6;
+  expectValueCloseTo(actual, stored, displayRoundingTolerance + extraTolerance, label);
+}
+
+// Lands a hover away from the modulo-100 ramp wrap so neighborhood operations
+// (denoise, spatial filter) see a locally-linear ramp at the reported pixel.
+export async function readSmoothInteriorPixel(
+  page: Page,
+  panelNumber: number,
+  imageDimensions: PixelDimensions,
+): Promise<ReportedPixel> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const probe = { x: 2450 + attempt * 7, y: 1850 + attempt * 3 };
+    const reported = await readReportedPixelNear(page, panelNumber, probe, imageDimensions);
+    if (isAwayFromRampWrap(reported.x) && isAwayFromRampWrap(reported.y)) return reported;
+  }
+  throw new Error("Could not land a hover away from the ramp wrap boundaries");
+}
+
+function isAwayFromRampWrap(coordinate: number): boolean {
+  const remainder = coordinate % 100;
+  return remainder >= 5 && remainder <= 94;
 }
 
 // --- apply with a wall-clock budget --------------------------------------------------------------------

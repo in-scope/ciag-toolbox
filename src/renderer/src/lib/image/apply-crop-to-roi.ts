@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   type RasterImage,
   type RasterTypedArray,
@@ -101,6 +102,5 @@ function createEmptyTypedArrayMatchingBand(
   band: RasterTypedArray,
   length: number,
 ): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  return new Constructor(length);
+  return allocateTypedArrayLikeBandOrThrow(band, length);
 }

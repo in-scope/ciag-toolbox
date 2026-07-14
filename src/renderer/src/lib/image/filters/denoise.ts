@@ -1,4 +1,5 @@
 import type { RasterTypedArray } from "@/lib/image/raster-image";
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
   runInChunksReportingProgress,
   scaleProgressToWindow,
@@ -74,7 +75,7 @@ export async function applyGaussianDenoiseInChunksReportingProgress(
 ): Promise<Float32Array> {
   assertBandLengthMatchesShape(band, shape);
   const kernel = buildNormalizedGaussianKernel(sigma);
-  const rowsSmoothed = new Float32Array(shape.width * shape.height);
+  const rowsSmoothed = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   await runInChunksReportingProgress(
     shape.height,
     denoiseRowsPerChunk(shape, pixelsPerChunk),
@@ -91,7 +92,7 @@ async function convolveColumnsInChunksReportingProgress(
   onProgress?: UnitProgressCallback,
   pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
 ): Promise<Float32Array> {
-  const out = new Float32Array(shape.width * shape.height);
+  const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   await runInChunksReportingProgress(
     shape.height,
     denoiseRowsPerChunk(shape, pixelsPerChunk),
@@ -108,7 +109,7 @@ export function applyMedianDenoise(
 ): Float32Array {
   assertMedianRadiusIsUsable(radius);
   assertBandLengthMatchesShape(band, shape);
-  const out = new Float32Array(shape.width * shape.height);
+  const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   const window = new Float64Array((2 * radius + 1) * (2 * radius + 1));
   medianDenoiseRowRange(band, shape, radius, out, window, 0, shape.height);
   return out;
@@ -123,7 +124,7 @@ export async function applyMedianDenoiseInChunksReportingProgress(
 ): Promise<Float32Array> {
   assertMedianRadiusIsUsable(radius);
   assertBandLengthMatchesShape(band, shape);
-  const out = new Float32Array(shape.width * shape.height);
+  const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   const window = new Float64Array((2 * radius + 1) * (2 * radius + 1));
   await runInChunksReportingProgress(
     shape.height,
@@ -181,7 +182,7 @@ function convolveEachRowWithKernel(
   shape: BandSpatialShape,
   kernel: Float64Array,
 ): Float32Array {
-  const out = new Float32Array(shape.width * shape.height);
+  const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   convolveRowRangeWithKernel(band, shape, kernel, out, 0, shape.height);
   return out;
 }
@@ -191,7 +192,7 @@ function convolveEachColumnWithKernel(
   shape: BandSpatialShape,
   kernel: Float64Array,
 ): Float32Array {
-  const out = new Float32Array(shape.width * shape.height);
+  const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
   convolveColumnRangeWithKernel(band, shape, kernel, out, 0, shape.height);
   return out;
 }

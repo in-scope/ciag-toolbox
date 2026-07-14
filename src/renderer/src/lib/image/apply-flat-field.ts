@@ -3,6 +3,7 @@ import {
   makeFloatRasterFromBandComputationReportingProgress,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
+import { allocateFloat64ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
   getRasterBandLabelOrDefault,
   getRasterBandPixelsOrThrow,
@@ -32,12 +33,9 @@ export function applyFlatFieldToRasterImage(
   if (darkReference) {
     assertReferenceIsCompatibleWithTarget(target, darkReference, "Dark reference");
   }
+  const references = buildFlatFieldReferences(target, lightReference, darkReference);
   return makeFloatRasterFromBandComputation(target, (targetBandPixels, bandIndex) =>
-    correctSingleBandWithFlatField(
-      { target, lightReference, darkReference },
-      targetBandPixels,
-      bandIndex,
-    ),
+    correctSingleBandWithFlatField(references, targetBandPixels, bandIndex),
   );
 }
 
@@ -53,18 +51,61 @@ export async function applyFlatFieldToRasterImageReportingProgress(
   if (darkReference) {
     assertReferenceIsCompatibleWithTarget(target, darkReference, "Dark reference");
   }
+  const references = buildFlatFieldReferences(target, lightReference, darkReference);
   return makeFloatRasterFromBandComputationReportingProgress(
     target,
     (targetBandPixels, bandIndex) =>
-      correctSingleBandWithFlatField({ target, lightReference, darkReference }, targetBandPixels, bandIndex),
+      correctSingleBandWithFlatField(references, targetBandPixels, bandIndex),
     onProgress,
   );
+}
+
+interface FlatFieldBandCorrection {
+  readonly denominators: Float64Array;
+  readonly meanDenominator: number;
+  readonly darkBand: RasterTypedArray | null;
 }
 
 interface FlatFieldReferences {
   readonly target: RasterImage;
   readonly lightReference: RasterImage;
   readonly darkReference?: RasterImage;
+  readonly sharedCorrection: FlatFieldBandCorrection | null;
+}
+
+// CT-239: a broadcast single-band reference yields IDENTICAL denominators for
+// every target band, so they are computed ONCE and shared. Recomputing them
+// per band allocated a transient 8-byte-per-pixel array for each target band
+// (17+ GB of garbage at the 45-band reference scale, an allocation failure
+// against the renderer's ~17 GB ArrayBuffer pool) and swept the reference
+// band-count times for no reason.
+function buildFlatFieldReferences(
+  target: RasterImage,
+  lightReference: RasterImage,
+  darkReference?: RasterImage,
+): FlatFieldReferences {
+  const referencesBroadcastOneBand =
+    lightReference.bandCount === 1 && (!darkReference || darkReference.bandCount === 1);
+  return {
+    target,
+    lightReference,
+    darkReference,
+    sharedCorrection: referencesBroadcastOneBand
+      ? buildCorrectionForTargetBand(target, lightReference, darkReference, 0)
+      : null,
+  };
+}
+
+function buildCorrectionForTargetBand(
+  target: RasterImage,
+  lightReference: RasterImage,
+  darkReference: RasterImage | undefined,
+  bandIndex: number,
+): FlatFieldBandCorrection {
+  const lightBand = readReferenceBandForTargetBand(lightReference, bandIndex);
+  const darkBand = darkReference ? readReferenceBandForTargetBand(darkReference, bandIndex) : null;
+  const denominators = computeBandDenominatorsOrThrowOnZero(target, lightBand, darkBand, bandIndex);
+  return { denominators, meanDenominator: computeMeanOfValues(denominators), darkBand };
 }
 
 function correctSingleBandWithFlatField(
@@ -72,15 +113,14 @@ function correctSingleBandWithFlatField(
   targetBandPixels: RasterTypedArray,
   bandIndex: number,
 ): Float32Array {
-  const lightBand = readReferenceBandForTargetBand(references.lightReference, bandIndex);
-  const darkBand = references.darkReference
-    ? readReferenceBandForTargetBand(references.darkReference, bandIndex)
-    : null;
-  const denominators = computeBandDenominatorsOrThrowOnZero(references.target, lightBand, darkBand, bandIndex);
-  const meanDenominator = computeMeanOfValues(denominators);
+  const correction =
+    references.sharedCorrection ??
+    buildCorrectionForTargetBand(references.target, references.lightReference, references.darkReference, bandIndex);
   return mapBandPixelsToFloat32(
     targetBandPixels,
-    (value, index) => (meanDenominator * (value - readDarkValue(darkBand, index))) / denominators[index]!,
+    (value, index) =>
+      (correction.meanDenominator * (value - readDarkValue(correction.darkBand, index))) /
+      correction.denominators[index]!,
   );
 }
 
@@ -98,7 +138,7 @@ function computeBandDenominatorsOrThrowOnZero(
   darkBand: RasterTypedArray | null,
   bandIndex: number,
 ): Float64Array {
-  const denominators = new Float64Array(lightBand.length);
+  const denominators = allocateFloat64ArrayOrThrow(lightBand.length);
   for (let index = 0; index < denominators.length; index += 1) {
     const denominator = (lightBand[index] ?? 0) - readDarkValue(darkBand, index);
     if (denominator === 0) throw new Error(buildZeroDivisorMessage(target, bandIndex));

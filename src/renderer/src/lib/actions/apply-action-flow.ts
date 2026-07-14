@@ -2,6 +2,10 @@ import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
+import {
+  estimateApplyAllocationBytesForAction,
+  estimateSourceCloneBytes,
+} from "@/lib/actions/estimate-apply-allocation";
 import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
 import {
   describeOperationLoadingMessage,
@@ -23,6 +27,11 @@ import {
   type ViewportContentMap,
   type ViewportContentMapUpdater,
 } from "@/lib/image/place-cloned-source-content";
+import {
+  assertRasterAllocationFitsMemoryBudget,
+  OPERATION_MEMORY_REFUSAL_MESSAGE,
+  sumLiveRasterBytesAcrossSources,
+} from "@/lib/image/raster-memory-budget";
 import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
@@ -47,10 +56,42 @@ export function applyActionInPlaceAtSourceIndex(
   bindings: ApplyActionFlowBindings,
 ): void {
   if (actionTransformsSource(action)) {
+    const content = bindings.imagesByIndex.get(sourceIndex);
+    if (content && reportApplyExceedsMemoryBudget(action, content.source, parameterValues, bindings)) return;
     void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
     return;
   }
   applyActionInPlaceWithoutBusyIndicator(action, parameterValues, sourceIndex, bindings);
+}
+
+// CT-239: refuse an apply whose new band arrays cannot fit in the renderer's
+// ArrayBuffer pool alongside the panels already open, BEFORE a result panel is
+// reserved or any allocation starts. An in-place apply is gated identically:
+// the transform still materializes the whole output while the source is alive.
+function reportApplyExceedsMemoryBudget(
+  action: RegisteredViewportAction,
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+  bindings: ApplyActionFlowBindings,
+): boolean {
+  try {
+    const allocationBytes = actionTransformsSource(action)
+      ? estimateApplyAllocationBytesForAction(action, source, parameterValues)
+      : estimateSourceCloneBytes(source);
+    assertRasterAllocationFitsMemoryBudget(
+      allocationBytes,
+      sumLiveRasterBytesAcrossSources(listSourcesAcrossViewports(bindings.imagesByIndex)),
+      OPERATION_MEMORY_REFUSAL_MESSAGE,
+    );
+    return false;
+  } catch (error) {
+    toast.error(formatActionErrorMessage(action.label, error));
+    return true;
+  }
+}
+
+function listSourcesAcrossViewports(imagesByIndex: ViewportContentMap): ViewportImageSource[] {
+  return [...imagesByIndex.values()].map((content) => content.source);
 }
 
 // Only non-transforming actions land here (the transforming ones are routed to
@@ -279,6 +320,7 @@ export function applyActionToDuplicateOfSource(
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
   if (reportActionCannotApplyToSourceBeforeOpeningPanel(action, sourceContent.source, parameterValues)) return;
+  if (reportApplyExceedsMemoryBudget(action, sourceContent.source, parameterValues, bindings)) return;
   if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   bindings.setPendingDuplicate({

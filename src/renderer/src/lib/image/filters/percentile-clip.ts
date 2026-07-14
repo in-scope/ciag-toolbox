@@ -1,3 +1,8 @@
+import {
+  allocateFloat32ArrayOrThrow,
+  allocateFloat64ArrayOrThrow,
+} from "@/lib/image/raster-allocation";
+
 // CT-205: percentile clipping with np.clip semantics. The cut points are the
 // lower/upper percentiles of the supplied values (numpy's default linear
 // interpolation over the sorted data), and every value is clamped into
@@ -41,7 +46,7 @@ export function clampValuesToCutPoints(
   values: ArrayLike<number>,
   cutPoints: PercentileCutPoints,
 ): Float32Array {
-  const clamped = new Float32Array(values.length);
+  const clamped = allocateFloat32ArrayOrThrow(values.length);
   for (let index = 0; index < values.length; index += 1) {
     clamped[index] = clampValueToRange(
       values[index] ?? 0,
@@ -75,7 +80,7 @@ export function assertPercentileValueCountIsNotEmpty(valueCount: number): void {
 }
 
 function sortValuesAscending(values: ArrayLike<number>): Float64Array {
-  const sorted = new Float64Array(values.length);
+  const sorted = allocateFloat64ArrayOrThrow(values.length);
   for (let index = 0; index < values.length; index += 1) sorted[index] = values[index] ?? 0;
   return sorted.sort();
 }

@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 import {
   computeArrayReportingPerUnitProgress,
@@ -8,8 +9,7 @@ export function mapBandValuesPreservingType(
   band: RasterTypedArray,
   mapValue: (value: number) => number,
 ): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  const mapped = new Constructor(band.length);
+  const mapped = allocateTypedArrayLikeBandOrThrow(band, band.length);
   for (let index = 0; index < band.length; index += 1) {
     mapped[index] = mapValue(band[index] ?? 0);
   }

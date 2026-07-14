@@ -1,3 +1,4 @@
+import { allocateUint8ArrayOrThrow } from "@/lib/image/raster-allocation";
 import type { RasterTypedArray } from "@/lib/image/raster-image";
 
 // CT-200: manual threshold. A pixel whose value falls inside the inclusive
@@ -20,7 +21,7 @@ export function applyManualThreshold(
   band: RasterTypedArray,
   bounds: ThresholdBounds,
 ): Uint8Array {
-  const out = new Uint8Array(band.length);
+  const out = allocateUint8ArrayOrThrow(band.length);
   for (let i = 0; i < band.length; i += 1) {
     out[i] = isValueWithinThresholdBounds(band[i] ?? 0, bounds)
       ? THRESHOLD_WHITE_LEVEL
@@ -38,7 +39,7 @@ export function applyManualThresholdAcrossBands(
 ): Uint8Array {
   const firstBand = bands[0];
   if (!firstBand) throw new Error("Threshold needs at least one band.");
-  const out = new Uint8Array(firstBand.length);
+  const out = allocateUint8ArrayOrThrow(firstBand.length);
   for (let i = 0; i < firstBand.length; i += 1) {
     out[i] = pixelIsWithinBoundsInEveryBand(bands, i, bounds)
       ? THRESHOLD_WHITE_LEVEL

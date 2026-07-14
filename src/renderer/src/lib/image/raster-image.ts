@@ -1,3 +1,5 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
+
 export type RasterSampleFormat = "uint" | "int" | "float";
 
 export type RasterSourceInterleave = "bsq" | "bil" | "bip";
@@ -124,8 +126,7 @@ export function clampBandIndexToRaster(
 }
 
 function copyRasterTypedArray(source: RasterTypedArray): RasterTypedArray {
-  const Constructor = source.constructor as new (length: number) => RasterTypedArray;
-  const copy = new Constructor(source.length);
+  const copy = allocateTypedArrayLikeBandOrThrow(source, source.length);
   copy.set(source as never);
   return copy;
 }

@@ -371,7 +371,9 @@ function createCropToRegionSourceTransform(): ViewportActionAsyncSourceTransform
   };
 }
 
-function readRoiFromCropParameterValues(parameterValues: ParameterValuesById) {
+// Exported for the CT-239 apply-allocation estimator: the crop cost is the
+// committed rectangle's pixels, not the whole stack's.
+export function readRoiFromCropParameterValues(parameterValues: ParameterValuesById) {
   return {
     imagePixelX0: readIntegerParameterOrThrow(parameterValues, CROP_PARAMETER_ID_X0),
     imagePixelY0: readIntegerParameterOrThrow(parameterValues, CROP_PARAMETER_ID_Y0),
@@ -1157,7 +1159,9 @@ function resolveInvertBandIndexes(
   return [readInvertTargetBandIndex(parameterValues)];
 }
 
-function readInvertApplyToAllBands(parameterValues: ParameterValuesById): boolean {
+// Exported for the CT-239 apply-allocation estimator: an all-bands invert
+// allocates the whole cube, a single-band invert only the target band.
+export function readInvertApplyToAllBands(parameterValues: ParameterValuesById): boolean {
   return parameterValues[INVERT_ALL_BANDS_PARAMETER_ID] === true;
 }
 
@@ -1313,6 +1317,15 @@ function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): Norm
   if (method === CLIP_ABSOLUTE_METHOD_VALUE) return resolveClipAbsoluteMethod(parameterValues);
   if (method === ROBUST_PERCENTILE_METHOD_VALUE) return resolveRobustPercentileMethod(parameterValues);
   return MIN_MAX_NORMALIZE_METHOD;
+}
+
+// Exported for the CT-239 apply-allocation estimator: clip-absolute preserves
+// the source data type (band-sized output), the scaling methods build a
+// float32 cube.
+export function normalizeMethodPreservesSourceDataType(
+  parameterValues: ParameterValuesById,
+): boolean {
+  return parameterValues[NORMALIZE_METHOD_PARAMETER_ID] === CLIP_ABSOLUTE_METHOD_VALUE;
 }
 
 function resolveRobustPercentileMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
