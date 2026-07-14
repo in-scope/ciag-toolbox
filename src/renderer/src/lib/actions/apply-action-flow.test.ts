@@ -18,8 +18,10 @@ import {
   EMPTY_OPERATION_HISTORY,
   type ViewportOperationHistory,
 } from "./operation-history";
-import { NO_PARAMETER_VALUES } from "./parameter-schema";
-import type { RegisteredViewportAction } from "./registered-actions";
+import type { RasterImage } from "@/lib/image/raster-image";
+
+import { NO_PARAMETER_VALUES, type ParameterValuesById } from "./parameter-schema";
+import { INVERT_ACTION, type RegisteredViewportAction } from "./registered-actions";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_REMOVED_BAND_INDEXES,
@@ -531,6 +533,173 @@ function buildActionReportingTransformProgress(
       return buildSinglePixelSource();
     },
   } as unknown as RegisteredViewportAction;
+}
+
+describe("apply without the whole-cube clone (CT-233)", () => {
+  it("carries unchanged bands into the duplicate result by the SAME references after a single-band op", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      INVERT_ACTION,
+      buildInvertBandZeroParameterValues(),
+      content,
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    const resultRaster = readRasterAtIndexOrThrow(harness, TARGET_INDEX);
+    expect(resultRaster.bandPixels[1]).toBe(sourceRaster.bandPixels[1]);
+    expect(resultRaster.bandPixels[2]).toBe(sourceRaster.bandPixels[2]);
+    expect(resultRaster.bandPixels[0]).not.toBe(sourceRaster.bandPixels[0]);
+    expect(Array.from(resultRaster.bandPixels[0]!)).toEqual([65435, 65335, 65235, 65135]);
+  });
+
+  it("leaves the source raster's band contents unchanged after an all-bands op", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const bandSnapshots = sourceRaster.bandPixels.map((band) => Array.from(band));
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      INVERT_ACTION,
+      buildInvertAllBandsParameterValues(),
+      content,
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
+    sourceRaster.bandPixels.forEach((band, index) => {
+      expect(Array.from(band)).toEqual(bandSnapshots[index]);
+    });
+  });
+
+  it("leaves the source panel untouched when a duplicate-path transform throws", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const bandSnapshots = sourceRaster.bandPixels.map((band) => Array.from(band));
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      content,
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
+    expect(harness.readContentAtIndex(TARGET_INDEX)).toBeUndefined();
+    sourceRaster.bandPixels.forEach((band, index) => {
+      expect(Array.from(band)).toEqual(bandSnapshots[index]);
+    });
+  });
+
+  it("leaves the source panel untouched when an in-place transform throws", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const bandSnapshots = sourceRaster.bandPixels.map((band) => Array.from(band));
+    const harness = buildRasterDuplicateFlowHarness(content);
+    vi.mocked(toast.error).mockClear();
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Throws failed: boom"));
+    expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
+    sourceRaster.bandPixels.forEach((band, index) => {
+      expect(Array.from(band)).toEqual(bandSnapshots[index]);
+    });
+  });
+});
+
+interface RasterDuplicateFlowHarness {
+  readonly bindings: ApplyActionFlowBindings;
+  readonly readContentAtIndex: (index: number) => ViewportCellContent | undefined;
+}
+
+function buildRasterDuplicateFlowHarness(
+  sourceContent: ViewportCellContent,
+): RasterDuplicateFlowHarness {
+  let imagesByIndex: ReadonlyMap<number, ViewportCellContent> = new Map([
+    [SOURCE_INDEX, sourceContent],
+  ]);
+  const bindings: ApplyActionFlowBindings = {
+    ...buildRasterHarnessRenderingBindings(),
+    gridLayout: "1x2",
+    cellCount: 2,
+    get imagesByIndex() {
+      return imagesByIndex;
+    },
+    setImagesByIndex: (updater) => {
+      imagesByIndex = updater(imagesByIndex);
+    },
+  };
+  return { bindings, readContentAtIndex: (index) => imagesByIndex.get(index) };
+}
+
+type RasterHarnessRenderingBindings = Pick<
+  ApplyActionFlowBindings,
+  "setGridLayout" | "setPendingDuplicate" | "getRenderingState" | "setRenderingState" | "busyRegistrar"
+>;
+
+function buildRasterHarnessRenderingBindings(): RasterHarnessRenderingBindings {
+  const renderingByIndex = new Map<number, ViewportRenderingState>([
+    [SOURCE_INDEX, buildRenderingStateWithHistory([])],
+  ]);
+  return {
+    setGridLayout: vi.fn(),
+    setPendingDuplicate: vi.fn(),
+    getRenderingState: (index) => renderingByIndex.get(index) ?? DEFAULT_VIEWPORT_RENDERING_STATE,
+    setRenderingState: vi.fn((index, next) => renderingByIndex.set(index, next)),
+    busyRegistrar: buildNoopBusyEntryRegistrarForTests(),
+  };
+}
+
+function buildThreeBandUint16RasterCellContent(): ViewportCellContent {
+  return {
+    fileName: "stack.tif",
+    source: { kind: "raster", raster: buildThreeBandUint16Raster() },
+    fileSizeBytes: 24,
+  };
+}
+
+function buildThreeBandUint16Raster(): RasterImage {
+  return {
+    bandPixels: [
+      new Uint16Array([100, 200, 300, 400]),
+      new Uint16Array([500, 600, 700, 800]),
+      new Uint16Array([900, 1000, 1100, 1200]),
+    ],
+    width: 2,
+    height: 2,
+    bitsPerSample: 16,
+    sampleFormat: "uint",
+    bandCount: 3,
+  };
+}
+
+function readRasterFromCellContentOrThrow(content: ViewportCellContent): RasterImage {
+  if (content.source.kind !== "raster") throw new Error("Expected a raster source");
+  return content.source.raster;
+}
+
+function readRasterAtIndexOrThrow(
+  harness: RasterDuplicateFlowHarness,
+  index: number,
+): RasterImage {
+  const content = harness.readContentAtIndex(index);
+  if (!content) throw new Error(`Expected viewport content at index ${index}`);
+  return readRasterFromCellContentOrThrow(content);
+}
+
+function buildInvertBandZeroParameterValues(): ParameterValuesById {
+  return Object.freeze({ applyToAllBands: false, targetBandIndex: 0 });
+}
+
+function buildInvertAllBandsParameterValues(): ParameterValuesById {
+  return Object.freeze({ applyToAllBands: true });
 }
 
 function buildSampleRoi(): ViewportRoi {

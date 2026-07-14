@@ -17,7 +17,6 @@ import {
 } from "@/lib/actions/viewport-action";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
-import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
 import {
   placeClonedSourceContentAtIndex,
@@ -413,7 +412,7 @@ async function placeTransformedDuplicateAtTargetIndex(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
 ): Promise<void> {
-  const transformedContent = await cloneAndTransformSourceContent(
+  const transformedContent = await transformImmutableSourceContent(
     sourceContent,
     action,
     parameterValues,
@@ -424,16 +423,19 @@ async function placeTransformedDuplicateAtTargetIndex(
   );
 }
 
-async function cloneAndTransformSourceContent(
+// CT-233: the source is handed to the transform directly, with no defensive
+// whole-cube clone. Transforms are bound by the immutability contract on
+// ViewportActionSourceTransform, so a failure leaves the source panel intact
+// and unchanged bands may be shared by reference between source and result.
+async function transformImmutableSourceContent(
   sourceContent: ViewportCellContent,
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   busyHandle: BusyEntryHandle,
 ): Promise<ViewportCellContent> {
-  const clonedSource = await cloneViewportImageSource(sourceContent.source);
   const transformedSource = await runActionSourceTransform(
     action,
-    clonedSource,
+    sourceContent.source,
     parameterValues,
     forwardTransformProgressToBusyEntry(busyHandle),
   );

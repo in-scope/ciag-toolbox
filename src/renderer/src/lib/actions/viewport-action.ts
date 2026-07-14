@@ -137,6 +137,12 @@ export function clearCubeTransformEditingState(state: ViewportRenderingState): V
   return { ...state, cubeTransform: null };
 }
 
+// CT-233: transforms receive the LIVE source, never a defensive clone (the apply
+// flow stopped deep-copying the cube). A transform must treat the input source as
+// immutable: return a new source object, never write into the input's band arrays
+// or metadata. Unchanged bands SHOULD be carried into the result by reference
+// (makeFloatRasterReusingUnchangedSourceBands and friends), which is safe exactly
+// because no transform ever mutates a band buffer in place.
 export type ViewportActionSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
