@@ -55,6 +55,10 @@ export interface ChunkedOpenedImageReadFinishRequest {
   readonly token: string;
 }
 
+export interface ChunkedOpenedImageReadAbortRequest {
+  readonly token: string;
+}
+
 export interface ChunkedOpenedImageReadFinishResult {
   readonly contentHash: string;
 }

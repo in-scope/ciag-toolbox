@@ -2,6 +2,19 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
+  OPENED_IMAGE_READ_ABORT_CHANNEL,
+  OPENED_IMAGE_READ_BEGIN_CHANNEL,
+  OPENED_IMAGE_READ_CHUNK_CHANNEL,
+  OPENED_IMAGE_READ_FINISH_CHANNEL,
+  type ChunkedOpenedImageReadAbortRequest,
+  type ChunkedOpenedImageReadBeginRequest,
+  type ChunkedOpenedImageReadBeginResult,
+  type ChunkedOpenedImageReadChunkRequest,
+  type ChunkedOpenedImageReadChunkResult,
+  type ChunkedOpenedImageReadFinishRequest,
+  type ChunkedOpenedImageReadFinishResult,
+} from "../shared/chunked-opened-image-read-protocol";
+import {
   SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
   SAVE_BUNDLE_BEGIN_CHANNEL,
   SAVE_BUNDLE_FINISH_CHANNEL,
@@ -61,11 +74,9 @@ export type OpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenImagesDialogFileMetadataEntry> };
 
-export interface OpenedImagesFileSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
+// CT-231: an ENVI header's binary sibling never crosses as assembled bytes;
+// the renderer streams it through the chunked-read wrappers below, so the
+// entry carries the picked file only.
 export interface OpenedImagesFileEntry {
   fileName: string;
   filePath: string;
@@ -73,7 +84,6 @@ export interface OpenedImagesFileEntry {
   contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
-  sidecar?: OpenedImagesFileSidecar;
 }
 
 export interface SaveImageDialogFilter {
@@ -183,6 +193,45 @@ function readSingleOpenedImageFileThroughMainProcess(
     (channel, payload) => ipcRenderer.invoke(channel, payload),
     metadata,
   );
+}
+
+// CT-231: the renderer drives the chunked read protocol directly for ENVI
+// headers, feeding each 64 MiB binary chunk straight into the streaming
+// decoder instead of assembling the whole multi-gigabyte sidecar.
+function beginOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadBeginRequest,
+): Promise<ChunkedOpenedImageReadBeginResult> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_BEGIN_CHANNEL,
+    request,
+  ) as Promise<ChunkedOpenedImageReadBeginResult>;
+}
+
+function readOpenedImageChunkFromMainProcess(
+  request: ChunkedOpenedImageReadChunkRequest,
+): Promise<ChunkedOpenedImageReadChunkResult> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_CHUNK_CHANNEL,
+    request,
+  ) as Promise<ChunkedOpenedImageReadChunkResult>;
+}
+
+function finishOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadFinishRequest,
+): Promise<ChunkedOpenedImageReadFinishResult> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_FINISH_CHANNEL,
+    request,
+  ) as Promise<ChunkedOpenedImageReadFinishResult>;
+}
+
+function abortOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadAbortRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_ABORT_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function showSaveImageDialogThroughMainProcess(
@@ -399,6 +448,10 @@ const apiBridge = {
   openImageDialog: showOpenImageDialogThroughMainProcess,
   openImagesDialog: showOpenImagesDialogThroughMainProcess,
   readOpenedImageFile: readSingleOpenedImageFileThroughMainProcess,
+  beginOpenedImageChunkedRead: beginOpenedImageChunkedReadInMainProcess,
+  readOpenedImageChunk: readOpenedImageChunkFromMainProcess,
+  finishOpenedImageChunkedRead: finishOpenedImageChunkedReadInMainProcess,
+  abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
   saveImageDialog: showSaveImageDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   readProjectBundleAsset: readBundleAssetThroughMainProcess,

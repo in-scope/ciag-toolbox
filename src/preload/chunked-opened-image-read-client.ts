@@ -17,6 +17,12 @@ import type {
 // protocol (see src/shared/chunked-opened-image-read-protocol.ts for why the
 // old whole-file reply crashed at gigabyte scale). The invoker is injected so
 // the assembly logic is unit-testable without electron.
+//
+// CT-231: an ENVI binary sibling is NEVER reassembled here. A begin result
+// carrying a sidecar means the caller opened a .hdr, and that flow must go
+// through the renderer's streaming decoder (read-envi-through-chunked-protocol),
+// which consumes the binary chunk-by-chunk instead of holding a whole
+// multi-gigabyte buffer.
 
 export type ChunkedReadInvoker = (channel: string, payload: unknown) => Promise<unknown>;
 
@@ -40,27 +46,22 @@ async function pullEntireOpenedFileEntry(
   metadata: OpenImagesDialogFileMetadataEntry,
   begun: ChunkedOpenedImageReadBeginResult,
 ): Promise<OpenedImagesFileEntry> {
+  rejectEnviSidecarAssembly(begun, metadata.fileName);
   const bytes = await pullWholeTarget(invoke, begun.token, "file", begun.fileSizeBytes, metadata.fileName);
-  const sidecar = await pullSidecarWhenPresent(invoke, begun);
   const finished = (await invoke(OPENED_IMAGE_READ_FINISH_CHANNEL, {
     token: begun.token,
   })) as ChunkedOpenedImageReadFinishResult;
-  return buildOpenedFileEntry(metadata, bytes, finished.contentHash, sidecar);
+  return buildOpenedFileEntry(metadata, bytes, finished.contentHash);
 }
 
-async function pullSidecarWhenPresent(
-  invoke: ChunkedReadInvoker,
+function rejectEnviSidecarAssembly(
   begun: ChunkedOpenedImageReadBeginResult,
-): Promise<OpenedImagesFileEntry["sidecar"]> {
-  if (begun.sidecar === null) return undefined;
-  const bytes = await pullWholeTarget(
-    invoke,
-    begun.token,
-    "sidecar",
-    begun.sidecar.sizeBytes,
-    begun.sidecar.fileName,
+  fileName: string,
+): void {
+  if (begun.sidecar === null) return;
+  throw new Error(
+    `${fileName} has an ENVI binary sibling and must be opened through the streaming ENVI decode path`,
   );
-  return { fileName: begun.sidecar.fileName, bytes };
 }
 
 async function pullWholeTarget(
@@ -113,7 +114,6 @@ function buildOpenedFileEntry(
   metadata: OpenImagesDialogFileMetadataEntry,
   bytes: Uint8Array,
   contentHash: string,
-  sidecar: OpenedImagesFileEntry["sidecar"],
 ): OpenedImagesFileEntry {
   return {
     fileName: metadata.fileName,
@@ -122,6 +122,5 @@ function buildOpenedFileEntry(
     contentHash,
     fileSizeBytes: metadata.fileSizeBytes,
     mtimeMs: metadata.mtimeMs,
-    ...(sidecar ? { sidecar } : {}),
   };
 }

@@ -37,7 +37,9 @@ export async function readEnviBinaryAsBandPixelsReportingPerBandProgress(
   return read.bandPixels;
 }
 
-interface InterleaveLayout {
+// Exported for the chunk-fed streaming decoder (read-envi-binary-from-chunks.ts),
+// which must share this exact layout math to stay byte-for-byte identical.
+export interface InterleaveLayout {
   readonly samples: number;
   readonly lines: number;
   readonly bands: number;
@@ -78,7 +80,7 @@ function rejectInsufficientBinarySize(
   }
 }
 
-function computeRequiredBinaryByteCount(
+export function computeRequiredBinaryByteCount(
   header: EnviHeader,
   descriptor: EnviDataTypeDescriptor,
 ): number {
@@ -86,7 +88,7 @@ function computeRequiredBinaryByteCount(
   return header.headerOffset + sampleCount * descriptor.bytesPerSample;
 }
 
-function allocateBandPixelsForHeader(
+export function allocateBandPixelsForHeader(
   header: EnviHeader,
   descriptor: EnviDataTypeDescriptor,
 ): RasterTypedArray[] {
@@ -102,7 +104,7 @@ function createBinaryDataView(binary: Uint8Array): DataView {
   return new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
 }
 
-function buildInterleaveLayoutFromHeader(
+export function buildInterleaveLayoutFromHeader(
   header: EnviHeader,
   descriptor: EnviDataTypeDescriptor,
 ): InterleaveLayout {

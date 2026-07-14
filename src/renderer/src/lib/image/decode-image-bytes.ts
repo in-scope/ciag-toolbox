@@ -77,7 +77,9 @@ async function decodeBrowserImageBytesAsBitmapSource(
   return { kind: "image-bitmap", image: bitmap };
 }
 
-function looksLikeEnviHeaderFileName(fileName: string): boolean {
+// Exported so the open flow can route .hdr files to the CT-231 streaming
+// ENVI decode path before any whole-file read happens.
+export function looksLikeEnviHeaderFileName(fileName: string): boolean {
   return fileName.toLowerCase().endsWith(".hdr");
 }
 

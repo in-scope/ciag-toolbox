@@ -87,7 +87,6 @@ describe("readOpenedImageFileThroughChunkedProtocol", () => {
     expect(entry.fileName).toBe("stack.tif");
     expect(entry.fileSizeBytes).toBe(9);
     expect(entry.mtimeMs).toBe(1234.5);
-    expect(entry.sidecar).toBeUndefined();
     expect(fake.calls).toEqual([
       OPENED_IMAGE_READ_BEGIN_CHANNEL,
       OPENED_IMAGE_READ_CHUNK_CHANNEL,
@@ -97,18 +96,19 @@ describe("readOpenedImageFileThroughChunkedProtocol", () => {
     ]);
   });
 
-  it("assembles an ENVI sidecar after the header file", async () => {
-    const fileBytes = buildDistinctBytes(3);
-    const sidecarBytes = buildDistinctBytes(10);
+  // CT-231: ENVI binaries stream through the renderer's chunk-fed decoder; the
+  // whole-sidecar reassembly was removed, so a sidecar-bearing session here is
+  // a routing bug and must abort loudly instead of allocating the whole binary.
+  it("refuses to assemble an ENVI sidecar and aborts the session", async () => {
     const fake = createFakeMainProcess({
-      fileBytes,
-      sidecar: { fileName: "stack.bin", bytes: sidecarBytes },
+      fileBytes: buildDistinctBytes(3),
+      sidecar: { fileName: "stack.bin", bytes: buildDistinctBytes(10) },
       chunkBytes: 4,
     });
-    const entry = await readOpenedImageFileThroughChunkedProtocol(fake.invoke, METADATA);
-    expect(entry.sidecar).toBeDefined();
-    expect(entry.sidecar!.fileName).toBe("stack.bin");
-    expect(entry.sidecar!.bytes).toEqual(sidecarBytes);
+    await expect(
+      readOpenedImageFileThroughChunkedProtocol(fake.invoke, METADATA),
+    ).rejects.toThrow(/streaming ENVI decode path/);
+    expect(fake.calls[fake.calls.length - 1]).toBe(OPENED_IMAGE_READ_ABORT_CHANNEL);
   });
 
   it("aborts the read and rethrows when a chunk request fails", async () => {

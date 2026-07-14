@@ -39,7 +39,9 @@ function decodeHeaderBytesAsUtf8Text(headerBytes: Uint8Array): string {
   return new TextDecoder("utf-8").decode(headerBytes);
 }
 
-function buildRasterImageFromEnviHeaderAndBandPixels(
+// Exported for the CT-231 streaming ENVI open path, which produces bandPixels
+// from protocol chunks instead of a whole binary buffer.
+export function buildRasterImageFromEnviHeaderAndBandPixels(
   header: EnviHeader,
   bandPixels: ReadonlyArray<RasterTypedArray>,
 ): RasterImage {

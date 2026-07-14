@@ -30,11 +30,8 @@ type ToolboxOpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<ToolboxOpenImagesDialogFileMetadataEntry> };
 
-interface ToolboxOpenedImagesFileSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
+// CT-231: an ENVI header's binary sibling streams through the chunked-read
+// methods below instead of arriving as assembled sidecar bytes.
 interface ToolboxOpenedImagesFileEntry {
   fileName: string;
   filePath: string;
@@ -42,7 +39,47 @@ interface ToolboxOpenedImagesFileEntry {
   contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
-  sidecar?: ToolboxOpenedImagesFileSidecar;
+}
+
+// CT-231 chunked opened-image read protocol (mirrors
+// src/shared/chunked-opened-image-read-protocol.ts; keep in sync).
+interface ToolboxOpenedImageChunkedReadBeginRequest {
+  filePath: string;
+}
+
+interface ToolboxOpenedImageChunkedReadSidecarInfo {
+  fileName: string;
+  sizeBytes: number;
+}
+
+interface ToolboxOpenedImageChunkedReadBeginResult {
+  token: string;
+  fileSizeBytes: number;
+  sidecar: ToolboxOpenedImageChunkedReadSidecarInfo | null;
+}
+
+type ToolboxOpenedImageChunkedReadTarget = "file" | "sidecar";
+
+interface ToolboxOpenedImageChunkedReadChunkRequest {
+  token: string;
+  target: ToolboxOpenedImageChunkedReadTarget;
+}
+
+interface ToolboxOpenedImageChunkedReadChunkResult {
+  done: boolean;
+  bytes: Uint8Array;
+}
+
+interface ToolboxOpenedImageChunkedReadFinishRequest {
+  token: string;
+}
+
+interface ToolboxOpenedImageChunkedReadFinishResult {
+  contentHash: string;
+}
+
+interface ToolboxOpenedImageChunkedReadAbortRequest {
+  token: string;
 }
 
 interface ToolboxSaveImageDialogFilter {
@@ -284,6 +321,18 @@ interface ToolboxApi {
   readOpenedImageFile: (
     metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   ) => Promise<ToolboxOpenedImagesFileEntry>;
+  beginOpenedImageChunkedRead: (
+    request: ToolboxOpenedImageChunkedReadBeginRequest,
+  ) => Promise<ToolboxOpenedImageChunkedReadBeginResult>;
+  readOpenedImageChunk: (
+    request: ToolboxOpenedImageChunkedReadChunkRequest,
+  ) => Promise<ToolboxOpenedImageChunkedReadChunkResult>;
+  finishOpenedImageChunkedRead: (
+    request: ToolboxOpenedImageChunkedReadFinishRequest,
+  ) => Promise<ToolboxOpenedImageChunkedReadFinishResult>;
+  abortOpenedImageChunkedRead: (
+    request: ToolboxOpenedImageChunkedReadAbortRequest,
+  ) => Promise<void>;
   saveImageDialog: (
     request: ToolboxSaveImageDialogRequest,
   ) => Promise<ToolboxSaveImageDialogResult>;

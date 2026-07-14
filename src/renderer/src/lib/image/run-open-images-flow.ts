@@ -1,10 +1,17 @@
-import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import {
+  decodeImageBytesToViewportSource,
+  looksLikeEnviHeaderFileName,
+} from "@/lib/image/decode-image-bytes";
 import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import {
   proposeGroupsForOpenedFiles,
   type OpenedFileForGrouping,
   type OpenedFilesGroupingProposal,
 } from "@/lib/image/group-opened-files";
+import {
+  readAndDecodeEnviHeaderFileStreamingChunks,
+  type ChunkedOpenedImageReadApi,
+} from "@/lib/image/read-envi-through-chunked-protocol";
 import type { BusyEntryHandle } from "@/state/busy-state-context";
 
 export type RunOpenImagesDialogResult =
@@ -83,9 +90,27 @@ export async function readAndDecodeSingleOpenedImageFile(
   metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   onDecodeProgress?: UnitProgressCallback,
 ): Promise<OpenedFileForGrouping> {
+  // CT-231: an ENVI header streams its binary sibling chunk-by-chunk into the
+  // decoder; the whole-binary reassembly path below never sees it.
+  if (looksLikeEnviHeaderFileName(metadata.fileName)) {
+    return readAndDecodeEnviHeaderFileStreamingChunks(
+      buildChunkedOpenedImageReadApiFromToolboxBridge(),
+      metadata,
+      onDecodeProgress,
+    );
+  }
   const entry = await window.toolboxApi.readOpenedImageFile(metadata);
   const decoded = await tryDecodeOpenedImageEntry(entry, onDecodeProgress);
   return buildOpenedFileForGroupingFromEntry(entry, decoded);
+}
+
+function buildChunkedOpenedImageReadApiFromToolboxBridge(): ChunkedOpenedImageReadApi {
+  return {
+    begin: (request) => window.toolboxApi.beginOpenedImageChunkedRead(request),
+    readChunk: (request) => window.toolboxApi.readOpenedImageChunk(request),
+    finish: (request) => window.toolboxApi.finishOpenedImageChunkedRead(request),
+    abort: (request) => window.toolboxApi.abortOpenedImageChunkedRead(request),
+  };
 }
 
 interface DecodedSourceOrError {
@@ -99,11 +124,7 @@ async function tryDecodeOpenedImageEntry(
 ): Promise<DecodedSourceOrError> {
   try {
     const source = await decodeImageBytesToViewportSource(
-      {
-        fileName: entry.fileName,
-        bytes: entry.bytes,
-        ...(entry.sidecar ? { sidecarBytes: entry.sidecar.bytes } : {}),
-      },
+      { fileName: entry.fileName, bytes: entry.bytes },
       onDecodeProgress,
     );
     return { source, errorMessage: null };
@@ -130,6 +151,5 @@ function buildOpenedFileForGroupingFromEntry(
     decodeError: decoded.errorMessage,
     contentHash: entry.contentHash,
     bytes: entry.bytes,
-    ...(entry.sidecar ? { sidecarBytes: entry.sidecar.bytes, sidecarFileName: entry.sidecar.fileName } : {}),
   };
 }

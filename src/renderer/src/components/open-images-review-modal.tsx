@@ -924,7 +924,7 @@ function RowWavelengthBadge({ wavelength }: { wavelength: number }): JSX.Element
 }
 
 function totalRowSizeIncludingSidecar(row: GroupedOpenedFileRow): number {
-  return row.fileSizeBytes + (row.sidecarBytes ? row.sidecarBytes.byteLength : 0);
+  return row.fileSizeBytes + (row.sidecarSizeBytes ?? 0);
 }
 
 function RowValidationBadge({ state }: { state: RowValidationState }): JSX.Element {
