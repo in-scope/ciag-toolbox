@@ -152,7 +152,9 @@ describe("createSaveBundleSessionStore", () => {
 
   // CT-235: a multi-chunk asset whose upload chunks do not align with the read
   // chunks round-trips byte-identically through the spool file.
-  it("round-trips a multi-chunk byte pattern crossing chunk boundaries through spool and chunked read", async () => {
+  // ~270 real fs appends/reads; under full-suite parallel load the 5 s default
+  // is marginal (observed 5.2-5.5 s), so this I/O test gets its own timeout.
+  it("round-trips a multi-chunk byte pattern crossing chunk boundaries through spool and chunked read", { timeout: 30_000 }, async () => {
     const store = createSaveBundleSessionStore(spoolDir);
     const pattern = bytesOfLength(1_000_003, 13);
     const uploadChunkBytes = 8_192;
