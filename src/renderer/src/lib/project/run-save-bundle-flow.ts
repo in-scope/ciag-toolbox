@@ -20,13 +20,15 @@ import {
 // reference-scale stack), and V8's ValueSerializer killed the renderer process
 // while serializing it - the save died with no toast, no error, and no file.
 // This orchestrator sends a byte-free header first (resolving the save dialog
-// before any bytes move), streams each baked asset up in small chunks, and
-// finishes with the zip write in main, so no invoke ever approaches the danger
-// zone and the awaits between chunks keep the renderer interactive. The api is
-// injected so the sequencing is unit-testable without the bridge.
+// before any bytes move), then encodes and uploads each baked asset chunk by
+// chunk (CT-235: the encode itself is chunked too, so no whole-asset buffer
+// ever exists in the renderer), and finishes with the zip write in main. No
+// invoke ever approaches the danger zone and the awaits between chunks keep
+// the renderer interactive. The api is injected so the sequencing is
+// unit-testable without the bridge.
 
-// Baking fills 0..0.25 of the bar, the asset upload 0.25..0.95, and the zip
-// write in main completes to 1 when finish resolves.
+// Draft/plan building fills 0..0.25 of the bar, the chunked encode-and-upload
+// 0.25..0.95, and the zip write in main completes to 1 when finish resolves.
 const BAKE_PROGRESS_WINDOW_END = 0.25;
 const UPLOAD_PROGRESS_WINDOW_END = 0.95;
 
@@ -102,15 +104,18 @@ async function uploadBakedAssetPartsInChunks(
   chunkBytes: number,
   onProgress: SaveBundleFlowInput["onProgress"],
 ): Promise<void> {
-  const totalBytes = parts.reduce((sum, part) => sum + part.bytes.byteLength, 0);
+  const totalBytes = parts.reduce((sum, part) => sum + part.plan.byteLength, 0);
   let sentBytes = 0;
   for (const part of parts) {
-    sentBytes = await uploadOnePartInChunks(api, token, part, chunkBytes, sentBytes, totalBytes, onProgress);
+    sentBytes = await encodeAndUploadOnePartInChunks(api, token, part, chunkBytes, sentBytes, totalBytes, onProgress);
   }
   onProgress?.({ fraction: UPLOAD_PROGRESS_WINDOW_END });
 }
 
-async function uploadOnePartInChunks(
+// Each chunk is encoded on demand and its upload awaited before the next chunk
+// is built (CT-235), so renderer memory holds one chunk at a time per asset and
+// the awaits double as paint yields.
+async function encodeAndUploadOnePartInChunks(
   api: SaveBundleFlowApi,
   token: string,
   part: SaveBundleUploadPart,
@@ -120,13 +125,11 @@ async function uploadOnePartInChunks(
   onProgress: SaveBundleFlowInput["onProgress"],
 ): Promise<number> {
   let sent = sentBytes;
-  for (let offset = 0; offset < part.bytes.byteLength; offset += chunkBytes) {
-    // slice copies, so the IPC layer never serializes a view over the whole asset.
-    const chunk = part.bytes.slice(offset, Math.min(offset + chunkBytes, part.bytes.byteLength));
+  await part.plan.emitChunksInOrder(chunkBytes, async (chunk) => {
     await api.sendSaveProjectBundleAssetChunk({ token, viewportIndex: part.viewportIndex, part: part.part, bytes: chunk });
     sent += chunk.byteLength;
     onProgress?.({ fraction: uploadWindowFraction(sent, totalBytes) });
-  }
+  });
   return sent;
 }
 

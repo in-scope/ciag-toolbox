@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { BundleAssetPartEncodingPlan } from "@/lib/image/encode-bundle-asset";
+
 import type { DraftBundleFile, DraftBundleViewportEntry } from "./serialize-project";
 import { splitDraftBundleForChunkedSave } from "./split-draft-bundle";
 
@@ -9,15 +11,26 @@ const RENDERING_STATE = {
   lastAppliedOperationLabel: null,
 };
 
+function partPlanOf(extension: string, bytes: Uint8Array): BundleAssetPartEncodingPlan {
+  return {
+    extension,
+    byteLength: bytes.byteLength,
+    emitChunksInOrder: async (maxChunkBytes, onChunk) => {
+      for (let offset = 0; offset < bytes.byteLength; offset += maxChunkBytes) {
+        await onChunk(bytes.slice(offset, Math.min(offset + maxChunkBytes, bytes.byteLength)));
+      }
+    },
+  };
+}
+
 function bakedEnviViewport(index: number): DraftBundleViewportEntry {
   return {
     index,
     fileName: `cube-${index}.hdr`,
     asset: {
       kind: "baked",
-      bytes: Uint8Array.from([1, 2, 3]),
-      extension: "hdr",
-      sidecar: { extension: "bin", bytes: Uint8Array.from([4, 5, 6, 7]) },
+      primary: partPlanOf("hdr", Uint8Array.from([1, 2, 3])),
+      sidecar: partPlanOf("bin", Uint8Array.from([4, 5, 6, 7])),
     },
     renderingState: RENDERING_STATE,
     operationHistory: [],
@@ -28,7 +41,7 @@ function bakedTiffViewport(index: number): DraftBundleViewportEntry {
   return {
     index,
     fileName: `band-${index}.tif`,
-    asset: { kind: "baked", bytes: Uint8Array.from([9, 9]), extension: "tif" },
+    asset: { kind: "baked", primary: partPlanOf("tif", Uint8Array.from([9, 9])) },
     renderingState: RENDERING_STATE,
     operationHistory: [],
     colorInterpretation: "rgb",
@@ -55,7 +68,7 @@ function draftOf(viewports: ReadonlyArray<DraftBundleViewportEntry>): DraftBundl
 }
 
 describe("splitDraftBundleForChunkedSave", () => {
-  it("describes baked assets as byte-length descriptors and collects their bytes as parts", () => {
+  it("describes baked assets as byte-length descriptors and collects their plans as parts", () => {
     const split = splitDraftBundleForChunkedSave(
       draftOf([bakedEnviViewport(0), externalViewport(1), bakedTiffViewport(2)]),
     );
@@ -64,7 +77,7 @@ describe("splitDraftBundleForChunkedSave", () => {
       primary: { extension: "hdr", byteLength: 3 },
       sidecar: { extension: "bin", byteLength: 4 },
     });
-    expect(split.parts.map((part) => [part.viewportIndex, part.part, part.bytes.byteLength])).toEqual([
+    expect(split.parts.map((part) => [part.viewportIndex, part.part, part.plan.byteLength])).toEqual([
       [0, "primary", 3],
       [0, "sidecar", 4],
       [2, "primary", 2],
@@ -92,9 +105,19 @@ describe("splitDraftBundleForChunkedSave", () => {
     expect(split.header.viewports[1]).not.toHaveProperty("colorInterpretation");
   });
 
-  it("keeps the exact byte contents in the collected parts", () => {
+  it("keeps the exact bytes reachable through the collected part plans", async () => {
     const split = splitDraftBundleForChunkedSave(draftOf([bakedEnviViewport(0)]));
-    expect(Array.from(split.parts[0]!.bytes)).toEqual([1, 2, 3]);
-    expect(Array.from(split.parts[1]!.bytes)).toEqual([4, 5, 6, 7]);
+    expect(Array.from(await emitAllBytes(split.parts[0]!.plan))).toEqual([1, 2, 3]);
+    expect(Array.from(await emitAllBytes(split.parts[1]!.plan))).toEqual([4, 5, 6, 7]);
   });
 });
+
+async function emitAllBytes(plan: BundleAssetPartEncodingPlan): Promise<Uint8Array> {
+  const collected = new Uint8Array(plan.byteLength);
+  let offset = 0;
+  await plan.emitChunksInOrder(2, async (bytes) => {
+    collected.set(bytes, offset);
+    offset += bytes.byteLength;
+  });
+  return collected;
+}

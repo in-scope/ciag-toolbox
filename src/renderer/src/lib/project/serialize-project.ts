@@ -1,7 +1,7 @@
 import type { GridLayout } from "@/lib/grid/grid-layout";
 import {
-  encodeBakedBundleAssetForRasterSource,
-  type BundleAssetBakedSidecar,
+  planBakedBundleAssetEncodingForRasterSource,
+  type BundleAssetPartEncodingPlan,
 } from "@/lib/image/encode-bundle-asset";
 import type { RasterColorInterpretation } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -14,11 +14,14 @@ import {
   type ProjectViewportRenderingState,
 } from "./project-schema";
 
+// CT-235: a baked draft asset carries chunk-emitting encoding PLANS, never whole
+// asset bytes. Byte lengths are known up front (from the raster's dimensions);
+// the bytes themselves are produced chunk-by-chunk during the upload phase of
+// the chunked save protocol.
 export interface DraftBundleBakedAsset {
   readonly kind: "baked";
-  readonly bytes: Uint8Array;
-  readonly extension: string;
-  readonly sidecar?: BundleAssetBakedSidecar;
+  readonly primary: BundleAssetPartEncodingPlan;
+  readonly sidecar?: BundleAssetPartEncodingPlan;
 }
 
 export interface DraftBundleExternalAsset {
@@ -101,16 +104,16 @@ function buildDraftBundleAssetForViewportOrThrow(
     return buildExternalAssetReferencingOriginalFile(viewport);
   }
   if (viewport.source.kind === "raster") {
-    return encodeBakedBundleAssetForRasterSource(viewport.source.raster);
+    return planBakedBundleAssetEncodingForRasterSource(viewport.source.raster);
   }
   return buildExternalAssetForBrowserSourceOrThrow(viewport);
 }
 
 // Re-encoding (baking) a raster source is a CPU-bound, multi-second operation
-// for large cubes that blocks the renderer thread. The save flow uses this to
-// decide whether to let the busy indicator paint before that synchronous work
-// begins (CT-072), so a save that only references unmodified on-disk files
-// stays as fast and flash-free as before.
+// for large cubes, even chunked (CT-235). The save flow uses this to decide
+// whether to let the busy indicator paint before that heavy work begins
+// (CT-072), so a save that only references unmodified on-disk files stays as
+// fast and flash-free as before.
 export function saveableSnapshotRequiresRasterRebake(
   snapshot: SaveableProjectSnapshot,
 ): boolean {
@@ -122,10 +125,11 @@ function viewportRequiresRasterRebake(viewport: SaveableViewportSnapshot): boole
   return viewport.source.kind === "raster";
 }
 
-// Re-encoding a raster into the bundle materialises a second full-size copy in
-// the renderer and clones it again across IPC, which crashes the renderer for
-// large ENVI cubes (CT-061). When the source is still the untouched on-disk
-// file, reference it instead so the main process streams it straight from disk.
+// Re-encoding a raster into the bundle costs a full chunked encode-and-upload
+// pass (originally it materialised a second full-size copy and crashed the
+// renderer for large ENVI cubes, CT-061). When the source is still the
+// untouched on-disk file, reference it instead so the main process streams it
+// straight from disk.
 function canStreamUnmodifiedSourceFromDisk(
   viewport: SaveableViewportSnapshot,
 ): boolean {

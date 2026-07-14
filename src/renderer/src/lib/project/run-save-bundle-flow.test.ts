@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { encodeRasterImageAsEnviFiles } from "@/lib/image/encode-envi";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -117,6 +118,16 @@ describe("runSaveProjectBundleFlowThroughMainProcess", () => {
     expect(record.releasedTokens).toEqual([]);
   });
 
+  // CT-235: the flow encodes during upload; the bytes arriving at the protocol
+  // must still be byte-identical to the sync ENVI encoder's output.
+  it("uploads chunk bytes whose concatenation matches the sync ENVI encode of the raster", async () => {
+    const { api, record } = buildFakeApi();
+    await runSaveProjectBundleFlowThroughMainProcess(flowInput(), api, 7);
+    const sync = encodeRasterImageAsEnviFiles(readRasterFromSnapshot(buildModifiedMultiBandSnapshot()));
+    expect(concatChunksForPart(record, "primary")).toEqual(sync.headerBytes);
+    expect(concatChunksForPart(record, "sidecar")).toEqual(sync.binaryBytes);
+  });
+
   it("returns canceled without uploading anything when the begin dialog cancels", async () => {
     const { api, record } = buildFakeApi({ begin: { status: "canceled" } });
     const result = await runSaveProjectBundleFlowThroughMainProcess(flowInput(), api, 7);
@@ -166,6 +177,26 @@ describe("runSaveProjectBundleFlowThroughMainProcess", () => {
 
 function sumOfUploadedBytes(record: FakeApiRecord): number {
   return record.chunks.reduce((sum, chunk) => sum + chunk.bytes.byteLength, 0);
+}
+
+function readRasterFromSnapshot(snapshot: SaveableProjectSnapshot): RasterImage {
+  const source = snapshot.viewports[0]!.source;
+  if (source.kind !== "raster") throw new Error("expected a raster source");
+  return source.raster;
+}
+
+function concatChunksForPart(
+  record: FakeApiRecord,
+  part: ToolboxSaveBundleAssetPart,
+): Uint8Array {
+  const chunks = record.chunks.filter((chunk) => chunk.part === part).map((chunk) => chunk.bytes);
+  const merged = new Uint8Array(chunks.reduce((sum, bytes) => sum + bytes.byteLength, 0));
+  let offset = 0;
+  for (const bytes of chunks) {
+    merged.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  return merged;
 }
 
 function totalDeclaredBakedBytes(record: FakeApiRecord): number {

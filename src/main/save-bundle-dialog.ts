@@ -3,7 +3,10 @@ import { unlink } from "node:fs/promises";
 import { extname } from "node:path";
 
 import { writeProjectBundleAtPath, type BundleDraft } from "./bundle-writer";
-import { createSaveBundleSessionStore } from "./chunked-save-bundle";
+import {
+  createSaveBundleSessionStore,
+  rethrowDescribingDiskFullSaveFailure,
+} from "./chunked-save-bundle";
 import { showSaveDialogOrStub } from "./e2e-dialog-stub";
 import {
   SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
@@ -57,6 +60,8 @@ function deriveDefaultBundleSavePath(currentProjectFilePath: string | null): str
   return `${stem}.${PROJECT_BUNDLE_EXTENSION}`;
 }
 
+// A failed write never leaves a partial bundle behind; a disk-full failure is
+// rethrown in the app's error vocabulary (CT-235).
 async function writeBundleAtPathOrCleanUpOnFailure(
   outputPath: string,
   draft: BundleDraft,
@@ -65,7 +70,7 @@ async function writeBundleAtPathOrCleanUpOnFailure(
     await writeProjectBundleAtPath(outputPath, draft);
   } catch (error) {
     await tryRemoveFileIgnoringErrors(outputPath);
-    throw error;
+    rethrowDescribingDiskFullSaveFailure(error);
   }
 }
 

@@ -150,8 +150,28 @@ async function appendChunkToSpooledPart(
   if (bytes.byteLength === 0 || spooled.receivedBytes + bytes.byteLength > spooled.descriptor.byteLength) {
     throw new Error("The packed stack bytes did not match the described size.");
   }
-  await writeExactLengthAtOffset(spooled.handle, bytes, spooled.receivedBytes);
+  await writeExactLengthAtOffset(spooled.handle, bytes, spooled.receivedBytes).catch(
+    rethrowDescribingDiskFullSaveFailure,
+  );
   spooled.receivedBytes += bytes.byteLength;
+}
+
+// CT-235: with the bake size cap gone, running out of disk while spooling or
+// writing the bundle is the one expected failure at very large scale. Surface
+// it in the app's error vocabulary instead of the raw fs error; everything
+// else rethrows untouched.
+const NOT_ENOUGH_DISK_SPACE_MESSAGE =
+  "There is not enough disk space to save this project. Free up space and try again.";
+
+export function rethrowDescribingDiskFullSaveFailure(error: unknown): never {
+  if (isDiskFullError(error)) throw new Error(NOT_ENOUGH_DISK_SPACE_MESSAGE);
+  throw error;
+}
+
+function isDiskFullError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOSPC" || code === "EDQUOT";
 }
 
 function requireSpooledPart(

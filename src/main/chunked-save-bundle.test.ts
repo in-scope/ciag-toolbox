@@ -1,10 +1,13 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, open, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { BundleDraft } from "./bundle-writer";
-import { createSaveBundleSessionStore } from "./chunked-save-bundle";
+import {
+  createSaveBundleSessionStore,
+  rethrowDescribingDiskFullSaveFailure,
+} from "./chunked-save-bundle";
 import type {
   SaveBundleDraftHeader,
   SaveBundleViewportHeaderEntry,
@@ -147,6 +150,29 @@ describe("createSaveBundleSessionStore", () => {
     );
   });
 
+  // CT-235: a multi-chunk asset whose upload chunks do not align with the read
+  // chunks round-trips byte-identically through the spool file.
+  it("round-trips a multi-chunk byte pattern crossing chunk boundaries through spool and chunked read", async () => {
+    const store = createSaveBundleSessionStore(spoolDir);
+    const pattern = bytesOfLength(1_000_003, 13);
+    const uploadChunkBytes = 8_192;
+    const token = await store.begin(
+      headerOf([bakedEnviViewport(0, 4, pattern.byteLength)]),
+      "/out/roundtrip.ctbundle",
+    );
+    await store.appendAssetChunk(token, 0, "primary", bytesOfLength(4, 1));
+    for (let offset = 0; offset < pattern.byteLength; offset += uploadChunkBytes) {
+      const end = Math.min(offset + uploadChunkBytes, pattern.byteLength);
+      await store.appendAssetChunk(token, 0, "sidecar", pattern.slice(offset, end));
+    }
+    const writable = await store.takeWritableBundleDraft(token);
+    const baked = writable.draft.viewports[0]?.asset;
+    if (!baked || baked.kind !== "baked") throw new Error("expected a baked asset");
+    const readBack = await readFileInChunks(baked.sidecar!.absolutePath, 7_001, pattern.byteLength);
+    expect(readBack).toEqual(pattern);
+    await store.release(token);
+  });
+
   it("release removes every spool file and tolerates unknown tokens", async () => {
     const store = createSaveBundleSessionStore(spoolDir);
     const token = await store.begin(headerOf([bakedEnviViewport(0, 4, 4)]), "/out/release.ctbundle");
@@ -157,6 +183,43 @@ describe("createSaveBundleSessionStore", () => {
     await expect(store.release("nope")).resolves.toBeUndefined();
   });
 });
+
+describe("rethrowDescribingDiskFullSaveFailure", () => {
+  it("maps ENOSPC to the in-vocabulary disk space message", () => {
+    const enospc = Object.assign(new Error("ENOSPC: no space left on device, write"), {
+      code: "ENOSPC",
+    });
+    expect(() => rethrowDescribingDiskFullSaveFailure(enospc)).toThrow(
+      "There is not enough disk space to save this project. Free up space and try again.",
+    );
+  });
+
+  it("rethrows other errors untouched", () => {
+    const other = new Error("The packed stack bytes did not match the described size.");
+    expect(() => rethrowDescribingDiskFullSaveFailure(other)).toThrow(other);
+  });
+});
+
+async function readFileInChunks(
+  filePath: string,
+  chunkBytes: number,
+  totalBytes: number,
+): Promise<Uint8Array> {
+  const collected = new Uint8Array(totalBytes);
+  const handle = await open(filePath, "r");
+  try {
+    let offset = 0;
+    while (offset < totalBytes) {
+      const length = Math.min(chunkBytes, totalBytes - offset);
+      const { bytesRead } = await handle.read(collected, offset, length, offset);
+      if (bytesRead === 0) throw new Error("unexpected end of spool file");
+      offset += bytesRead;
+    }
+  } finally {
+    await handle.close();
+  }
+  return collected;
+}
 
 async function expectWritableDraftMatchesUpload(
   draft: BundleDraft,

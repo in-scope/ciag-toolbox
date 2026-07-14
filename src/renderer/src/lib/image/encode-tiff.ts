@@ -1,6 +1,10 @@
 import { writeArrayBuffer } from "geotiff";
 
 import {
+  emitBufferInBoundedSlicesInOrder,
+  type ByteChunkConsumer,
+} from "@/lib/image/emit-byte-chunks";
+import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
   type RasterSampleFormat,
@@ -153,6 +157,83 @@ export async function encodeRgbRasterAsRgbTiffBytesReportingProgress(
   );
 }
 
+// CT-235: chunked encoding plan for the project bake. The header block is built
+// eagerly (one-sample writeArrayBuffer, cheap); the sample section never
+// materializes as part of one whole-file buffer - chunks are produced on demand,
+// big-endian, so the concatenation is byte-identical to
+// encodeRasterBandAsSingleChannelTiffBytes.
+export interface SingleChannelTiffChunkedEncoding {
+  readonly byteLength: number;
+  readonly emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: ByteChunkConsumer,
+  ) => Promise<void>;
+}
+
+export function planSingleChannelTiffChunkedEncoding(
+  raster: RasterImage,
+  bandIndex: number,
+  targetBitDepth: TargetBitDepth,
+): SingleChannelTiffChunkedEncoding {
+  const metadata = buildSingleBandTiffMetadata(raster.width, raster.height, targetBitDepth);
+  const sampleCount = raster.width * raster.height;
+  const dummy = targetBitDepth === 8 ? new Uint8Array(1) : new Uint16Array(1);
+  const headerBytes = buildTiffHeaderBytesPinningStripByteCounts(sampleCount, dummy, metadata);
+  return {
+    byteLength: headerBytes.length + sampleCount * dummy.BYTES_PER_ELEMENT,
+    emitChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitSingleChannelTiffChunksInOrder(raster, bandIndex, targetBitDepth, headerBytes, maxChunkBytes, onChunk),
+  };
+}
+
+async function emitSingleChannelTiffChunksInOrder(
+  raster: RasterImage,
+  bandIndex: number,
+  targetBitDepth: TargetBitDepth,
+  headerBytes: Uint8Array,
+  maxChunkBytes: number,
+  onChunk: ByteChunkConsumer,
+): Promise<void> {
+  await emitBufferInBoundedSlicesInOrder(headerBytes, maxChunkBytes, onChunk);
+  const sourcePixels = getRasterBandPixelsOrThrow(raster, bandIndex);
+  const targetPixels = convertSourcePixelsToTargetBitDepth(sourcePixels, raster.sampleFormat, targetBitDepth);
+  await emitBigEndianSampleChunksInOrder(targetPixels, maxChunkBytes, onChunk);
+}
+
+async function emitBigEndianSampleChunksInOrder(
+  samples: Uint8Array | Uint16Array,
+  maxChunkBytes: number,
+  onChunk: ByteChunkConsumer,
+): Promise<void> {
+  const samplesPerChunk = Math.max(1, Math.floor(maxChunkBytes / samples.BYTES_PER_ELEMENT));
+  for (let start = 0; start < samples.length; start += samplesPerChunk) {
+    const end = Math.min(samples.length, start + samplesPerChunk);
+    await onChunk(buildOneBigEndianSampleChunk(samples, start, end));
+  }
+}
+
+function buildOneBigEndianSampleChunk(
+  samples: Uint8Array | Uint16Array,
+  start: number,
+  end: number,
+): Uint8Array {
+  if (samples instanceof Uint16Array) return buildOneUint16BigEndianChunk(samples, start, end);
+  return samples.slice(start, end);
+}
+
+function buildOneUint16BigEndianChunk(
+  samples: Uint16Array,
+  start: number,
+  end: number,
+): Uint8Array {
+  const chunk = new Uint8Array((end - start) * 2);
+  const view = new DataView(chunk.buffer);
+  for (let i = start; i < end; i += 1) {
+    view.setUint16((i - start) * 2, samples[i] ?? 0, false);
+  }
+  return chunk;
+}
+
 type TiffSampleArray = Uint8Array | Uint16Array | Float32Array;
 
 async function writeTiffSamplesInChunksReportingProgress(
@@ -178,12 +259,24 @@ function buildTiffHeaderBytesMatchingWriteArrayBuffer(
   samples: TiffSampleArray,
   metadata: TiffWriteMetadata,
 ): Uint8Array {
-  const elementSize = samples.BYTES_PER_ELEMENT;
+  return buildTiffHeaderBytesPinningStripByteCounts(
+    samples.length,
+    buildOneSampleDummyMatchingType(samples),
+    metadata,
+  );
+}
+
+function buildTiffHeaderBytesPinningStripByteCounts(
+  sampleCount: number,
+  dummy: TiffSampleArray,
+  metadata: TiffWriteMetadata,
+): Uint8Array {
+  const elementSize = dummy.BYTES_PER_ELEMENT;
   const headerMetadata: TiffWriteMetadata = {
     ...metadata,
-    StripByteCounts: [samples.length * elementSize],
+    StripByteCounts: [sampleCount * elementSize],
   };
-  const headerBuffer = writeArrayBuffer(buildOneSampleDummyMatchingType(samples), headerMetadata);
+  const headerBuffer = writeArrayBuffer(dummy, headerMetadata);
   return new Uint8Array(headerBuffer, 0, headerBuffer.byteLength - elementSize);
 }
 
