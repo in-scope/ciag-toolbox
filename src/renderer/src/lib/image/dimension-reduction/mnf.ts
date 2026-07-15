@@ -1,8 +1,14 @@
+import {
+  computePerBandMeans,
+  computePerBandMeansReportingProgress,
+  covarianceBetweenCentredBands,
+} from "@/lib/image/dimension-reduction/band-statistics";
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
-import { buildSquareMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
+import { buildSymmetricMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
+import type { RasterTypedArray } from "@/lib/image/raster-image";
 import {
   runInChunksReportingProgress,
   scaleProgressToWindow,
@@ -24,6 +30,12 @@ import {
 // noise survives. The whitened-data eigenvalue along a direction is the
 // signal-plus-noise variance in noise units, so the per-component noise fraction
 // is its reciprocal.
+//
+// CT-240: every statistic streams from the sample matrix's band arrays (which
+// alias the live raster - no float64 cube copy), and the band-pair loops
+// accumulate only the upper triangle, mirrored at read time. The mirror is
+// bit-identical to the full square (per-pair products commute and the
+// accumulation order per cell is unchanged) and halves the dominant cost.
 
 export interface MnfFit {
   readonly means: ReadonlyArray<number>;
@@ -37,16 +49,18 @@ export interface MnfFit {
 const NOISE_EIGENVALUE_FLOOR_FRACTION = 1e-6;
 
 export function fitMnf(samples: CubeSampleMatrix, bandCount: number): MnfFit {
-  const means = computePerBandMeans(samples.bandValues, samples.sampleCount, bandCount);
+  const means = computePerBandMeans(samples, bandCount);
   const whitening = buildNoiseWhiteningMatrix(estimateShiftDifferenceNoiseCovariance(samples, bandCount));
-  const dataCovariance = computeCovarianceFromMeans(samples.bandValues, means, samples.sampleCount, bandCount);
+  const dataCovariance = computeCovarianceFromMeans(samples, means, bandCount);
   return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, whitening, bandCount);
 }
 
-// CT-227: the async twin of fitMnf. The noise-covariance pass (streaming over
-// every neighbour pair) fills the first half of the fit window and the data
-// covariance pass (one sweep per band pair) fills the second, each chunked with
-// paint yields; the per-pair math is identical to the sync fit.
+// CT-227: the async twin of fitMnf. The means sweep ticks per band, the
+// noise-covariance pass (streaming over every neighbour pair) fills the first
+// half of the fit window and the data covariance pass (one sweep per band pair)
+// fills the second, each chunked with paint yields; the per-pair math is
+// identical to the sync fit.
+const MNF_MEANS_END_FRACTION = 0.04;
 const MNF_NOISE_COVARIANCE_PASS_END_FRACTION = 0.5;
 
 export async function fitMnfReportingProgress(
@@ -54,11 +68,15 @@ export async function fitMnfReportingProgress(
   bandCount: number,
   onProgress?: UnitProgressCallback,
 ): Promise<MnfFit> {
-  const means = computePerBandMeans(samples.bandValues, samples.sampleCount, bandCount);
+  const means = await computePerBandMeansReportingProgress(
+    samples,
+    bandCount,
+    scaleProgressToWindow(onProgress, 0, MNF_MEANS_END_FRACTION),
+  );
   const noiseCovariance = await estimateShiftDifferenceNoiseCovarianceReportingProgress(
     samples,
     bandCount,
-    scaleProgressToWindow(onProgress, 0, MNF_NOISE_COVARIANCE_PASS_END_FRACTION),
+    scaleProgressToWindow(onProgress, MNF_MEANS_END_FRACTION, MNF_NOISE_COVARIANCE_PASS_END_FRACTION),
   );
   const dataCovariance = await computeDataCovarianceInPairChunks(
     samples,
@@ -75,10 +93,9 @@ function computeDataCovarianceInPairChunks(
   bandCount: number,
   onProgress?: UnitProgressCallback,
 ): Promise<number[][]> {
-  return buildSquareMatrixInPairChunksReportingProgress(
+  return buildSymmetricMatrixInPairChunksReportingProgress(
     bandCount,
-    (row, col) =>
-      covarianceOfBands(samples.bandValues[row]!, samples.bandValues[col]!, means[row]!, means[col]!, samples.sampleCount),
+    (row, col) => covarianceOfBandPair(samples, means, row, col),
     onProgress,
   );
 }
@@ -107,41 +124,27 @@ function toNoiseFraction(eigenvalue: number): number {
   return Math.min(1, 1 / eigenvalue);
 }
 
-function computePerBandMeans(
-  bandValues: ReadonlyArray<Float64Array>,
-  sampleCount: number,
-  bandCount: number,
-): number[] {
-  return Array.from({ length: bandCount }, (_unused, band) => meanOfValues(bandValues[band]!, sampleCount));
-}
-
-function meanOfValues(values: Float64Array, sampleCount: number): number {
-  let sum = 0;
-  for (let i = 0; i < sampleCount; i += 1) sum += values[i]!;
-  return sum / Math.max(1, sampleCount);
-}
-
 function computeCovarianceFromMeans(
-  bandValues: ReadonlyArray<Float64Array>,
+  samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
-  sampleCount: number,
   bandCount: number,
 ): number[][] {
-  return buildSymmetricMatrix(bandCount, (row, col) =>
-    covarianceOfBands(bandValues[row]!, bandValues[col]!, means[row]!, means[col]!, sampleCount),
-  );
+  return buildSquareMatrix(bandCount, (row, col) => covarianceOfBandPair(samples, means, row, col));
 }
 
-function covarianceOfBands(
-  rowValues: Float64Array,
-  colValues: Float64Array,
-  rowMean: number,
-  colMean: number,
-  sampleCount: number,
+function covarianceOfBandPair(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  row: number,
+  col: number,
 ): number {
-  let sum = 0;
-  for (let i = 0; i < sampleCount; i += 1) sum += (rowValues[i]! - rowMean) * (colValues[i]! - colMean);
-  return sum / Math.max(1, sampleCount);
+  return covarianceBetweenCentredBands(
+    samples.bandValues[row]!,
+    samples.bandValues[col]!,
+    means[row]!,
+    means[col]!,
+    samples.sampleCount,
+  );
 }
 
 // CT-195: the noise covariance is accumulated by STREAMING over neighbour pairs
@@ -222,9 +225,16 @@ function accumulateDirectionCentredCrossSum(
   return { centredCrossSum: centreCrossSums(accumulators.rawCrossSums, accumulators.differenceSums, pairCount, bandCount), pairCount };
 }
 
-// Sized so each main-thread chunk stays in the tens of milliseconds at
-// reference scale (the CT-226 denoise chunking convention).
-const NOISE_ESTIMATE_PIXELS_PER_CHUNK = 2_000_000;
+// CT-240: the per-pair cost scales with bandCount squared (the cross-product
+// triangle), so the chunk size is derived from an op budget instead of a fixed
+// pixel count - a fixed 2M-pixel chunk that took tens of milliseconds at 5
+// bands would block for ~15 seconds at 100 bands and blow the UI-gap budget.
+const NOISE_ESTIMATE_OPS_PER_CHUNK = 250_000_000;
+
+function noiseEstimatePixelsPerChunk(bandCount: number): number {
+  const opsPerPixel = bandCount * bandCount;
+  return Math.max(1, Math.floor(NOISE_ESTIMATE_OPS_PER_CHUNK / Math.max(1, opsPerPixel)));
+}
 
 async function accumulateDirectionCentredCrossSumInRowChunks(
   samples: CubeSampleMatrix,
@@ -236,7 +246,7 @@ async function accumulateDirectionCentredCrossSumInRowChunks(
   let pairCount = 0;
   await runInChunksReportingProgress(
     direction.firstRows,
-    Math.max(1, Math.floor(NOISE_ESTIMATE_PIXELS_PER_CHUNK / Math.max(1, direction.firstColumns))),
+    Math.max(1, Math.floor(noiseEstimatePixelsPerChunk(bandCount) / Math.max(1, direction.firstColumns))),
     (startRow, endRow) => {
       pairCount += streamRowRangeOfNeighbourDifferences(samples, bandCount, direction, startRow, endRow, accumulators);
     },
@@ -279,7 +289,7 @@ function streamRowRangeOfNeighbourDifferences(
 }
 
 function addNeighbourPairToCrossSums(
-  bandValues: ReadonlyArray<Float64Array>,
+  bandValues: ReadonlyArray<RasterTypedArray>,
   bandCount: number,
   firstIndex: number,
   direction: NeighbourDirection,
@@ -292,7 +302,7 @@ function addNeighbourPairToCrossSums(
 }
 
 function fillBandDifferencesAtNeighbourPair(
-  bandValues: ReadonlyArray<Float64Array>,
+  bandValues: ReadonlyArray<RasterTypedArray>,
   bandCount: number,
   firstIndex: number,
   neighbourOffset: number,
@@ -304,6 +314,10 @@ function fillBandDifferencesAtNeighbourPair(
   }
 }
 
+// CT-240: only the upper triangle (column >= row) is accumulated; the mirror
+// happens once at centreCrossSums time. Cell (r, c) receives the exact products
+// cell (c, r) would have received in the same order, so the halved sweep is
+// bit-identical to the full one.
 function accumulateDifferenceSumsAndCrossProducts(
   differenceBuffer: Float64Array,
   bandCount: number,
@@ -313,18 +327,19 @@ function accumulateDifferenceSumsAndCrossProducts(
   for (let row = 0; row < bandCount; row += 1) {
     const rowDifference = differenceBuffer[row]!;
     differenceSums[row] = differenceSums[row]! + rowDifference;
-    accumulateRowCrossProducts(rowDifference, differenceBuffer, bandCount, row * bandCount, rawCrossSums);
+    accumulateUpperTriangleRowCrossProducts(rowDifference, differenceBuffer, bandCount, row, rawCrossSums);
   }
 }
 
-function accumulateRowCrossProducts(
+function accumulateUpperTriangleRowCrossProducts(
   rowDifference: number,
   differenceBuffer: Float64Array,
   bandCount: number,
-  rowOffset: number,
+  row: number,
   rawCrossSums: Float64Array,
 ): void {
-  for (let column = 0; column < bandCount; column += 1) {
+  const rowOffset = row * bandCount;
+  for (let column = row; column < bandCount; column += 1) {
     const index = rowOffset + column;
     rawCrossSums[index] = rawCrossSums[index]! + rowDifference * differenceBuffer[column]!;
   }
@@ -332,7 +347,8 @@ function accumulateRowCrossProducts(
 
 // Centred cross-sum for a direction = Σ d_r d_c - (Σ d_r)(Σ d_c)/N, the standard
 // identity for the mean-centred sum of products, so a smooth signal's constant
-// local gradient cancels and only its noise survives.
+// local gradient cancels and only its noise survives. The raw cross-sums hold
+// only the upper triangle; reading through the (min, max) index mirrors them.
 function centreCrossSums(
   rawCrossSums: Float64Array,
   differenceSums: Float64Array,
@@ -341,8 +357,20 @@ function centreCrossSums(
 ): number[][] {
   const inversePairCount = pairCount > 0 ? 1 / pairCount : 0;
   return buildSquareMatrix(bandCount, (row, column) =>
-    rawCrossSums[row * bandCount + column]! - differenceSums[row]! * differenceSums[column]! * inversePairCount,
+    readUpperTriangleCrossSum(rawCrossSums, bandCount, row, column) -
+    differenceSums[row]! * differenceSums[column]! * inversePairCount,
   );
+}
+
+function readUpperTriangleCrossSum(
+  rawCrossSums: Float64Array,
+  bandCount: number,
+  row: number,
+  column: number,
+): number {
+  const low = Math.min(row, column);
+  const high = Math.max(row, column);
+  return rawCrossSums[low * bandCount + high]!;
 }
 
 function addMatrices(
@@ -447,10 +475,6 @@ function accumulateTransposedColumn(
   let sum = 0;
   for (let k = 0; k < whitening.length; k += 1) sum += whitening[k]![band]! * whitenedVector[k]!;
   return sum;
-}
-
-function buildSymmetricMatrix(size: number, entry: (row: number, col: number) => number): number[][] {
-  return buildSquareMatrix(size, entry);
 }
 
 function buildSquareMatrix(size: number, entry: (row: number, col: number) => number): number[][] {

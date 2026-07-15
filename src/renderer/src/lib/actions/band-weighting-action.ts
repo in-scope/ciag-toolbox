@@ -1,6 +1,6 @@
 import { Scale } from "lucide-react";
 
-import { computeWeightedSum } from "@/lib/image/band-ops/band-weighting";
+import { computeWeightedSumReportingProgress } from "@/lib/image/band-ops/band-weighting";
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
@@ -14,7 +14,7 @@ import type { RegisteredViewportAction } from "./registered-actions";
 import {
   clearBandWeightingEditingState,
   EMPTY_REMOVED_BAND_INDEXES,
-  type ViewportActionSourceTransform,
+  type ViewportActionAsyncSourceTransform,
   type ViewportRenderingState,
 } from "./viewport-action";
 
@@ -40,7 +40,7 @@ export const BAND_WEIGHTING_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: injectBandWeightsForApply,
   apply: resetStateForWeightedSumOutput,
   clearConsumedSourceStateAfterApply: clearBandWeightingEditingState,
-  transformSource: createBandWeightingSourceTransform(),
+  transformSourceAsync: createBandWeightingSourceTransform(),
 };
 
 function injectBandWeightsForApply(
@@ -71,16 +71,23 @@ function resetStateForWeightedSumOutput(state: ViewportRenderingState): Viewport
   });
 }
 
-function createBandWeightingSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+// CT-240: the weighted sum sweeps every band at every pixel, so at reference
+// scale it runs as an async transform - chunked with paint yields and a
+// determinate progress fraction - instead of blocking the renderer.
+function createBandWeightingSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const weights = readBandWeightsOrThrow(parameterValues);
-    return { kind: "raster", raster: buildWeightedSumStack(source.raster, weights) };
+    return { kind: "raster", raster: await buildWeightedSumStack(source.raster, weights, onProgress) };
   };
 }
 
-function buildWeightedSumStack(raster: RasterImage, weights: ReadonlyArray<number>): RasterImage {
-  const band = computeWeightedSum(raster.bandPixels, weights);
+async function buildWeightedSumStack(
+  raster: RasterImage,
+  weights: ReadonlyArray<number>,
+  onProgress?: (fraction: number) => void,
+): Promise<RasterImage> {
+  const band = await computeWeightedSumReportingProgress(raster.bandPixels, weights, onProgress);
   return makeFloat32RasterFromBands(
     { width: raster.width, height: raster.height, bandLabels: [WEIGHTED_SUM_BAND_LABEL] },
     [band],

@@ -1,7 +1,13 @@
+import {
+  runOverSampleRangesYielding,
+  samplesPerChunkForPerBandSweep,
+} from "@/lib/image/dimension-reduction/band-statistics";
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
-  computeArrayReportingPerUnitProgress,
+  reportMultiUnitWorkStarting,
+  reportProgressFractionAndYield,
   type UnitProgressCallback,
 } from "@/lib/image/unit-progress";
 
@@ -9,7 +15,10 @@ import {
 // projection the same way: mean-centre every pixel with the fit means and dot it
 // with each kept component vector. Only the source of the vectors differs (PCA
 // eigenvectors vs MNF noise-whitened vectors), so the projection itself lives
-// here, shared by both transforms.
+// here, shared by both transforms. CT-240: each component projects into float32
+// ON THE FLY from the original band arrays (the sample matrix aliases them) -
+// no intermediate cube-sized buffer exists, and the per-component output routes
+// through the mapped allocator.
 
 export function projectMeanCentredSamplesOntoComponentVectors(
   samples: CubeSampleMatrix,
@@ -22,8 +31,10 @@ export function projectMeanCentredSamplesOntoComponentVectors(
   );
 }
 
-// CT-223: the async twin of projectMeanCentredSamplesOntoComponentVectors. Identical
-// per-component math, one progress tick per projected component.
+// CT-223 / CT-240: the async twin. Identical per-sample math and accumulation
+// order; each component owns an equal window of the bar and its sample sweep is
+// chunked with paint yields so a single 50-megapixel component never blocks the
+// renderer past the UI-gap threshold.
 export async function projectMeanCentredSamplesOntoComponentVectorsReportingProgress(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
@@ -31,11 +42,27 @@ export async function projectMeanCentredSamplesOntoComponentVectorsReportingProg
   keptCount: number,
   onProgress?: UnitProgressCallback,
 ): Promise<ComponentProjection> {
-  return computeArrayReportingPerUnitProgress(
-    keptCount,
-    (component) => projectEverySampleOntoComponentVector(samples, means, componentVectors[component]!),
-    onProgress,
+  reportMultiUnitWorkStarting(onProgress, keptCount);
+  const projected: Float32Array[] = [];
+  for (let component = 0; component < keptCount; component += 1) {
+    projected.push(await projectComponentInSampleChunks(samples, means, componentVectors[component]!));
+    await reportProgressFractionAndYield(onProgress, (component + 1) / keptCount);
+  }
+  return projected;
+}
+
+async function projectComponentInSampleChunks(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  componentVector: ReadonlyArray<number>,
+): Promise<Float32Array> {
+  const projected = allocateFloat32ArrayOrThrow(samples.sampleCount);
+  await runOverSampleRangesYielding(
+    samples.sampleCount,
+    samplesPerChunkForPerBandSweep(samples.bandCount),
+    (start, end) => fillProjectedSampleRange(samples, means, componentVector, projected, start, end),
   );
+  return projected;
 }
 
 function projectEverySampleOntoComponentVector(
@@ -43,11 +70,24 @@ function projectEverySampleOntoComponentVector(
   means: ReadonlyArray<number>,
   componentVector: ReadonlyArray<number>,
 ): Float32Array {
-  const projected = new Float32Array(samples.sampleCount);
-  for (let pixel = 0; pixel < samples.sampleCount; pixel += 1) {
-    projected[pixel] = projectSingleSampleOntoComponentVector(samples, means, componentVector, pixel);
-  }
+  const projected = allocateFloat32ArrayOrThrow(samples.sampleCount);
+  fillProjectedSampleRange(samples, means, componentVector, projected, 0, samples.sampleCount);
   return projected;
+}
+
+function fillProjectedSampleRange(
+  samples: CubeSampleMatrix,
+  means: ReadonlyArray<number>,
+  componentVector: ReadonlyArray<number>,
+  projected: Float32Array,
+  startSample: number,
+  endSample: number,
+): void {
+  for (let pixel = startSample; pixel < endSample; pixel += 1) {
+    projected[pixel] = finiteOrZero(
+      projectSingleSampleOntoComponentVector(samples, means, componentVector, pixel),
+    );
+  }
 }
 
 function projectSingleSampleOntoComponentVector(
@@ -60,7 +100,7 @@ function projectSingleSampleOntoComponentVector(
   for (let band = 0; band < samples.bandCount; band += 1) {
     value += componentVector[band]! * (samples.bandValues[band]![pixel]! - means[band]!);
   }
-  return finiteOrZero(value);
+  return value;
 }
 
 // A component band that is not finite (e.g. a non-finite source value or fit

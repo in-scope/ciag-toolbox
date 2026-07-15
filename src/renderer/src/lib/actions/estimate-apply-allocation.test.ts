@@ -6,6 +6,13 @@ import {
   estimateSourceCloneBytes,
   sumRasterBandBytes,
 } from "./estimate-apply-allocation";
+import { ICA_ACTION } from "./ica-action";
+import {
+  describeFastIcaFitSampling,
+  MAX_FAST_ICA_FIT_SAMPLES,
+} from "@/lib/image/dimension-reduction/ica";
+import { MNF_ACTION } from "./mnf-action";
+import { PCA_ACTION } from "./pca-action";
 import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
 import {
   BIT_SHIFT_ACTION,
@@ -114,6 +121,45 @@ describe("estimateApplyAllocationBytesForAction", () => {
     expect(withRegion).toBe(2 * 2 * BAND_COUNT * 2);
     expect(estimateApplyAllocationBytesForAction(CROP_TO_REGION_ACTION, uint16Source(), {})).toBe(
       UINT16_CUBE_BYTES,
+    );
+  });
+
+  // CT-240: dimension reduction outputs keptCount float32 component bands; ICA
+  // additionally holds a float32 whitened axis per kept component through its
+  // fit, so it is billed double. An absent component count resolves to the
+  // default min(10, bandCount) exactly like the apply itself.
+  it("bills PCA and MNF keptCount float32 bands from the component-count parameter", () => {
+    for (const action of [PCA_ACTION, MNF_ACTION]) {
+      expect(
+        estimateApplyAllocationBytesForAction(action, uint16Source(), { componentCount: 3 }),
+        action.id,
+      ).toBe(3 * PIXELS * 4);
+      expect(estimateApplyAllocationBytesForAction(action, uint16Source(), {}), action.id).toBe(
+        BAND_COUNT * PIXELS * 4,
+      );
+    }
+  });
+
+  it("bills ICA the component stack plus its float32 whitened working set (full below the cap)", () => {
+    expect(estimateApplyAllocationBytesForAction(ICA_ACTION, uint16Source(), { componentCount: 3 })).toBe(
+      2 * 3 * PIXELS * 4,
+    );
+  });
+
+  it("caps ICA's whitened working set at the FastICA sample cap for reference-scale rasters", () => {
+    const raster: RasterImage = {
+      bandPixels: [new Uint16Array(1)],
+      width: 10_000,
+      height: 5_000,
+      bitsPerSample: 16,
+      sampleFormat: "uint",
+      bandCount: 100,
+    };
+    const source: ViewportImageSource = { kind: "raster", raster };
+    const { sampledCount } = describeFastIcaFitSampling(10_000 * 5_000);
+    expect(sampledCount).toBeLessThanOrEqual(MAX_FAST_ICA_FIT_SAMPLES);
+    expect(estimateApplyAllocationBytesForAction(ICA_ACTION, source, { componentCount: 10 })).toBe(
+      10 * 10_000 * 5_000 * 4 + 10 * sampledCount * 4,
     );
   });
 

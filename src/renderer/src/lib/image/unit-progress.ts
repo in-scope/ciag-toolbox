@@ -95,6 +95,9 @@ export async function computeArrayReportingPerUnitProgress<T>(
   return results;
 }
 
-function yieldOnceSoTheBusyIndicatorCanPaint(): Promise<void> {
+// CT-240: exported for chunked work that must yield WITHOUT reporting progress
+// (e.g. the sample-range sub-chunks inside one FastICA iteration, whose progress
+// unit is the whole iteration).
+export function yieldOnceSoTheBusyIndicatorCanPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

@@ -32,25 +32,26 @@ describe("BAND_WEIGHTING_ACTION", () => {
     expect(prepared).toMatchObject({ weightsJson: "[1,0,0]" });
   });
 
-  it("outputs a single float32 band equal to the normalized weighted sum", () => {
+  // CT-240: the transform is async (chunked with paint yields at scale).
+  it("outputs a single float32 band equal to the normalized weighted sum", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, bandWeights: [1, 1, 1] };
     const prepared = BAND_WEIGHTING_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    const result = BAND_WEIGHTING_ACTION.transformSource!(
+    const result = (await BAND_WEIGHTING_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandUint16Raster([0, 30], [30, 30], [60, 30]) },
       prepared,
-    ) as { raster: RasterImage };
+    )) as { raster: RasterImage };
     expect(result.raster.bandCount).toBe(1);
     expect(result.raster.sampleFormat).toBe("float");
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([30, 30]);
   });
 
-  it("selects a single band exactly when only that band is weighted", () => {
+  it("selects a single band exactly when only that band is weighted", async () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, bandWeights: [0, 1, 0] };
     const prepared = BAND_WEIGHTING_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    const result = BAND_WEIGHTING_ACTION.transformSource!(
+    const result = (await BAND_WEIGHTING_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeThreeBandUint16Raster([100], [800], [1600]) },
       prepared,
-    ) as { raster: RasterImage };
+    )) as { raster: RasterImage };
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([800]);
   });
 

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyIca, fitIca, fitIcaReportingProgress } from "./ica";
+import {
+  applyIca,
+  describeFastIcaFitSampling,
+  fitIca,
+  fitIcaReportingProgress,
+  MAX_FAST_ICA_FIT_SAMPLES,
+} from "./ica";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
@@ -96,6 +102,21 @@ describe("fitIca / applyIca", () => {
     expect(fitIca(MIXED_CUBE, 2).componentVectors).toEqual(fitIca(MIXED_CUBE, 2).componentVectors);
   });
 
+  // CT-240: the sample matrix aliases the raster's own typed arrays, so the fit
+  // must read integer storage to the exact same float64 values a copy held.
+  it("fits identically over uint16 storage and a float64 copy of the same values", () => {
+    const integerBands = [
+      SAWTOOTH.map((value) => Math.round(600 + 100 * value)),
+      SQUARE.map((value, index) => Math.round(1200 + 90 * value + 3 * (index % 7))),
+    ];
+    const float64Cube = makeSampleMatrix(integerBands);
+    const uint16Cube: CubeSampleMatrix = {
+      ...float64Cube,
+      bandValues: integerBands.map((band) => Uint16Array.from(band)),
+    };
+    expect(fitIca(uint16Cube, 2)).toEqual(fitIca(float64Cube, 2));
+  });
+
   it("keeps only the requested number of components", () => {
     const fit = fitIca(MIXED_CUBE, 2);
     const projection = applyIca(MIXED_CUBE, fit, 1);
@@ -109,6 +130,21 @@ describe("fitIca / applyIca", () => {
     const projection = applyIca(meanSample, fit, 2);
     expect(projection[0]![0]!).toBeCloseTo(0, 6);
     expect(projection[1]![0]!).toBeCloseTo(0, 6);
+  });
+
+  // CT-240: cubes at or below the cap keep stride 1 (bit-identical fits); a
+  // reference-scale cube strides uniformly down to at most the cap, which is
+  // what bounds ICA's whitened working set inside the renderer's pool.
+  it("samples every pixel below the FastICA cap and strides uniformly above it", () => {
+    expect(describeFastIcaFitSampling(1_000)).toEqual({ stride: 1, sampledCount: 1_000 });
+    expect(describeFastIcaFitSampling(MAX_FAST_ICA_FIT_SAMPLES)).toEqual({
+      stride: 1,
+      sampledCount: MAX_FAST_ICA_FIT_SAMPLES,
+    });
+    const atScale = describeFastIcaFitSampling(50_000_000);
+    expect(atScale.stride).toBe(13);
+    expect(atScale.sampledCount).toBe(Math.ceil(50_000_000 / 13));
+    expect(atScale.sampledCount).toBeLessThanOrEqual(MAX_FAST_ICA_FIT_SAMPLES);
   });
 
   it("terminates with finite component vectors on near-Gaussian data (the max-iteration cap)", () => {

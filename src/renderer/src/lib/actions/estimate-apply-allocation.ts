@@ -1,3 +1,4 @@
+import { COMPONENT_COUNT_PARAMETER_ID } from "@/lib/actions/dimension-reduction-action";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import {
   normalizeMethodPreservesSourceDataType,
@@ -5,6 +6,8 @@ import {
   readRoiFromCropParameterValues,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
+import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
 import { TONE_CURVE_SCOPE_PARAMETER_ID, WHOLE_STACK_TONE_CURVE_SCOPE_VALUE } from "@/lib/actions/tone-curve-scope";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -43,6 +46,14 @@ const TYPE_PRESERVING_FULL_CUBE_ACTION_IDS: ReadonlySet<string> = new Set([
   "reflect",
 ]);
 
+// CT-240: dimension reduction outputs keptCount float32 component bands, and
+// the fit streams from the source's own band arrays (no cube copy). ICA is the
+// one transform with a working set on top of the output: its whitened sample
+// matrix holds keptCount float32 axes of the CAPPED FastICA sample count
+// (describeFastIcaFitSampling), alive through the whole estimation.
+const DIMENSION_REDUCTION_ACTION_IDS: ReadonlySet<string> = new Set(["pca", "mnf", "ica"]);
+const ICA_ACTION_ID = "ica";
+
 export function estimateApplyAllocationBytesForAction(
   action: RegisteredViewportAction,
   source: ViewportImageSource,
@@ -67,6 +78,9 @@ function estimateAllocationBytesForRasterApply(
   if (action.id === "normalize-data" && normalizeMethodPreservesSourceDataType(parameterValues)) {
     return sumRasterBandBytes(raster);
   }
+  if (DIMENSION_REDUCTION_ACTION_IDS.has(action.id)) {
+    return estimateDimensionReductionAllocationBytes(action.id, raster, parameterValues);
+  }
   if (FLOAT32_FULL_CUBE_ACTION_IDS.has(action.id)) return float32CubeBytes(raster);
   if (TYPE_PRESERVING_FULL_CUBE_ACTION_IDS.has(action.id)) return sumRasterBandBytes(raster);
   if (action.id === "tone-curve") return estimateToneCurveAllocationBytes(raster, parameterValues);
@@ -78,6 +92,29 @@ function estimateAllocationBytesForRasterApply(
 
 function pixelCountOf(raster: RasterImage): number {
   return raster.width * raster.height;
+}
+
+// keptCount x W x H x 4 for the float32 component stack; ICA adds its float32
+// whitened working set of the capped sample count (see CT-240 notes above).
+function estimateDimensionReductionAllocationBytes(
+  actionId: string,
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): number {
+  const keptCount = resolveComponentCount(readComponentCountParameter(parameterValues), raster.bandCount);
+  const componentStackBytes = keptCount * pixelCountOf(raster) * FLOAT32_BYTES_PER_SAMPLE;
+  if (actionId !== ICA_ACTION_ID) return componentStackBytes;
+  return componentStackBytes + estimateIcaWhitenedWorkingSetBytes(raster, keptCount);
+}
+
+function estimateIcaWhitenedWorkingSetBytes(raster: RasterImage, keptCount: number): number {
+  const { sampledCount } = describeFastIcaFitSampling(pixelCountOf(raster));
+  return keptCount * sampledCount * FLOAT32_BYTES_PER_SAMPLE;
+}
+
+function readComponentCountParameter(parameterValues: ParameterValuesById): number | undefined {
+  const raw = parameterValues[COMPONENT_COUNT_PARAMETER_ID];
+  return typeof raw === "number" ? raw : undefined;
 }
 
 function float32CubeBytes(raster: RasterImage): number {

@@ -26,7 +26,7 @@ function makeThreeByTwoBandRaster(): RasterImage {
 }
 
 describe("extractCubeSampleMatrixFromRaster", () => {
-  it("returns one band-major Float64Array per band over every pixel", () => {
+  it("returns one band-major value array per band over every pixel", () => {
     const matrix = extractCubeSampleMatrixFromRaster(makeTwoBandRaster());
     expect(matrix.bandCount).toBe(2);
     expect(matrix.sampleCount).toBe(4);
@@ -34,9 +34,11 @@ describe("extractCubeSampleMatrixFromRaster", () => {
     expect(Array.from(matrix.bandValues[1]!)).toEqual([10, 20, 30, 40]);
   });
 
-  it("produces Float64Array bands so integer cubes feed float math", () => {
-    const matrix = extractCubeSampleMatrixFromRaster(makeTwoBandRaster());
-    expect(matrix.bandValues[0]!).toBeInstanceOf(Float64Array);
+  it("CT-240: aliases the raster's own band arrays instead of copying to float64", () => {
+    const raster = makeTwoBandRaster();
+    const matrix = extractCubeSampleMatrixFromRaster(raster);
+    expect(matrix.bandValues[0]).toBe(raster.bandPixels[0]);
+    expect(matrix.bandValues[1]).toBe(raster.bandPixels[1]);
   });
 });
 
@@ -48,6 +50,14 @@ describe("collectRoiSamples", () => {
     expect(matrix.sampleCount).toBe(4);
     expect(Array.from(matrix.bandValues[0]!)).toEqual([2, 3, 5, 6]);
     expect(Array.from(matrix.bandValues[1]!)).toEqual([20, 30, 50, 60]);
+  });
+
+  it("CT-240: copies ROI samples in the band's own sample type, never a float64 cube", () => {
+    const raster = makeThreeByTwoBandRaster();
+    const roi = { imagePixelX0: 0, imagePixelY0: 0, imagePixelX1: 2, imagePixelY1: 1 };
+    const matrix = collectRoiSamples(raster, roi);
+    expect(matrix.bandValues[0]).toBeInstanceOf(Uint16Array);
+    expect(matrix.bandValues[0]).not.toBe(raster.bandPixels[0]);
   });
 
   it("canonicalizes reversed corners and clamps them to the image bounds", () => {

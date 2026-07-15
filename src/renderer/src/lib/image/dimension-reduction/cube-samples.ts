@@ -1,55 +1,64 @@
-import { getRasterBandPixelsOrThrow, type RasterImage } from "@/lib/image/raster-image";
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
+import {
+  getRasterBandPixelsOrThrow,
+  type RasterImage,
+  type RasterTypedArray,
+} from "@/lib/image/raster-image";
 import {
   clampViewportRoiToImageBounds,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
 
 // CT-180: dimension-reduction math works on a cube as a band-major sample
-// matrix: one Float64Array per band, each holding the value of that band at
+// matrix: one value array per band, each holding the value of that band at
 // every selected sample (pixel). Band-major matches the per-band covariance and
 // projection loops, and matches the raster's own band-pixel layout so the
-// whole-image case is a straight copy. CT-182 adds an ROI variant that fills the
-// same shape from a pixel subset, so the transform math never branches on scope.
-// CT-183: the samples are laid out row-major over a width x height rectangle (the
-// whole image, or the ROI rectangle), so a transform that needs spatial
-// adjacency (MNF's shift-difference noise estimate) can walk neighbours.
+// whole-image case is a straight reference. CT-182 adds an ROI variant that
+// fills the same shape from a pixel subset, so the transform math never
+// branches on scope. CT-183: the samples are laid out row-major over a
+// width x height rectangle (the whole image, or the ROI rectangle), so a
+// transform that needs spatial adjacency (MNF's shift-difference noise
+// estimate) can walk neighbours.
+//
+// CT-240: the whole-image matrix ALIASES the raster's own band arrays instead
+// of copying them to float64. A float64 copy of a 100-band 10 GB cube is 40 GB
+// and can never fit the measured ~17 GB renderer ArrayBuffer pool; reading a
+// sample from the original typed array yields the exact same float64 value the
+// copy held (every raster sample type widens to float64 exactly), so the fit
+// and projection numbers are bit-identical with zero cube-scale allocation.
+// The fit/project math is READ-ONLY over bandValues - the arrays belong to the
+// live source raster (the CT-233 immutability contract).
 
 export interface CubeSampleMatrix {
   readonly bandCount: number;
   readonly sampleCount: number;
   readonly width: number;
   readonly height: number;
-  readonly bandValues: ReadonlyArray<Float64Array>;
+  readonly bandValues: ReadonlyArray<RasterTypedArray>;
 }
 
 export function extractCubeSampleMatrixFromRaster(raster: RasterImage): CubeSampleMatrix {
-  const sampleCount = raster.width * raster.height;
-  const bandValues = collectEveryBandAsFloat64(raster, sampleCount);
-  return { bandCount: raster.bandCount, sampleCount, width: raster.width, height: raster.height, bandValues };
+  return {
+    bandCount: raster.bandCount,
+    sampleCount: raster.width * raster.height,
+    width: raster.width,
+    height: raster.height,
+    bandValues: listEveryBandByReference(raster),
+  };
 }
 
-function collectEveryBandAsFloat64(raster: RasterImage, sampleCount: number): Float64Array[] {
+function listEveryBandByReference(raster: RasterImage): RasterTypedArray[] {
   return Array.from({ length: raster.bandCount }, (_, bandIndex) =>
-    copyBandPixelsToFloat64(getRasterBandPixelsOrThrow(raster, bandIndex), sampleCount),
+    getRasterBandPixelsOrThrow(raster, bandIndex),
   );
-}
-
-function copyBandPixelsToFloat64(
-  bandPixels: ArrayLike<number>,
-  sampleCount: number,
-): Float64Array {
-  const values = new Float64Array(sampleCount);
-  for (let pixelIndex = 0; pixelIndex < sampleCount; pixelIndex += 1) {
-    values[pixelIndex] = bandPixels[pixelIndex] ?? 0;
-  }
-  return values;
 }
 
 // CT-182: a transform may be FIT on only the pixels inside a selected ROI (a
 // clean background or a target material) and then APPLIED to the whole cube. The
 // fit consumes this in-ROI sample matrix; the apply step keeps using the full
 // extractCubeSampleMatrixFromRaster. The returned shape is identical, so the
-// fit/project math never branches on scope.
+// fit/project math never branches on scope. The ROI copy keeps each band's own
+// sample type (values read identically) and routes through the mapped allocator.
 export function collectRoiSamples(raster: RasterImage, roi: ViewportRoi): CubeSampleMatrix {
   const bounds = clampViewportRoiToImageBounds(roi, raster);
   const pixelIndexes = listRoiPixelIndexes(bounds, raster.width);
@@ -72,17 +81,17 @@ function listRoiPixelIndexes(bounds: ViewportRoi, width: number): number[] {
 function collectBandsAtPixelIndexes(
   raster: RasterImage,
   pixelIndexes: ReadonlyArray<number>,
-): Float64Array[] {
+): RasterTypedArray[] {
   return Array.from({ length: raster.bandCount }, (_, bandIndex) =>
-    copyPixelsAtIndexesToFloat64(getRasterBandPixelsOrThrow(raster, bandIndex), pixelIndexes),
+    copyPixelsAtIndexesKeepingSampleType(getRasterBandPixelsOrThrow(raster, bandIndex), pixelIndexes),
   );
 }
 
-function copyPixelsAtIndexesToFloat64(
-  bandPixels: ArrayLike<number>,
+function copyPixelsAtIndexesKeepingSampleType(
+  bandPixels: RasterTypedArray,
   pixelIndexes: ReadonlyArray<number>,
-): Float64Array {
-  const values = new Float64Array(pixelIndexes.length);
+): RasterTypedArray {
+  const values = allocateTypedArrayLikeBandOrThrow(bandPixels, pixelIndexes.length);
   for (let i = 0; i < pixelIndexes.length; i += 1) {
     values[i] = bandPixels[pixelIndexes[i]!] ?? 0;
   }

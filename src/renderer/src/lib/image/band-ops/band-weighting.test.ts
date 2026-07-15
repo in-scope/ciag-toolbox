@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeWeightedSum } from "./band-weighting";
+import { computeWeightedSum, computeWeightedSumReportingProgress } from "./band-weighting";
 
 describe("computeWeightedSum", () => {
   it("normalizes by the sum of absolute weights, so equal weights give the band mean", () => {
@@ -37,5 +37,31 @@ describe("computeWeightedSum", () => {
   it("throws a clear error when the weight count does not match the band count", () => {
     const bands = [Float32Array.from([1]), Float32Array.from([2])];
     expect(() => computeWeightedSum(bands, [1])).toThrow(/one weight per band/);
+  });
+});
+
+// CT-240: the async twin chunks the same per-pixel sweep with paint yields and
+// determinate progress; the output must be byte-identical to the sync path.
+describe("computeWeightedSumReportingProgress", () => {
+  it("matches the sync computeWeightedSum exactly across chunk boundaries", async () => {
+    const pixelCount = 1000;
+    const bands = [
+      Uint16Array.from({ length: pixelCount }, (_unused, index) => 600 + (index % 100)),
+      Uint16Array.from({ length: pixelCount }, (_unused, index) => 1200 + (index % 37)),
+    ];
+    const weights = [1, 1];
+    expect(await computeWeightedSumReportingProgress(bands, weights)).toEqual(
+      computeWeightedSum(bands, weights),
+    );
+  });
+
+  it("reports monotonic progress ending at exactly 1", async () => {
+    const ticks: number[] = [];
+    const bands = [Uint16Array.from({ length: 10 }, (_unused, index) => index)];
+    await computeWeightedSumReportingProgress(bands, [1], (fraction) => ticks.push(fraction));
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
   });
 });

@@ -85,6 +85,22 @@ describe("fitMnf", () => {
     expect(correlationWithHighSnr).toBeGreaterThan(0.9);
     expect(correlationWithHighSnr).toBeGreaterThan(correlationWithLowSnr);
   });
+
+  // CT-240: the sample matrix aliases the raster's own typed arrays, so the fit
+  // (noise covariance included) must read integer storage to the exact same
+  // float64 values a copy held.
+  it("fits identically over uint16 storage and a float64 copy of the same values", () => {
+    const integerBands = [
+      [600, 601, 640, 700, 733, 799, 610, 620, 630],
+      [1200, 1210, 1290, 1400, 1470, 1598, 1230, 1250, 1260],
+    ];
+    const float64Cube = makeSampleMatrix(3, 3, integerBands);
+    const uint16Cube: CubeSampleMatrix = {
+      ...float64Cube,
+      bandValues: integerBands.map((band) => Uint16Array.from(band)),
+    };
+    expect(fitMnf(uint16Cube, 2)).toEqual(fitMnf(float64Cube, 2));
+  });
 });
 
 // CT-195: when the noise covariance is rank-deficient (e.g. two bands carrying
