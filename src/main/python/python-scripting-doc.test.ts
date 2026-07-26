@@ -94,6 +94,15 @@ describe("hosted scripting doc (docs/python-scripting.md)", () => {
     expect(text).toContain("never installs packages");
   });
 
+  it("documents when code runs relative to Apply for every scripting operation", () => {
+    const text = readHostedScriptingDocLowercased();
+    expect(text).toContain("run, then apply");
+    expect(text).toContain("no python runs at apply time");
+    expect(text).toContain("tool loaded:");
+    expect(text).toContain("click apply to run your code on the stack");
+    expect(text).toContain("re-read on every apply");
+  });
+
   it("provides a worked example for each input form", () => {
     const text = readHostedScriptingDoc();
     expect(text).toContain("cube.var(axis=(1, 2))");

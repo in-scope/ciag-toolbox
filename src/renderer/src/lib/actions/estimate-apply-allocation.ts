@@ -38,6 +38,10 @@ const FLOAT32_FULL_CUBE_ACTION_IDS: ReadonlySet<string> = new Set([
   "spectral-derivative",
   "flat-field",
   "spectralon",
+  // The custom transform's output band count is only known after its Python
+  // runs at Apply, so it is priced as a source-band-count float32 cube (the
+  // best dimension-only estimate available).
+  "custom-transform",
 ]);
 
 const TYPE_PRESERVING_FULL_CUBE_ACTION_IDS: ReadonlySet<string> = new Set([

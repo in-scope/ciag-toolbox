@@ -24,6 +24,7 @@ import {
 } from "./python-worker";
 import { wallClockTimeoutMsForUserScriptResultKind } from "./user-script-timeouts";
 import {
+  USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
@@ -36,6 +37,7 @@ import {
   type UserScriptRunExecuteResult,
   type UserScriptRunReleaseRequest,
   type UserScriptRunResultChunkRequest,
+  type UserScriptPickScriptResult,
   type UserScriptRunResultKind,
   type UserScriptRunSource,
 } from "../../shared/chunked-user-script-run-protocol";
@@ -65,6 +67,9 @@ interface PreparedUserScriptRun {
 
 export function registerRunUserScriptIpcHandler(): void {
   const sessions = createChunkedUserScriptRunSessionStore();
+  ipcMain.handle(USER_SCRIPT_PICK_SCRIPT_CHANNEL, (event) =>
+    handlePickUserScriptFile(findWindowForIpcEvent(event)),
+  );
   ipcMain.handle(USER_SCRIPT_RUN_BEGIN_CHANNEL, (event, request: UserScriptRunBeginRequest) =>
     handleBeginUserScriptRun(sessions, event, request),
   );
@@ -136,7 +141,27 @@ async function prepareUserScriptInputOrCancel(
       sourceName: null,
     };
   }
+  if (source.scriptPath !== undefined) return prepareImportedUserScriptFromKnownPath(source.scriptPath);
   return prepareImportedUserScriptFromDialog(window);
+}
+
+// The Custom transform picks its script file up front (the pick-script channel)
+// and runs at Apply time, so its begin carries the path and shows no dialog.
+async function prepareImportedUserScriptFromKnownPath(
+  scriptPath: string,
+): Promise<PreparedUserScriptRun> {
+  return {
+    prepared: await prepareImportedUserScriptFromFilePath(scriptPath),
+    sourceName: basename(scriptPath),
+  };
+}
+
+async function handlePickUserScriptFile(
+  window: BrowserWindow | null,
+): Promise<UserScriptPickScriptResult> {
+  const filePath = await chooseImportedScriptFilePathOrNull(window);
+  if (filePath === null) return { canceled: true };
+  return { canceled: false, filePath, fileName: basename(filePath) };
 }
 
 async function prepareImportedUserScriptFromDialog(

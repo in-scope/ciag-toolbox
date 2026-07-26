@@ -6,32 +6,40 @@ import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
-  applyOperation,
+  applyCustomTransformAwaitingRun,
   clickImportCustomTransformScript,
   countPanels,
+  CUSTOM_TRANSFORM_FORMULA_SET_STATUS,
   CUSTOM_TRANSFORM_OPERATION_LABEL,
+  customTransformFailureToast,
   enqueueOpenDialogPaths,
+  expectCustomTransformConfigured,
   expectCustomTransformEditorReady,
-  expectCustomTransformReady,
+  expectCustomTransformPanelClosed,
+  expectCustomTransformPanelStillOpen,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
   expectPixelReadoutToEqual,
+  loadedToolStatusText,
   loadFixtureAsStack,
   openOperation,
   readMetadata,
-  runCustomTransformFormula,
   selectPanel,
+  setCustomTransformFormula,
   type PixelDimensions,
 } from "./support/page-objects";
 
-// CT-216: the Custom transform runs a formula or imported tool over the WHOLE
-// cube and applies the returned cube as a new float32 stack in a fresh panel;
-// the band count is free. multiband-12bit.tif (3 bands; at pixel (0,0) band 1 =
-// 100, band 2 = 800, band 3 = 1600) is the oracle: 'cube * 2' keeps 3 bands and
-// reads 200 at (0,0) on band 1; 'np.diff(cube, axis=0)' shrinks to 2 bands and
-// reads 700; the imported transform-tool.py reverses the band order so band 1
-// reads 1600. Each case asserts the true value via the pixel-readout oracle and
-// that the result opened in a new panel.
+// The Custom transform runs a formula or imported tool over the WHOLE cube AT
+// APPLY TIME: entering a formula or importing a .py only configures the panel
+// (status line "Formula set..." / "Tool loaded: ..."), and Apply uploads the
+// cube, runs the Python, and opens the returned cube as a new float32 stack
+// in a fresh panel; the band count is free. The panel stays open across
+// Apply, so a failed run can be corrected and re-applied without re-entering
+// anything. multiband-12bit.tif (3 bands; at pixel (0,0) band 1 = 100, band 2
+// = 800, band 3 = 1600) is the oracle: 'cube * 2' keeps 3 bands and reads 200
+// at (0,0) on band 1; 'np.diff(cube, axis=0)' shrinks to 2 bands and reads
+// 700; the imported transform-tool.py reverses the band order so band 1 reads
+// 1600. Each case asserts the true value via the pixel-readout oracle.
 
 const RESULT_PANEL = 2;
 const FLOAT32 = "float32";
@@ -56,11 +64,12 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("a formula transforming every value applies as a same-band-count stack", async () => {
+test("a configured formula runs at Apply and lands as a same-band-count stack", async () => {
   await openCustomTransformEditor();
-  await runCustomTransformFormula(launched.window, "cube * 2");
-  await expectCustomTransformReady(launched.window, "Formula (3 bands)");
-  await applyAndExpectTransformedOutput({
+  await setCustomTransformFormula(launched.window, "cube * 2");
+  await expectCustomTransformConfigured(launched.window, CUSTOM_TRANSFORM_FORMULA_SET_STATUS);
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expectTransformedOutput({
     expectedBandCount: 3,
     expectedTopLeftBandOneValue: DOUBLED_BAND_ONE_VALUE,
     historyDetailSubstring: "cube * 2",
@@ -69,24 +78,45 @@ test("a formula transforming every value applies as a same-band-count stack", as
 
 test("a formula changing the band count applies as a reduced stack", async () => {
   await openCustomTransformEditor();
-  await runCustomTransformFormula(launched.window, "np.diff(cube, axis=0)");
-  await expectCustomTransformReady(launched.window, "Formula (2 bands)");
-  await applyAndExpectTransformedOutput({
+  await setCustomTransformFormula(launched.window, "np.diff(cube, axis=0)");
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expectTransformedOutput({
     expectedBandCount: 2,
     expectedTopLeftBandOneValue: DIFF_BAND_ONE_VALUE,
     historyDetailSubstring: "np.diff(cube, axis=0)",
   });
 });
 
-test("an imported .py tool transforming the cube applies and is named in History", async () => {
+test("an imported .py tool only loads at import, runs at Apply, and is named in History", async () => {
   await openCustomTransformEditor();
   await enqueueOpenDialogPaths(launched.window, [IMPORTED_TRANSFORM_TOOL_PATH]);
   await clickImportCustomTransformScript(launched.window);
-  await expectCustomTransformReady(launched.window, "Imported tool: transform-tool.py (3 bands)");
-  await applyAndExpectTransformedOutput({
+  await expectCustomTransformConfigured(
+    launched.window,
+    loadedToolStatusText("transform-tool.py"),
+  );
+  expect(await countPanels(launched.window)).toBe(1);
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expectTransformedOutput({
     expectedBandCount: 3,
     expectedTopLeftBandOneValue: REVERSED_BAND_ONE_VALUE,
     historyDetailSubstring: "transform-tool.py",
+  });
+});
+
+test("a failed run keeps the panel open with the formula set, and a corrected formula applies", async () => {
+  await openCustomTransformEditor();
+  await setCustomTransformFormula(launched.window, "cube +");
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expect(customTransformFailureToast(launched.window)).toBeVisible();
+  await expectCustomTransformPanelStillOpen(launched.window);
+  await expectCustomTransformConfigured(launched.window, CUSTOM_TRANSFORM_FORMULA_SET_STATUS);
+  await setCustomTransformFormula(launched.window, "cube * 2");
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expectTransformedOutput({
+    expectedBandCount: 3,
+    expectedTopLeftBandOneValue: DOUBLED_BAND_ONE_VALUE,
+    historyDetailSubstring: "cube * 2",
   });
 });
 
@@ -101,8 +131,8 @@ interface ExpectedTransformedOutput {
   readonly historyDetailSubstring: string;
 }
 
-async function applyAndExpectTransformedOutput(expected: ExpectedTransformedOutput): Promise<void> {
-  await applyOperation(launched.window, CUSTOM_TRANSFORM_OPERATION_LABEL);
+async function expectTransformedOutput(expected: ExpectedTransformedOutput): Promise<void> {
+  await expectCustomTransformPanelClosed(launched.window);
   expect(await countPanels(launched.window)).toBe(RESULT_PANEL);
   await selectPanel(launched.window, RESULT_PANEL);
   await expectResultIsFloat32StackWithBandCount(expected.expectedBandCount);

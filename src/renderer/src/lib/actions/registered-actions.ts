@@ -190,6 +190,13 @@ export interface RegisteredViewportAction extends ViewportAction {
     sourceRenderingState: ViewportRenderingState,
   ) => ViewportRenderingState;
   /**
+   * The operation panel stays open through the apply run and closes only when
+   * the run SUCCEEDS. The Custom transform uses this because its Python runs
+   * AT Apply time: a failed run must leave the panel open, with the configured
+   * formula or tool intact, so the user can correct the script and Apply again.
+   */
+  readonly keepsPanelOpenUntilApplySucceeds?: boolean;
+  /**
    * The operation emits extra outputs alongside its primary result; each is
    * placed in its own fresh viewport with its own applied label (CT-097).
    */

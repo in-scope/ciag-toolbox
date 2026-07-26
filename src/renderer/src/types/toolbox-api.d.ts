@@ -234,7 +234,11 @@ interface ToolboxPythonEnvironmentSnapshot {
 
 type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
-  | { mode: "import" };
+  | { mode: "import"; scriptPath?: string };
+
+type ToolboxUserScriptPickResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string; fileName: string };
 
 type ToolboxRunUserScriptResultKind = "value" | "cube";
 
@@ -389,6 +393,7 @@ interface ToolboxApi {
   setPythonEnvironment: (
     ownInterpreterPath: string | null,
   ) => Promise<ToolboxPythonEnvironmentSnapshot>;
+  pickUserScriptFile: () => Promise<ToolboxUserScriptPickResult>;
   beginUserScriptRun: (
     request: ToolboxUserScriptRunBeginRequest,
   ) => Promise<ToolboxUserScriptRunBeginResult>;

@@ -412,11 +412,17 @@ export {
   expectBandSelectionFunction,
 } from "./band-selection";
 export {
-  CUSTOM_TRANSFORM_OPERATION_LABEL,
-  expectCustomTransformEditorReady,
-  runCustomTransformFormula,
+  applyCustomTransformAwaitingRun,
   clickImportCustomTransformScript,
-  expectCustomTransformReady,
+  CUSTOM_TRANSFORM_FORMULA_SET_STATUS,
+  CUSTOM_TRANSFORM_OPERATION_LABEL,
+  customTransformFailureToast,
+  expectCustomTransformConfigured,
+  expectCustomTransformEditorReady,
+  expectCustomTransformPanelClosed,
+  expectCustomTransformPanelStillOpen,
+  loadedToolStatusText,
+  setCustomTransformFormula,
 } from "./custom-transform";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";

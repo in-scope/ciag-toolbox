@@ -47,6 +47,11 @@ export interface ApplyActionFlowBindings {
   // next action targets the result rather than the original source panel.
   selectViewportIndex?: (index: number) => void;
   busyRegistrar: BusyEntryRegistrar;
+  // Reports how an apply run ended (the run is asynchronous, so this fires
+  // after the click returns). App uses it for actions whose panel stays open
+  // until a run SUCCEEDS (keepsPanelOpenUntilApplySucceeds): success closes
+  // the panel, failure leaves it open for correction.
+  reportApplyOutcome?: (outcome: { succeeded: boolean }) => void;
 }
 
 export function applyActionInPlaceAtSourceIndex(
@@ -85,9 +90,28 @@ function reportApplyExceedsMemoryBudget(
     );
     return false;
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
     return true;
   }
+}
+
+// Success and failure both toast AND report the outcome to the optional
+// binding, so panel-close decisions stay in one place per outcome.
+function reportApplySucceededWithToast(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+): void {
+  toast.success(action.successMessage);
+  bindings.reportApplyOutcome?.({ succeeded: true });
+}
+
+function reportApplyFailedWithToast(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+  error: unknown,
+): void {
+  toast.error(formatActionErrorMessage(action.label, error));
+  bindings.reportApplyOutcome?.({ succeeded: false });
 }
 
 function listSourcesAcrossViewports(imagesByIndex: ViewportContentMap): ViewportImageSource[] {
@@ -111,9 +135,9 @@ function applyActionInPlaceWithoutBusyIndicator(
       bindings,
     );
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   }
 }
 
@@ -138,9 +162,9 @@ async function runApplyActionInPlaceWithBusyIndicator(
       bindings,
     );
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   } finally {
     handle.clear();
   }
@@ -400,9 +424,9 @@ export async function runDuplicateAndApplyAtTargetIndex(
     clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, targetIndex, bindings);
     selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   } finally {
     handle?.clear();
   }

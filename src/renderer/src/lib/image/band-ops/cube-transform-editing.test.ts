@@ -3,54 +3,61 @@ import { describe, expect, it } from "vitest";
 import {
   buildFormulaCubeTransformState,
   buildImportedToolCubeTransformState,
+  describeCubeTransformForAudit,
   describeCubeTransformRunError,
   formatCubeTransformStatusLine,
-  NO_CUBE_TRANSFORM_READY_STATUS,
+  NO_CUBE_TRANSFORM_SET_STATUS,
 } from "./cube-transform-editing";
 import { SCRIPTING_DOCS_HINT, UserScriptReturnContractError } from "./user-script-return-contract";
 
 describe("cube transform editing state builders", () => {
-  it("labels a formula run 'Formula' and records the expression for the audit trail", () => {
-    const state = buildFormulaCubeTransformState("cube-transform-0", 3, "cube * 2");
-    expect(state.sourceLabel).toBe("Formula");
-    expect(state.auditDescription).toBe("cube * 2");
-    expect(state.token).toBe("cube-transform-0");
-    expect(state.outputBandCount).toBe(3);
+  it("builds a formula state carrying the raw expression text", () => {
+    const state = buildFormulaCubeTransformState("cube * 2");
+    expect(state).toEqual({ kind: "formula", expression: "cube * 2" });
   });
 
-  it("labels an imported tool by its file name and records that name for the audit trail", () => {
-    const state = buildImportedToolCubeTransformState("cube-transform-1", 2, "transform-tool.py");
-    expect(state.sourceLabel).toBe("Imported tool: transform-tool.py");
-    expect(state.auditDescription).toBe("transform-tool.py");
+  it("treats a blank expression as no configured transform", () => {
+    expect(buildFormulaCubeTransformState("")).toBeNull();
+    expect(buildFormulaCubeTransformState("   ")).toBeNull();
   });
 
-  it("falls back to a generic tool name when the import carries no source name", () => {
-    const state = buildImportedToolCubeTransformState("cube-transform-2", 2, undefined);
-    expect(state.sourceLabel).toBe("Imported tool: script");
-    expect(state.auditDescription).toBe("script");
+  it("builds a tool state carrying the file path and name", () => {
+    const state = buildImportedToolCubeTransformState("C:/tools/transform-tool.py", "transform-tool.py");
+    expect(state).toEqual({
+      kind: "tool",
+      filePath: "C:/tools/transform-tool.py",
+      fileName: "transform-tool.py",
+    });
   });
 });
 
 describe("formatCubeTransformStatusLine", () => {
-  it("reports no ready transform when the state is absent", () => {
-    expect(formatCubeTransformStatusLine(null)).toBe(NO_CUBE_TRANSFORM_READY_STATUS);
+  it("reports nothing set when the state is absent", () => {
+    expect(formatCubeTransformStatusLine(null)).toBe(NO_CUBE_TRANSFORM_SET_STATUS);
   });
 
-  it("names the ready formula transform including the output band count", () => {
-    const state = buildFormulaCubeTransformState("t", 3, "cube * 2");
-    expect(formatCubeTransformStatusLine(state)).toBe("Transform ready: Formula (3 bands)");
-  });
-
-  it("uses the singular band wording for a single-band output", () => {
-    const state = buildFormulaCubeTransformState("t", 1, "cube[:1]");
-    expect(formatCubeTransformStatusLine(state)).toBe("Transform ready: Formula (1 band)");
-  });
-
-  it("names the ready imported-tool transform including the output band count", () => {
-    const state = buildImportedToolCubeTransformState("t", 3, "transform-tool.py");
-    expect(formatCubeTransformStatusLine(state)).toBe(
-      "Transform ready: Imported tool: transform-tool.py (3 bands)",
+  it("points at Apply for a configured formula", () => {
+    expect(formatCubeTransformStatusLine(buildFormulaCubeTransformState("cube * 2"))).toBe(
+      "Formula set. Apply runs it on the stack.",
     );
+  });
+
+  it("names the loaded tool and points at Apply", () => {
+    const state = buildImportedToolCubeTransformState("C:/tools/transform-tool.py", "transform-tool.py");
+    expect(formatCubeTransformStatusLine(state)).toBe(
+      "Tool loaded: transform-tool.py. Apply runs it on the stack.",
+    );
+  });
+});
+
+describe("describeCubeTransformForAudit", () => {
+  it("records the trimmed formula expression", () => {
+    expect(describeCubeTransformForAudit(buildFormulaCubeTransformState(" cube * 2 ")!)).toBe("cube * 2");
+  });
+
+  it("records the imported tool's file name", () => {
+    const state = buildImportedToolCubeTransformState("C:/tools/transform-tool.py", "transform-tool.py");
+    expect(describeCubeTransformForAudit(state)).toBe("transform-tool.py");
   });
 });
 

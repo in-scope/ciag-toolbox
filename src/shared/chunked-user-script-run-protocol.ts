@@ -18,6 +18,7 @@
 // float32 bytes) -> execute (spawns the Python worker under the wall-clock
 // limit) -> for cube results, N result-chunk pulls -> release.
 
+export const USER_SCRIPT_PICK_SCRIPT_CHANNEL = "user-script:pick-script";
 export const USER_SCRIPT_RUN_BEGIN_CHANNEL = "user-script:run-begin";
 export const USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL = "user-script:run-cube-chunk";
 export const USER_SCRIPT_RUN_EXECUTE_CHANNEL = "user-script:run-execute";
@@ -26,9 +27,17 @@ export const USER_SCRIPT_RUN_RELEASE_CHANNEL = "user-script:run-release";
 
 export const USER_SCRIPT_RUN_CHUNK_BYTES = 64 * 1024 * 1024;
 
+// An import run with a scriptPath uses that file directly; without one, begin
+// shows the import dialog (the flow band weighting and band selection keep).
+// The Custom transform picks its file up front through the pick-script channel
+// and runs at Apply time with the remembered path.
 export type UserScriptRunSource =
   | { readonly mode: "formula"; readonly expression: string }
-  | { readonly mode: "import" };
+  | { readonly mode: "import"; readonly scriptPath?: string };
+
+export type UserScriptPickScriptResult =
+  | { readonly canceled: true }
+  | { readonly canceled: false; readonly filePath: string; readonly fileName: string };
 
 export type UserScriptRunResultKind = "value" | "cube";
 

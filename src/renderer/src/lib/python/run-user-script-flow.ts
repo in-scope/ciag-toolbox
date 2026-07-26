@@ -51,8 +51,8 @@ function registerViewportBusyEntryForUserScriptRun(
   });
 }
 
+// Deliberately no "on the stack": a run only stages a result (the stack
+// changes on Apply), and the old wording read as if the stack was mutating.
 export function describeUserScriptRunBusyLabel(source: ToolboxRunUserScriptSource): string {
-  return source.mode === "formula"
-    ? "Running formula on the stack..."
-    : "Running imported tool on the stack...";
+  return source.mode === "formula" ? "Running formula..." : "Running imported tool...";
 }

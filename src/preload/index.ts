@@ -39,11 +39,13 @@ import {
   type SaveImageReleaseRequest,
 } from "../shared/chunked-save-image-protocol";
 import {
+  USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
   USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
+  type UserScriptPickScriptResult,
   type UserScriptRunBeginRequest,
   type UserScriptRunBeginResult,
   type UserScriptRunCubeChunkRequest,
@@ -369,6 +371,10 @@ function setPythonEnvironmentThroughMainProcess(
 // keep each context-bridge crossing and each invoke far below the size that
 // wedged the renderer. The renderer orchestrator
 // (lib/python/run-user-script-chunked.ts) drives the sequence.
+function pickUserScriptFileThroughMainProcess(): Promise<UserScriptPickScriptResult> {
+  return ipcRenderer.invoke(USER_SCRIPT_PICK_SCRIPT_CHANNEL) as Promise<UserScriptPickScriptResult>;
+}
+
 function beginUserScriptRunThroughMainProcess(
   request: UserScriptRunBeginRequest,
 ): Promise<UserScriptRunBeginResult> {
@@ -473,6 +479,7 @@ const apiBridge = {
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
+  pickUserScriptFile: pickUserScriptFileThroughMainProcess,
   beginUserScriptRun: beginUserScriptRunThroughMainProcess,
   sendUserScriptRunCubeChunk: sendUserScriptRunCubeChunkToMainProcess,
   executeUserScriptRun: executeUserScriptRunInMainProcess,

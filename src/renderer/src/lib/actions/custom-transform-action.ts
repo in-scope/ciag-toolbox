@@ -7,9 +7,10 @@ import {
   type TransformSourceBandMetadata,
 } from "@/lib/image/band-ops/cube-transform-contract";
 import {
-  readRememberedCubeTransformResultOrNull,
-  type RememberedCubeTransformResult,
-} from "@/lib/image/band-ops/cube-transform-result-store";
+  describeCubeTransformForAudit,
+  describeCubeTransformRunError,
+  type CubeTransformEditingState,
+} from "@/lib/image/band-ops/cube-transform-editing";
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
@@ -17,28 +18,43 @@ import {
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
 import type { RasterImage } from "@/lib/image/raster-image";
+import { runUserScriptOverCubeInChunks } from "@/lib/python/run-user-script-chunked";
+import { buildUserScriptRunCubeInputFromRaster } from "@/lib/python/user-script-cube";
 
 import type { ParameterValuesById } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
 import {
   clearCubeTransformEditingState,
   EMPTY_REMOVED_BAND_INDEXES,
-  type ViewportActionSourceTransform,
+  type TransformProgressCallback,
+  type ViewportActionAsyncSourceTransform,
   type ViewportRenderingState,
 } from "./viewport-action";
 
-// CT-216: transform the WHOLE cube with a one-line Python formula or an imported
-// .py/.zip tool. The scripting worker already produced the transformed cube at
-// Run formula / Import script time (the CT-209/210 model); it is remembered in
-// the cube-transform result store under a token, and the ready choice rides in
-// ViewportRenderingState (written by the embedded editor). Apply resolves the
-// token synchronously, re-validates it against the source it is applied to, and
-// builds a NEW float32 stack whose band count is free (metadata carries through
-// only when the band count is unchanged).
+// The Custom transform runs the user's Python AT APPLY TIME, unlike band
+// weighting and band selection (which still run at Run formula / Import script
+// time): the editor only CONFIGURES the input - a formula expression or a
+// picked .py/.zip file path - and Apply uploads the cube, runs the worker,
+// validates the returned cube against the source, and builds a NEW float32
+// stack whose band count is free (metadata carries through only when the band
+// count is unchanged). A failed run leaves the source panel and the configured
+// input untouched, so the user can correct the script and Apply again; the
+// script file is re-read from disk on every Apply for the same reason.
 
 export const CUSTOM_TRANSFORM_ACTION_ID = "custom-transform";
-const CUSTOM_TRANSFORM_TOKEN_PARAMETER_ID = "customTransformToken";
+const CUSTOM_TRANSFORM_MODE_PARAMETER_ID = "customTransformMode";
+const CUSTOM_TRANSFORM_EXPRESSION_PARAMETER_ID = "customTransformExpression";
+const CUSTOM_TRANSFORM_SCRIPT_PATH_PARAMETER_ID = "customTransformScriptPath";
 const CUSTOM_TRANSFORM_DESCRIPTION_PARAMETER_ID = "customTransformDescription";
+
+const NO_TRANSFORM_CONFIGURED_MESSAGE =
+  "Custom transform needs a formula or an imported tool. Enter one first.";
+
+export type CubeTransformScriptRunner = (
+  raster: RasterImage,
+  source: ToolboxRunUserScriptSource,
+  onProgress?: TransformProgressCallback,
+) => Promise<ToolboxRunUserScriptResult>;
 
 export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
   id: CUSTOM_TRANSFORM_ACTION_ID,
@@ -46,32 +62,39 @@ export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
   icon: Wand2,
   successMessage: "Custom transform applied",
   appliedLabel: "Custom transform",
-  loadingMessage: "Transforming the stack...",
+  loadingMessage: "Running the transform on the stack...",
+  keepsPanelOpenUntilApplySucceeds: true,
   formatAppliedLabel: formatCustomTransformAppliedLabel,
-  prepareParameterValuesForApply: injectCubeTransformChoiceForApply,
+  prepareParameterValuesForApply: injectConfiguredCubeTransformForApply,
   apply: resetStateForTransformedStackOutput,
-  clearConsumedSourceStateAfterApply: clearCubeTransformEditingState,
-  transformSource: createCustomTransformSourceTransform(),
+  transformSourceAsync: createCustomTransformSourceTransform(),
 };
 
-function injectCubeTransformChoiceForApply(
+function injectConfiguredCubeTransformForApply(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
 ): ParameterValuesById {
-  const choice = sourceRenderingState.cubeTransform;
-  if (!choice) {
-    throw new Error("Custom transform needs a transform. Run a formula or import a tool first.");
-  }
+  const config = sourceRenderingState.cubeTransform;
+  if (!config) throw new Error(NO_TRANSFORM_CONFIGURED_MESSAGE);
   return Object.freeze({
     ...rawParameterValues,
-    [CUSTOM_TRANSFORM_TOKEN_PARAMETER_ID]: choice.token,
-    [CUSTOM_TRANSFORM_DESCRIPTION_PARAMETER_ID]: choice.auditDescription,
+    ...buildConfiguredInputParameter(config),
+    [CUSTOM_TRANSFORM_MODE_PARAMETER_ID]: config.kind,
+    [CUSTOM_TRANSFORM_DESCRIPTION_PARAMETER_ID]: describeCubeTransformForAudit(config),
   });
 }
 
+function buildConfiguredInputParameter(config: CubeTransformEditingState): ParameterValuesById {
+  if (config.kind === "formula") {
+    return { [CUSTOM_TRANSFORM_EXPRESSION_PARAMETER_ID]: config.expression.trim() };
+  }
+  return { [CUSTOM_TRANSFORM_SCRIPT_PATH_PARAMETER_ID]: config.filePath };
+}
+
 // The output band count can differ from the source, so band-dependent viewer
-// state resets like the other band-count-changing operations, and the consumed
-// choice clears.
+// state resets like the other band-count-changing operations. The OUTPUT panel
+// starts without a configured transform; the source panel keeps its config so
+// the user can adjust and Apply again.
 function resetStateForTransformedStackOutput(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
@@ -85,41 +108,70 @@ function resetStateForTransformedStackOutput(
   });
 }
 
-function createCustomTransformSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+export function createCustomTransformSourceTransform(
+  runScript: CubeTransformScriptRunner = runCubeTransformScriptThroughWorker,
+): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    return { kind: "raster", raster: buildTransformedStack(source.raster, parameterValues) };
+    const scriptSource = readConfiguredScriptSource(parameterValues);
+    const result = await runScript(source.raster, scriptSource, onProgress);
+    return { kind: "raster", raster: buildStackFromRunResult(source.raster, result) };
   };
 }
 
-function buildTransformedStack(
+function runCubeTransformScriptThroughWorker(
   raster: RasterImage,
-  parameterValues: ParameterValuesById,
+  source: ToolboxRunUserScriptSource,
+  onProgress?: TransformProgressCallback,
+): Promise<ToolboxRunUserScriptResult> {
+  return runUserScriptOverCubeInChunks(
+    window.toolboxApi,
+    buildUserScriptRunCubeInputFromRaster(raster),
+    source,
+    "cube",
+    { onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress) },
+  );
+}
+
+// The upload fraction is determinate; the worker-run phase reports nothing, so
+// the busy bar holds at the uploaded fraction while the Python executes.
+function reportUploadFractionAsApplyProgress(
+  fraction: number | null,
+  onProgress: TransformProgressCallback | undefined,
+): void {
+  if (fraction !== null) onProgress?.(fraction);
+}
+
+function readConfiguredScriptSource(parameterValues: ParameterValuesById): ToolboxRunUserScriptSource {
+  const expression = parameterValues[CUSTOM_TRANSFORM_EXPRESSION_PARAMETER_ID];
+  if (typeof expression === "string") return { mode: "formula", expression };
+  const scriptPath = parameterValues[CUSTOM_TRANSFORM_SCRIPT_PATH_PARAMETER_ID];
+  if (typeof scriptPath === "string") return { mode: "import", scriptPath };
+  throw new Error(NO_TRANSFORM_CONFIGURED_MESSAGE);
+}
+
+function buildStackFromRunResult(
+  raster: RasterImage,
+  result: ToolboxRunUserScriptResult,
 ): RasterImage {
-  const remembered = readRememberedTransformOrThrow(readTransformTokenOrThrow(parameterValues));
+  if (result.status !== "completed-cube") {
+    throw new Error(describeCubeTransformRunError(describeNonCubeRunOutcome(result)));
+  }
   const validated = validateTransformedCubeAgainstSource(
-    remembered.shape,
-    remembered.bands,
+    result.shape,
+    result.bands,
     raster.height,
     raster.width,
   );
   return buildFloat32StackFromValidatedCube(raster, validated);
 }
 
-function readTransformTokenOrThrow(parameterValues: ParameterValuesById): string {
-  const raw = parameterValues[CUSTOM_TRANSFORM_TOKEN_PARAMETER_ID];
-  if (typeof raw !== "string") {
-    throw new Error("Custom transform needs a transform. Run a formula or import a tool first.");
-  }
-  return raw;
-}
-
-function readRememberedTransformOrThrow(token: string): RememberedCubeTransformResult {
-  const result = readRememberedCubeTransformResultOrNull(token);
-  if (!result) {
-    throw new Error("The transformed stack is no longer available. Run the formula or tool again.");
-  }
-  return result;
+function describeNonCubeRunOutcome(
+  result: Exclude<ToolboxRunUserScriptResult, { status: "completed-cube" }>,
+): string {
+  if (result.status === "failed") return result.message;
+  if (result.status === "canceled") return "The transform run was canceled.";
+  return "The script returned an unexpected result.";
 }
 
 function buildFloat32StackFromValidatedCube(

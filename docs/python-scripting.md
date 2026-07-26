@@ -8,6 +8,13 @@ Three operations in the toolbox can run your own Python against the current stac
 
 Every result opens in a new panel by default, with an entry in the stack's audit trail.
 
+## Run, then Apply
+
+When your code runs depends on the operation:
+
+- **Band weighting and band selection**: Run formula or Import script... executes your code immediately, and the panel reports the ready result. Click Apply to commit that result; no Python runs at Apply time. The staged result is discarded when you close the operation panel or switch to another operation.
+- **Custom transform**: typing a formula or importing a tool only configures the transform; the status line reports what is set, for example "Tool loaded: my-tool.py". Click Apply to run your code on the stack and open the transformed result. If the run fails, the panel stays open with your formula or tool still set, and the script file is re-read on every Apply, so you can fix the file in your editor and click Apply again.
+
 ## Two ways to provide code
 
 ### The inline formula

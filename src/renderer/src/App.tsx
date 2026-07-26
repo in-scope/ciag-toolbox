@@ -743,12 +743,7 @@ function buildActiveCustomTransformEditorElementOrNull(
   const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
   if (!shouldEmbedCustomTransformEditorInOperationPanel(placement)) return null;
   if (content?.source.kind !== "raster") return null;
-  return (
-    <ToolOptionsCustomTransformEditor
-      viewportIndex={singleSelectedSource.index}
-      raster={content.source.raster}
-    />
-  );
+  return <ToolOptionsCustomTransformEditor viewportIndex={singleSelectedSource.index} />;
 }
 
 function clearSelectionWhenClickIsOutsideAnyCell(
@@ -2519,12 +2514,30 @@ function runApplyActionFromPanel(
     readRasterAtViewportIndexOrNull(bindings.imagesByIndex, source.index),
   );
   if (merged === null) return;
+  const boundBindings = bindApplyOutcomeToPanelClosure(action, bindings, setActiveAction);
   if (options.openInNewViewport) {
-    applyActionToDuplicateOfSource(action, merged, source.index, bindings);
+    applyActionToDuplicateOfSource(action, merged, source.index, boundBindings);
   } else {
-    applyActionInPlaceAtSourceIndex(action, merged, source.index, bindings);
+    applyActionInPlaceAtSourceIndex(action, merged, source.index, boundBindings);
   }
-  setActiveAction(null);
+  if (!action.keepsPanelOpenUntilApplySucceeds) setActiveAction(null);
+}
+
+// An action with keepsPanelOpenUntilApplySucceeds (the Custom transform, whose
+// Python runs at Apply) keeps its panel open through the run: success closes
+// it, failure leaves it open with the configured input intact for correction.
+function bindApplyOutcomeToPanelClosure(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+  setActiveAction: SetActiveAction,
+): ApplyActionFlowBindings {
+  if (!action.keepsPanelOpenUntilApplySucceeds) return bindings;
+  return {
+    ...bindings,
+    reportApplyOutcome: (outcome) => {
+      if (outcome.succeeded) setActiveAction(null);
+    },
+  };
 }
 
 function deriveActionAvailabilityForActiveViewport(

@@ -65,7 +65,7 @@ describe("runUserScriptOnRasterShowingViewportBusy", () => {
       buildFakeApi({ status: "ready", token: "tok", sourceName: null }),
     );
     expect(result).toEqual({ status: "completed", value: [1] });
-    expect(log[0]).toEqual({ kind: "register", detail: "Running formula on the stack..." });
+    expect(log[0]).toEqual({ kind: "register", detail: "Running formula..." });
     expect(log.at(-1)).toEqual({ kind: "clear" });
     const progressUpdates = log.filter((entry) => entry.kind === "update").map((entry) => entry.detail);
     expect(progressUpdates[0]).toBe(0);
@@ -87,12 +87,10 @@ describe("runUserScriptOnRasterShowingViewportBusy", () => {
 });
 
 describe("describeUserScriptRunBusyLabel", () => {
-  it("names the formula and imported-tool runs in the locked vocabulary", () => {
+  it("names the runs without implying the stack changes (that happens on Apply)", () => {
     expect(describeUserScriptRunBusyLabel({ mode: "formula", expression: "x" })).toBe(
-      "Running formula on the stack...",
+      "Running formula...",
     );
-    expect(describeUserScriptRunBusyLabel({ mode: "import" })).toBe(
-      "Running imported tool on the stack...",
-    );
+    expect(describeUserScriptRunBusyLabel({ mode: "import" })).toBe("Running imported tool...");
   });
 });
