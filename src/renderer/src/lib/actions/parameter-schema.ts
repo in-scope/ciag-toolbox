@@ -7,6 +7,10 @@ export interface ParameterSchemaBase {
   // CT-194: only render this field when another parameter equals a given value
   // (e.g. the clip lo/hi inputs appear only when the method is "Clip by value").
   readonly visibleWhen?: ParameterVisibilityCondition;
+  // CT-247: hide this field when the source is a true-colour composite (e.g. the
+  // Brightness & Contrast "Apply to all bands" switch - a photo always adjusts
+  // all three channels, so the choice would be meaningless there).
+  readonly hiddenForTrueColorComposite?: boolean;
 }
 
 export interface ParameterVisibilityCondition {
@@ -147,6 +151,17 @@ export function isParameterSchemaVisible(
 ): boolean {
   if (!schema.visibleWhen) return true;
   return values[schema.visibleWhen.parameterId] === schema.visibleWhen.equals;
+}
+
+// CT-247: source-aware visibility on top of the value-driven CT-194 gate: a field
+// flagged hiddenForTrueColorComposite disappears when the source is a photo.
+export function isParameterSchemaVisibleForSource(
+  schema: ParameterSchema,
+  values: ParameterValuesById,
+  sourceIsTrueColorComposite: boolean,
+): boolean {
+  if (schema.hiddenForTrueColorComposite && sourceIsTrueColorComposite) return false;
+  return isParameterSchemaVisible(schema, values);
 }
 
 export function readClipBoundOrDefault(value: ParameterValue | undefined, fallback: number): number {

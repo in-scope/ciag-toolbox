@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { applyBrightnessToRasterBands, brightnessDeltaForRangeFractionOfBand } from "./apply-brightness";
 import { applyContrastToRasterBands } from "./apply-contrast";
-import { buildBrightnessContrastPreviewLutOrNull } from "./brightness-contrast-preview";
+import {
+  buildBrightnessContrastCompositePreviewLutsOrNull,
+  buildBrightnessContrastPreviewLutOrNull,
+} from "./brightness-contrast-preview";
 import type { RasterImage } from "./raster-image";
 
 const ENTRY_COUNT = 1024;
@@ -18,6 +21,32 @@ function makeUint8Raster(values: ReadonlyArray<number>): RasterImage {
     sampleFormat: "uint",
     bitsPerSample: 8,
   };
+}
+
+const COMPOSITE_RED_VALUES = [200, 10, 255, 0];
+const COMPOSITE_GREEN_VALUES = [100, 20, 0, 255];
+const COMPOSITE_BLUE_VALUES = [50, 30, 0, 0];
+
+function makeRgbCompositeRaster(): RasterImage {
+  return {
+    bandPixels: [
+      Uint8Array.from(COMPOSITE_RED_VALUES),
+      Uint8Array.from(COMPOSITE_GREEN_VALUES),
+      Uint8Array.from(COMPOSITE_BLUE_VALUES),
+    ],
+    width: COMPOSITE_RED_VALUES.length,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+    colorInterpretation: "rgb",
+  };
+}
+
+function makeThreeBandScientificRaster(): RasterImage {
+  const raster = { ...makeRgbCompositeRaster() };
+  delete raster.colorInterpretation;
+  return raster;
 }
 
 function clampToUnitInterval(value: number): number {
@@ -83,5 +112,51 @@ describe("buildBrightnessContrastPreviewLutOrNull", () => {
       const previewed = sampleLutAtDisplayCoordinate(lut, value / UINT8_MAX);
       expect(previewed).toBeCloseTo(applied[pixelIndex]!, 2);
     });
+  });
+});
+
+// CT-247: the composite preview must equal the committed Apply over bands 0/1/2,
+// where contrast centres on each channel's OWN brightened mean.
+function normalizedAppliedCompositeChannels(
+  brightnessPercent: number,
+  contrastRatio: number,
+): ReadonlyArray<ReadonlyArray<number>> {
+  const raster = makeRgbCompositeRaster();
+  const delta = brightnessDeltaForRangeFractionOfBand(raster.bandPixels[0]!, "uint", brightnessPercent / 100);
+  const brightened = applyBrightnessToRasterBands(raster, [0, 1, 2], delta);
+  const contrasted = applyContrastToRasterBands(brightened, [0, 1, 2], contrastRatio);
+  return contrasted.bandPixels.map((band) => Array.from(band).map((value) => value / UINT8_MAX));
+}
+
+describe("buildBrightnessContrastCompositePreviewLutsOrNull", () => {
+  it("returns null for a 3-band scientific stack (no rgb interpretation)", () => {
+    expect(
+      buildBrightnessContrastCompositePreviewLutsOrNull(makeThreeBandScientificRaster(), 20, 1.2),
+    ).toBeNull();
+  });
+
+  it("returns null for the identity adjustment and for a missing raster", () => {
+    expect(buildBrightnessContrastCompositePreviewLutsOrNull(makeRgbCompositeRaster(), 0, 1)).toBeNull();
+    expect(buildBrightnessContrastCompositePreviewLutsOrNull(null, 20, 1.2)).toBeNull();
+  });
+
+  it("pins each channel LUT to the committed Apply over bands 0/1/2 (per-channel brightened means)", () => {
+    const luts = buildBrightnessContrastCompositePreviewLutsOrNull(makeRgbCompositeRaster(), 20, 1.2)!;
+    const applied = normalizedAppliedCompositeChannels(20, 1.2);
+    const channelValues = [COMPOSITE_RED_VALUES, COMPOSITE_GREEN_VALUES, COMPOSITE_BLUE_VALUES];
+    [luts.red, luts.green, luts.blue].forEach((lut, channelIndex) => {
+      channelValues[channelIndex]!.forEach((value, pixelIndex) => {
+        const previewed = sampleLutAtDisplayCoordinate(lut, value / UINT8_MAX);
+        expect(previewed).toBeCloseTo(applied[channelIndex]![pixelIndex]!, 2);
+      });
+    });
+  });
+
+  it("centres contrast per channel: the same input value maps differently on channels with different means", () => {
+    const luts = buildBrightnessContrastCompositePreviewLutsOrNull(makeRgbCompositeRaster(), 0, 2)!;
+    const midCoordinate = 100 / UINT8_MAX;
+    const redPreview = sampleLutAtDisplayCoordinate(luts.red, midCoordinate);
+    const bluePreview = sampleLutAtDisplayCoordinate(luts.blue, midCoordinate);
+    expect(Math.abs(redPreview - bluePreview)).toBeGreaterThan(0.05);
   });
 });

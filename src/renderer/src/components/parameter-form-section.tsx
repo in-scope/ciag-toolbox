@@ -30,7 +30,7 @@ import {
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
   describeClipBoundsErrorOrNull,
-  isParameterSchemaVisible,
+  isParameterSchemaVisibleForSource,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
   readClipBoundOrDefault,
@@ -59,6 +59,7 @@ interface ParameterFormSectionProps {
   values: ParameterValuesById;
   onChangeValue: (id: string, next: ParameterValue) => void;
   sourceBandCount?: number | null;
+  sourceIsTrueColorComposite?: boolean;
   loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
 }
 
@@ -73,6 +74,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           value={readParameterRowValue(schema, props.values)}
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
+          sourceIsTrueColorComposite={props.sourceIsTrueColorComposite ?? false}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
           onChangeValueAtId={props.onChangeValue}
@@ -96,13 +98,16 @@ interface ParameterFieldRowProps {
   value: ParameterValue;
   allValues: ParameterValuesById;
   sourceBandCount: number | null;
+  sourceIsTrueColorComposite: boolean;
   loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
   onChangeValue: (next: ParameterValue) => void;
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
 
 function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
-  if (!isParameterSchemaVisible(props.schema, props.allValues)) return null;
+  if (!isParameterSchemaVisibleForSource(props.schema, props.allValues, props.sourceIsTrueColorComposite)) {
+    return null;
+  }
   if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
@@ -111,6 +116,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
         value={props.value}
         allValues={props.allValues}
         sourceBandCount={props.sourceBandCount}
+        sourceIsTrueColorComposite={props.sourceIsTrueColorComposite}
         loadedReferenceCandidates={props.loadedReferenceCandidates}
         onChangeValue={props.onChangeValue}
         onChangeValueAtId={props.onChangeValueAtId}

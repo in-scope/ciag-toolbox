@@ -7,6 +7,7 @@ import {
   describeBlockingParameterErrorOrNull,
   describeClipBoundsErrorOrNull,
   isParameterSchemaVisible,
+  isParameterSchemaVisibleForSource,
   parseParameterValuesFromJsonString,
   readBandRangeTextOrEmpty,
   readCubeScopeChoiceOrDefault,
@@ -217,6 +218,34 @@ describe("clip-bounds schema defaults and visibility (CT-194)", () => {
 
   it("treats a schema without a visibleWhen condition as always visible", () => {
     expect(isParameterSchemaVisible(buildCubeScopeSchema(), {})).toBe(true);
+  });
+});
+
+describe("isParameterSchemaVisibleForSource (CT-247)", () => {
+  const compositeHiddenSchema: ParameterSchema = {
+    kind: "boolean",
+    id: "applyToAllBands",
+    label: "Apply to all bands",
+    defaultValue: false,
+    hiddenForTrueColorComposite: true,
+  };
+
+  it("hides a composite-flagged field when the source is a true-colour composite", () => {
+    expect(isParameterSchemaVisibleForSource(compositeHiddenSchema, {}, true)).toBe(false);
+  });
+
+  it("shows a composite-flagged field for a scientific stack", () => {
+    expect(isParameterSchemaVisibleForSource(compositeHiddenSchema, {}, false)).toBe(true);
+  });
+
+  it("keeps unflagged fields visible for a composite", () => {
+    expect(isParameterSchemaVisibleForSource(buildCubeScopeSchema(), {}, true)).toBe(true);
+  });
+
+  it("still honours the value-driven visibleWhen gate", () => {
+    const schema = buildClipBoundsSchema();
+    expect(isParameterSchemaVisibleForSource(schema, { method: "min-max" }, false)).toBe(false);
+    expect(isParameterSchemaVisibleForSource(schema, { method: "clip-absolute" }, false)).toBe(true);
   });
 });
 

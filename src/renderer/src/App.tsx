@@ -86,7 +86,10 @@ import {
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
-import { buildBrightnessContrastPreviewLutOrNull } from "@/lib/image/brightness-contrast-preview";
+import {
+  buildBrightnessContrastCompositePreviewLutsOrNull,
+  buildBrightnessContrastPreviewLutOrNull,
+} from "@/lib/image/brightness-contrast-preview";
 import { buildThresholdPreviewLutOrNull } from "@/lib/image/threshold/threshold-preview";
 import {
   buildComposedChannelPreviewLutOrNull,
@@ -2012,8 +2015,10 @@ function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInp
   const toneCurveLut = useSingleBandToneCurvePreviewLut(toneCurveRaster, state);
   const brightnessContrastLut = useBrightnessContrastPreviewLut(inputs, state);
   const thresholdLut = useThresholdPreviewLut(inputs, state);
-  const channelLookupTables = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
+  const toneCurveChannelLuts = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
+  const brightnessContrastChannelLuts = useBrightnessContrastCompositePreviewLuts(inputs);
   const lookupTable = toneCurveLut ?? brightnessContrastLut ?? thresholdLut;
+  const channelLookupTables = toneCurveChannelLuts ?? brightnessContrastChannelLuts;
   return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
 }
 
@@ -2037,6 +2042,7 @@ function useThresholdPreviewLut(
 // CT-186: brightness/contrast previews through the SAME single-band display LUT slot
 // the tone curve uses (only one tool is open at a time). It tracks the VIEWED band
 // only - even when "Apply to all bands" is on - and stays display-only until Apply.
+// A composite previews through the per-channel triple below instead (CT-247).
 function useBrightnessContrastPreviewLut(
   inputs: PublishActiveToolPreviewInputs,
   state: ViewportRenderingState | null,
@@ -2052,6 +2058,21 @@ function useBrightnessContrastPreviewLut(
         ? null
         : buildBrightnessContrastPreviewLutOrNull(raster, bandIndex, brightnessPercent, contrastRatio),
     [isComposite, raster, bandIndex, brightnessPercent, contrastRatio],
+  );
+}
+
+// CT-247: a true-colour composite previews brightness/contrast live by remapping
+// ALL THREE channels through the CT-177 per-channel LUT triple (the tone-curve
+// composite path); display-only, the data readout is unchanged until Apply.
+function useBrightnessContrastCompositePreviewLuts(
+  inputs: PublishActiveToolPreviewInputs,
+): ToneCurveChannelPreviewLuts | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "brightness-contrast");
+  const brightnessPercent = readBrightnessPercent(inputs.parameterValues);
+  const contrastRatio = readContrastRatio(inputs.parameterValues);
+  return useMemo(
+    () => buildBrightnessContrastCompositePreviewLutsOrNull(raster, brightnessPercent, contrastRatio),
+    [raster, brightnessPercent, contrastRatio],
   );
 }
 

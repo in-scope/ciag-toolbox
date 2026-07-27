@@ -322,6 +322,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
           schemas={props.parameterSchemas}
           values={props.parameterValues}
           sourceBandCount={props.sourceViewport?.sourceBandCount ?? null}
+          sourceIsTrueColorComposite={props.sourceViewport?.isTrueColorComposite ?? false}
           loadedReferenceCandidates={props.loadedReferenceCandidates}
           onChangeValue={props.onChangeParameterValue}
         />

@@ -124,7 +124,55 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
       "Brightness -20%, contrast 1.50 (all bands)",
     );
   });
+
+  it("forces the all-bands flag on for a true-colour composite so the label reads all bands (CT-247)", () => {
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: 20, contrastRatio: 1, applyToAllBands: false },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeRgbCompositeRaster(),
+    );
+    expect(prepared.applyToAllBands).toBe(true);
+    expect(BRIGHTNESS_CONTRAST_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Brightness +20%, contrast 1.00 (all bands)",
+    );
+  });
+
+  it("leaves the user's all-bands choice alone for a scientific stack (CT-247)", () => {
+    const prepared = BRIGHTNESS_CONTRAST_ACTION.prepareParameterValuesForApply!(
+      { brightnessPercent: 20, contrastRatio: 1, applyToAllBands: false },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeThreeBandScientificStack(),
+    );
+    expect(prepared.applyToAllBands).toBe(false);
+  });
+
+  it("adjusts all three channels of a composite even without the all-bands flag, centring contrast per channel (CT-247)", async () => {
+    const result = await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoPixelRgbCompositeRaster() },
+      { brightnessPercent: 0, contrastRatio: 2, applyToAllBands: false },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 150]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([30, 70]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([5, 25]);
+  });
 });
+
+// Two pixels per channel with distinct channel means (50 / 50 / 15), so a
+// contrast of 2 stretches each channel around ITS OWN mean.
+function makeTwoPixelRgbCompositeRaster(): RasterImage {
+  return {
+    bandPixels: [Uint8Array.from([0, 100]), Uint8Array.from([40, 60]), Uint8Array.from([10, 20])],
+    width: 2,
+    height: 1,
+    bandCount: 3,
+    sampleFormat: "uint",
+    bitsPerSample: 8,
+    colorInterpretation: "rgb",
+  };
+}
 
 function makeSingleBandUint8Raster(values: ReadonlyArray<number>): RasterImage {
   return {

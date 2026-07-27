@@ -849,12 +849,15 @@ const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
   step: 0.05,
 };
 
+// CT-247: a true-colour photo always adjusts all three channels, so the
+// all-bands choice is hidden for composites (scientific stacks keep it).
 const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
   description: "Off applies to the selected band only; on applies to every band in the stack.",
   defaultValue: false,
+  hiddenForTrueColorComposite: true,
 };
 
 export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
@@ -874,14 +877,22 @@ export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
   transformSourceAsync: createBrightnessContrastSourceTransform(),
 };
 
+// CT-247: a composite Apply always adjusts all three channels, so the audit
+// params record applyToAllBands=true and the History label reads "all bands".
 function injectSelectedBandIndexForBrightnessContrast(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
 ): ParameterValuesById {
-  return Object.freeze({
+  const values: Record<string, ParameterValue> = {
     ...rawParameterValues,
     [BRIGHTNESS_CONTRAST_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
-  });
+  };
+  if (sourceRaster && shouldRenderRasterAsRgbComposite(sourceRaster)) {
+    values[BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID] = true;
+  }
+  return Object.freeze(values);
 }
 
 function createBrightnessContrastSourceTransform(): ViewportActionAsyncSourceTransform {
@@ -918,11 +929,15 @@ async function adjustBrightnessThenContrast(
   );
 }
 
+// CT-247: a true-colour composite ALWAYS adjusts all three channels (contrast
+// still centres on each band's own brightened mean inside the per-band apply).
 function resolveBrightnessContrastBandIndexes(
   parameterValues: ParameterValuesById,
   raster: RasterImage,
 ): ReadonlyArray<number> {
-  if (readApplyToAllBands(parameterValues)) return listAllBandIndexes(raster.bandPixels.length);
+  if (shouldRenderRasterAsRgbComposite(raster) || readApplyToAllBands(parameterValues)) {
+    return listAllBandIndexes(raster.bandPixels.length);
+  }
   return [readBrightnessContrastTargetBandIndex(parameterValues)];
 }
 
