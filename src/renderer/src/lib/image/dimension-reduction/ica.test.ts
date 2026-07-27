@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyIca, fitIca } from "./ica";
+import {
+  applyIca,
+  describeFastIcaFitSampling,
+  fitIca,
+  fitIcaReportingProgress,
+  MAX_FAST_ICA_FIT_SAMPLES,
+} from "./ica";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
@@ -96,6 +102,21 @@ describe("fitIca / applyIca", () => {
     expect(fitIca(MIXED_CUBE, 2).componentVectors).toEqual(fitIca(MIXED_CUBE, 2).componentVectors);
   });
 
+  // CT-240: the sample matrix aliases the raster's own typed arrays, so the fit
+  // must read integer storage to the exact same float64 values a copy held.
+  it("fits identically over uint16 storage and a float64 copy of the same values", () => {
+    const integerBands = [
+      SAWTOOTH.map((value) => Math.round(600 + 100 * value)),
+      SQUARE.map((value, index) => Math.round(1200 + 90 * value + 3 * (index % 7))),
+    ];
+    const float64Cube = makeSampleMatrix(integerBands);
+    const uint16Cube: CubeSampleMatrix = {
+      ...float64Cube,
+      bandValues: integerBands.map((band) => Uint16Array.from(band)),
+    };
+    expect(fitIca(uint16Cube, 2)).toEqual(fitIca(float64Cube, 2));
+  });
+
   it("keeps only the requested number of components", () => {
     const fit = fitIca(MIXED_CUBE, 2);
     const projection = applyIca(MIXED_CUBE, fit, 1);
@@ -111,11 +132,52 @@ describe("fitIca / applyIca", () => {
     expect(projection[1]![0]!).toBeCloseTo(0, 6);
   });
 
+  // CT-240: cubes at or below the cap keep stride 1 (bit-identical fits); a
+  // reference-scale cube strides uniformly down to at most the cap, which is
+  // what bounds ICA's whitened working set inside the renderer's pool.
+  it("samples every pixel below the FastICA cap and strides uniformly above it", () => {
+    expect(describeFastIcaFitSampling(1_000)).toEqual({ stride: 1, sampledCount: 1_000 });
+    expect(describeFastIcaFitSampling(MAX_FAST_ICA_FIT_SAMPLES)).toEqual({
+      stride: 1,
+      sampledCount: MAX_FAST_ICA_FIT_SAMPLES,
+    });
+    const atScale = describeFastIcaFitSampling(50_000_000);
+    expect(atScale.stride).toBe(13);
+    expect(atScale.sampledCount).toBe(Math.ceil(50_000_000 / 13));
+    expect(atScale.sampledCount).toBeLessThanOrEqual(MAX_FAST_ICA_FIT_SAMPLES);
+  });
+
   it("terminates with finite component vectors on near-Gaussian data (the max-iteration cap)", () => {
     const gaussianCube = makeSampleMatrix([approximatelyGaussianStream(1), approximatelyGaussianStream(98765)]);
     const fit = fitIca(gaussianCube, 2);
     const everyEntry = fit.componentVectors.flat();
     expect(everyEntry).toHaveLength(4);
     expect(everyEntry.every((value) => Number.isFinite(value))).toBe(true);
+  });
+});
+
+// CT-227: the async twin runs the exact sync steps (whitening covariance,
+// whitened projections, FastICA fixed-point updates), reporting the whitening
+// into the first half of the fit window and one tick per fixed-point iteration
+// (against the iteration cap) into the second.
+describe("fitIcaReportingProgress (CT-227)", () => {
+  it("produces a fit identical to the sync fitIca", async () => {
+    expect(await fitIcaReportingProgress(MIXED_CUBE, 2)).toEqual(fitIca(MIXED_CUBE, 2));
+  });
+
+  it("matches the sync fit on near-Gaussian data where the iteration cap bites", async () => {
+    const gaussianCube = makeSampleMatrix([approximatelyGaussianStream(1), approximatelyGaussianStream(98765)]);
+    expect(await fitIcaReportingProgress(gaussianCube, 2)).toEqual(fitIca(gaussianCube, 2));
+  });
+
+  it("ticks monotonically within 0..1 with whitening ticks then per-iteration ticks", async () => {
+    const ticks: number[] = [];
+    await fitIcaReportingProgress(MIXED_CUBE, 2, (fraction) => ticks.push(fraction));
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
+    expect(ticks.some((fraction) => fraction <= 0.5)).toBe(true);
+    expect(ticks.some((fraction) => fraction > 0.5 && fraction < 1)).toBe(true);
   });
 });

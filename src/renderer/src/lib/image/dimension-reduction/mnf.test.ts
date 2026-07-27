@@ -5,7 +5,9 @@ import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samp
 import {
   applyMnf,
   estimateShiftDifferenceNoiseCovariance,
+  estimateShiftDifferenceNoiseCovarianceReportingProgress,
   fitMnf,
+  fitMnfReportingProgress,
   noiseFractionPerComponent,
 } from "./mnf";
 
@@ -83,6 +85,22 @@ describe("fitMnf", () => {
     expect(correlationWithHighSnr).toBeGreaterThan(0.9);
     expect(correlationWithHighSnr).toBeGreaterThan(correlationWithLowSnr);
   });
+
+  // CT-240: the sample matrix aliases the raster's own typed arrays, so the fit
+  // (noise covariance included) must read integer storage to the exact same
+  // float64 values a copy held.
+  it("fits identically over uint16 storage and a float64 copy of the same values", () => {
+    const integerBands = [
+      [600, 601, 640, 700, 733, 799, 610, 620, 630],
+      [1200, 1210, 1290, 1400, 1470, 1598, 1230, 1250, 1260],
+    ];
+    const float64Cube = makeSampleMatrix(3, 3, integerBands);
+    const uint16Cube: CubeSampleMatrix = {
+      ...float64Cube,
+      bandValues: integerBands.map((band) => Uint16Array.from(band)),
+    };
+    expect(fitMnf(uint16Cube, 2)).toEqual(fitMnf(float64Cube, 2));
+  });
 });
 
 // CT-195: when the noise covariance is rank-deficient (e.g. two bands carrying
@@ -137,6 +155,53 @@ describe("fitMnf on a rank-deficient-noise cube (CT-195 white-screen regression)
         expect(Number.isFinite(value)).toBe(true);
         expect(Math.abs(value)).toBeLessThan(HALF_FLOAT_MAX_FINITE);
       }
+    }
+  });
+});
+
+// CT-227: the async twin streams the SAME row-range noise accumulator and the
+// SAME per-pair data covariance as the sync fit (identical accumulation order,
+// so identical floats), chunked with a paint yield so the fit stretch of the
+// phase bar advances. The noise pass fills the first half of the fit window and
+// the data covariance pass the second.
+describe("fitMnfReportingProgress (CT-227)", () => {
+  it("produces a fit identical to the sync fitMnf", async () => {
+    expect(await fitMnfReportingProgress(NOISY_RAMP_CUBE, 2)).toEqual(fitMnf(NOISY_RAMP_CUBE, 2));
+  });
+
+  it("matches the sync fit on the rank-deficient-noise cube too", async () => {
+    const cube = rankDeficientNoiseCube();
+    expect(await fitMnfReportingProgress(cube, 2)).toEqual(fitMnf(cube, 2));
+  });
+
+  it("ticks monotonically within 0..1, crossing from the noise pass into the data pass", async () => {
+    const ticks: number[] = [];
+    await fitMnfReportingProgress(NOISY_RAMP_CUBE, 2, (fraction) => ticks.push(fraction));
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
+    expect(ticks.some((fraction) => fraction <= 0.5)).toBe(true);
+    expect(ticks.some((fraction) => fraction > 0.5 && fraction < 1)).toBe(true);
+  });
+});
+
+describe("estimateShiftDifferenceNoiseCovarianceReportingProgress (CT-227)", () => {
+  it("matches the sync streaming estimator exactly", async () => {
+    expect(await estimateShiftDifferenceNoiseCovarianceReportingProgress(NOISY_RAMP_CUBE, 2)).toEqual(
+      estimateShiftDifferenceNoiseCovariance(NOISY_RAMP_CUBE, 2),
+    );
+  });
+
+  it("ticks the horizontal pass into the first half and the vertical pass into the second", async () => {
+    const ticks: number[] = [];
+    await estimateShiftDifferenceNoiseCovarianceReportingProgress(NOISY_RAMP_CUBE, 2, (fraction) =>
+      ticks.push(fraction),
+    );
+    expect(ticks).toContain(0.5);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
     }
   });
 });

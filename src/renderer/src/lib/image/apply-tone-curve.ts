@@ -16,6 +16,11 @@ import {
   computeRasterBandRawValueExtents,
   type SingleBandScalarExtents,
 } from "@/lib/image/compute-image-channel-extents";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 export interface ToneCurveAnchor {
   readonly input: number;
@@ -191,6 +196,25 @@ export function applyToneCurveToWholeStackPerBandMinMax(
   );
 }
 
+// CT-222: the async twin of applyToneCurveToWholeStackPerBandMinMax. Identical
+// per-band math, one progress tick per band.
+export async function applyToneCurveToWholeStackPerBandMinMaxReportingProgress(
+  raster: RasterImage,
+  selectedBandIndex: number,
+  anchors: ReadonlyArray<ToneCurveAnchor>,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const curve = buildMonotoneToneCurve(anchors);
+  const shape = buildNormalizedToneCurveShapeForBand(raster, selectedBandIndex, curve);
+  let current = raster;
+  reportMultiUnitWorkStarting(onProgress, raster.bandPixels.length);
+  for (let bandIndex = 0; bandIndex < raster.bandPixels.length; bandIndex += 1) {
+    current = remapBandThroughShapeByOwnMinMax(current, bandIndex, shape);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, bandIndex + 1, raster.bandPixels.length);
+  }
+  return current;
+}
+
 type NormalizedToneCurveShape = (normalizedInput: number) => number;
 
 function buildNormalizedToneCurveShapeForBand(
@@ -286,7 +310,7 @@ function inputForLookupTableEntry(
 function assertAnchorsAreOrderedWithAtLeastTwo(
   anchors: ReadonlyArray<ToneCurveAnchor>,
 ): ReadonlyArray<ToneCurveAnchor> {
-  if (anchors.length < 2) throw new Error("A tone curve needs at least two anchor points.");
+  if (anchors.length < 2) throw new Error("A contrast curve needs at least two anchor points.");
   assertAnchorInputsStrictlyIncrease(anchors);
   return anchors;
 }
@@ -294,7 +318,7 @@ function assertAnchorsAreOrderedWithAtLeastTwo(
 function assertAnchorInputsStrictlyIncrease(anchors: ReadonlyArray<ToneCurveAnchor>): void {
   for (let index = 1; index < anchors.length; index += 1) {
     if (anchors[index]!.input > anchors[index - 1]!.input) continue;
-    throw new Error("Tone curve anchors must be ordered by strictly increasing input.");
+    throw new Error("Contrast curve anchors must be ordered by strictly increasing input.");
   }
 }
 

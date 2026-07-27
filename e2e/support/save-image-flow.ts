@@ -7,6 +7,7 @@ import type { ElectronApplication, Locator, Page } from "@playwright/test";
 import { enqueueOpenDialogPaths, enqueueSaveDialogPath } from "./dialog-stub-controls";
 import { triggerSaveImageMenuItem } from "./main-process";
 import { applicationToolbar } from "./operations";
+import { runAsStoryboardStep } from "./storyboard-step";
 
 // The Save Image flow has two stages. First the native File > "Save Image..." menu item
 // (driven from the MAIN process, since Playwright cannot click native menus) opens the
@@ -111,12 +112,18 @@ export interface SaveImageExportRequest {
 export async function exportSelectedStackThroughSaveDialog(
   request: SaveImageExportRequest,
 ): Promise<void> {
-  await enqueueSaveDialogPath(request.page, request.destinationPath);
-  await triggerSaveImageMenuItem(request.app);
-  await expect(saveImageFormatPicker(request.page)).toBeVisible();
-  await chooseSaveImageFormat(request.page, request.formatLabel);
-  await confirmSaveImageFormat(request.page);
-  await expectSaveSucceededToast(request.page);
+  await runAsStoryboardStep(
+    request.page,
+    `Save the selected stack as ${request.formatLabel}`,
+    async () => {
+      await enqueueSaveDialogPath(request.page, request.destinationPath);
+      await triggerSaveImageMenuItem(request.app);
+      await expect(saveImageFormatPicker(request.page)).toBeVisible();
+      await chooseSaveImageFormat(request.page, request.formatLabel);
+      await confirmSaveImageFormat(request.page);
+      await expectSaveSucceededToast(request.page);
+    },
+  );
 }
 
 async function expectSaveSucceededToast(page: Page): Promise<void> {
@@ -124,9 +131,11 @@ async function expectSaveSucceededToast(page: Page): Promise<void> {
 }
 
 export async function loadImageFromAbsolutePath(page: Page, absolutePath: string): Promise<void> {
-  await enqueueOpenDialogPaths(page, [absolutePath]);
-  await applicationToolbar(page).getByRole("button", { name: "Open image" }).click();
-  await expect(page.getByText(basename(absolutePath), { exact: false }).first()).toBeVisible();
+  await runAsStoryboardStep(page, `Open ${basename(absolutePath)} as a stack`, async () => {
+    await enqueueOpenDialogPaths(page, [absolutePath]);
+    await applicationToolbar(page).getByRole("button", { name: "Open image" }).click();
+    await expect(page.getByText(basename(absolutePath), { exact: false }).first()).toBeVisible();
+  });
 }
 
 export async function createTemporaryExportDirectory(): Promise<string> {

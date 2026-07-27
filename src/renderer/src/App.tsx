@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 
 import { AboutDialog } from "@/components/about-dialog";
+import { PythonEnvironmentDialog } from "@/components/python-environment-dialog";
 import { AppBusyModal } from "@/components/busy-indicators";
 import { StatusBar } from "@/components/status-bar";
 import {
@@ -28,6 +29,10 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
+import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
+import { ToolOptionsBandSelectionEditor } from "@/components/tool-options-band-selection-editor";
+import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
   Toolbar,
@@ -69,6 +74,10 @@ import {
   type OperationCommandHandlers,
 } from "@/lib/actions/operation-command-bindings";
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
+import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
+import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
+import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
+import { shouldEmbedCustomTransformEditorInOperationPanel } from "@/lib/actions/custom-transform-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
@@ -77,7 +86,11 @@ import {
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
-import { buildBrightnessContrastPreviewLutOrNull } from "@/lib/image/brightness-contrast-preview";
+import {
+  buildBrightnessContrastCompositePreviewLutsOrNull,
+  buildBrightnessContrastPreviewLutOrNull,
+} from "@/lib/image/brightness-contrast-preview";
+import { buildThresholdPreviewLutOrNull } from "@/lib/image/threshold/threshold-preview";
 import {
   buildComposedChannelPreviewLutOrNull,
   isCompositeToneCurvePreviewActive,
@@ -95,7 +108,7 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
-import { rememberReferenceRaster } from "@/lib/image/reference-raster-store";
+import { replaceRememberedPanelReferenceRasters } from "@/lib/image/reference-raster-store";
 import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
@@ -109,18 +122,25 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
-import {
-  planOpenImagePlacement,
-  type OpenImagePlacementPlan,
-} from "@/lib/grid/plan-open-image";
+import { planOpenImagePlacement } from "@/lib/grid/plan-open-image";
 import {
   planOpenImagesPlacement,
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
-import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
-import { runOpenImagesDialogPhase } from "@/lib/image/run-open-images-flow";
+import {
+  DUPLICATE_MEMORY_REFUSAL_MESSAGE,
+  rasterAllocationExceedsMemoryBudget,
+  remainingRasterMemoryBudgetBytes,
+  sumLiveRasterBytesAcrossSources,
+} from "@/lib/image/raster-memory-budget";
+import { estimateSourceCloneBytes } from "@/lib/actions/estimate-apply-allocation";
+import {
+  readAndDecodeSingleOpenedImageFile,
+  readAndDecodeSingleOpenedImageFileOrThrow,
+  runOpenImagesDialogPhase,
+} from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
 import type {
@@ -135,13 +155,22 @@ import {
   removePinnedSpectrumById,
   removeRoiSpectrumById,
 } from "@/lib/image/spectrum-entry";
-import { runSaveImageFlowThroughMainProcess } from "@/lib/image/run-save-image-flow";
+import {
+  buildSaveImageFailureToastText,
+  runSaveImageFlowThroughMainProcess,
+} from "@/lib/image/run-save-image-flow";
 import type { SaveImageFormatId } from "@/lib/image/save-image-formats";
 import {
   findLowestIndexEmptyViewport,
   listOccupiedViewportEntries,
 } from "@/lib/image/find-empty-viewport";
 import { placeClonedSourceContentAtIndex } from "@/lib/image/place-cloned-source-content";
+import { SaveBeforeCloseDialog } from "@/components/save-before-close-dialog";
+import {
+  useProjectContentRevisionTracker,
+  type ProjectContentRevisionTracker,
+} from "@/lib/project/use-project-content-revisions";
+import { useWindowCloseGuard } from "@/lib/project/use-window-close-guard";
 import {
   runOpenProjectFlowThroughMainProcess,
   type OpenedProject,
@@ -205,6 +234,7 @@ import {
   useViewportSelection,
   type ViewportSelectionState,
 } from "@/state/selection-context";
+import { PanelLinkProvider, usePanelLink } from "@/state/panel-link-context";
 import {
   ViewportRenderingProvider,
   useViewportRendering,
@@ -212,9 +242,17 @@ import {
   type ViewportRenderingByIndex,
 } from "@/state/viewport-rendering-context";
 import {
+  clearBandSelectionEditingState,
+  clearBandWeightingEditingState,
+  clearCubeTransformEditingState,
+  clearThresholdEditingState,
   clearToneCurveEditingState,
   DEFAULT_VIEWPORT_RENDERING_STATE,
   EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
+  hasBandSelectionEditingState,
+  hasBandWeightingEditingState,
+  hasCubeTransformEditingState,
+  hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyScope,
   type ViewportRenderingState,
@@ -252,6 +290,7 @@ export function App(): JSX.Element {
   return (
     <TooltipProvider delayDuration={300}>
       <ViewportSelectionProvider>
+        <PanelLinkProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
             <RegionRequestProvider>
@@ -262,6 +301,7 @@ export function App(): JSX.Element {
                     <RightPanelCollapsedStateProvider>
                       <ApplicationShell />
                       <AboutDialog />
+                      <PythonEnvironmentDialog />
                       <AppBusyModal />
                       <Toaster />
                     </RightPanelCollapsedStateProvider>
@@ -272,6 +312,7 @@ export function App(): JSX.Element {
             </RegionRequestProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
+        </PanelLinkProvider>
       </ViewportSelectionProvider>
     </TooltipProvider>
   );
@@ -303,6 +344,7 @@ function ApplicationShell(): JSX.Element {
     replaceSelection,
   } = useViewportSelection();
   const renderingApi = useViewportRendering();
+  const panelLink = usePanelLink();
   const regionTool = useRegionTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
@@ -311,6 +353,7 @@ function ApplicationShell(): JSX.Element {
     useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
+  const projectRevisionTracker = useProjectContentRevisionTracker(imagesByIndex);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
@@ -318,6 +361,7 @@ function ApplicationShell(): JSX.Element {
     setImagesByIndex,
     pruneSelectionToCellCount,
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
+    pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
   });
   const gridLayoutRef = useLatestRef(gridLayout);
   const handleOpenImagesRequested = useOpenImagesThroughDialogHandler({
@@ -345,6 +389,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     currentProjectFilePathRef: useLatestRef(currentProjectFilePath),
     setCurrentProjectFilePath,
+    projectRevisionTracker,
     busyRegistrar,
   });
   useMenuSaveProjectTriggersHandler(handleSaveProjectRequested.saveOrPromptForPath);
@@ -353,9 +398,15 @@ function ApplicationShell(): JSX.Element {
     setGridLayout,
     setImagesByIndex,
     setCurrentProjectFilePath,
+    projectRevisionTracker,
     replaceAllRenderingStates: renderingApi.replaceAllRenderingStates,
     replaceSelection,
     busyRegistrar,
+  });
+  const windowCloseGuard = useWindowCloseGuard({
+    imagesByIndexRef,
+    revisionTracker: projectRevisionTracker,
+    saveProjectReportingSuccess: handleSaveProjectRequested.saveReportingSuccess,
   });
   useMenuOpenProjectTriggersHandler(handleOpenProjectRequested);
   const applyActionFlowBindings = buildApplyActionFlowBindings({
@@ -446,9 +497,12 @@ function ApplicationShell(): JSX.Element {
     compactRenderingStateAfterRemovingIndex: renderingApi.compactRenderingStateAfterRemovingIndex,
     pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
+    compactLinkGroupsAfterRemovingIndex: panelLink.compactAfterRemovingIndex,
     replaceSelection,
   });
   const reimportApi = useViewportReimportApi({
+    imagesByIndexRef,
     setImagesByIndex,
     setRenderingState: renderingApi.setRenderingState,
     busyRegistrar,
@@ -473,7 +527,7 @@ function ApplicationShell(): JSX.Element {
                 activeAction={activeAction}
                 sourceViewport={singleSelectedSource?.summary ?? null}
                 loadedReferenceCandidates={loadedReferenceCandidates}
-                toolOptionsEmbeddedEditor={buildActiveToneCurveEditorElementOrNull(
+                toolOptionsEmbeddedEditor={buildActiveOperationEmbeddedEditorOrNull(
                   activeAction,
                   singleSelectedSource,
                   imagesByIndex,
@@ -540,6 +594,12 @@ function ApplicationShell(): JSX.Element {
             busyRegistrar,
           })
         }
+      />
+      <SaveBeforeCloseDialog
+        open={windowCloseGuard.isSaveBeforeCloseDialogOpen}
+        onSaveAndClose={windowCloseGuard.saveProjectThenCloseWindow}
+        onCloseWithoutSaving={windowCloseGuard.closeWindowWithoutSaving}
+        onCancel={windowCloseGuard.cancelCloseRequest}
       />
       <StatusBar />
     </div>
@@ -610,6 +670,20 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
 }
 
+function buildActiveOperationEmbeddedEditorOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  return (
+    buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveCustomTransformEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
+  );
+}
+
 function buildActiveToneCurveEditorElementOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
@@ -628,11 +702,82 @@ function buildActiveToneCurveEditorElementOrNull(
   );
 }
 
+function buildActiveThresholdEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedThresholdEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsThresholdEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveBandWeightingEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedBandWeightingEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsBandWeightingEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveBandSelectionEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedBandSelectionEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return (
+    <ToolOptionsBandSelectionEditor
+      viewportIndex={singleSelectedSource.index}
+      raster={content.source.raster}
+    />
+  );
+}
+
+function buildActiveCustomTransformEditorElementOrNull(
+  activeAction: RegisteredViewportAction | null,
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+): ReactNode {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  if (!shouldEmbedCustomTransformEditorInOperationPanel(placement)) return null;
+  if (content?.source.kind !== "raster") return null;
+  return <ToolOptionsCustomTransformEditor viewportIndex={singleSelectedSource.index} />;
+}
+
 function clearSelectionWhenClickIsOutsideAnyCell(
   event: MouseEvent<HTMLElement>,
   clearSelection: () => void,
 ): void {
   const targetElement = event.target as HTMLElement;
+  // Portaled overlays owned by grid content (e.g. the remove-band confirmation
+  // dialog) live at document.body but bubble clicks through the React tree, so
+  // only a click whose DOM target sits inside the stage counts as a stage click.
+  if (!event.currentTarget.contains(targetElement)) return;
   if (targetElement.closest('[role="gridcell"]')) return;
   clearSelection();
 }
@@ -815,11 +960,14 @@ async function runSaveImageFlowAndShowToast(
     label: `Saving ${input.originalFileName}...`,
   });
   try {
-    const result = await runSaveImageFlowThroughMainProcess(input);
+    const result = await runSaveImageFlowThroughMainProcess({
+      ...input,
+      onProgress: (fraction) => handle.update({ progress: fraction }),
+    });
     if (result.canceled) return;
     toast.success(`Saved to ${result.filePath}`);
   } catch (error) {
-    toast.error(`Could not save ${input.originalFileName}: ${describeUnknownError(error)}`);
+    toast.error(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
   } finally {
     handle.clear();
   }
@@ -892,60 +1040,98 @@ async function runOpenImagesDialogPhaseAndDispatchOutcome(
   bindings: OpenImagesBindings,
   handle: BusyEntryHandle,
 ): Promise<void> {
-  const result = await runOpenImagesDialogPhase({ readPhaseBusyHandle: handle });
+  const result = await runOpenImagesDialogPhase({
+    readPhaseBusyHandle: handle,
+    remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current),
+  });
   if (result.kind === "canceled") return;
   if (result.kind === "single-file") {
-    await routeSingleFileFastPathThroughOpenImages(result.file, bindings);
+    handle.clear();
+    await readSingleFileShowingViewportProgressThenPlace(result.metadata, bindings);
     return;
   }
   bindings.setPendingOpenImagesReview(result.proposal);
 }
 
-async function routeSingleFileFastPathThroughOpenImages(
-  file: OpenedFileForGrouping,
-  bindings: OpenImagesBindings,
-): Promise<void> {
-  if (file.decodeError !== null || file.source === null) {
-    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
-    return;
-  }
-  routeSingleSourceToViewportPlacement(
-    {
-      fileName: file.fileName,
-      source: file.source,
-      originalFilePath: file.filePath,
-      fileSizeBytes: file.fileSizeBytes,
-    },
-    bindings,
+// CT-239: how much of the renderer's ArrayBuffer pool the panels currently
+// open leave for a new allocation (opens, duplicates, re-imports).
+function remainingRasterBudgetBytesForViewports(imagesByIndex: ImagesByIndexMap): number {
+  return remainingRasterMemoryBudgetBytes(
+    sumLiveRasterBytesAcrossSources([...imagesByIndex.values()].map((content) => content.source)),
   );
 }
 
-function routeSingleSourceToViewportPlacement(
-  pending: PendingOpenImageReplaceItem,
+// CT-220: the single-file fast path reserves its destination cell FIRST so the read
+// and decode can report determinate progress on that viewport's busy overlay instead
+// of the app-wide read modal.
+async function readSingleFileShowingViewportProgressThenPlace(
+  metadata: ToolboxOpenImagesDialogFileMetadataEntry,
   bindings: OpenImagesBindings,
-): void {
+): Promise<void> {
+  const targetIndex = reserveViewportCellForSingleFileOpen(bindings);
+  const handle = registerSingleFileReadBusyEntry(metadata.fileName, targetIndex, bindings);
+  try {
+    const file = await readAndDecodeSingleOpenedImageFile(
+      metadata,
+      (fraction) => handle.update({ progress: fraction }),
+      { remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current) },
+    );
+    placeSingleDecodedFileIntoViewport(file, targetIndex, bindings);
+  } finally {
+    handle.clear();
+  }
+}
+
+function reserveViewportCellForSingleFileOpen(bindings: OpenImagesBindings): number | null {
   const plan = planOpenImagePlacement({
     currentLayout: bindings.gridLayoutRef.current,
     imagesByIndex: bindings.imagesByIndexRef.current,
   });
-  applyOpenImagePlacementPlan(plan, pending, bindings);
+  if (plan.kind === "promptReplace") return null;
+  if (plan.kind === "growGridAndPlace") bindings.setGridLayout(plan.expandedLayout);
+  return plan.targetIndex;
 }
 
-function applyOpenImagePlacementPlan(
-  plan: OpenImagePlacementPlan,
-  pending: PendingOpenImageReplaceItem,
+function registerSingleFileReadBusyEntry(
+  fileName: string,
+  targetIndex: number | null,
+  bindings: OpenImagesBindings,
+): BusyEntryHandle {
+  const label = `Reading ${fileName}...`;
+  if (targetIndex === null) {
+    return bindings.busyRegistrar.registerAppBusyEntry({ label });
+  }
+  return bindings.busyRegistrar.registerViewportBusyEntry({ label, viewportIndex: targetIndex });
+}
+
+function placeSingleDecodedFileIntoViewport(
+  file: OpenedFileForGrouping,
+  targetIndex: number | null,
   bindings: OpenImagesBindings,
 ): void {
-  if (plan.kind === "placeInExistingEmptyCell") {
-    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
+  if (file.decodeError !== null || file.source === null) {
+    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
     return;
   }
-  if (plan.kind === "growGridAndPlace") {
-    bindings.setGridLayout(plan.expandedLayout);
-    applyLoadedImageAtIndex(plan.targetIndex, pending, bindings);
+  routeSingleDecodedSourceToCell(file, targetIndex, bindings);
+}
+
+function routeSingleDecodedSourceToCell(
+  file: OpenedFileForGrouping,
+  targetIndex: number | null,
+  bindings: OpenImagesBindings,
+): void {
+  const pending: PendingOpenImageReplaceItem = {
+    fileName: file.fileName,
+    source: file.source!,
+    originalFilePath: file.filePath,
+    fileSizeBytes: file.fileSizeBytes,
+  };
+  if (targetIndex === null) {
+    bindings.setPendingOpenImagesReplace({ items: [pending] });
     return;
   }
-  bindings.setPendingOpenImagesReplace({ items: [pending] });
+  applyLoadedImageAtIndex(targetIndex, pending, bindings);
 }
 
 interface ApplyLoadedImageBindings {
@@ -1141,6 +1327,7 @@ interface GridLayoutChangeBindings {
   setImagesByIndex: SetImagesByIndex;
   pruneSelectionToCellCount: (cellCount: number) => void;
   pruneRenderingStateToCellCount: (cellCount: number) => void;
+  pruneLinkGroupsToCellCount: (cellCount: number) => void;
 }
 
 function createGridLayoutChangeHandler(
@@ -1156,6 +1343,7 @@ function applyGridLayoutChange(newLayout: GridLayout, bindings: GridLayoutChange
   bindings.setImagesByIndex(filterImagesToWithinCellCount(bindings.imagesByIndex, newCellCount));
   bindings.pruneSelectionToCellCount(newCellCount);
   bindings.pruneRenderingStateToCellCount(newCellCount);
+  bindings.pruneLinkGroupsToCellCount(newCellCount);
   bindings.setGridLayout(newLayout);
 }
 
@@ -1272,9 +1460,27 @@ function routeDuplicateRequest(
 ): void {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
+  if (reportDuplicateExceedsMemoryBudget(bindings, sourceContent)) return;
   if (placeDuplicateInExistingEmptyViewport(bindings, sourceContent, sourceIndex)) return;
   if (placeDuplicateByExpandingGrid(bindings, sourceContent, sourceIndex)) return;
   bindings.setPendingDuplicate({ sourceIndex, sourceContent });
+}
+
+// CT-239: a duplicate deep-clones the whole cube; refuse before allocating when
+// the clone cannot fit in the renderer's ArrayBuffer pool alongside the panels
+// already open.
+function reportDuplicateExceedsMemoryBudget(
+  bindings: ViewportDuplicationApiBindings,
+  sourceContent: ViewportCellContent,
+): boolean {
+  const liveBytes = sumLiveRasterBytesAcrossSources(
+    [...bindings.imagesByIndex.values()].map((content) => content.source),
+  );
+  if (!rasterAllocationExceedsMemoryBudget(estimateSourceCloneBytes(sourceContent.source), liveBytes)) {
+    return false;
+  }
+  toast.error(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
+  return true;
 }
 
 function placeDuplicateInExistingEmptyViewport(
@@ -1383,6 +1589,8 @@ interface ViewportClosingApiBindings {
   compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
   pruneSelectionToCellCount: (cellCount: number) => void;
   compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
+  pruneLinkGroupsToCellCount: (cellCount: number) => void;
+  compactLinkGroupsAfterRemovingIndex: (removedIndex: number) => void;
   replaceSelection: (indices: ReadonlySet<number>) => void;
 }
 
@@ -1397,6 +1605,8 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
     compactRenderingStateAfterRemovingIndex,
     pruneSelectionToCellCount,
     compactSelectionAfterRemovingIndex,
+    pruneLinkGroupsToCellCount,
+    compactLinkGroupsAfterRemovingIndex,
     replaceSelection,
   } = bindings;
   return useMemo(
@@ -1411,6 +1621,8 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
         compactRenderingStateAfterRemovingIndex,
         pruneSelectionToCellCount,
         compactSelectionAfterRemovingIndex,
+        pruneLinkGroupsToCellCount,
+        compactLinkGroupsAfterRemovingIndex,
         replaceSelection,
       }),
     [
@@ -1423,12 +1635,15 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
       compactRenderingStateAfterRemovingIndex,
       pruneSelectionToCellCount,
       compactSelectionAfterRemovingIndex,
+      pruneLinkGroupsToCellCount,
+      compactLinkGroupsAfterRemovingIndex,
       replaceSelection,
     ],
   );
 }
 
 interface ViewportReimportApiBindings {
+  imagesByIndexRef: MutableRefObject<ImagesByIndexMap>;
   setImagesByIndex: SetImagesByIndex;
   setRenderingState: ViewportRenderingApi["setRenderingState"];
   busyRegistrar: BusyEntryRegistrar;
@@ -1437,10 +1652,10 @@ interface ViewportReimportApiBindings {
 function useViewportReimportApi(
   bindings: ViewportReimportApiBindings,
 ): ViewportReimportApi {
-  const { setImagesByIndex, setRenderingState, busyRegistrar } = bindings;
+  const { imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar } = bindings;
   return useMemo(
-    () => buildViewportReimportApi({ setImagesByIndex, setRenderingState, busyRegistrar }),
-    [setImagesByIndex, setRenderingState, busyRegistrar],
+    () => buildViewportReimportApi({ imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar }),
+    [imagesByIndexRef, setImagesByIndex, setRenderingState, busyRegistrar],
   );
 }
 
@@ -1459,7 +1674,7 @@ async function runReimportSourceFromDiskFlow(
 ): Promise<void> {
   const result = await invokeOpenImageDialogForReimportSafely();
   if (!result || result.canceled) return;
-  await replaceViewportSourceWithReimportedFile(viewportIndex, result, bindings);
+  await replaceViewportSourceWithReimportedFile(viewportIndex, result.file, bindings);
 }
 
 async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImageDialogResult | null> {
@@ -1471,35 +1686,39 @@ async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImag
   }
 }
 
+// CT-234: the dialog reply is metadata only; the file's bytes stream through
+// the chunked opened-image read protocol (the same path as the main open flow),
+// so a re-import works at any size the 16 GiB openable limit allows.
 async function replaceViewportSourceWithReimportedFile(
   viewportIndex: number,
-  result: Extract<ToolboxOpenImageDialogResult, { canceled: false }>,
+  file: ToolboxOpenImagesDialogFileMetadataEntry,
   bindings: ViewportReimportApiBindings,
 ): Promise<void> {
   const handle = bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex,
-    label: `Re-importing ${result.fileName}...`,
+    label: `Re-importing ${file.fileName}...`,
   });
   try {
-    const source = coerceViewportSourceToRasterSource(
-      await decodeImageBytesToViewportSource({
-        fileName: result.fileName,
-        bytes: result.bytes,
-        sidecarBytes: result.sidecar?.bytes,
-      }),
+    // The replaced panel's cube stays alive until the decode lands, so the
+    // budget counts it: the transient peak really is old cube plus new cube.
+    const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(
+      file,
+      (fraction) => handle.update({ progress: fraction }),
+      { remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current) },
     );
+    const source = coerceViewportSourceToRasterSource(decoded.source);
     bindings.setImagesByIndex((previous) =>
       assignViewportContentAtIndex(previous, viewportIndex, {
-        fileName: result.fileName,
+        fileName: file.fileName,
         source,
-        originalFilePath: result.filePath,
-        fileSizeBytes: result.bytes.length,
+        originalFilePath: file.filePath,
+        fileSizeBytes: file.fileSizeBytes,
       }),
     );
     bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
-    toast.success(`Re-imported ${result.fileName}`);
+    toast.success(`Re-imported ${file.fileName}`);
   } catch (error) {
-    toast.error(`Could not re-import ${result.fileName}: ${describeUnknownError(error)}`);
+    toast.error(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -1522,6 +1741,7 @@ function closeViewportAndCompactRemainingIndices(
   bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
   bindings.compactRenderingStateAfterRemovingIndex(index);
   bindings.compactSelectionAfterRemovingIndex(index);
+  bindings.compactLinkGroupsAfterRemovingIndex(index);
   collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
   toast.info(formatClosedSingleViewportMessage(index, content.fileName));
 }
@@ -1565,6 +1785,7 @@ function collapseGridLayoutAndRestoreSelectionAfterClose(
   bindings.setGridLayout(plan.collapsedLayout);
   bindings.pruneRenderingStateToCellCount(newCellCount);
   bindings.pruneSelectionToCellCount(newCellCount);
+  bindings.pruneLinkGroupsToCellCount(newCellCount);
   if (plan.fallbackSelectionIndex !== null) {
     bindings.replaceSelection(new Set([plan.fallbackSelectionIndex]));
   }
@@ -1619,6 +1840,38 @@ function clearTransientOperationStateOnActiveSource(
 ): void {
   clearOperationRegionOnActiveSource(inputs);
   clearToneCurveAnchorsOnActiveSource(inputs);
+  clearThresholdBoundsOnActiveSource(inputs);
+  clearBandWeightsOnActiveSource(inputs);
+  clearBandSelectionOnActiveSource(inputs);
+  clearCubeTransformOnActiveSource(inputs);
+}
+
+function clearCubeTransformOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasCubeTransformEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearCubeTransformEditingState(state));
+}
+
+function clearBandWeightsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasBandWeightingEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearBandWeightingEditingState(state));
+}
+
+function clearBandSelectionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasBandSelectionEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearBandSelectionEditingState(state));
+}
+
+function clearThresholdBoundsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
+  if (inputs.activeSourceIndex === null) return;
+  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
+  if (!hasThresholdEditingState(state)) return;
+  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, clearThresholdEditingState(state));
 }
 
 function clearToneCurveAnchorsOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
@@ -1690,6 +1943,7 @@ function deriveSingleSelectedSource(
       operationRegion: renderingState.operationRegion,
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
       selectedBandNumber: renderingState.selectedBandIndex + 1,
+      isTrueColorComposite: readIsTrueColorPhotoFromContent(content),
     },
   };
 }
@@ -1705,8 +1959,10 @@ function useLoadedReferenceCandidates(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],
   );
+  // CT-239: SYNC the store (evicting closed panels' entries) instead of
+  // accumulating - the remember-only loop pinned every closed panel's cube.
   useEffect(() => {
-    for (const candidate of candidates) rememberReferenceRaster(candidate.token, candidate.raster);
+    replaceRememberedPanelReferenceRasters(candidates);
   }, [candidates]);
   return candidates;
 }
@@ -1782,14 +2038,35 @@ function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInp
   const state = index !== null ? inputs.renderingApi.getRenderingState(index) : null;
   const toneCurveLut = useSingleBandToneCurvePreviewLut(toneCurveRaster, state);
   const brightnessContrastLut = useBrightnessContrastPreviewLut(inputs, state);
-  const channelLookupTables = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
-  const lookupTable = toneCurveLut ?? brightnessContrastLut;
+  const thresholdLut = useThresholdPreviewLut(inputs, state);
+  const toneCurveChannelLuts = useCompositeToneCurvePreviewLuts(toneCurveRaster, state);
+  const brightnessContrastChannelLuts = useBrightnessContrastCompositePreviewLuts(inputs);
+  const lookupTable = toneCurveLut ?? brightnessContrastLut ?? thresholdLut;
+  const channelLookupTables = toneCurveChannelLuts ?? brightnessContrastChannelLuts;
   return useMemo(() => ({ lookupTable, channelLookupTables }), [lookupTable, channelLookupTables]);
+}
+
+// CT-200: the manual threshold previews its binary result through the SAME
+// single-band display-LUT slot (only one tool panel is open at a time). It
+// tracks the VIEWED band only and stays display-only until Apply.
+function useThresholdPreviewLut(
+  inputs: PublishActiveToolPreviewInputs,
+  state: ViewportRenderingState | null,
+): ReadonlyArray<number> | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "threshold");
+  const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
+  const bandIndex = state?.selectedBandIndex ?? 0;
+  const bounds = state?.thresholdBounds ?? null;
+  return useMemo(
+    () => (isComposite ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds)),
+    [isComposite, raster, bandIndex, bounds],
+  );
 }
 
 // CT-186: brightness/contrast previews through the SAME single-band display LUT slot
 // the tone curve uses (only one tool is open at a time). It tracks the VIEWED band
 // only - even when "Apply to all bands" is on - and stays display-only until Apply.
+// A composite previews through the per-channel triple below instead (CT-247).
 function useBrightnessContrastPreviewLut(
   inputs: PublishActiveToolPreviewInputs,
   state: ViewportRenderingState | null,
@@ -1805,6 +2082,21 @@ function useBrightnessContrastPreviewLut(
         ? null
         : buildBrightnessContrastPreviewLutOrNull(raster, bandIndex, brightnessPercent, contrastRatio),
     [isComposite, raster, bandIndex, brightnessPercent, contrastRatio],
+  );
+}
+
+// CT-247: a true-colour composite previews brightness/contrast live by remapping
+// ALL THREE channels through the CT-177 per-channel LUT triple (the tone-curve
+// composite path); display-only, the data readout is unchanged until Apply.
+function useBrightnessContrastCompositePreviewLuts(
+  inputs: PublishActiveToolPreviewInputs,
+): ToneCurveChannelPreviewLuts | null {
+  const raster = resolveActiveToolRasterOrNull(inputs, "brightness-contrast");
+  const brightnessPercent = readBrightnessPercent(inputs.parameterValues);
+  const contrastRatio = readContrastRatio(inputs.parameterValues);
+  return useMemo(
+    () => buildBrightnessContrastCompositePreviewLutsOrNull(raster, brightnessPercent, contrastRatio),
+    [raster, brightnessPercent, contrastRatio],
   );
 }
 
@@ -2268,12 +2560,30 @@ function runApplyActionFromPanel(
     readRasterAtViewportIndexOrNull(bindings.imagesByIndex, source.index),
   );
   if (merged === null) return;
+  const boundBindings = bindApplyOutcomeToPanelClosure(action, bindings, setActiveAction);
   if (options.openInNewViewport) {
-    applyActionToDuplicateOfSource(action, merged, source.index, bindings);
+    applyActionToDuplicateOfSource(action, merged, source.index, boundBindings);
   } else {
-    applyActionInPlaceAtSourceIndex(action, merged, source.index, bindings);
+    applyActionInPlaceAtSourceIndex(action, merged, source.index, boundBindings);
   }
-  setActiveAction(null);
+  if (!action.keepsPanelOpenUntilApplySucceeds) setActiveAction(null);
+}
+
+// An action with keepsPanelOpenUntilApplySucceeds (the Custom transform, whose
+// Python runs at Apply) keeps its panel open through the run: success closes
+// it, failure leaves it open with the configured input intact for correction.
+function bindApplyOutcomeToPanelClosure(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+  setActiveAction: SetActiveAction,
+): ApplyActionFlowBindings {
+  if (!action.keepsPanelOpenUntilApplySucceeds) return bindings;
+  return {
+    ...bindings,
+    reportApplyOutcome: (outcome) => {
+      if (outcome.succeeded) setActiveAction(null);
+    },
+  };
 }
 
 function deriveActionAvailabilityForActiveViewport(
@@ -2332,12 +2642,14 @@ interface SaveProjectRequestBindings {
   readonly renderingApi: ViewportRenderingApi;
   readonly currentProjectFilePathRef: MutableRefObject<string | null>;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
+  readonly projectRevisionTracker: ProjectContentRevisionTracker;
   readonly busyRegistrar: BusyEntryRegistrar;
 }
 
 interface SaveProjectRequestHandlers {
   readonly saveOrPromptForPath: () => void;
   readonly alwaysPromptForPath: () => void;
+  readonly saveReportingSuccess: () => Promise<boolean>;
 }
 
 function useSaveProjectRequestHandler(
@@ -2351,26 +2663,34 @@ function useSaveProjectRequestHandler(
     () => void runSaveProjectFlowAndShowToast(bindings, true),
     [bindings],
   );
-  return { saveOrPromptForPath, alwaysPromptForPath };
+  const saveReportingSuccess = useCallback(
+    () => runSaveProjectFlowAndShowToast(bindings, false),
+    [bindings],
+  );
+  return { saveOrPromptForPath, alwaysPromptForPath, saveReportingSuccess };
 }
 
+// Resolves true only when a bundle was actually written (the CT-258 close
+// guard confirms the window close on that signal alone).
 async function runSaveProjectFlowAndShowToast(
   bindings: SaveProjectRequestBindings,
   saveAs: boolean,
-): Promise<void> {
+): Promise<boolean> {
+  const revisionBeingSaved = bindings.projectRevisionTracker.readContentRevision();
   const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
   if (snapshot.viewports.length === 0) {
     toast.info("No panels with loaded files to save");
-    return;
+    return false;
   }
-  await invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings);
+  return invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings, revisionBeingSaved);
 }
 
 async function invokeSaveProjectFlowWithToastFeedback(
   snapshot: SaveableProjectSnapshot,
   saveAs: boolean,
   bindings: SaveProjectRequestBindings,
-): Promise<void> {
+  revisionBeingSaved: number,
+): Promise<boolean> {
   const handle = bindings.busyRegistrar.registerAppBusyEntry({
     label: "Saving project...",
     progress: 0,
@@ -2383,9 +2703,10 @@ async function invokeSaveProjectFlowWithToastFeedback(
       saveAs,
       onProgress: (event) => updateSaveBundleProgressOnHandle(handle, event),
     });
-    handleSaveProjectFlowOutcome(result, bindings.setCurrentProjectFilePath);
+    return handleSaveProjectFlowOutcome(result, bindings, revisionBeingSaved);
   } catch (error) {
     toast.error(`Could not save project: ${describeUnknownError(error)}`);
+    return false;
   } finally {
     handle.clear();
   }
@@ -2404,22 +2725,21 @@ async function letBusyIndicatorPaintBeforeHeavySaveWork(
 
 function updateSaveBundleProgressOnHandle(
   handle: BusyEntryHandle,
-  event: { bakedAssetCount: number; totalAssetCount: number },
+  event: { fraction: number },
 ): void {
-  const fraction = event.totalAssetCount === 0 ? 1 : event.bakedAssetCount / event.totalAssetCount;
-  handle.update({
-    label: `Saving project... asset ${event.bakedAssetCount} of ${event.totalAssetCount}`,
-    progress: fraction,
-  });
+  handle.update({ label: "Saving project...", progress: event.fraction });
 }
 
 function handleSaveProjectFlowOutcome(
   result: { canceled: boolean; filePath?: string },
-  setCurrentProjectFilePath: SetCurrentProjectFilePath,
-): void {
-  if (result.canceled || !result.filePath) return;
-  setCurrentProjectFilePath(result.filePath);
+  bindings: SaveProjectRequestBindings,
+  revisionBeingSaved: number,
+): boolean {
+  if (result.canceled || !result.filePath) return false;
+  bindings.setCurrentProjectFilePath(result.filePath);
+  bindings.projectRevisionTracker.markContentRevisionAsSaved(revisionBeingSaved);
   toast.success(`Saved project to ${result.filePath}`);
+  return true;
 }
 
 function buildSaveableProjectSnapshotFromCurrentState(
@@ -2482,6 +2802,7 @@ interface OpenProjectRequestBindings {
   readonly setGridLayout: SetGridLayout;
   readonly setImagesByIndex: SetImagesByIndex;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
+  readonly projectRevisionTracker: ProjectContentRevisionTracker;
   readonly replaceAllRenderingStates: ViewportRenderingApi["replaceAllRenderingStates"];
   readonly replaceSelection: ViewportSelectionState["replaceSelection"];
   readonly busyRegistrar: BusyEntryRegistrar;
@@ -2517,9 +2838,12 @@ async function runOpenProjectFlowAndShowToast(
 
 function updateOpenBundleProgressOnHandle(
   handle: BusyEntryHandle,
-  event: { readAssetCount: number; totalAssetCount: number },
+  event: { readAssetCount: number; totalAssetCount: number; currentAssetFraction: number },
 ): void {
-  const fraction = event.totalAssetCount === 0 ? 1 : event.readAssetCount / event.totalAssetCount;
+  const fraction =
+    event.totalAssetCount === 0
+      ? 1
+      : (event.readAssetCount + event.currentAssetFraction) / event.totalAssetCount;
   handle.update({
     label: `Opening project... asset ${event.readAssetCount} of ${event.totalAssetCount}`,
     progress: fraction,
@@ -2543,6 +2867,7 @@ function applyOpenedProjectToApplicationState(
   opened: OpenedProject,
   bindings: OpenProjectRequestBindings,
 ): void {
+  bindings.projectRevisionTracker.markNextContentChangeAsSaved();
   bindings.setGridLayout(opened.project.gridLayout);
   bindings.setImagesByIndex(buildImagesByIndexMapFromOpenedProject(opened));
   bindings.replaceAllRenderingStates(buildRenderingByIndexMapFromOpenedProject(opened));

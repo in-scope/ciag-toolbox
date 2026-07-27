@@ -70,7 +70,7 @@ async function halveActiveChannelRightEndpoint(channel: ToneCurveChannelButtonNa
   await selectToneCurveChannel(launched.window, channel);
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
   await toneCurveEndpointHandles(launched.window).last().click();
-  await setToneCurveAnchorField(launched.window, "Output", RIGHT_ENDPOINT_HALF_OUTPUT);
+  await setToneCurveAnchorField(launched.window, "New value", RIGHT_ENDPOINT_HALF_OUTPUT);
 }
 
 // Display-only proof: both curves halve, so the rendered photo darkens across channels while

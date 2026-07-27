@@ -15,6 +15,7 @@ import {
   historyEntryCount,
   loadFixtureAsStack,
   openOperation,
+  operationPanel,
   readMetadata,
   setOperationNumberParameter,
   type PixelDimensions,
@@ -29,6 +30,13 @@ import {
 // operation runs, is auto-promoted (CT-109) to an 8-bit 3-band RGB raster, so it CAN be converted;
 // but its values are then an 8-bit decode, not controlled numbers. The 3-band uint16
 // multiband-12bit.tif (bands treated as R/G/B) is the deterministic oracle, like the other specs.
+
+// CT-249: the weight-field descriptions are Anna's wording; the exact copy is pinned here.
+const WEIGHT_DESCRIPTIONS = [
+  "Weight applied to the first band. Default set to standard weighting; enter 0.3333 to average the bands.",
+  "Weight applied to the second band. Default set to standard weighting; enter 0.3333 to average the bands.",
+  "Weight applied to the third band. Default set to standard weighting; enter 0.3333 to average the bands.",
+] as const;
 
 const RGB_TO_GRAYSCALE_LABEL = "RGB to Grayscale";
 const PANEL = 1;
@@ -50,6 +58,7 @@ test.afterEach(async () => {
 test("default luminance weights collapse a 3-band stack to one luminance band", async () => {
   await loadFixtureAsStack(launched.window, multiBandTiff.fileName);
   await openOperation(launched.window, RGB_TO_GRAYSCALE_LABEL);
+  await expectPanelShowsAllThreeWeightDescriptions();
   await applyOperationInPlace(launched.window, RGB_TO_GRAYSCALE_LABEL);
 
   await expectSingleBandUint16Result();
@@ -101,6 +110,13 @@ test("a non-RGB source rejected on the new-panel path opens no blank panel", asy
   await expectPanelHoldsFile(launched.window, PANEL, flatFieldReferenceTiff.fileName);
   expect(await historyEntryCount(launched.window)).toBe(0);
 });
+
+async function expectPanelShowsAllThreeWeightDescriptions(): Promise<void> {
+  const panel = operationPanel(launched.window, RGB_TO_GRAYSCALE_LABEL);
+  for (const description of WEIGHT_DESCRIPTIONS) {
+    await expect(panel).toContainText(description);
+  }
+}
 
 async function expectSingleBandUint16Result(): Promise<void> {
   await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: 4, height: 4 });

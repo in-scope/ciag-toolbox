@@ -17,7 +17,7 @@ import {
   setOperationNumberParameter,
 } from "./support/page-objects";
 
-// CT-194: the Normalize op's "Clip by value (absolute)" method clamps each value to an
+// CT-194: the Normalize op's "Clip by value" method clips each value to an
 // absolute [lo, hi] range instead of rescaling to [0,1]. It is data-changing but TYPE- and
 // in-range-PRESERVING (only the known bad highs/lows move to the bounds), so the output stays
 // uint16. multiband-12bit.tif documents band 2 (0,0)=800 / (3,3)=950 and band 3 (0,0)=1600 /

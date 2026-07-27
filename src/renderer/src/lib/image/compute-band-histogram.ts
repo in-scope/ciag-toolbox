@@ -36,6 +36,9 @@ export interface BandHistogramInputs {
   readonly sampleFormat: RasterSampleFormat;
   readonly bitsPerSample: number;
   readonly binCount: number;
+  // CT-219d: a combined (all-bands-together) tally bins every band into ONE
+  // shared range instead of each band's own derived range.
+  readonly range?: HistogramValueRange;
 }
 
 export function computeBandHistogramFromBandPixels(
@@ -46,12 +49,13 @@ export function computeBandHistogramFromBandPixels(
   return fillHistogramBinsAcrossRange(inputs.pixels, range, inputs.binCount, isIntegerFormat);
 }
 
-interface HistogramValueRange {
+export interface HistogramValueRange {
   readonly min: number;
   readonly max: number;
 }
 
 function deriveHistogramRangeForInputs(inputs: BandHistogramInputs): HistogramValueRange {
+  if (inputs.range) return inputs.range;
   if (inputs.sampleFormat === "float") {
     return deriveFloatBandHistogramRangeFromPixels(inputs.pixels);
   }

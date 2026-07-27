@@ -29,7 +29,7 @@ export async function writeTemporarySingleBandUint16Tiff(
   return filePath;
 }
 
-function encodeSingleBandUint16Tiff(request: SingleBandTiffRequest): Uint8Array {
+export function encodeSingleBandUint16Tiff(request: SingleBandTiffRequest): Uint8Array {
   const stripByteSize = request.width * request.height * 2;
   const view = new DataView(new ArrayBuffer(TIFF_HEADER_BYTE_SIZE + TIFF_IFD_BYTE_SIZE + stripByteSize));
   writeLittleEndianTiffHeader(view);

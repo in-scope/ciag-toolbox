@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 
-import { applyPca, fitPca, varianceExplained } from "./pca";
+import { applyPca, fitPca, fitPcaReportingProgress, varianceExplained } from "./pca";
 
 function makeSampleMatrix(bands: ReadonlyArray<ReadonlyArray<number>>): CubeSampleMatrix {
   const bandValues = bands.map((band) => Float64Array.from(band));
@@ -43,6 +43,45 @@ describe("fitPca", () => {
   it("mean-centres each band", () => {
     const fit = fitPca(DOMINANT_AXIS_CUBE, 2);
     expect(fit.means).toEqual([2.5, 5]);
+  });
+
+  // CT-240: the sample matrix aliases the raster's own typed arrays, so the fit
+  // must read integer storage to the exact same float64 values a copy held.
+  it("fits identically over uint16 storage and a float64 copy of the same values", () => {
+    const bands = [
+      [600, 601, 699, 700, 799, 601],
+      [1200, 1202, 1398, 1400, 1598, 1202],
+    ];
+    const uint16Matrix: CubeSampleMatrix = {
+      ...makeSampleMatrix(bands),
+      bandValues: bands.map((band) => Uint16Array.from(band)),
+    };
+    expect(fitPca(uint16Matrix, 2)).toEqual(fitPca(makeSampleMatrix(bands), 2));
+  });
+});
+
+// CT-227 / CT-240: the async twin shares the sync fit's per-pair covariance
+// math exactly (the symmetric builder mirrors each unordered pair, which is
+// bit-identical to the full square) and reports per-band means ticks followed
+// by one tick per upper-triangle band pair.
+describe("fitPcaReportingProgress (CT-227)", () => {
+  it("produces a fit identical to the sync fitPca", async () => {
+    expect(await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2)).toEqual(fitPca(DOMINANT_AXIS_CUBE, 2));
+  });
+
+  it("ticks monotonically within 0..1, ending at exactly 1", async () => {
+    const ticks: number[] = [];
+    await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2, (fraction) => ticks.push(fraction));
+    expect(ticks.length).toBeGreaterThanOrEqual(4);
+    expect(ticks[ticks.length - 1]).toBe(1);
+    for (let i = 1; i < ticks.length; i += 1) {
+      expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+    }
+  });
+
+  it("works without a progress callback", async () => {
+    const fit = await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2);
+    expect(fit.eigenvalues[0]!).toBeGreaterThan(fit.eigenvalues[1]!);
   });
 });
 

@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
@@ -61,8 +62,7 @@ function replaceBandPixelsAtIndex(
 }
 
 function copyBandPixels(band: RasterTypedArray): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  const copy = new Constructor(band.length);
+  const copy = allocateTypedArrayLikeBandOrThrow(band, band.length);
   copy.set(band as never);
   return copy;
 }

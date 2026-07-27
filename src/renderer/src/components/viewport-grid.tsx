@@ -1,4 +1,5 @@
 import { useCallback, type MouseEvent } from "react";
+import { toast } from "sonner";
 
 import { ViewportBusyOverlay } from "@/components/busy-indicators";
 import {
@@ -47,6 +48,7 @@ import {
   useViewportSelection,
   type ViewportSelectionClickModifiers,
 } from "@/state/selection-context";
+import { usePanelLink, type PanelLinkApi, type PanelLinkFailureReason } from "@/state/panel-link-context";
 
 export interface ViewportCellContent {
   fileName: string;
@@ -142,6 +144,8 @@ function renderViewportCellViewport(
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       floatDisplayUsesFixedUnitWindow={settings.floatDisplayUsesFixedUnitWindow}
       onToggleFixedUnitFloatView={settings.handleToggleFixedUnitFloatView}
+      viewChannelsSeparately={settings.viewChannelsSeparately}
+      onToggleViewChannelsSeparately={settings.handleToggleViewChannelsSeparately}
       selectedBandIndex={settings.selectedBandIndex}
       onSelectBandIndex={settings.handleSelectBandIndex}
       onRemoveBand={settings.handleRemoveBand}
@@ -162,6 +166,7 @@ function ViewportCellContextMenuContent(props: { sourceIndex: number }): JSX.Ele
     <ContextMenuContent>
       <DuplicateContextMenuItem sourceIndex={props.sourceIndex} />
       <ReimportSourceContextMenuItem sourceIndex={props.sourceIndex} />
+      <LinkPanZoomContextMenuItem sourceIndex={props.sourceIndex} />
       <CloseContextMenuItem sourceIndex={props.sourceIndex} />
     </ContextMenuContent>
   );
@@ -178,6 +183,8 @@ interface ViewportCellInteractionSettings {
   handleToggleNormalizedViewing: () => void;
   floatDisplayUsesFixedUnitWindow: boolean;
   handleToggleFixedUnitFloatView: () => void;
+  viewChannelsSeparately: boolean;
+  handleToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
   handleSelectBandIndex: (bandIndex: number) => void;
   handleRemoveBand: (bandIndex: number) => void;
@@ -273,6 +280,18 @@ function useViewportCellInteractionSettings(
       }),
     [cellIndex, renderingState, setRenderingState],
   );
+  // CT-248: display-only channel view for a colour photo. Both directions land
+  // on band 0 so entering starts at Red and leaving restores the composite's
+  // untouched readout state exactly as it was before the toggle.
+  const handleToggleViewChannelsSeparately = useCallback(
+    () =>
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        viewChannelsSeparately: !renderingState.viewChannelsSeparately,
+        selectedBandIndex: 0,
+      }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   const handleSelectBandIndex = useCallback(
     (bandIndex: number) =>
       setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
@@ -293,6 +312,8 @@ function useViewportCellInteractionSettings(
     handleToggleNormalizedViewing,
     floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
     handleToggleFixedUnitFloatView,
+    viewChannelsSeparately: renderingState.viewChannelsSeparately,
+    handleToggleViewChannelsSeparately,
     selectedBandIndex: renderingState.selectedBandIndex,
     handleSelectBandIndex,
     handleRemoveBand,
@@ -377,4 +398,39 @@ function ReimportSourceContextMenuItem(props: { sourceIndex: number }): JSX.Elem
       Re-import source from disk
     </ContextMenuItem>
   );
+}
+
+function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element {
+  const panelLink = usePanelLink();
+  const { selectedIndices } = useViewportSelection();
+  if (panelLink.isPanelLinked(props.sourceIndex)) {
+    return (
+      <ContextMenuItem onSelect={() => panelLink.unlinkPanel(props.sourceIndex)}>
+        Unlink pan &amp; zoom
+      </ContextMenuItem>
+    );
+  }
+  return (
+    <ContextMenuItem
+      onSelect={() => linkPanZoomFromSelection(panelLink, selectedIndices, props.sourceIndex)}
+    >
+      Link pan &amp; zoom
+    </ContextMenuItem>
+  );
+}
+
+function linkPanZoomFromSelection(
+  panelLink: PanelLinkApi,
+  selectedIndices: ReadonlySet<number>,
+  sourceIndex: number,
+): void {
+  const indices = new Set(selectedIndices);
+  indices.add(sourceIndex);
+  const result = panelLink.linkPanels([...indices]);
+  if (!result.ok) toast.error(describePanelLinkFailureMessage(result.reason));
+}
+
+function describePanelLinkFailureMessage(reason: PanelLinkFailureReason): string {
+  if (reason === "different-size") return "Only panels of the same size can be linked.";
+  return "Select two or more panels to link their pan and zoom.";
 }

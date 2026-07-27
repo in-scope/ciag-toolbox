@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   proposeGroupsForOpenedFiles,
+  splitGroupRowsIntoSingleImageGroups,
   type OpenedFileForGrouping,
+  type OpenedFilesGroup,
 } from "./group-opened-files";
 import type { RasterImage } from "./raster-image";
 import type { ViewportImageSource } from "../webgl/texture";
@@ -47,7 +49,6 @@ function buildStackableFile(fileName: string): OpenedFileForGrouping {
     source: buildSingleBandRasterSource(),
     decodeError: null,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 
@@ -60,7 +61,6 @@ function buildMultiBandFile(fileName: string, bandCount: number): OpenedFileForG
     source: buildMultiBandRasterSource(bandCount),
     decodeError: null,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 
@@ -73,7 +73,6 @@ function buildDecodeFailedFile(fileName: string, message: string): OpenedFileFor
     source: null,
     decodeError: message,
     contentHash: `hash-${fileName}`,
-    bytes: new Uint8Array(),
   };
 }
 
@@ -149,5 +148,88 @@ describe("proposeGroupsForOpenedFiles", () => {
     expect(result.groups[0]!.rows).toHaveLength(2);
     expect(result.groups[1]!.rows[0]!.fileName).toBe("rgb.jpg");
     expect(result.groups[2]!.rows[0]!.fileName).toBe("broken.tif");
+  });
+});
+
+describe("splitGroupRowsIntoSingleImageGroups", () => {
+  function proposeWavelengthStackGroup(): {
+    files: ReadonlyArray<OpenedFileForGrouping>;
+    group: OpenedFilesGroup;
+  } {
+    const files = [
+      buildStackableFile("img_w450_capture.tif"),
+      buildStackableFile("img_w501_capture.tif"),
+      buildStackableFile("img_w552_capture.tif"),
+    ];
+    return { files, group: proposeGroupsForOpenedFiles(files).groups[0]! };
+  }
+
+  it("splits a multi-row group into one singles group per row in the same order", () => {
+    const { group } = proposeWavelengthStackGroup();
+    const split = splitGroupRowsIntoSingleImageGroups(group);
+    expect(split).toHaveLength(3);
+    expect(split.every((singleGroup) => singleGroup.mode === "singles")).toBe(true);
+    expect(split.map((singleGroup) => singleGroup.rows.map((row) => row.fileName))).toEqual([
+      ["img_w450_capture.tif"],
+      ["img_w501_capture.tif"],
+      ["img_w552_capture.tif"],
+    ]);
+  });
+
+  it("gives every split group a unique id distinct from the source group's id", () => {
+    const { group } = proposeWavelengthStackGroup();
+    const ids = splitGroupRowsIntoSingleImageGroups(group).map((singleGroup) => singleGroup.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids).not.toContain(group.id);
+  });
+
+  it("normalizes each split row to the isolated-single shape: no wavelength, full-name emphasis", () => {
+    const { group } = proposeWavelengthStackGroup();
+    expect(group.rows.some((row) => row.wavelength !== null)).toBe(true);
+    for (const singleGroup of splitGroupRowsIntoSingleImageGroups(group)) {
+      expect(singleGroup.hadConfidentWavelengthParse).toBe(false);
+      expect(singleGroup.rows).toHaveLength(1);
+      expect(singleGroup.rows[0]!.wavelength).toBeNull();
+      expect(singleGroup.rows[0]!.differentiatingSubstring).toBe(singleGroup.rows[0]!.fileName);
+    }
+  });
+
+  it("keeps every row's decoded source and file facts by reference", () => {
+    const { group } = proposeWavelengthStackGroup();
+    splitGroupRowsIntoSingleImageGroups(group).forEach((singleGroup, index) => {
+      const sourceRow = group.rows[index]!;
+      const splitRow = singleGroup.rows[0]!;
+      expect(splitRow.source).toBe(sourceRow.source);
+      expect(splitRow.contentHash).toBe(sourceRow.contentHash);
+      expect(splitRow.filePath).toBe(sourceRow.filePath);
+      expect(splitRow.fileSizeBytes).toBe(sourceRow.fileSizeBytes);
+      expect(splitRow.mtimeMs).toBe(sourceRow.mtimeMs);
+    });
+  });
+
+  it("carries ENVI sidecar facts through the split", () => {
+    const group: OpenedFilesGroup = {
+      id: "image-1",
+      mode: "stack",
+      rows: [
+        {
+          fileName: "cube.hdr",
+          filePath: "/test/cube.hdr",
+          fileSizeBytes: 100,
+          mtimeMs: 1,
+          source: buildSingleBandRasterSource(),
+          decodeError: null,
+          wavelength: 450,
+          differentiatingSubstring: "450",
+          contentHash: "hash-cube",
+          sidecarFileName: "cube.raw",
+          sidecarSizeBytes: 4096,
+        },
+      ],
+      hadConfidentWavelengthParse: false,
+    };
+    const split = splitGroupRowsIntoSingleImageGroups(group);
+    expect(split[0]!.rows[0]!.sidecarFileName).toBe("cube.raw");
+    expect(split[0]!.rows[0]!.sidecarSizeBytes).toBe(4096);
   });
 });

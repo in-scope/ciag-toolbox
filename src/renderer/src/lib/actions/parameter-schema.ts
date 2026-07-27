@@ -7,6 +7,10 @@ export interface ParameterSchemaBase {
   // CT-194: only render this field when another parameter equals a given value
   // (e.g. the clip lo/hi inputs appear only when the method is "Clip by value").
   readonly visibleWhen?: ParameterVisibilityCondition;
+  // CT-247: hide this field when the source is a true-colour composite (e.g. the
+  // Brightness & Contrast "Apply to all bands" switch - a photo always adjusts
+  // all three channels, so the choice would be meaningless there).
+  readonly hiddenForTrueColorComposite?: boolean;
 }
 
 export interface ParameterVisibilityCondition {
@@ -34,8 +38,13 @@ export interface SliderParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: number;
   readonly min: number;
   readonly max: number;
+  // CT-257: for a log-symmetric slider the Radix track runs over positions
+  // 0..1, step is the POSITION step, and min must equal 1 / max so the track
+  // center maps to exactly 1 (see log-symmetric-slider-scale.ts). Linear
+  // sliders keep step in value units.
   readonly step: number;
   readonly valueSuffix?: string;
+  readonly scale?: "log-symmetric";
 }
 
 export interface EnumParameterSchema extends ParameterSchemaBase {
@@ -63,6 +72,10 @@ export interface CubeScopeParameterSchema extends ParameterSchemaBase {
   readonly kind: "cube-scope";
   readonly defaultValue: CubeScopeChoice;
   readonly bandRangeParameterId: string;
+  // CT-251: when set, an empty band-wise field is VALID and means "every band"
+  // (Normalize, Standardize, spatial filter, denoise, percentile clip).
+  // Threshold keeps the flag off, so its empty field still blocks Apply.
+  readonly emptyBandRangeMeansAllBands?: boolean;
 }
 
 export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
@@ -149,6 +162,17 @@ export function isParameterSchemaVisible(
   return values[schema.visibleWhen.parameterId] === schema.visibleWhen.equals;
 }
 
+// CT-247: source-aware visibility on top of the value-driven CT-194 gate: a field
+// flagged hiddenForTrueColorComposite disappears when the source is a photo.
+export function isParameterSchemaVisibleForSource(
+  schema: ParameterSchema,
+  values: ParameterValuesById,
+  sourceIsTrueColorComposite: boolean,
+): boolean {
+  if (schema.hiddenForTrueColorComposite && sourceIsTrueColorComposite) return false;
+  return isParameterSchemaVisible(schema, values);
+}
+
 export function readClipBoundOrDefault(value: ParameterValue | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -233,7 +257,22 @@ function describeBandWiseRangeErrorForSchemaOrNull(
   if (!shouldShowCubeScopeControl(bandCount)) return null;
   const choice = readCubeScopeChoiceOrDefault(values[schema.id] ?? schema.defaultValue, schema.defaultValue);
   if (choice !== BAND_WISE_SCOPE) return null;
-  return describeBandRangeErrorOrNull(readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]), bandCount);
+  return describeCubeScopeBandRangeErrorOrNull(
+    schema,
+    readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]),
+    bandCount,
+  );
+}
+
+// CT-251: the single validity rule for a cube-scope band field, shared by the
+// Apply gate above and the inline field error in parameter-form-section.tsx.
+export function describeCubeScopeBandRangeErrorOrNull(
+  schema: CubeScopeParameterSchema,
+  bandRangeText: string,
+  bandCount: number | null,
+): string | null {
+  if (schema.emptyBandRangeMeansAllBands && bandRangeText.trim() === "") return null;
+  return describeBandRangeErrorOrNull(bandRangeText, bandCount);
 }
 
 export function readBandNumberOrDefault(value: ParameterValue | undefined, fallback: number): number {

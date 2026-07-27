@@ -1,13 +1,17 @@
 import { BrowserWindow, ipcMain } from "electron";
-import { readdir, stat } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
 
-import { computeSha256HexFromBytes } from "./content-hash";
 import { showOpenDialogOrStub } from "./e2e-dialog-stub";
-import { readFileWithinOpenableSizeLimitOrThrow } from "./openable-file-size-limit";
+import {
+  readFileMetadataForOpenedImagePath,
+  type OpenedImageFileMetadataEntry,
+} from "./opened-image-file-metadata";
+
+export {
+  readFileMetadataForOpenedImagePath,
+  type OpenedImageFileMetadataEntry,
+} from "./opened-image-file-metadata";
 
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
-const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
 
 const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   name: "Images",
@@ -29,37 +33,6 @@ const SUPPORTED_IMAGE_FILTER: Electron.FileFilter = {
   ],
 };
 
-const ENVI_HEADER_EXTENSION = ".hdr";
-const ENVI_BINARY_EXTENSION_CANDIDATES: ReadonlyArray<string> = [
-  ".bin",
-  ".dat",
-  ".img",
-  ".raw",
-  "",
-];
-
-export interface OpenedImageFileSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-export interface OpenedImageFileMetadataEntry {
-  fileName: string;
-  filePath: string;
-  fileSizeBytes: number;
-  mtimeMs: number;
-}
-
-export interface OpenedImageFileEntry {
-  fileName: string;
-  filePath: string;
-  bytes: Uint8Array;
-  contentHash: string;
-  fileSizeBytes: number;
-  mtimeMs: number;
-  sidecar?: OpenedImageFileSidecar;
-}
-
 export type OpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenedImageFileMetadataEntry> };
@@ -72,18 +45,6 @@ async function showImagesOpenDialogAllowingMultiSelect(
     properties: ["openFile", "multiSelections"],
     filters: [SUPPORTED_IMAGE_FILTER],
   });
-}
-
-async function readFileMetadataForOpenedImagePath(
-  filePath: string,
-): Promise<OpenedImageFileMetadataEntry> {
-  const stats = await stat(filePath);
-  return {
-    fileName: basename(filePath),
-    filePath,
-    fileSizeBytes: stats.size,
-    mtimeMs: stats.mtimeMs,
-  };
 }
 
 async function collectMetadataForAllSelectedImagePaths(
@@ -117,88 +78,11 @@ async function handleOpenImagesDialogIpc(
   return chooseImagePathsAndCollectMetadata(window);
 }
 
-async function readBytesAtPathAsUint8Array(filePath: string): Promise<Uint8Array> {
-  return readFileWithinOpenableSizeLimitOrThrow(filePath);
-}
-
-async function findEnviSidecarForOpenedImageFile(
-  filePath: string,
-): Promise<OpenedImageFileSidecar | undefined> {
-  if (!isEnviHeaderFilePath(filePath)) return undefined;
-  return loadEnviBinarySiblingOrThrow(filePath);
-}
-
-function isEnviHeaderFilePath(filePath: string): boolean {
-  return extname(filePath).toLowerCase() === ENVI_HEADER_EXTENSION;
-}
-
-async function loadEnviBinarySiblingOrThrow(
-  headerPath: string,
-): Promise<OpenedImageFileSidecar> {
-  const directoryEntries = await readdir(dirname(headerPath));
-  const matchingEntry = pickEnviBinarySiblingFromDirectoryEntries(headerPath, directoryEntries);
-  if (!matchingEntry) {
-    throw new Error(
-      `Could not find ENVI binary sibling for ${basename(headerPath)} (looked for .bin/.dat/.img/.raw or extensionless match)`,
-    );
-  }
-  const siblingPath = join(dirname(headerPath), matchingEntry);
-  return {
-    fileName: matchingEntry,
-    bytes: await readBytesAtPathAsUint8Array(siblingPath),
-  };
-}
-
-function pickEnviBinarySiblingFromDirectoryEntries(
-  headerPath: string,
-  directoryEntries: ReadonlyArray<string>,
-): string | undefined {
-  const headerBaseName = basename(headerPath, extname(headerPath));
-  const headerBaseNameLower = headerBaseName.toLowerCase();
-  for (const candidate of ENVI_BINARY_EXTENSION_CANDIDATES) {
-    const match = directoryEntries.find((entry) =>
-      entryMatchesBaseNameAndExtension(entry, headerBaseNameLower, candidate),
-    );
-    if (match) return match;
-  }
-  return undefined;
-}
-
-function entryMatchesBaseNameAndExtension(
-  entry: string,
-  baseNameLower: string,
-  expectedExtensionLower: string,
-): boolean {
-  const entryLower = entry.toLowerCase();
-  if (expectedExtensionLower === "") return entryLower === baseNameLower;
-  return entryLower === baseNameLower + expectedExtensionLower;
-}
-
-async function buildOpenedImageFileEntryFromMetadata(
-  metadata: OpenedImageFileMetadataEntry,
-): Promise<OpenedImageFileEntry> {
-  const bytes = await readBytesAtPathAsUint8Array(metadata.filePath);
-  const contentHash = computeSha256HexFromBytes(bytes);
-  const sidecar = await findEnviSidecarForOpenedImageFile(metadata.filePath);
-  return {
-    fileName: metadata.fileName,
-    filePath: metadata.filePath,
-    bytes,
-    contentHash,
-    fileSizeBytes: metadata.fileSizeBytes,
-    mtimeMs: metadata.mtimeMs,
-    ...(sidecar ? { sidecar } : {}),
-  };
-}
-
-async function handleReadOpenedImageFileIpc(
-  _event: Electron.IpcMainInvokeEvent,
-  metadata: OpenedImageFileMetadataEntry,
-): Promise<OpenedImageFileEntry> {
-  return buildOpenedImageFileEntryFromMetadata(metadata);
-}
-
+// CT-219b: the old "image:open-images-read-file" handler that returned the
+// WHOLE file's bytes in one reply lived here; it killed the main process for
+// files of roughly 1 GiB and above (serializer growth past the PartitionAlloc
+// 2 GiB allocation cap). File bytes now stream through the chunked protocol in
+// chunked-opened-image-read-ipc.ts instead.
 export function registerOpenImagesDialogIpcHandlers(): void {
   ipcMain.handle(OPEN_IMAGES_DIALOG_CHANNEL, handleOpenImagesDialogIpc);
-  ipcMain.handle(OPEN_IMAGES_READ_FILE_CHANNEL, handleReadOpenedImageFileIpc);
 }

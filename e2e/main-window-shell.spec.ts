@@ -9,6 +9,10 @@ import {
   type LaunchedApp,
 } from "./support/launch-app";
 import {
+  listMenuCommandsAlphabetically,
+  OPERATION_MENUS,
+} from "../src/shared/operation-menu-catalog";
+import {
   describeApplicationMenu,
   readAppNameAndVersion,
   readMainWindowOuterBounds,
@@ -61,6 +65,16 @@ test("File menu exposes Open Images and the app can be quit", async () => {
   const fileMenu = findTopLevelMenu(menu, "File");
   expect(submenuLabelsOf(fileMenu)).toContain("Open Images...");
   expect(menuTreeHasQuitItem(menu)).toBe(true);
+});
+
+test("every operation menu mirrors the shared catalog, alphabetically and without separators", async () => {
+  const menu = await describeApplicationMenu(launched.app);
+  for (const operationMenu of OPERATION_MENUS) {
+    const topLevel = findTopLevelMenu(menu, operationMenu.menuLabel);
+    expect(topLevel, `missing top-level menu "${operationMenu.menuLabel}"`).toBeDefined();
+    expect(submenuLabelsOf(topLevel)).toEqual(nonSeparatorLabelsOf(topLevel));
+    expect(nonSeparatorLabelsOf(topLevel)).toEqual(menuItemLabelsFromCatalog(operationMenu));
+  }
 });
 
 test("View menu is present", async () => {
@@ -128,6 +142,16 @@ function findHelpMenu(menu: MenuItemSummary[]): MenuItemSummary | undefined {
 
 function submenuLabelsOf(menu: MenuItemSummary | undefined): string[] {
   return (menu?.submenu ?? []).map((item) => item.label);
+}
+
+function nonSeparatorLabelsOf(menu: MenuItemSummary | undefined): string[] {
+  return submenuLabelsOf(menu).filter((label) => typeof label === "string" && label.length > 0);
+}
+
+function menuItemLabelsFromCatalog(
+  operationMenu: (typeof OPERATION_MENUS)[number],
+): string[] {
+  return listMenuCommandsAlphabetically(operationMenu).map((command) => command.label);
 }
 
 function isAboutLabel(label: string): boolean {

@@ -2,7 +2,6 @@ import {
   BoxSelect,
   FlipHorizontal,
   FlipVertical,
-  Layers,
   RotateCcw,
   RotateCw,
   type LucideIcon,
@@ -19,7 +18,9 @@ import {
   type GeometricTransform,
 } from "@/lib/image/apply-geometric-transform";
 import {
+  BAND_SUBSET_ACTION,
   REGISTERED_VIEWPORT_ACTIONS,
+  type RegisteredActionIcon,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
 import type {
@@ -90,7 +91,7 @@ export type ToolbarOperationItem =
       readonly kind: "toggle";
       readonly id: string;
       readonly label: string;
-      readonly icon: LucideIcon;
+      readonly icon: RegisteredActionIcon;
       readonly isActive: boolean;
       readonly isAvailable: boolean;
       readonly unavailableHint?: string;
@@ -107,7 +108,7 @@ export type ToolbarOperationItem =
       readonly kind: "quick";
       readonly id: string;
       readonly label: string;
-      readonly icon: LucideIcon;
+      readonly icon: RegisteredActionIcon;
       readonly isAvailable: boolean;
       readonly onInvoke: () => void;
     };
@@ -127,7 +128,9 @@ export interface ToolbarOperationGroupContext {
   readonly isQuickTransformAvailable: boolean;
 }
 
-const QUICK_TRANSFORM_ICONS: Record<string, LucideIcon> = {
+// Exported so the icon-uniqueness test can assert no operation shares an icon
+// with a quick-transform button.
+export const QUICK_TRANSFORM_ICONS: Record<string, LucideIcon> = {
   "rotate-90-cw": RotateCw,
   "rotate-270-cw": RotateCcw,
   "flip-horizontal": FlipHorizontal,
@@ -194,7 +197,8 @@ function buildBandSubsetToggleItem(
     kind: "toggle",
     id: command.id,
     label: command.label,
-    icon: Layers,
+    // Same operation as the band-subset action panel, so it shares that icon.
+    icon: BAND_SUBSET_ACTION.icon,
     isActive: context.bandSubsetToggle.isActive,
     isAvailable: context.bandSubsetToggle.isAvailable,
     unavailableHint: SUBSET_BANDS_UNAVAILABLE_HINT,

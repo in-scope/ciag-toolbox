@@ -1,16 +1,24 @@
 import {
+  emitBufferInBoundedSlicesInOrder,
+  type ByteChunkConsumer,
+} from "@/lib/image/emit-byte-chunks";
+import {
   encodeViewportSourceAsCanvasBlobBytes,
   readRgbaBytesFromBrowserSource,
 } from "@/lib/image/encode-canvas";
 import {
-  encodeRasterImageAsEnviFiles,
-  encodeRasterImageAsFloat32EnviFiles,
+  encodeRasterImageAsEnviFilesReportingProgress,
+  encodeRasterImageAsFloat32EnviFilesReportingProgress,
+  planEnviFilesChunkedEncoding,
+  planFloat32EnviFilesChunkedEncoding,
+  type EnviChunkedEncoding,
+  type EnviEncodedFiles,
 } from "@/lib/image/encode-envi";
 import {
-  encodeRasterBandAsFloat32TiffBytes,
-  encodeRasterBandAsSingleChannelTiffBytes,
-  encodeRgbaBytesAsRgbTiffBytes,
-  encodeRgbRasterAsRgbTiffBytes,
+  encodeRasterBandAsFloat32TiffBytesReportingProgress,
+  encodeRasterBandAsSingleChannelTiffBytesReportingProgress,
+  encodeRgbaBytesAsRgbTiffBytesReportingProgress,
+  encodeRgbRasterAsRgbTiffBytesReportingProgress,
 } from "@/lib/image/encode-tiff";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
@@ -19,12 +27,16 @@ import {
   type SaveImageFormatKind,
   type SaveImageSampleFormat,
 } from "@/lib/image/save-image-formats";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface EncodeSavedImageInput {
   readonly source: ViewportImageSource;
   readonly selectedBandIndex: number;
   readonly formatId: SaveImageFormatId;
+  // CT-219f: TIFF and ENVI encodes report determinate 0..1 progress; the canvas
+  // formats (PNG, JPEG) are single-shot and keep the indeterminate spinner.
+  readonly onProgress?: UnitProgressCallback;
 }
 
 export interface EncodedSavedImageSidecarFile {
@@ -42,6 +54,79 @@ export async function encodeViewportSourceForSaving(
 ): Promise<EncodedSavedImage> {
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
   return dispatchEncodingByFormatKind(input, details.kind, details.targetBitDepth, details.targetSampleFormat);
+}
+
+// CT-237: the save flow uploads the encoded export through the chunked
+// save-image protocol, so it consumes chunk-emitting PLANS instead of whole
+// buffers. TIFF/PNG/JPEG encodes stay eager (single band or view, small) and
+// are re-emitted in bounded slices; ENVI plans emit their multi-gigabyte
+// binary on demand (CT-235 emitters), so no whole-sidecar buffer ever exists.
+export interface SaveImageUploadPartPlan {
+  readonly byteLength: number;
+  readonly emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: ByteChunkConsumer,
+  ) => Promise<void>;
+}
+
+export interface SaveImageUploadSidecarPlan {
+  readonly extension: string;
+  readonly plan: SaveImageUploadPartPlan;
+}
+
+export interface SaveImageUploadPlan {
+  readonly primary: SaveImageUploadPartPlan;
+  readonly sidecar?: SaveImageUploadSidecarPlan;
+}
+
+export async function planViewportSourceSaveUpload(
+  input: EncodeSavedImageInput,
+): Promise<SaveImageUploadPlan> {
+  const details = readSaveImageFormatTechnicalDetails(input.formatId);
+  if (details.kind === "envi") {
+    return planEnviSaveUploadWithoutMaterializingBinary(input, details.targetSampleFormat);
+  }
+  const encoded = await dispatchEncodingByFormatKind(
+    input,
+    details.kind,
+    details.targetBitDepth,
+    details.targetSampleFormat,
+  );
+  return { primary: wrapEncodedBytesAsUploadPartPlan(encoded.bytes) };
+}
+
+function planEnviSaveUploadWithoutMaterializingBinary(
+  input: EncodeSavedImageInput,
+  targetSampleFormat: SaveImageSampleFormat,
+): SaveImageUploadPlan {
+  rejectNonRasterSourceForEnviWrite(input.source);
+  const encoding = planEnviEncodingForSampleFormat(input.source.raster, targetSampleFormat);
+  return {
+    primary: wrapEncodedBytesAsUploadPartPlan(encoding.headerBytes),
+    sidecar: {
+      extension: "bin",
+      plan: {
+        byteLength: encoding.binaryByteLength,
+        emitChunksInOrder: encoding.emitBinaryChunksInOrder,
+      },
+    },
+  };
+}
+
+function planEnviEncodingForSampleFormat(
+  raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
+  targetSampleFormat: SaveImageSampleFormat,
+): EnviChunkedEncoding {
+  if (targetSampleFormat === "float") return planFloat32EnviFilesChunkedEncoding(raster);
+  return planEnviFilesChunkedEncoding(raster);
+}
+
+function wrapEncodedBytesAsUploadPartPlan(bytes: Uint8Array): SaveImageUploadPartPlan {
+  return {
+    byteLength: bytes.byteLength,
+    emitChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitBufferInBoundedSlicesInOrder(bytes, maxChunkBytes, onChunk),
+  };
 }
 
 async function dispatchEncodingByFormatKind(
@@ -71,52 +156,72 @@ async function encodeViewportSourceAsTiff(
   targetSampleFormat: SaveImageSampleFormat,
 ): Promise<EncodedSavedImage> {
   if (input.source.kind === "raster") {
-    const bytes = encodeRasterBandAsTiffBytes(
+    const bytes = await encodeRasterBandAsTiffBytesReportingProgress(
       input.source.raster,
       input.selectedBandIndex,
       targetBitDepth,
       targetSampleFormat,
+      input.onProgress,
     );
     return { bytes };
   }
   const rgba = await readRgbaBytesFromBrowserSource(input.source);
-  const bytes = encodeRgbaBytesAsRgbTiffBytes(rgba.rgba, rgba.width, rgba.height, targetBitDepth);
+  const bytes = await encodeRgbaBytesAsRgbTiffBytesReportingProgress(
+    rgba.rgba,
+    rgba.width,
+    rgba.height,
+    targetBitDepth,
+    input.onProgress,
+  );
   return { bytes };
 }
 
-function encodeRasterBandAsTiffBytes(
+async function encodeRasterBandAsTiffBytesReportingProgress(
   raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
   selectedBandIndex: number,
   targetBitDepth: 8 | 16,
   targetSampleFormat: SaveImageSampleFormat,
-): Uint8Array {
+  onProgress: UnitProgressCallback | undefined,
+): Promise<Uint8Array> {
   if (targetSampleFormat === "float") {
-    return encodeRasterBandAsFloat32TiffBytes(raster, selectedBandIndex);
+    return encodeRasterBandAsFloat32TiffBytesReportingProgress(raster, selectedBandIndex, onProgress);
   }
   if (shouldRenderRasterAsRgbComposite(raster)) {
-    return encodeRgbRasterAsRgbTiffBytes(raster, targetBitDepth);
+    return encodeRgbRasterAsRgbTiffBytesReportingProgress(raster, targetBitDepth, onProgress);
   }
-  return encodeRasterBandAsSingleChannelTiffBytes(raster, selectedBandIndex, targetBitDepth);
+  return encodeRasterBandAsSingleChannelTiffBytesReportingProgress(
+    raster,
+    selectedBandIndex,
+    targetBitDepth,
+    onProgress,
+  );
 }
 
-function encodeViewportSourceAsEnviFiles(
+async function encodeViewportSourceAsEnviFiles(
   input: EncodeSavedImageInput,
   targetSampleFormat: SaveImageSampleFormat,
-): EncodedSavedImage {
+): Promise<EncodedSavedImage> {
   rejectNonRasterSourceForEnviWrite(input.source);
-  const encoded = encodeEnviFilesForSampleFormat(input.source.raster, targetSampleFormat);
+  const encoded = await encodeEnviFilesForSampleFormatReportingProgress(
+    input.source.raster,
+    targetSampleFormat,
+    input.onProgress,
+  );
   return {
     bytes: encoded.headerBytes,
     sidecar: { extension: "bin", bytes: encoded.binaryBytes },
   };
 }
 
-function encodeEnviFilesForSampleFormat(
+async function encodeEnviFilesForSampleFormatReportingProgress(
   raster: Extract<ViewportImageSource, { kind: "raster" }>["raster"],
   targetSampleFormat: SaveImageSampleFormat,
-): ReturnType<typeof encodeRasterImageAsEnviFiles> {
-  if (targetSampleFormat === "float") return encodeRasterImageAsFloat32EnviFiles(raster);
-  return encodeRasterImageAsEnviFiles(raster);
+  onProgress: UnitProgressCallback | undefined,
+): Promise<EnviEncodedFiles> {
+  if (targetSampleFormat === "float") {
+    return encodeRasterImageAsFloat32EnviFilesReportingProgress(raster, onProgress);
+  }
+  return encodeRasterImageAsEnviFilesReportingProgress(raster, onProgress);
 }
 
 function rejectNonRasterSourceForEnviWrite(

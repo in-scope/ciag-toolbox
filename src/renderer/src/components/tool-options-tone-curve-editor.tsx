@@ -165,7 +165,7 @@ const TONE_CURVE_CHANNEL_OPTIONS: ReadonlyArray<ToneCurveChannelOption> = [
 function ToneCurveChannelSelector(props: ToneCurveChannelSelectorProps): JSX.Element {
   const switchChannel = useSwitchActiveToneCurveChannel(props.viewportIndex);
   return (
-    <div role="group" aria-label="Tone curve channel" className="flex gap-1">
+    <div role="group" aria-label="Contrast curve channel" className="flex gap-1">
       {TONE_CURVE_CHANNEL_OPTIONS.map((option) => (
         <ToneCurveChannelButton
           key={option.channel}
@@ -339,7 +339,7 @@ interface ToneCurveEditorHeaderProps {
 function ToneCurveEditorHeader(props: ToneCurveEditorHeaderProps): JSX.Element {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs font-medium text-muted-foreground">Tone curve</span>
+      <span className="text-xs font-medium text-muted-foreground">Contrast curve</span>
       <Button
         type="button"
         variant="outline"
@@ -377,14 +377,14 @@ function SelectedToneCurveAnchorFields(props: SelectedToneCurveAnchorFieldsProps
   return (
     <div className="grid grid-cols-2 gap-2">
       <ToneCurveAnchorField
-        label="Input"
+        label="Original value"
         value={anchor.input}
         step={step}
         isIntegerBand={props.isIntegerBand}
         onCommitValue={(value) => props.onChange(moveSelectedAnchorInputTo(props.anchors, index, value, props.ranges))}
       />
       <ToneCurveAnchorField
-        label="Output"
+        label="New value"
         value={anchor.output}
         step={step}
         isIntegerBand={props.isIntegerBand}
@@ -503,7 +503,7 @@ function useSelectedToneCurveAnchorIndex(anchorCount: number): SelectedToneCurve
 function ToneCurveEditorLoading(): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-muted-foreground">Tone curve</span>
+      <span className="text-xs font-medium text-muted-foreground">Contrast curve</span>
       <HistogramSkeleton />
     </div>
   );

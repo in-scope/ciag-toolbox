@@ -41,6 +41,23 @@ describe("BandHistogramCache", () => {
     expect(cache.read(raster, 0, 256)).toBe(histogram256);
   });
 
+  // CT-256: region and whole-band histograms cache independently; the key
+  // includes the region corners, so distinct rectangles never collide.
+  it("scopes entries by region corners, independently of the whole-band entry", () => {
+    const cache = new BandHistogramCache();
+    const raster = buildTinyRaster();
+    const wholeBand = buildPlaceholderHistogram();
+    const regionA = buildPlaceholderHistogram();
+    const regionB = buildPlaceholderHistogram();
+    cache.store(raster, 0, 256, wholeBand);
+    cache.store(raster, 0, 256, regionA, cornersRect(0, 0, 1, 0));
+    cache.store(raster, 0, 256, regionB, cornersRect(1, 0, 3, 0));
+    expect(cache.read(raster, 0, 256)).toBe(wholeBand);
+    expect(cache.read(raster, 0, 256, cornersRect(0, 0, 1, 0))).toBe(regionA);
+    expect(cache.read(raster, 0, 256, cornersRect(1, 0, 3, 0))).toBe(regionB);
+    expect(cache.read(raster, 0, 256, cornersRect(0, 0, 3, 0))).toBeNull();
+  });
+
   it("does not share entries across distinct raster identities", () => {
     const cache = new BandHistogramCache();
     const raster = buildTinyRaster();
@@ -49,6 +66,10 @@ describe("BandHistogramCache", () => {
     expect(cache.read(otherRaster, 0, 256)).toBeNull();
   });
 });
+
+function cornersRect(x0: number, y0: number, x1: number, y1: number) {
+  return { imagePixelX0: x0, imagePixelY0: y0, imagePixelX1: x1, imagePixelY1: y1 };
+}
 
 function buildTinyRaster(): RasterImage {
   return {

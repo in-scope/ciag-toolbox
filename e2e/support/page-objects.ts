@@ -20,7 +20,7 @@ export {
   applicationToolbar,
   operationPanel,
   openOperation,
-  openOperationFromImageMenu,
+  openOperationFromMenu,
   applyOperation,
   applyOperationInPlace,
   setOpenInNewPanel,
@@ -95,6 +95,9 @@ export {
   fixedUnitFloatViewToggle,
   toggleFixedUnitFloatView,
   expectFixedUnitFloatViewEnabled,
+  expectFixedUnitFloatViewTooltip,
+  FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP,
+  FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP,
 } from "./fixed-unit-float-view";
 export {
   goToBandNumberInput,
@@ -117,7 +120,10 @@ export {
 } from "./panel-header-label";
 export {
   removeBandButton,
+  removeBandConfirmationDialog,
   removeDisplayedBand,
+  confirmPendingBandRemoval,
+  cancelPendingBandRemoval,
   subsetBandsToggleButton,
   subsetBandsEditor,
   openSubsetBandsEditor,
@@ -149,8 +155,10 @@ export {
   openImagesReviewModal,
   openImagesReplaceTargetPicker,
   reviewModalRows,
+  reviewModalGroups,
   reviewModalNewStackButton,
   reviewModalGroupModeSelect,
+  chooseReviewModalGroupMode,
   readReviewModalGroupModeOptionLabels,
   readReviewModalRowFileNamesInOrder,
   confirmReviewModal,
@@ -163,6 +171,8 @@ export {
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,
+  writeTemporaryDistinctValueWavelengthBandFixtures,
+  DISTINCT_VALUE_BAND_FIXTURE_SIDE,
   writeTemporaryCorruptImageFixture,
   type WavelengthStackFixtureFile,
 } from "./temporary-open-images-fixtures";
@@ -214,6 +224,16 @@ export {
   type SaveProjectBundleRequest,
   type OpenProjectBundleRequest,
 } from "./project-bundle-flow";
+export {
+  linkPanZoomMenuItem,
+  unlinkPanZoomMenuItem,
+  openPanelContextMenuAtCorner,
+  linkPanZoomFromPanelContextMenu,
+  linkedPanelBadge,
+  expectPanelIsLinked,
+  expectPanelIsNotLinked,
+  differentSizeLinkErrorToast,
+} from "./linked-panels";
 export {
   regionToolButton,
   activateRegionTool,
@@ -312,9 +332,23 @@ export {
   nonClearPixelFraction,
   averageNonClearCanvasColor,
   colorfulNonClearPixelFraction,
+  saturatedWhitePixelFraction,
   type CanvasPixelSummary,
   type CanvasAverageColor,
 } from "./canvas-pixels";
+export {
+  THRESHOLD_OPERATION_LABEL,
+  thresholdBoundHandle,
+  thresholdBoundField,
+  thresholdAutoButton,
+  clickThresholdOtsuAutoButton,
+  expectThresholdEditorReady,
+  setThresholdBoundField,
+  readThresholdBoundFieldValue,
+  dragThresholdBoundHandleToFraction,
+  releaseThresholdBoundDrag,
+  type ThresholdBoundSide,
+} from "./threshold-editor";
 export {
   readImageTextureUploadCount,
   readPreviewRasterAllocationCount,
@@ -326,6 +360,9 @@ export {
   brightnessContrastSliderThumb,
   setBrightnessContrastSlider,
   maximizeBrightnessContrastSlider,
+  setLogSymmetricContrastSlider,
+  contrastRatioAtSliderPosition,
+  contrastSliderDisplayedValue,
   applyToAllBandsSwitch,
   setApplyToAllBands,
 } from "./brightness-contrast-controls";
@@ -368,3 +405,37 @@ export {
   expectHistogramShowsEmptyMiddleBins,
   type HistogramRowProfile,
 } from "./histogram-bar-canvas";
+export {
+  BAND_WEIGHTING_OPERATION_LABEL,
+  bandWeightField,
+  expectBandWeightingEditorReady,
+  setBandWeightField,
+  clickResetAllWeightsToOne,
+  clickResetAllWeightsToZero,
+  runBandWeightingFormula,
+  clickImportBandWeightingScript,
+  expectBandWeightFieldsToEqual,
+} from "./band-weighting";
+export {
+  BAND_SELECTION_OPERATION_LABEL,
+  expectBandSelectionEditorReady,
+  clickBandSelectionPreset,
+  runBandSelectionFormula,
+  clickImportBandSelectionScript,
+  expectBandSelectionFunction,
+} from "./band-selection";
+export {
+  applyCustomTransformAwaitingRun,
+  clickImportCustomTransformScript,
+  CUSTOM_TRANSFORM_FORMULA_SET_STATUS,
+  CUSTOM_TRANSFORM_OPERATION_LABEL,
+  customTransformFailureToast,
+  expectCustomTransformConfigured,
+  expectCustomTransformEditorReady,
+  expectCustomTransformPanelClosed,
+  expectCustomTransformPanelStillOpen,
+  loadedToolStatusText,
+  setCustomTransformFormula,
+} from "./custom-transform";
+export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
+export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";

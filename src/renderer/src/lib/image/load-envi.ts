@@ -1,10 +1,14 @@
+import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import { describeSupportedEnviDataTypeOrThrow } from "@/lib/image/envi-data-type";
 import {
   parseEnviHeaderText,
   type EnviHeader,
 } from "@/lib/image/parse-envi-header";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
-import { readEnviBinaryAsBandPixels } from "@/lib/image/read-envi-binary";
+import {
+  readEnviBinaryAsBandPixels,
+  readEnviBinaryAsBandPixelsReportingPerBandProgress,
+} from "@/lib/image/read-envi-binary";
 
 export function loadEnviAsRaster(
   headerBytes: Uint8Array,
@@ -15,11 +19,29 @@ export function loadEnviAsRaster(
   return buildRasterImageFromEnviHeaderAndBandPixels(header, bandPixels);
 }
 
+// CT-220: the same load with one progress tick per decoded band, for determinate
+// busy indicators on large cube opens.
+export async function loadEnviAsRasterReportingPerBandProgress(
+  headerBytes: Uint8Array,
+  binaryBytes: Uint8Array,
+  onDecodeProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const header = parseEnviHeaderText(decodeHeaderBytesAsUtf8Text(headerBytes));
+  const bandPixels = await readEnviBinaryAsBandPixelsReportingPerBandProgress(
+    header,
+    binaryBytes,
+    onDecodeProgress,
+  );
+  return buildRasterImageFromEnviHeaderAndBandPixels(header, bandPixels);
+}
+
 function decodeHeaderBytesAsUtf8Text(headerBytes: Uint8Array): string {
   return new TextDecoder("utf-8").decode(headerBytes);
 }
 
-function buildRasterImageFromEnviHeaderAndBandPixels(
+// Exported for the CT-231 streaming ENVI open path, which produces bandPixels
+// from protocol chunks instead of a whole binary buffer.
+export function buildRasterImageFromEnviHeaderAndBandPixels(
   header: EnviHeader,
   bandPixels: ReadonlyArray<RasterTypedArray>,
 ): RasterImage {

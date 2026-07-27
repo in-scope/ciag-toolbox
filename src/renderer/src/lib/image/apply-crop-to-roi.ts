@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   type RasterImage,
   type RasterTypedArray,
@@ -6,6 +7,10 @@ import {
   clampViewportRoiToImageBounds,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
+import {
+  computeArrayReportingPerUnitProgress,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 export interface CropRectangleInPixels {
   readonly x0: number;
@@ -31,6 +36,25 @@ export function applyCropToRasterImage(
     width: cropWidth,
     height: cropHeight,
   };
+}
+
+// CT-222: the async twin of applyCropToRasterImage. Identical per-band math, one
+// progress tick per band.
+export async function applyCropToRasterImageReportingProgress(
+  raster: RasterImage,
+  roi: ViewportRoi,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const cropRect = readCropRectangleFromRoiClampedToRaster(raster, roi);
+  validateCropRectangleHasPositiveArea(cropRect);
+  const cropWidth = cropRect.x1 - cropRect.x0 + 1;
+  const cropHeight = cropRect.y1 - cropRect.y0 + 1;
+  const croppedBandPixels = await computeArrayReportingPerUnitProgress(
+    raster.bandPixels.length,
+    (index) => cropBandPixelsToRectangle(raster.bandPixels[index]!, raster.width, cropRect, cropWidth, cropHeight),
+    onProgress,
+  );
+  return { ...raster, bandPixels: croppedBandPixels, width: cropWidth, height: cropHeight };
 }
 
 export function readCropRectangleFromRoiClampedToRaster(
@@ -78,6 +102,5 @@ function createEmptyTypedArrayMatchingBand(
   band: RasterTypedArray,
   length: number,
 ): RasterTypedArray {
-  const Constructor = band.constructor as new (length: number) => RasterTypedArray;
-  return new Constructor(length);
+  return allocateTypedArrayLikeBandOrThrow(band, length);
 }

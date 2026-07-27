@@ -59,6 +59,10 @@ export function getViewportNumberFromIndex(index: number): number {
   return index + 1;
 }
 
+export function getViewportIndexFromNumber(viewportNumber: number): number {
+  return viewportNumber - 1;
+}
+
 const NEXT_LARGER_GRID_LAYOUT: Partial<Record<GridLayout, GridLayout>> = {
   "1x1": "1x2",
   "1x2": "1x3",

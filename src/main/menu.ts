@@ -1,18 +1,20 @@
 import {
   app,
   Menu,
+  shell,
   type BrowserWindow,
   type MenuItemConstructorOptions,
 } from "electron";
+import { SCRIPTING_DOCS_URL } from "../shared/scripting-docs-url";
 import {
   applyThemeModeFromMenu,
   getCurrentThemeMode,
 } from "./theme-controller";
 import type { ThemeMode } from "./theme-state";
 import {
+  listMenuCommandsAlphabetically,
   OPERATION_MENUS,
   type OperationCommand,
-  type OperationGroup,
   type OperationMenu,
 } from "../shared/operation-menu-catalog";
 
@@ -128,30 +130,17 @@ function buildOperationCommandMenuItem(
   };
 }
 
-function buildOperationGroupMenuItems(
-  window: BrowserWindow,
-  group: OperationGroup,
-): MenuItemConstructorOptions[] {
-  return group.commands
-    .filter((command) => command.showInMenu)
-    .map((command) => buildOperationCommandMenuItem(window, command));
-}
-
-function joinMenuGroupsWithSeparators(
-  groups: ReadonlyArray<MenuItemConstructorOptions[]>,
-): MenuItemConstructorOptions[] {
-  const separator: MenuItemConstructorOptions = { type: "separator" };
-  return groups.flatMap((items, index) => (index === 0 ? items : [separator, ...items]));
-}
-
+// Operation menus are flat alphabetical lists with no separators: find an
+// operation by name. (File keeps its separators; its groups are workflows,
+// not an operation inventory.)
 function buildOperationMenu(
   window: BrowserWindow,
   menu: OperationMenu,
 ): MenuItemConstructorOptions {
-  const populatedGroups = menu.groups
-    .map((group) => buildOperationGroupMenuItems(window, group))
-    .filter((items) => items.length > 0);
-  return { label: menu.menuLabel, submenu: joinMenuGroupsWithSeparators(populatedGroups) };
+  const items = listMenuCommandsAlphabetically(menu).map((command) =>
+    buildOperationCommandMenuItem(window, command),
+  );
+  return { label: menu.menuLabel, submenu: items };
 }
 
 function buildOperationMenus(window: BrowserWindow): MenuItemConstructorOptions[] {
@@ -192,19 +181,32 @@ function buildDeveloperRefreshMenuItems(): MenuItemConstructorOptions[] {
   ];
 }
 
-function buildViewMenuSubmenu(): MenuItemConstructorOptions[] {
+function buildPythonEnvironmentMenuItem(
+  window: BrowserWindow,
+): MenuItemConstructorOptions {
+  return {
+    label: "Python Environment...",
+    click: () => sendMenuChannelToRenderer(window, "menu:python-environment"),
+  };
+}
+
+function buildViewMenuSubmenu(
+  window: BrowserWindow,
+): MenuItemConstructorOptions[] {
   return [
     buildThemeSubmenu(),
+    { type: "separator" },
+    buildPythonEnvironmentMenuItem(window),
     ...buildDeveloperRefreshMenuItems(),
     { type: "separator" },
     { role: "togglefullscreen" },
   ];
 }
 
-function buildViewMenu(): MenuItemConstructorOptions {
+function buildViewMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "View",
-    submenu: buildViewMenuSubmenu(),
+    submenu: buildViewMenuSubmenu(window),
   };
 }
 
@@ -217,10 +219,21 @@ function buildAboutMenuItem(
   };
 }
 
+function buildHowToWriteScriptMenuItem(): MenuItemConstructorOptions {
+  return {
+    label: "How to Write a Custom Script",
+    click: () => void shell.openExternal(SCRIPTING_DOCS_URL),
+  };
+}
+
 function buildHelpMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     role: "help",
-    submenu: [buildAboutMenuItem(window)],
+    submenu: [
+      buildHowToWriteScriptMenuItem(),
+      { type: "separator" },
+      buildAboutMenuItem(window),
+    ],
   };
 }
 
@@ -231,7 +244,7 @@ function buildMenuTemplateForPlatform(
   if (isRunningOnMac) template.push(buildMacAppMenu());
   template.push(buildFileMenu(window));
   template.push(...buildOperationMenus(window));
-  template.push(buildViewMenu());
+  template.push(buildViewMenu(window));
   template.push(buildHelpMenu(window));
   return template;
 }

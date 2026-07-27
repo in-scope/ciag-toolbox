@@ -15,7 +15,6 @@ import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-referen
 import {
   BAND_RANGE_SYNTAX_EXAMPLES,
   BAND_RANGE_SYNTAX_HINT,
-  describeBandRangeErrorOrNull,
 } from "@/lib/image/parse-band-range";
 import {
   readReferenceTokenDisplayName,
@@ -25,12 +24,14 @@ import {
   formatComponentCountLabel,
   resolveComponentCount,
 } from "@/lib/image/dimension-reduction/component-count";
+import { describeSliderTrackForSchema } from "@/lib/actions/log-symmetric-slider-scale";
 import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
   describeClipBoundsErrorOrNull,
-  isParameterSchemaVisible,
+  describeCubeScopeBandRangeErrorOrNull,
+  isParameterSchemaVisibleForSource,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
   readClipBoundOrDefault,
@@ -59,6 +60,7 @@ interface ParameterFormSectionProps {
   values: ParameterValuesById;
   onChangeValue: (id: string, next: ParameterValue) => void;
   sourceBandCount?: number | null;
+  sourceIsTrueColorComposite?: boolean;
   loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
 }
 
@@ -73,6 +75,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           value={readParameterRowValue(schema, props.values)}
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
+          sourceIsTrueColorComposite={props.sourceIsTrueColorComposite ?? false}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
           onChangeValueAtId={props.onChangeValue}
@@ -96,13 +99,16 @@ interface ParameterFieldRowProps {
   value: ParameterValue;
   allValues: ParameterValuesById;
   sourceBandCount: number | null;
+  sourceIsTrueColorComposite: boolean;
   loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
   onChangeValue: (next: ParameterValue) => void;
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
 
 function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
-  if (!isParameterSchemaVisible(props.schema, props.allValues)) return null;
+  if (!isParameterSchemaVisibleForSource(props.schema, props.allValues, props.sourceIsTrueColorComposite)) {
+    return null;
+  }
   if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
@@ -111,6 +117,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
         value={props.value}
         allValues={props.allValues}
         sourceBandCount={props.sourceBandCount}
+        sourceIsTrueColorComposite={props.sourceIsTrueColorComposite}
         loadedReferenceCandidates={props.loadedReferenceCandidates}
         onChangeValue={props.onChangeValue}
         onChangeValueAtId={props.onChangeValueAtId}
@@ -423,6 +430,14 @@ interface SliderParameterFieldProps {
 
 function SliderParameterField(props: SliderParameterFieldProps): JSX.Element {
   const id = useId();
+  const track = describeSliderTrackForSchema(props.schema, props.value);
+  const commitThumbPosition = (thumbPositions: number[]): void =>
+    props.onChangeValue(
+      clampSliderParameterValueToSchema(
+        props.schema,
+        track.valueAtThumbPosition(thumbPositions[0] ?? track.thumbPosition),
+      ),
+    );
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -436,13 +451,11 @@ function SliderParameterField(props: SliderParameterFieldProps): JSX.Element {
       <Slider
         id={id}
         aria-label={props.schema.label}
-        min={props.schema.min}
-        max={props.schema.max}
-        step={props.schema.step}
-        value={[props.value]}
-        onValueChange={(values) =>
-          props.onChangeValue(clampSliderParameterValueToSchema(props.schema, values[0] ?? props.value))
-        }
+        min={track.trackMin}
+        max={track.trackMax}
+        step={track.trackStep}
+        value={[track.thumbPosition]}
+        onValueChange={commitThumbPosition}
       />
     </div>
   );
@@ -513,6 +526,7 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
       />
       {props.value === "band-wise" ? (
         <BandRangeTextInput
+          schema={props.schema}
           value={props.bandRangeText}
           sourceBandCount={props.sourceBandCount}
           onChangeValue={props.onChangeBandRangeText}
@@ -523,6 +537,7 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
 }
 
 interface BandRangeTextInputProps {
+  schema: CubeScopeParameterSchema;
   value: string;
   sourceBandCount: number | null;
   onChangeValue: (next: string) => void;
@@ -530,7 +545,7 @@ interface BandRangeTextInputProps {
 
 function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
   const id = useId();
-  const rangeError = describeBandRangeErrorOrNull(props.value, props.sourceBandCount);
+  const rangeError = describeCubeScopeBandRangeErrorOrNull(props.schema, props.value, props.sourceBandCount);
   const hintId = `${id}-syntax-hint`;
   return (
     <div className="flex flex-col gap-1 pl-6 text-sm">

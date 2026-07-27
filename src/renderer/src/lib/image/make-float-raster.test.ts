@@ -4,7 +4,9 @@ import {
   FLOAT32_BITS_PER_SAMPLE,
   makeFloat32RasterFromBands,
   makeFloatRasterFromBandComputation,
+  makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBands,
+  makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -158,3 +160,65 @@ function buildUint8Raster(): RasterImage {
     bandOriginalNumbers: [1, 2],
   };
 }
+
+describe("makeFloatRasterFromBandComputationReportingProgress (CT-221)", () => {
+  it("produces the same raster as the sync version", async () => {
+    const result = await makeFloatRasterFromBandComputationReportingProgress(
+      buildUint8Raster(),
+      halveEachValue,
+    );
+    expect(result).toEqual(makeFloatRasterFromBandComputation(buildUint8Raster(), halveEachValue));
+  });
+
+  it("reports a monotonic 0-to-1 tick sequence with one tick per band", async () => {
+    const ticks: number[] = [];
+    await makeFloatRasterFromBandComputationReportingProgress(
+      buildUint8Raster(),
+      halveEachValue,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+});
+
+describe("makeFloatRasterReusingUnchangedSourceBandsReportingProgress (CT-221)", () => {
+  it("produces the same raster as the sync version and reuses unchanged float bands", async () => {
+    const changed = new Set([1]);
+    const result = await makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+      buildUint8Raster(),
+      changed,
+      halveEachValue,
+    );
+    expect(result).toEqual(
+      makeFloatRasterReusingUnchangedSourceBands(buildUint8Raster(), changed, halveEachValue),
+    );
+  });
+
+  it("ticks once per band including carried-through bands", async () => {
+    const ticks: number[] = [];
+    await makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+      buildUint8Raster(),
+      new Set([0]),
+      halveEachValue,
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 1 / 2, 1]);
+  });
+});
+
+// CT-226: an async per-band computation can report its own within-band fraction,
+// folded into the overall bar as (completed bands + fraction) / band count.
+describe("within-band progress composition (CT-226)", () => {
+  it("folds within-band fractions between the per-band completion ticks", async () => {
+    const ticks: number[] = [];
+    await makeFloatRasterFromBandComputationReportingProgress(
+      buildUint8Raster(),
+      async (band, _index, onWithinBand) => {
+        onWithinBand?.(0.5);
+        return mapBandPixelsToFloat32(band, (value) => value);
+      },
+      (fraction) => ticks.push(fraction),
+    );
+    expect(ticks).toEqual([0, 0.25, 0.5, 0.75, 1]);
+  });
+});

@@ -1,5 +1,6 @@
 import type { BandHistogram } from "@/lib/image/compute-band-histogram";
 import type {
+  BandHistogramRegionSelection,
   BandHistogramWorkerRequest,
   BandHistogramWorkerResponse,
 } from "@/lib/image/band-histogram-worker-protocol";
@@ -7,11 +8,13 @@ import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
 } from "@/lib/image/raster-image";
+import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
 export interface ComputeBandHistogramOnWorkerInputs {
   readonly raster: RasterImage;
   readonly bandIndex: number;
   readonly binCount: number;
+  readonly region?: ViewportRoi | null;
 }
 
 export interface BandHistogramWorkerClient {
@@ -92,7 +95,15 @@ function buildBandHistogramRequestMessage(
     sampleFormat: inputs.raster.sampleFormat,
     bitsPerSample: inputs.raster.bitsPerSample,
     binCount: inputs.binCount,
+    region: buildRegionSelectionForRequestOrUndefined(inputs),
   };
+}
+
+function buildRegionSelectionForRequestOrUndefined(
+  inputs: ComputeBandHistogramOnWorkerInputs,
+): BandHistogramRegionSelection | undefined {
+  if (!inputs.region) return undefined;
+  return { rectangle: inputs.region, imageWidthInPixels: inputs.raster.width };
 }
 
 function handleBandHistogramWorkerMessage(

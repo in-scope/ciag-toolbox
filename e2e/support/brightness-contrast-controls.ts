@@ -42,6 +42,36 @@ export async function maximizeBrightnessContrastSlider(
   await expect(thumb).toHaveAttribute("aria-valuenow", maximum ?? "");
 }
 
+// CT-257: the Contrast slider is log-symmetric. Its Radix track runs over
+// POSITIONS 0..1 (aria-valuenow is the position, not the ratio) and the app
+// commits round-to-2-decimals(20^(2p - 1)). Contrast is therefore driven by
+// stepping the thumb and converting each observed position through that same
+// mapping. Reachable ratios are quantized: from the default 1 each arrow step
+// multiplies by 20^0.01 (~3%), e.g. 1 -> 1.03 -> 1.06 -> ... -> 1.20 -> ... ->
+// 1.99; End lands on exactly 20 and Home on exactly 0.05.
+
+export const CONTRAST_SLIDER_MAXIMUM_VALUE = 20;
+
+export function contrastRatioAtSliderPosition(position: number): number {
+  const ratio = Math.pow(CONTRAST_SLIDER_MAXIMUM_VALUE, 2 * position - 1);
+  return Math.round(ratio * 100) / 100;
+}
+
+export async function setLogSymmetricContrastSlider(page: Page, targetRatio: number): Promise<void> {
+  const thumb = brightnessContrastSliderThumb(page, CONTRAST_SLIDER_LABEL);
+  await thumb.focus();
+  for (let attempt = 0; attempt < MAXIMUM_SLIDER_STEPS; attempt += 1) {
+    const current = contrastRatioAtSliderPosition(await readSliderValue(thumb));
+    if (Math.abs(current - targetRatio) < SLIDER_VALUE_EPSILON) return;
+    await thumb.press(current < targetRatio ? "ArrowRight" : "ArrowLeft");
+  }
+  throw new Error(`Contrast slider did not reach ${targetRatio} within ${MAXIMUM_SLIDER_STEPS} steps`);
+}
+
+export function contrastSliderDisplayedValue(page: Page): Locator {
+  return operationPanel(page, BRIGHTNESS_CONTRAST_LABEL).locator('label:text-is("Contrast") + span');
+}
+
 const MAXIMUM_SLIDER_STEPS = 240;
 
 async function stepSliderThumbTowardValue(thumb: Locator, targetValue: number): Promise<void> {

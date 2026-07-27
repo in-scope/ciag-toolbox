@@ -5,6 +5,10 @@ import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
   expectFixedUnitFloatViewEnabled,
+  expectFixedUnitFloatViewTooltip,
+  FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP,
+  FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP,
+  fixedUnitFloatViewToggle,
   historyEntryCount,
   loadImageFromAbsolutePath,
   panelCanvas,
@@ -63,6 +67,35 @@ test("fixed [0,1] float view clamps out-of-range float without changing data or 
     await toggleFixedUnitFloatView(app.window, PANEL);
     await expectFixedUnitFloatViewEnabled(app.window, PANEL, false);
     await expectPanelToHaveAutoStretchedAgain(app, PANEL);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-259: the toggle's tooltip explains what each state does while the aria-label keeps
+// the stable "Fixed [0,1] float view" name. A click on the trigger closes the open Radix
+// tooltip, so the pointer parks away from the button between the two hovers.
+test("the fixed [0,1] float view tooltip explains both states", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadImageFromAbsolutePath(app.window, await writeMostlyNegativeFloatFixture());
+    await test.step("auto-stretch state names the fixed 0 to 1 switch", async () => {
+      await expect(fixedUnitFloatViewToggle(app.window, PANEL)).toHaveAttribute(
+        "aria-label",
+        "Fixed [0,1] float view",
+      );
+      await expectFixedUnitFloatViewTooltip(app.window, PANEL, FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP);
+    });
+    await test.step("fixed-scale state names the stretch switch back", async () => {
+      await toggleFixedUnitFloatView(app.window, PANEL);
+      await expectFixedUnitFloatViewEnabled(app.window, PANEL, true);
+      await expect(fixedUnitFloatViewToggle(app.window, PANEL)).toHaveAttribute(
+        "aria-label",
+        "Fixed [0,1] float view (on)",
+      );
+      await app.window.mouse.move(0, 0);
+      await expectFixedUnitFloatViewTooltip(app.window, PANEL, FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP);
+    });
   } finally {
     await closeToolboxApp(app);
   }

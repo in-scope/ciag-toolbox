@@ -1,4 +1,13 @@
+import {
+  buildRasterMemoryAllocationErrorForByteLength,
+  RasterMemoryAllocationError,
+} from "@/lib/image/raster-allocation";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
+import {
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 // CT-077: shared constructor for operation-produced float32 rasters. Operations
 // that emit fractional results (normalize, standardize, Spectralon, ...) compute
@@ -14,15 +23,9 @@ export type ComputeFloatBandFromSource = (
   bandIndex: number,
 ) => Float32Array;
 
-// CT-103: a clear, actionable typed error for a failed band allocation, so the
-// apply-action-flow toast names the memory needed instead of surfacing the raw
-// engine "Array buffer allocation failed".
-export class RasterMemoryAllocationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RasterMemoryAllocationError";
-  }
-}
+// CT-239: the error class moved to raster-allocation.ts (the shared mapped
+// allocator); re-exported here for the existing importers.
+export { RasterMemoryAllocationError };
 
 export function makeFloatRasterFromBandComputation(
   source: RasterImage,
@@ -30,6 +33,33 @@ export function makeFloatRasterFromBandComputation(
 ): RasterImage {
   const bandPixels = source.bandPixels.map((band, index) =>
     computeSingleFloatBandMatchingSourceLength(band, index, computeFloatBand),
+  );
+  return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
+// CT-226: an async per-band computation may itself be chunked, reporting its own
+// 0..1 within-band fraction (third argument), which the band loop folds into the
+// overall fraction as (completed bands + within-band fraction) / band count. A
+// plain sync ComputeFloatBandFromSource is assignable and simply never ticks
+// within a band.
+export type ComputeFloatBandFromSourceReportingProgress = (
+  sourceBandPixels: RasterTypedArray,
+  bandIndex: number,
+  onWithinBandProgress?: UnitProgressCallback,
+) => Float32Array | Promise<Float32Array>;
+
+// CT-221: the async twin of makeFloatRasterFromBandComputation. One progress tick
+// (and a paint yield) per computed band, so a long per-band operation can drive a
+// determinate busy indicator. The per-band math is identical to the sync version.
+export async function makeFloatRasterFromBandComputationReportingProgress(
+  source: RasterImage,
+  computeFloatBand: ComputeFloatBandFromSourceReportingProgress,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
+    source,
+    (index, onWithinBand) => computeFloatBand(source.bandPixels[index]!, index, onWithinBand),
+    onProgress,
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
@@ -48,6 +78,69 @@ export function makeFloatRasterReusingUnchangedSourceBands(
       : carryUnchangedBandThroughAsFloat32(band),
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
+// CT-221: the async twin of makeFloatRasterReusingUnchangedSourceBands. Every band
+// is a progress unit (carried-through bands tick instantly), so the fraction tracks
+// the whole output raster.
+export async function makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+  source: RasterImage,
+  changedBandIndexes: ReadonlySet<number>,
+  computeChangedFloatBand: ComputeFloatBandFromSourceReportingProgress,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
+    source,
+    (index, onWithinBand) =>
+      computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index, onWithinBand),
+    onProgress,
+  );
+  return buildFloat32RasterPreservingMetadata(source, bandPixels);
+}
+
+function computeChangedBandOrCarryThrough(
+  source: RasterImage,
+  changedBandIndexes: ReadonlySet<number>,
+  computeChangedFloatBand: ComputeFloatBandFromSourceReportingProgress,
+  index: number,
+  onWithinBandProgress?: UnitProgressCallback,
+): Float32Array | Promise<Float32Array> {
+  const band = source.bandPixels[index]!;
+  if (!changedBandIndexes.has(index)) return carryUnchangedBandThroughAsFloat32(band);
+  return computeChangedFloatBand(band, index, onWithinBandProgress);
+}
+
+// CT-226: the shared band loop behind both async twins. The within-band callback
+// for band i maps a 0..1 fraction to (i + fraction) / bandCount, so a chunked
+// band computation advances the bar continuously between per-band completion
+// ticks.
+async function computeFloatBandsFoldingWithinBandProgress(
+  source: RasterImage,
+  computeBand: (index: number, onWithinBand?: UnitProgressCallback) => Float32Array | Promise<Float32Array>,
+  onProgress?: UnitProgressCallback,
+): Promise<Float32Array[]> {
+  const totalBands = source.bandPixels.length;
+  reportMultiUnitWorkStarting(onProgress, totalBands);
+  const bandPixels: Float32Array[] = [];
+  for (let index = 0; index < totalBands; index += 1) {
+    const onWithinBand = onProgress
+      ? (fraction: number): void => onProgress((index + fraction) / totalBands)
+      : undefined;
+    bandPixels.push(await computeBandAssertingSourceLength(source, computeBand, index, onWithinBand));
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalBands);
+  }
+  return bandPixels;
+}
+
+async function computeBandAssertingSourceLength(
+  source: RasterImage,
+  computeBand: (index: number, onWithinBand?: UnitProgressCallback) => Float32Array | Promise<Float32Array>,
+  index: number,
+  onWithinBand?: UnitProgressCallback,
+): Promise<Float32Array> {
+  const result = await computeBand(index, onWithinBand);
+  assertComputedBandLengthMatchesSource(result, source.bandPixels[index]!, index);
+  return result;
 }
 
 export function mapBandPixelsToFloat32(
@@ -81,11 +174,7 @@ function allocateFloat32ArrayOrThrow(length: number): Float32Array {
 }
 
 function buildRasterMemoryAllocationErrorForLength(length: number): RasterMemoryAllocationError {
-  const megabytes = Math.ceil((length * Float32Array.BYTES_PER_ELEMENT) / (1024 * 1024));
-  return new RasterMemoryAllocationError(
-    `Not enough memory to allocate ${megabytes} MB for this operation. ` +
-      `Free memory or run it on fewer bands and try again.`,
-  );
+  return buildRasterMemoryAllocationErrorForByteLength(length * Float32Array.BYTES_PER_ELEMENT);
 }
 
 function computeSingleFloatBandMatchingSourceLength(

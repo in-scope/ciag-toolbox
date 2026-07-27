@@ -1,49 +1,41 @@
-import { encodeRasterImageAsEnviFiles } from "@/lib/image/encode-envi";
-import { encodeRasterBandAsSingleChannelTiffBytes } from "@/lib/image/encode-tiff";
+import {
+  emitBufferInBoundedSlicesInOrder,
+  type ByteChunkConsumer,
+} from "@/lib/image/emit-byte-chunks";
+import { planEnviFilesChunkedEncoding } from "@/lib/image/encode-envi";
+import { planSingleChannelTiffChunkedEncoding } from "@/lib/image/encode-tiff";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
-export interface BundleAssetBakedEncoding {
+// CT-235: a baked asset never materializes as one whole Uint8Array. Planning is
+// metadata-only (byte lengths come from the raster's dimensions, so the chunked
+// save protocol can describe every part before any pixel bytes exist), and the
+// bytes are produced on demand in bounded chunks that the caller spools before
+// the next chunk is built. The old 1.8 GB bake cap is gone: the only remaining
+// limit on a baked asset is disk space at spool/write time (surfaced by the
+// main-process save handlers).
+export interface BundleAssetPartEncodingPlan {
+  readonly extension: string;
+  readonly byteLength: number;
+  readonly emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: ByteChunkConsumer,
+  ) => Promise<void>;
+}
+
+export interface BundleAssetChunkedEncodingPlan {
   readonly kind: "baked";
-  readonly bytes: Uint8Array;
-  readonly extension: string;
-  readonly sidecar?: BundleAssetBakedSidecar;
+  readonly primary: BundleAssetPartEncodingPlan;
+  readonly sidecar?: BundleAssetPartEncodingPlan;
 }
 
-export interface BundleAssetBakedSidecar {
-  readonly extension: string;
-  readonly bytes: Uint8Array;
-}
-
-// A baked asset is copied into renderer memory and then structured-cloned
-// across the IPC boundary to the main process. Past roughly the V8 structured
-// clone ceiling (~2 GiB) that copy crashes the renderer (white screen, CT-061),
-// so a raster that must be re-encoded (because it was modified and no longer
-// matches its on-disk file) is rejected with a catchable error instead.
-const MAX_BAKED_BUNDLE_ASSET_BYTES = 1_800_000_000;
-
-export function encodeBakedBundleAssetForRasterSource(
+export function planBakedBundleAssetEncodingForRasterSource(
   raster: RasterImage,
-): BundleAssetBakedEncoding {
-  throwIfRasterTooLargeToBakeIntoBundle(raster);
+): BundleAssetChunkedEncodingPlan {
   if (canEncodeAsSingleChannelTiff(raster)) {
-    return encodeRasterAsBakedSingleBandTiff(raster);
+    return planBakedSingleBandTiffEncoding(raster);
   }
-  return encodeRasterAsBakedEnvi(raster);
-}
-
-function throwIfRasterTooLargeToBakeIntoBundle(raster: RasterImage): void {
-  if (estimateBakedRasterPayloadByteSize(raster) <= MAX_BAKED_BUNDLE_ASSET_BYTES) {
-    return;
-  }
-  throw new Error(
-    "This image is too large to bake into a saved project. Save the project before applying operations so the original file can be packed directly.",
-  );
-}
-
-function estimateBakedRasterPayloadByteSize(raster: RasterImage): number {
-  const bytesPerSample = raster.bandPixels[0]?.BYTES_PER_ELEMENT ?? 1;
-  return raster.width * raster.height * raster.bandCount * bytesPerSample;
+  return planBakedEnviEncoding(raster);
 }
 
 export function canBakeViewportSourceIntoBundle(
@@ -58,20 +50,35 @@ function canEncodeAsSingleChannelTiff(raster: RasterImage): boolean {
   return raster.bitsPerSample === 8 || raster.bitsPerSample === 16;
 }
 
-function encodeRasterAsBakedSingleBandTiff(
+function planBakedSingleBandTiffEncoding(
   raster: RasterImage,
-): BundleAssetBakedEncoding {
+): BundleAssetChunkedEncodingPlan {
   const targetBitDepth = raster.bitsPerSample === 8 ? 8 : 16;
-  const bytes = encodeRasterBandAsSingleChannelTiffBytes(raster, 0, targetBitDepth);
-  return { kind: "baked", bytes, extension: "tif" };
-}
-
-function encodeRasterAsBakedEnvi(raster: RasterImage): BundleAssetBakedEncoding {
-  const envi = encodeRasterImageAsEnviFiles(raster);
+  const tiff = planSingleChannelTiffChunkedEncoding(raster, 0, targetBitDepth);
   return {
     kind: "baked",
-    bytes: envi.headerBytes,
-    extension: "hdr",
-    sidecar: { extension: "bin", bytes: envi.binaryBytes },
+    primary: {
+      extension: "tif",
+      byteLength: tiff.byteLength,
+      emitChunksInOrder: tiff.emitChunksInOrder,
+    },
+  };
+}
+
+function planBakedEnviEncoding(raster: RasterImage): BundleAssetChunkedEncodingPlan {
+  const envi = planEnviFilesChunkedEncoding(raster);
+  return {
+    kind: "baked",
+    primary: {
+      extension: "hdr",
+      byteLength: envi.headerBytes.byteLength,
+      emitChunksInOrder: (maxChunkBytes, onChunk) =>
+        emitBufferInBoundedSlicesInOrder(envi.headerBytes, maxChunkBytes, onChunk),
+    },
+    sidecar: {
+      extension: "bin",
+      byteLength: envi.binaryByteLength,
+      emitChunksInOrder: envi.emitBinaryChunksInOrder,
+    },
   };
 }

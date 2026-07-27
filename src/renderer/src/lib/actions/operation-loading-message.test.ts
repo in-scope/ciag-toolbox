@@ -22,7 +22,7 @@ describe("describeOperationLoadingMessage", () => {
   });
 
   it("falls back to a label-driven message when none is specified", () => {
-    expect(describeOperationLoadingMessage({ label: "Tone Curve" })).toBe("Applying Tone Curve...");
+    expect(describeOperationLoadingMessage({ label: "Contrast Curve" })).toBe("Applying Contrast Curve...");
   });
 });
 

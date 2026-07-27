@@ -45,6 +45,7 @@ import {
   convertCanvasPointToClipSpace,
   convertPixelDeltaToClipDelta,
   type ClipPoint,
+  type UserView,
   type ViewportSize,
 } from "./view-transform";
 import {
@@ -323,6 +324,18 @@ export class ViewportRenderer {
 
   resetView(): void {
     this.resetViewState();
+    this.draw();
+  }
+
+  getUserView(): UserView {
+    return { pan: this.userPan, zoom: this.userZoom };
+  }
+
+  // CT-207: apply a view transform supplied by a linked panel. The zoom is
+  // re-clamped to this panel's own image/display bounds before drawing.
+  applyUserView(view: UserView): void {
+    this.userZoom = clampUserZoom(view.zoom, this.imageSize, this.displaySize);
+    this.userPan = view.pan;
     this.draw();
   }
 

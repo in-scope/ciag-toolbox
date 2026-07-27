@@ -1,8 +1,10 @@
 import { computeRoiMeanSpectrumOrNull } from "@/lib/image/compute-spectrum";
 import {
   makeFloatRasterFromBandComputation,
+  makeFloatRasterFromBandComputationReportingProgress,
   mapBandPixelsToFloat32,
 } from "@/lib/image/make-float-raster";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import {
   getRasterBandLabelOrDefault,
   type RasterImage,
@@ -35,6 +37,28 @@ export function applySpectralonReflectanceCalibration(
       bandPixels,
       bandIndex,
     ),
+  );
+}
+
+// CT-221: the async twin of applySpectralonReflectanceCalibration. Identical per-band
+// math, one progress tick per band so a long calibration can drive a determinate
+// indicator.
+export async function applySpectralonReflectanceCalibrationReportingProgress(
+  target: RasterImage,
+  options: SpectralonCalibrationOptions,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const brightMeans = computeBandMeansOverRoiOrThrow(target, options.brightRoi, "bright target");
+  const darkMeans = resolveDarkBandMeansOrZeros(target, options.darkRoi);
+  return makeFloatRasterFromBandComputationReportingProgress(
+    target,
+    (bandPixels, bandIndex) =>
+      calibrateSingleBandToReflectance(
+        { target, brightMeans, darkMeans, reflectance: options.reflectance },
+        bandPixels,
+        bandIndex,
+      ),
+    onProgress,
   );
 }
 

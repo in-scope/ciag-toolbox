@@ -1,6 +1,7 @@
 import { Waves } from "lucide-react";
 
-import { applyMnf, fitMnf, noiseFractionPerComponent, type MnfFit } from "@/lib/image/dimension-reduction/mnf";
+import { fitMnfReportingProgress, noiseFractionPerComponent, type MnfFit } from "@/lib/image/dimension-reduction/mnf";
+import { projectMeanCentredSamplesOntoComponentVectorsReportingProgress } from "@/lib/image/dimension-reduction/project-samples";
 
 import { registerDimensionReductionAction } from "./dimension-reduction-action";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -22,8 +23,9 @@ export const MNF_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   successMessage: "MNF applied",
   loadingMessage: "Computing minimum-noise-fraction components...",
   componentLabelPrefix: MNF_COMPONENT_LABEL_PREFIX,
-  fit: fitMnf,
-  project: applyMnf,
+  fit: fitMnfReportingProgress,
+  project: (samples, fit, keptCount, onProgress) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress),
   describeKeptComponentLabels: describeKeptMnfComponentLabels,
 });
 

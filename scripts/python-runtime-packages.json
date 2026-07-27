@@ -1,0 +1,21 @@
+{
+  "comment": "Single source of truth for the bundled Python runtime's package set. Read by scripts/setup-python-runtime.mjs (pip pins), src/main/python/python-scripting-doc.test.ts (the docs table must list every entry), and src/main/python/python-worker.test.ts (every importName must import inside the sandboxed worker). The set is the union of the script-facing packages in Wallace's three sample environments (ip26, IP4AI_2023, opencvlarge, July 2026) at the newest sample version; entries whose sample pin cannot run on this runtime (CPython 3.12, numpy 2) carry the nearest compatible release and a bumpedFrom note. IDE tooling from those environments (Spyder, Jupyter, linters, Qt, Sphinx) is deliberately not bundled.",
+  "packages": [
+    { "distribution": "numpy", "version": "2.5.0", "importName": "numpy" },
+    { "distribution": "scipy", "version": "1.18.0", "importName": "scipy" },
+    { "distribution": "scikit-image", "version": "0.26.0", "importName": "skimage" },
+    { "distribution": "scikit-learn", "version": "1.8.0", "importName": "sklearn" },
+    { "distribution": "pandas", "version": "2.3.3", "importName": "pandas", "bumpedFrom": "1.5.2 (needs numpy 1 and Python <= 3.11)" },
+    { "distribution": "matplotlib", "version": "3.10.8", "importName": "matplotlib" },
+    { "distribution": "seaborn", "version": "0.13.2", "importName": "seaborn", "bumpedFrom": "0.11.2 (needs pandas 1)" },
+    { "distribution": "opencv-python", "version": "4.13.0.92", "importName": "cv2", "bumpedFrom": "4.9.0.80 (needs numpy 1)" },
+    { "distribution": "pillow", "version": "12.1.1", "importName": "PIL" },
+    { "distribution": "sympy", "version": "1.14.0", "importName": "sympy" },
+    { "distribution": "spectral", "version": "0.25", "importName": "spectral", "bumpedFrom": "0.22.4 (predates numpy 2)" },
+    { "distribution": "tifffile", "version": "2024.8.30", "importName": "tifffile" },
+    { "distribution": "pyvips", "version": "3.1.1", "importName": "pyvips", "pipExtras": "binary" },
+    { "distribution": "joblib", "version": "1.5.3", "importName": "joblib" },
+    { "distribution": "requests", "version": "2.32.5", "importName": "requests" },
+    { "distribution": "pyyaml", "version": "6.0.3", "importName": "yaml" }
+  ]
+}

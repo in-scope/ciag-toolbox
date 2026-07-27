@@ -68,12 +68,12 @@ function formatBytesAsGigabytes(bytes: number): string {
 export async function readFileWithinOpenableSizeLimitOrThrow(
   filePath: string,
 ): Promise<Uint8Array> {
-  await throwIfFilePathExceedsOpenableSizeLimit(filePath);
+  await assertFilePathWithinOpenableSizeLimitOrThrow(filePath);
   const buffer = await readFile(filePath);
   return new Uint8Array(buffer);
 }
 
-async function throwIfFilePathExceedsOpenableSizeLimit(filePath: string): Promise<void> {
+export async function assertFilePathWithinOpenableSizeLimitOrThrow(filePath: string): Promise<void> {
   const limitBytes = resolveMaxOpenableFileBytes();
   const stats = await stat(filePath);
   if (isFileSizeWithinOpenableLimit(stats.size, limitBytes)) return;

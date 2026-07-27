@@ -10,6 +10,10 @@ import {
   type PinnedRoiSpectraList,
   type PinnedSpectraList,
 } from "@/lib/image/spectrum-entry";
+import type { BandSelectionEditingState } from "@/lib/image/band-ops/band-selection";
+import type { CubeTransformEditingState } from "@/lib/image/band-ops/cube-transform-editing";
+import type { ThresholdOtsuCutoffs } from "@/lib/image/threshold/otsu-cutoffs";
+import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -23,6 +27,7 @@ import {
 export interface ViewportRenderingState {
   readonly normalizationEnabled: boolean;
   readonly floatDisplayUsesFixedUnitWindow: boolean;
+  readonly viewChannelsSeparately: boolean;
   readonly lastAppliedOperationLabel: string | null;
   readonly selectedBandIndex: number;
   readonly operationHistory: ViewportOperationHistory;
@@ -31,6 +36,11 @@ export interface ViewportRenderingState {
   readonly toneCurveAnchors: ReadonlyArray<ToneCurveAnchor> | null;
   readonly toneCurveChannelAnchors: ToneCurveChannelAnchors;
   readonly toneCurveActiveChannel: ToneCurveChannel;
+  readonly thresholdBounds: ThresholdBounds | null;
+  readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
+  readonly bandWeights: ReadonlyArray<number> | null;
+  readonly bandSelection: BandSelectionEditingState | null;
+  readonly cubeTransform: CubeTransformEditingState | null;
   readonly pinnedSpectra: PinnedSpectraList;
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
@@ -44,6 +54,7 @@ export const EMPTY_TONE_CURVE_CHANNEL_ANCHORS: ToneCurveChannelAnchors = Object.
 export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   normalizationEnabled: false,
   floatDisplayUsesFixedUnitWindow: false,
+  viewChannelsSeparately: false,
   lastAppliedOperationLabel: null,
   selectedBandIndex: 0,
   operationHistory: EMPTY_OPERATION_HISTORY,
@@ -52,6 +63,11 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   toneCurveAnchors: null,
   toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
+  thresholdBounds: null,
+  thresholdOtsuCutoffs: null,
+  bandWeights: null,
+  bandSelection: null,
+  cubeTransform: null,
   pinnedSpectra: EMPTY_PINNED_SPECTRA,
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -75,10 +91,80 @@ export function clearToneCurveEditingState(state: ViewportRenderingState): Viewp
   };
 }
 
+// CT-200: the threshold popup's live bounds live in rendering state (like the
+// tone-curve anchors) so the editor, the GPU preview, and Apply all read one
+// source of truth. Opening/closing the panel and Apply clear them. CT-201: the
+// Auto button's per-band Otsu cutoffs ride alongside the bounds and clear with
+// them; any manual bound edit also discards them (the editor handles that).
+export function hasThresholdEditingState(state: ViewportRenderingState): boolean {
+  return state.thresholdBounds !== null || state.thresholdOtsuCutoffs !== null;
+}
+
+export function clearThresholdEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, thresholdBounds: null, thresholdOtsuCutoffs: null };
+}
+
+// CT-209: the band-weighting popup's per-band weights live in rendering state
+// (the same editor-owned pattern as the threshold bounds), so the weight fields,
+// a formula/imported-tool result, and Apply all read one source of truth. Opening
+// or closing the panel and Apply clear them.
+export function hasBandWeightingEditingState(state: ViewportRenderingState): boolean {
+  return state.bandWeights !== null;
+}
+
+export function clearBandWeightingEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, bandWeights: null };
+}
+
+// CT-210: the band-selection popup's current choice (a preset, or a custom
+// formula/tool result token) lives in rendering state, the same editor-owned
+// pattern as the band weights. Opening or closing the panel and Apply clear it.
+export function hasBandSelectionEditingState(state: ViewportRenderingState): boolean {
+  return state.bandSelection !== null;
+}
+
+export function clearBandSelectionEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, bandSelection: null };
+}
+
+// CT-216: the Custom transform popup's ready transform (a result-store token plus
+// display strings, never band data) lives in rendering state, the same
+// editor-owned pattern as the band selection choice. Opening or closing the
+// panel and Apply clear it.
+export function hasCubeTransformEditingState(state: ViewportRenderingState): boolean {
+  return state.cubeTransform !== null;
+}
+
+export function clearCubeTransformEditingState(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, cubeTransform: null };
+}
+
+// CT-233: transforms receive the LIVE source, never a defensive clone (the apply
+// flow stopped deep-copying the cube). A transform must treat the input source as
+// immutable: return a new source object, never write into the input's band arrays
+// or metadata. Unchanged bands SHOULD be carried into the result by reference
+// (makeFloatRasterReusingUnchangedSourceBands and friends), which is safe exactly
+// because no transform ever mutates a band buffer in place.
 export type ViewportActionSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
 ) => ViewportImageSource;
+
+// CT-221: an async transform reports determinate progress (a 0..1 fraction, one
+// tick per completed band or equivalent unit) through this callback; the apply
+// flow forwards it to the busy entry so the overlay shows a percentage.
+export type TransformProgressCallback = (fraction: number) => void;
+
+// CT-219a: a source transform may instead be asynchronous (the spatial filter
+// runs its FFT loop on a Web Worker so a large stack does not freeze the UI
+// thread). An action defines transformSource OR transformSourceAsync; the apply
+// flow gates and runs both kinds only through actionTransformsSource /
+// runActionSourceTransform below.
+export type ViewportActionAsyncSourceTransform = (
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+  onProgress?: TransformProgressCallback,
+) => Promise<ViewportImageSource>;
 
 // CT-097: an operation may emit additional outputs beyond the primary in-place /
 // duplicated result. Each secondary output is placed in its own fresh viewport
@@ -130,6 +216,24 @@ export interface ViewportAction {
     parameterValues: ParameterValuesById,
   ) => ViewportRenderingState;
   readonly transformSource?: ViewportActionSourceTransform;
+  readonly transformSourceAsync?: ViewportActionAsyncSourceTransform;
+}
+
+export function actionTransformsSource(action: ViewportAction): boolean {
+  return action.transformSource !== undefined || action.transformSourceAsync !== undefined;
+}
+
+export async function runActionSourceTransform(
+  action: ViewportAction,
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+  onProgress?: TransformProgressCallback,
+): Promise<ViewportImageSource> {
+  if (action.transformSourceAsync) {
+    return action.transformSourceAsync(source, parameterValues, onProgress);
+  }
+  if (action.transformSource) return action.transformSource(source, parameterValues);
+  return source;
 }
 
 export interface ApplyActionFailure {

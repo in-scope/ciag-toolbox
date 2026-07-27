@@ -25,6 +25,8 @@ function generateAllFixtures() {
 function buildAllFixtures() {
   return {
     lowContrastGrayPng: buildLowContrastGrayscalePngFixture(),
+    bimodalGrayPng: buildBimodalGrayscalePngFixture(),
+    noisyGrayPng: buildNoisyGrayscalePngFixture(),
     rgbPng: buildKnownRgbPngFixture(),
     multiBandTiff: buildMultiBandTwelveBitTiffFixture(),
     flatFieldReferenceTiff: buildSingleBandReferenceTiffFixture(),
@@ -35,6 +37,8 @@ function buildAllFixtures() {
 
 function writeAllFixtureFiles(fixtures) {
   writeFixtureFile(fixtures.lowContrastGrayPng.fileName, fixtures.lowContrastGrayPng.bytes);
+  writeFixtureFile(fixtures.bimodalGrayPng.fileName, fixtures.bimodalGrayPng.bytes);
+  writeFixtureFile(fixtures.noisyGrayPng.fileName, fixtures.noisyGrayPng.bytes);
   writeFixtureFile(fixtures.rgbPng.fileName, fixtures.rgbPng.bytes);
   writeFixtureFile(fixtures.multiBandTiff.fileName, fixtures.multiBandTiff.bytes);
   writeFixtureFile(fixtures.flatFieldReferenceTiff.fileName, fixtures.flatFieldReferenceTiff.bytes);
@@ -80,6 +84,146 @@ function buildLowContrastGraySamples() {
     samples[index] = 100 + index * 2;
   }
   return samples;
+}
+
+// --- Bimodal 8-bit grayscale PNG (CT-201) ------------------------------------
+// 4x4, index = y*4 + x. The first 8 pixels form a dark cluster 40..54 (step 2),
+// the last 8 a bright cluster 200..214 (step 2), leaving a known empty valley
+// 55..199. Otsu (256 one-wide bins over the uint8 type range, first maximizing
+// split kept on ties) therefore lands the cutoff at 55, the value just above
+// the dark cluster; the manifest pins that expected cutoff. No randomness.
+
+const BIMODAL_FIXTURE_WIDTH = 4;
+const BIMODAL_FIXTURE_HEIGHT = 4;
+const BIMODAL_DARK_BASE = 40;
+const BIMODAL_BRIGHT_BASE = 200;
+const BIMODAL_VALUE_STEP = 2;
+const BIMODAL_DARK_PIXEL_COUNT = 8;
+
+function buildBimodalGrayscalePngFixture() {
+  const samples = buildBimodalGraySamples();
+  return {
+    fileName: "bimodal-gray.png",
+    width: BIMODAL_FIXTURE_WIDTH,
+    height: BIMODAL_FIXTURE_HEIGHT,
+    samples,
+    expectedOtsuCutoff: computeExpectedOtsuCutoffForUint8Samples(samples),
+    bytes: encodeGrayscalePngBytes(BIMODAL_FIXTURE_WIDTH, BIMODAL_FIXTURE_HEIGHT, samples),
+  };
+}
+
+function buildBimodalGraySamples() {
+  const samples = new Uint8Array(BIMODAL_FIXTURE_WIDTH * BIMODAL_FIXTURE_HEIGHT);
+  for (let index = 0; index < samples.length; index += 1) {
+    samples[index] = index < BIMODAL_DARK_PIXEL_COUNT
+      ? BIMODAL_DARK_BASE + index * BIMODAL_VALUE_STEP
+      : BIMODAL_BRIGHT_BASE + (index - BIMODAL_DARK_PIXEL_COUNT) * BIMODAL_VALUE_STEP;
+  }
+  return samples;
+}
+
+// Mirrors src/renderer/src/lib/image/threshold/otsu.ts for a uint8 band: 256
+// one-wide bins, between-class variance maximization, first maximizing split
+// kept, cutoff = the lower edge of the first foreground bin (split + 1).
+function computeExpectedOtsuCutoffForUint8Samples(samples) {
+  const bins = new Uint32Array(256);
+  for (const value of samples) bins[value] += 1;
+  let totalCount = 0;
+  let totalSum = 0;
+  for (let bin = 0; bin < bins.length; bin += 1) {
+    totalCount += bins[bin];
+    totalSum += bin * bins[bin];
+  }
+  let bestSplit = null;
+  let bestVariance = 0;
+  let count0 = 0;
+  let sum0 = 0;
+  for (let split = 0; split < bins.length - 1; split += 1) {
+    count0 += bins[split];
+    sum0 += split * bins[split];
+    const count1 = totalCount - count0;
+    if (count0 === 0 || count1 === 0) continue;
+    const meanDifference = sum0 / count0 - (totalSum - sum0) / count1;
+    const variance = count0 * count1 * meanDifference * meanDifference;
+    if (variance > bestVariance) {
+      bestVariance = variance;
+      bestSplit = split;
+    }
+  }
+  if (bestSplit === null) throw new Error("bimodal fixture must have a valid Otsu split");
+  return bestSplit + 1;
+}
+
+// --- Noisy 8-bit grayscale PNG (CT-204) ---------------------------------------
+// 8x8, smooth base value(x, y) = 100 + 2x + 2y (range 100..128) with two FIXED
+// salt-and-pepper spikes at known interior coordinates: (2,2) -> 255 (salt)
+// and (5,5) -> 0 (pepper). No randomness. The manifest pins, per spike, the
+// noisy (pre) value, the smooth base value, and the radius-1 median-denoised
+// (post) value computed by mirroring
+// src/renderer/src/lib/image/filters/denoise.ts (clamped square neighborhood,
+// exact middle of the sorted 3x3 window).
+
+const NOISY_FIXTURE_WIDTH = 8;
+const NOISY_FIXTURE_HEIGHT = 8;
+const NOISY_BASE_VALUE = 100;
+const NOISY_BASE_STEP = 2;
+const NOISY_SPIKE_COORDINATES = [
+  { x: 2, y: 2, noisyValue: 255 },
+  { x: 5, y: 5, noisyValue: 0 },
+];
+
+function buildNoisyGrayscalePngFixture() {
+  const samples = buildNoisyGraySamples();
+  return {
+    fileName: "noisy-gray.png",
+    width: NOISY_FIXTURE_WIDTH,
+    height: NOISY_FIXTURE_HEIGHT,
+    samples,
+    spikes: NOISY_SPIKE_COORDINATES.map((spike) => describeNoisySpike(samples, spike)),
+    bytes: encodeGrayscalePngBytes(NOISY_FIXTURE_WIDTH, NOISY_FIXTURE_HEIGHT, samples),
+  };
+}
+
+function computeSmoothNoisyBaseValue(x, y) {
+  return NOISY_BASE_VALUE + NOISY_BASE_STEP * x + NOISY_BASE_STEP * y;
+}
+
+function buildNoisyGraySamples() {
+  const samples = new Uint8Array(NOISY_FIXTURE_WIDTH * NOISY_FIXTURE_HEIGHT);
+  for (let y = 0; y < NOISY_FIXTURE_HEIGHT; y += 1) {
+    for (let x = 0; x < NOISY_FIXTURE_WIDTH; x += 1) {
+      samples[y * NOISY_FIXTURE_WIDTH + x] = computeSmoothNoisyBaseValue(x, y);
+    }
+  }
+  for (const spike of NOISY_SPIKE_COORDINATES) {
+    samples[spike.y * NOISY_FIXTURE_WIDTH + spike.x] = spike.noisyValue;
+  }
+  return samples;
+}
+
+function describeNoisySpike(samples, spike) {
+  return {
+    x: spike.x,
+    y: spike.y,
+    noisyValue: spike.noisyValue,
+    smoothValue: computeSmoothNoisyBaseValue(spike.x, spike.y),
+    medianDenoisedValue: computeRadiusOneMedianAt(samples, spike.x, spike.y),
+  };
+}
+
+// Mirrors applyMedianDenoise for radius 1: coordinates clamp to the band's
+// edges, the window is the full 3x3 square, and the median is its exact middle.
+function computeRadiusOneMedianAt(samples, centerX, centerY) {
+  const window = [];
+  for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+    const y = Math.min(Math.max(centerY + offsetY, 0), NOISY_FIXTURE_HEIGHT - 1);
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      const x = Math.min(Math.max(centerX + offsetX, 0), NOISY_FIXTURE_WIDTH - 1);
+      window.push(samples[y * NOISY_FIXTURE_WIDTH + x]);
+    }
+  }
+  window.sort((a, b) => a - b);
+  return window[(window.length - 1) / 2];
 }
 
 // --- 8-bit RGB PNG with known per-pixel R/G/B -------------------------------
@@ -471,6 +615,8 @@ function buildFixtureManifest(fixtures) {
   return {
     note: "Generated by e2e/fixtures/generate-fixtures.mjs - do not edit by hand.",
     lowContrastGrayPng: describeGrayscaleFixture(fixtures.lowContrastGrayPng),
+    bimodalGrayPng: describeBimodalGrayFixture(fixtures.bimodalGrayPng),
+    noisyGrayPng: describeNoisyGrayFixture(fixtures.noisyGrayPng),
     rgbPng: describeRgbFixture(fixtures.rgbPng),
     multiBandTiff: describeStackFixture(fixtures.multiBandTiff, "uint16"),
     flatFieldReferenceTiff: describeStackFixture(fixtures.flatFieldReferenceTiff, "uint16"),
@@ -490,6 +636,44 @@ function describeEnviFloatFixture(fixture) {
     wavelengths: fixture.wavelengths,
     bandMeans: fixture.bands.map(computeMean),
     samplePixels: buildStackCornerSamplePixels(fixture.bands, fixture.width, fixture.height),
+  };
+}
+
+// The sample pixels straddle the valley: the last dark pixel (3,1) and the
+// first bright pixel (0,2) sit either side of the pinned Otsu cutoff.
+function describeBimodalGrayFixture(fixture) {
+  return {
+    fileName: fixture.fileName,
+    width: fixture.width,
+    height: fixture.height,
+    bandCount: 1,
+    dataType: "uint8",
+    expectedOtsuCutoff: fixture.expectedOtsuCutoff,
+    samplePixels: [
+      buildSamplePixel(0, 0, [fixture.samples[0]]),
+      buildSamplePixel(3, 1, [fixture.samples[7]]),
+      buildSamplePixel(0, 2, [fixture.samples[8]]),
+      buildSamplePixel(3, 3, [fixture.samples[15]]),
+    ],
+  };
+}
+
+// The spikes carry the pre (noisy), smooth base, and post (radius-1 median)
+// values so the denoising spec asserts against documented numbers.
+function describeNoisyGrayFixture(fixture) {
+  return {
+    fileName: fixture.fileName,
+    width: fixture.width,
+    height: fixture.height,
+    bandCount: 1,
+    dataType: "uint8",
+    spikes: fixture.spikes,
+    samplePixels: [
+      buildSamplePixel(0, 0, [fixture.samples[0]]),
+      buildSamplePixel(fixture.width - 1, fixture.height - 1, [
+        fixture.samples[fixture.samples.length - 1],
+      ]),
+    ],
   };
 }
 

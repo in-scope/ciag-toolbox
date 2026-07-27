@@ -1,9 +1,16 @@
-import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
 import { restoreSourceColorInterpretation } from "@/lib/image/restore-source-color-interpretation";
+import { readAndDecodeSingleOpenedImageFileOrThrow } from "@/lib/image/run-open-images-flow";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { parseProjectFileFromJsonString } from "./parse-project";
 import type { ProjectFile, ProjectViewportEntry } from "./project-schema";
+
+// CT-236: bundle assets never cross IPC as whole byte payloads. Each viewport
+// asset is resolved to file metadata by main and then read through the same
+// chunked opened-image path as a normal open, so an ENVI asset streams its
+// binary sidecar straight into the CT-231 chunk-fed decoder and a project
+// holding a 10 GB stack reopens without any 2 GiB single-reply ceiling.
 
 export interface OpenedProjectViewportSnapshot {
   readonly index: number;
@@ -27,6 +34,9 @@ export type OpenProjectFlowResult =
 export interface OpenProjectFlowProgressEvent {
   readonly readAssetCount: number;
   readonly totalAssetCount: number;
+  // 0..1 within the asset currently being read, so a single multi-gigabyte
+  // asset still drives a moving progress bar.
+  readonly currentAssetFraction: number;
 }
 
 export interface OpenProjectFlowOptions {
@@ -58,38 +68,70 @@ async function readAllViewportAssetsForProject(
   onProgress: OpenProjectFlowOptions["onProgress"],
 ): Promise<OpenedProject> {
   const totalAssetCount = project.viewports.length;
-  onProgress?.({ readAssetCount: 0, totalAssetCount });
+  reportAssetProgress(onProgress, 0, totalAssetCount, 0);
   const resolved: OpenedProjectViewportSnapshot[] = [];
   for (let viewportPosition = 0; viewportPosition < totalAssetCount; viewportPosition++) {
-    const entry = project.viewports[viewportPosition]!;
-    resolved.push(await readSingleViewportAssetOrThrow(projectFilePath, entry));
-    onProgress?.({ readAssetCount: viewportPosition + 1, totalAssetCount });
+    resolved.push(
+      await readViewportAssetAtPositionReportingProgress(
+        projectFilePath,
+        project,
+        { position: viewportPosition, totalAssetCount },
+        onProgress,
+      ),
+    );
+    reportAssetProgress(onProgress, viewportPosition + 1, totalAssetCount, 0);
   }
   return { projectFilePath, project, resolvedViewports: resolved };
+}
+
+function reportAssetProgress(
+  onProgress: OpenProjectFlowOptions["onProgress"],
+  readAssetCount: number,
+  totalAssetCount: number,
+  currentAssetFraction: number,
+): void {
+  onProgress?.({ readAssetCount, totalAssetCount, currentAssetFraction });
+}
+
+async function readViewportAssetAtPositionReportingProgress(
+  projectFilePath: string,
+  project: ProjectFile,
+  place: { position: number; totalAssetCount: number },
+  onProgress: OpenProjectFlowOptions["onProgress"],
+): Promise<OpenedProjectViewportSnapshot> {
+  const entry = project.viewports[place.position]!;
+  return readSingleViewportAssetOrThrow(projectFilePath, entry, (fraction) =>
+    reportAssetProgress(onProgress, place.position, place.totalAssetCount, fraction),
+  );
 }
 
 async function readSingleViewportAssetOrThrow(
   projectFilePath: string,
   entry: ProjectViewportEntry,
+  onDecodeProgress: UnitProgressCallback,
 ): Promise<OpenedProjectViewportSnapshot> {
-  const result = await window.toolboxApi.readProjectBundleAsset({
+  const resolved = await window.toolboxApi.resolveProjectBundleAsset({
     projectFilePath,
     relativePath: entry.source.relativePath,
   });
-  if (result.kind === "missing") {
+  if (resolved.kind === "missing") {
     throw new Error(`Bundle asset "${entry.source.relativePath}" is missing or unreadable`);
   }
-  const decoded = await decodeImageBytesToViewportSource({
-    fileName: result.fileName,
-    bytes: result.bytes,
-    sidecarBytes: result.sidecar?.bytes,
-  });
+  const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(resolved.file, onDecodeProgress);
+  return buildViewportSnapshotFromDecodedAsset(entry, resolved.file, decoded.source);
+}
+
+function buildViewportSnapshotFromDecodedAsset(
+  entry: ProjectViewportEntry,
+  file: ToolboxOpenImagesDialogFileMetadataEntry,
+  source: ViewportImageSource,
+): OpenedProjectViewportSnapshot {
   return {
     index: entry.index,
     fileName: entry.source.fileName,
-    source: restoreSourceColorInterpretation(decoded, entry.colorInterpretation),
-    originalFilePath: result.absolutePath,
-    fileSizeBytes: result.bytes.length,
+    source: restoreSourceColorInterpretation(source, entry.colorInterpretation),
+    originalFilePath: file.filePath,
+    fileSizeBytes: file.fileSizeBytes,
     entry,
   };
 }

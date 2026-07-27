@@ -31,7 +31,7 @@ import type { Locator } from "@playwright/test";
 // they disable at zero AND at 2+ selection, which is how the PRD AC ("reflects the
 // selected count and disables at zero selection") maps onto the real app.
 
-const OPERATION_APPLY_AFFORDANCE = "Bit Shift";
+const OPERATION_APPLY_AFFORDANCE = "Contrast Curve";
 
 let launched: LaunchedApp;
 

@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
 import type { PixelDimensions } from "./support/page-objects";
@@ -7,29 +7,35 @@ import type { LaunchedApp } from "./support/launch-app";
 import {
   activateRegionTool,
   applyOperationInPlace,
+  applyScopeFieldset,
+  applyScopeRadio,
   dragToneCurveEndpointTo,
   drawInspectionRoiBetweenPixels,
   expectMetadataDataTypeAndDimensions,
   expectOperationAwaitsItsOwnRegion,
   expectPixelReadoutToEqual,
   expectToneCurveOpensWithTwoEndpoints,
+  FULL_IMAGE_SCOPE_LABEL,
   loadFixtureAsStack,
   openOperation,
+  operationRegionPlaceholder,
+  selectOperationRegionButton,
   selectOperationRegionByDrag,
   selectPanel,
-  selectRegionOfInterestScope,
   setOperationNumberParameter,
   TONE_CURVE_LABEL,
+  WHOLE_STACK_SCOPE_LABEL,
 } from "./support/page-objects";
 
-// CT-154 / manual section 21 (CT-095): the ROI/operation separation, verified across ALL
-// three region-using operations at once. The inspection ROI tool drives inspection only;
-// Crop to Region, the Tone Curve's region scope, and Spectralon's reference patch each ask
-// for their OWN region through one shared region-request flow, even with a stale inspection
-// ROI sitting on screen. Two contracts per operation:
+// CT-154 / manual section 21 (CT-095): the ROI/operation separation. The inspection ROI tool
+// drives inspection only; Crop to Region and Spectralon's reference patch each ask for their
+// OWN region through one shared region-request flow, even with a stale inspection ROI sitting
+// on screen. Two contracts per operation:
 //   (1) it prompts for its own region (the shared "Select a region..." placeholder shows and
 //       Apply stays disabled) instead of silently consuming the inspection ROI;
 //   (2) it uses the FRESHLY selected region, not the pre-existing inspection ROI.
+// CT-244 removed the Tone Curve's Region of interest scope entirely; its test now pins the
+// two remaining scopes and that Full image remaps pixels everywhere, stale ROI or not.
 //
 // The inspection ROI sits top-left (0,0)-(1,1); every operation's fresh region is bottom-right
 // (2,2)-(3,3). An outcome that matches the bottom-right area but contradicts what consuming the
@@ -98,17 +104,32 @@ test("Spectralon requests its own region and calibrates against the fresh region
   await expectFullImageReadout({ x: 0, y: 0 }, bandZeroValueAt(0, 0) / FRESH_REGION_BAND_ZERO_MEAN);
 });
 
-test("Tone Curve region scope requests its own region and remaps only the fresh area", async () => {
+// CT-244: the tone curve has no region scope any more. Its scope control lists exactly
+// Full image and Whole stack, the panel shows no region affordance even with a stale
+// inspection ROI on screen, and a Full image apply remaps pixels EVERYWHERE (the drag
+// clamps the black point to (0, 65535), so the 2-anchor curve maps every value to max).
+test("Contrast Curve offers exactly Full image and Whole stack, and Full image remaps everywhere", async () => {
   await openOperation(launched.window, TONE_CURVE_LABEL);
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
+  await expectToneCurveScopesAreExactlyFullImageAndWholeStack();
+  await expectToneCurvePanelShowsNoRegionAffordance();
   await dragToneCurveEndpointTo(launched.window, "left", -0.2, -0.2);
-  await selectRegionOfInterestScope(launched.window, TONE_CURVE_LABEL);
-  await expectOperationAwaitsItsOwnRegion(launched.window, TONE_CURVE_LABEL);
-  await selectFreshBottomRightRegion(TONE_CURVE_LABEL);
   await applyOperationInPlace(launched.window, TONE_CURVE_LABEL);
+  await expectFullImageReadout({ x: 0, y: 0 }, UINT16_TYPE_MAX);
   await expectFullImageReadout({ x: 3, y: 3 }, UINT16_TYPE_MAX);
-  await expectFullImageReadout({ x: 0, y: 0 }, bandZeroValueAt(0, 0));
 });
+
+async function expectToneCurveScopesAreExactlyFullImageAndWholeStack(): Promise<void> {
+  const fieldset = applyScopeFieldset(launched.window, TONE_CURVE_LABEL);
+  await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, FULL_IMAGE_SCOPE_LABEL)).toBeVisible();
+  await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, WHOLE_STACK_SCOPE_LABEL)).toBeVisible();
+  await expect(fieldset.getByRole("radio")).toHaveCount(2);
+}
+
+async function expectToneCurvePanelShowsNoRegionAffordance(): Promise<void> {
+  await expect(selectOperationRegionButton(launched.window, TONE_CURVE_LABEL)).toHaveCount(0);
+  await expect(operationRegionPlaceholder(launched.window, TONE_CURVE_LABEL)).toHaveCount(0);
+}
 
 async function drawInspectionRoiTopLeft(): Promise<void> {
   await activateRegionTool(launched.window);

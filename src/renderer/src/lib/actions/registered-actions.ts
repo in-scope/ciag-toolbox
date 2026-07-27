@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal, Layers, Palette, RotateCw, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, Palette, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
 import {
   EMPTY_PINNED_ROI_SPECTRA,
@@ -10,11 +10,11 @@ import {
   formatKeptOriginalBandsHistoryLabel,
   mapKeptBandNumbersToCurrentPositions,
 } from "@/lib/image/apply-band-keep";
-import { applyBitShiftToRasterImage } from "@/lib/image/apply-bit-shift";
+import { applyBitShiftToRasterImageReportingProgress } from "@/lib/image/apply-bit-shift";
 import {
   applyComposedToneCurveToRasterBand,
   applyToneCurveToRasterBand,
-  applyToneCurveToWholeStackPerBandMinMax,
+  applyToneCurveToWholeStackPerBandMinMaxReportingProgress,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -27,17 +27,17 @@ import {
   type ToneCurveChannelAnchors,
 } from "@/lib/image/tone-curve-channels";
 import {
-  applyBrightnessToRasterBands,
+  applyBrightnessToRasterBandsReportingProgress,
   brightnessDeltaForRangeFractionOfBand,
 } from "@/lib/image/apply-brightness";
-import { applyContrastToRasterBands } from "@/lib/image/apply-contrast";
-import { applyCropToRasterImage } from "@/lib/image/apply-crop-to-roi";
+import { applyContrastToRasterBandsReportingProgress } from "@/lib/image/apply-contrast";
+import { applyCropToRasterImageReportingProgress } from "@/lib/image/apply-crop-to-roi";
 import {
   buildFalseColorComposite,
   type FalseColorBandAssignment,
 } from "@/lib/image/apply-false-color-composite";
 import {
-  applyGeometricTransformToRasterImage,
+  applyGeometricTransformToRasterImageReportingProgress,
   GEOMETRIC_TRANSFORM_LABELS,
   isGeometricTransform,
   isReflectionTransform,
@@ -48,11 +48,17 @@ import {
 import {
   autoNormalizeUnboundedRasterToUnitRange,
   isRasterDataRangeBoundedForInvert,
-  planInvertForRaster,
+  planInvertForRasterReportingProgress,
 } from "@/lib/image/apply-invert";
-import { applyFlatFieldToRasterImage } from "@/lib/image/apply-flat-field";
+import { applyFlatFieldToRasterImageReportingProgress } from "@/lib/image/apply-flat-field";
 import {
-  applyNormalizeToRaster,
+  reportCompletedUnitAndYieldSoProgressCanPaint,
+  reportMultiUnitWorkStarting,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
+import {
+  applyNormalizeToRasterReportingProgress,
   MIN_MAX_NORMALIZE_METHOD,
   type NormalizeRangeMethod,
 } from "@/lib/image/apply-normalize";
@@ -62,12 +68,8 @@ import {
   LUMINANCE_GRAYSCALE_WEIGHTS,
   type RgbToGrayscaleWeights,
 } from "@/lib/image/apply-rgb-to-grayscale";
-import { applySpectralonReflectanceCalibration } from "@/lib/image/apply-spectralon";
-import { applyStandardizeToRaster } from "@/lib/image/apply-standardize";
-import {
-  formatBandNumbersAsRangeText,
-  parseBandRangeText,
-} from "@/lib/image/parse-band-range";
+import { applySpectralonReflectanceCalibrationReportingProgress } from "@/lib/image/apply-spectralon";
+import { applyStandardizeToRasterReportingProgress } from "@/lib/image/apply-standardize";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import {
@@ -83,12 +85,16 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import {
+  describeCubeScopeForAppliedLabel,
+  injectSourceBandCountForBandWiseLabels,
+  resolveCubeScopeSelectionFromParameters,
+  type CubeScopeParameterIds,
+} from "./band-scope-selection";
+import {
   FULL_CUBE_SCOPE,
   NO_RASTER_REFERENCE_SELECTED,
   readBandNumberOrDefault,
-  readBandRangeTextOrEmpty,
   readClipBoundOrDefault,
-  readCubeScopeChoiceOrDefault,
   readRasterReferenceTokenOrEmpty,
   type BandNumberParameterSchema,
   type BooleanParameterSchema,
@@ -113,6 +119,7 @@ import type {
   ViewportAction,
   ViewportActionOutput,
   ViewportActionSecondaryOutputsTransform,
+  ViewportActionAsyncSourceTransform,
   ViewportActionSourceApplicabilityCheck,
   ViewportActionSourceTransform,
 } from "./viewport-action";
@@ -130,6 +137,14 @@ import {
 import { PCA_ACTION } from "./pca-action";
 import { MNF_ACTION } from "./mnf-action";
 import { ICA_ACTION } from "./ica-action";
+import { THRESHOLD_ACTION } from "./threshold-action";
+import { SPECTRAL_DERIVATIVE_ACTION } from "./spectral-derivative-action";
+import { SPATIAL_FILTER_ACTION } from "./spatial-filter-action";
+import { DENOISE_ACTION } from "./denoise-action";
+import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
+import { BAND_WEIGHTING_ACTION } from "./band-weighting-action";
+import { BAND_SELECTION_ACTION } from "./band-selection-action";
+import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -155,11 +170,13 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly supportsRoiScope?: boolean;
   /**
    * CT-192: a custom set of "Apply to" scope options for this action, resolved against
-   * the source band count (e.g. the tone curve drops "Whole stack" for a single band).
-   * Actions without this fall back to DEFAULT_APPLY_SCOPE_OPTIONS.
+   * the source band count and photo-ness (e.g. the tone curve drops "Whole stack" for a
+   * single band and for a true-colour photo). Actions without this fall back to
+   * DEFAULT_APPLY_SCOPE_OPTIONS.
    */
   readonly resolveApplyScopeOptions?: (
     bandCount: number | null,
+    isTrueColorComposite: boolean,
   ) => ReadonlyArray<ApplyScopeOption>;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
@@ -175,6 +192,13 @@ export interface RegisteredViewportAction extends ViewportAction {
     sourceRenderingState: ViewportRenderingState,
   ) => ViewportRenderingState;
   /**
+   * The operation panel stays open through the apply run and closes only when
+   * the run SUCCEEDS. The Custom transform uses this because its Python runs
+   * AT Apply time: a failed run must leave the panel open, with the configured
+   * formula or tool intact, so the user can correct the script and Apply again.
+   */
+  readonly keepsPanelOpenUntilApplySucceeds?: boolean;
+  /**
    * The operation emits extra outputs alongside its primary result; each is
    * placed in its own fresh viewport with its own applied label (CT-097).
    */
@@ -188,17 +212,13 @@ export interface RegisteredViewportAction extends ViewportAction {
 }
 
 const BIT_SHIFT_PARAMETER_ID = "shiftAmount";
-const BIT_SHIFT_REGION_PARAMETER_ID_X0 = "regionImagePixelX0";
-const BIT_SHIFT_REGION_PARAMETER_ID_Y0 = "regionImagePixelY0";
-const BIT_SHIFT_REGION_PARAMETER_ID_X1 = "regionImagePixelX1";
-const BIT_SHIFT_REGION_PARAMETER_ID_Y1 = "regionImagePixelY1";
 
 const BIT_SHIFT_PARAMETER_SCHEMA: IntegerParameterSchema = {
   kind: "integer",
   id: BIT_SHIFT_PARAMETER_ID,
   label: "Shift amount",
   description:
-    "Brightens images from cameras that pack a smaller bit depth (such as 12-bit) into a 16-bit file, scaling the values up so they fill the full expected brightness range. Each step doubles the values.",
+    "Brightens images from imaging systems that pack a smaller bit depth into a larger bit-depth file, such as 12-bit data in a 16-bit file. Each shift step doubles the values; for example, 4 shifts take 12-bit data to 16-bit.",
   defaultValue: 4,
   min: 0,
   max: 8,
@@ -209,42 +229,23 @@ export const BIT_SHIFT_ACTION: RegisteredViewportAction = {
   label: "Bit Shift",
   icon: ChevronsLeft,
   parameters: [BIT_SHIFT_PARAMETER_SCHEMA],
-  supportsRoiScope: true,
   successMessage: "Bit shift applied",
   appliedLabel: "Bit shift",
   formatAppliedLabel: formatBitShiftAppliedLabel,
-  prepareParameterValuesForApply: prepareBitShiftParameterValuesForScope,
-  apply: clearOperationRegionFromState,
-  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createBitShiftSourceTransform(),
+  apply: (state) => state,
+  transformSourceAsync: createBitShiftSourceTransform(),
 };
 
-const BIT_SHIFT_REGION_PARAMETER_IDS = {
-  x0: BIT_SHIFT_REGION_PARAMETER_ID_X0,
-  y0: BIT_SHIFT_REGION_PARAMETER_ID_Y0,
-  x1: BIT_SHIFT_REGION_PARAMETER_ID_X1,
-  y1: BIT_SHIFT_REGION_PARAMETER_ID_Y1,
-};
-
-function prepareBitShiftParameterValuesForScope(
-  rawParameterValues: ParameterValuesById,
-  sourceRenderingState: ViewportRenderingState,
-  applyScope: ApplyScope,
-): ParameterValuesById {
-  if (applyScope !== "roi") return rawParameterValues;
-  const region = requireOperationRegionForApply(sourceRenderingState, "Bit Shift");
-  return injectOperationRegionCorners(rawParameterValues, region, BIT_SHIFT_REGION_PARAMETER_IDS);
-}
-
-function createBitShiftSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createBitShiftSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
-    const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
-    return {
-      kind: "raster",
-      raster: applyBitShiftToRasterImage(source.raster, shiftAmount, region ? { region } : {}),
-    };
+    const raster = await applyBitShiftToRasterImageReportingProgress(
+      source.raster,
+      shiftAmount,
+      onProgress,
+    );
+    return { kind: "raster", raster };
   };
 }
 
@@ -256,42 +257,8 @@ function readBitShiftAmountFromParameterValues(parameterValues: ParameterValuesB
   return Math.round(raw);
 }
 
-function readBitShiftRegionFromParameterValuesIfPresent(
-  parameterValues: ParameterValuesById,
-): ViewportRoi | null {
-  const x0 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_X0];
-  const y0 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_Y0];
-  const x1 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_X1];
-  const y1 = parameterValues[BIT_SHIFT_REGION_PARAMETER_ID_Y1];
-  if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
-  return {
-    imagePixelX0: Math.round(x0 as number),
-    imagePixelY0: Math.round(y0 as number),
-    imagePixelX1: Math.round(x1 as number),
-    imagePixelY1: Math.round(y1 as number),
-  };
-}
-
-function areAllRegionCornersFiniteNumbers(
-  x0: unknown,
-  y0: unknown,
-  x1: unknown,
-  y1: unknown,
-): boolean {
-  return (
-    typeof x0 === "number" && Number.isFinite(x0) &&
-    typeof y0 === "number" && Number.isFinite(y0) &&
-    typeof x1 === "number" && Number.isFinite(x1) &&
-    typeof y1 === "number" && Number.isFinite(y1)
-  );
-}
-
 function formatBitShiftAppliedLabel(parameterValues: ParameterValuesById): string {
-  const shiftAmount = readBitShiftAmountFromParameterValues(parameterValues);
-  const region = readBitShiftRegionFromParameterValuesIfPresent(parameterValues);
-  if (!region) return `Bit shift +${shiftAmount}`;
-  const canonical = canonicalizeViewportRoiCorners(region);
-  return `Bit shift +${shiftAmount} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
+  return `Bit shift +${readBitShiftAmountFromParameterValues(parameterValues)}`;
 }
 
 const CROP_PARAMETER_ID_X0 = "imagePixelX0";
@@ -310,7 +277,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
   apply: clearRegionAndStaleInspectionRoiAfterCrop,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createCropToRegionSourceTransform(),
+  transformSourceAsync: createCropToRegionSourceTransform(),
 };
 
 function clearRegionAndStaleInspectionRoiAfterCrop(
@@ -344,15 +311,18 @@ function prepareCropParameterValuesFromOperationRegion(
   return injectOperationRegionCorners(rawParameterValues, region, CROP_REGION_PARAMETER_IDS);
 }
 
-function createCropToRegionSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createCropToRegionSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const roi = readRoiFromCropParameterValues(parameterValues);
-    return { kind: "raster", raster: applyCropToRasterImage(source.raster, roi) };
+    const raster = await applyCropToRasterImageReportingProgress(source.raster, roi, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
-function readRoiFromCropParameterValues(parameterValues: ParameterValuesById) {
+// Exported for the CT-239 apply-allocation estimator: the crop cost is the
+// committed rectangle's pixels, not the whole stack's.
+export function readRoiFromCropParameterValues(parameterValues: ParameterValuesById) {
   return {
     imagePixelX0: readIntegerParameterOrThrow(parameterValues, CROP_PARAMETER_ID_X0),
     imagePixelY0: readIntegerParameterOrThrow(parameterValues, CROP_PARAMETER_ID_Y0),
@@ -494,15 +464,20 @@ export const FLAT_FIELD_ACTION: RegisteredViewportAction = {
   loadingMessage: "Applying flat-field correction...",
   formatAppliedLabel: formatFlatFieldAppliedLabel,
   apply: (state) => state,
-  transformSource: createFlatFieldSourceTransform(),
+  transformSourceAsync: createFlatFieldSourceTransform(),
 };
 
-function createFlatFieldSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createFlatFieldSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const lightReference = resolveRequiredLightReferenceOrThrow(parameterValues);
     const darkReference = resolveOptionalDarkReferenceOrThrow(parameterValues);
-    const raster = applyFlatFieldToRasterImage(source.raster, lightReference, darkReference ?? undefined);
+    const raster = await applyFlatFieldToRasterImageReportingProgress(
+      source.raster,
+      lightReference,
+      darkReference ?? undefined,
+      onProgress,
+    );
     return { kind: "raster", raster };
   };
 }
@@ -572,7 +547,7 @@ export const SPECTRALON_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: prepareSpectralonBrightRegionFromOperationRegion,
   apply: clearOperationRegionFromState,
   clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createSpectralonSourceTransform(),
+  transformSourceAsync: createSpectralonSourceTransform(),
 };
 
 const SPECTRALON_BRIGHT_REGION_PARAMETER_IDS = {
@@ -590,12 +565,16 @@ function prepareSpectralonBrightRegionFromOperationRegion(
   return injectOperationRegionCorners(rawParameterValues, region, SPECTRALON_BRIGHT_REGION_PARAMETER_IDS);
 }
 
-function createSpectralonSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createSpectralonSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const brightRoi = readSpectralonBrightRoiOrThrow(parameterValues);
     const reflectance = readSpectralonReflectanceFromParameterValues(parameterValues);
-    const raster = applySpectralonReflectanceCalibration(source.raster, { brightRoi, reflectance });
+    const raster = await applySpectralonReflectanceCalibrationReportingProgress(
+      source.raster,
+      { brightRoi, reflectance },
+      onProgress,
+    );
     return { kind: "raster", raster };
   };
 }
@@ -640,32 +619,20 @@ function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): str
 const TONE_CURVE_ANCHORS_PARAMETER_ID = "toneCurveAnchorsJson";
 const TONE_CURVE_BAND_PARAMETER_ID = "targetBandIndex";
 const TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID = "toneCurveChannelAnchorsJson";
-const TONE_CURVE_REGION_PARAMETER_IDS = {
-  x0: "regionImagePixelX0",
-  y0: "regionImagePixelY0",
-  x1: "regionImagePixelX1",
-  y1: "regionImagePixelY1",
-} as const;
 
 export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   id: "tone-curve",
-  label: "Tone Curve",
+  label: "Contrast Curve",
   icon: Spline,
-  successMessage: "Tone curve applied",
-  appliedLabel: "Tone curve",
-  loadingMessage: "Applying tone curve...",
-  supportsRoiScope: true,
+  successMessage: "Contrast curve applied",
+  appliedLabel: "Contrast curve",
+  loadingMessage: "Applying contrast curve...",
   resolveApplyScopeOptions: resolveToneCurveApplyScopeOptions,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
-  apply: clearToneCurveAfterApply,
-  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
-  transformSource: createToneCurveSourceTransform(),
+  apply: clearToneCurveEditingState,
+  transformSourceAsync: createToneCurveSourceTransform(),
 };
-
-function clearToneCurveAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return clearToneCurveEditingState({ ...state, operationRegion: null });
-}
 
 function prepareToneCurveParameterValues(
   rawParameterValues: ParameterValuesById,
@@ -675,17 +642,15 @@ function prepareToneCurveParameterValues(
 ): ParameterValuesById {
   const anchors = sourceRenderingState.toneCurveAnchors;
   if (!anchors || anchors.length < 2) {
-    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
+    throw new Error("Contrast Curve needs at least two anchor points. Adjust the curve first.");
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
   const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
-  const withScope = withToneCurveWholeStackScope(withChannels, applyScope);
-  return injectToneCurveRegionIfPresent(withScope, resolveToneCurveRegion(sourceRenderingState, applyScope));
+  return Object.freeze(withToneCurveWholeStackScope(withChannels, applyScope));
 }
 
 // CT-192: mark a whole-stack apply so the transform bakes every band and the History
-// entry records the scope. Whole stack and ROI are mutually exclusive (ROI never injects
-// a region for the whole-stack scope, see resolveToneCurveRegion).
+// entry records the scope.
 function withToneCurveWholeStackScope(
   parameterValues: ParameterValuesById,
   applyScope: ApplyScope,
@@ -712,14 +677,6 @@ function withToneCurveChannelAnchorsForComposite(
   return { ...parameterValues, [TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID]: serializeToneCurveChannelAnchors(merged) };
 }
 
-function resolveToneCurveRegion(
-  sourceRenderingState: ViewportRenderingState,
-  applyScope: ApplyScope,
-): ViewportRoi | null {
-  if (applyScope !== "roi") return null;
-  return requireOperationRegionForApply(sourceRenderingState, "Tone Curve");
-}
-
 function withToneCurveAnchorsAndBandValues(
   rawParameterValues: ParameterValuesById,
   anchors: ReadonlyArray<ToneCurveAnchor>,
@@ -730,14 +687,6 @@ function withToneCurveAnchorsAndBandValues(
     [TONE_CURVE_ANCHORS_PARAMETER_ID]: serializeToneCurveAnchors(anchors),
     [TONE_CURVE_BAND_PARAMETER_ID]: selectedBandIndex,
   };
-}
-
-function injectToneCurveRegionIfPresent(
-  parameterValues: ParameterValuesById,
-  region: ViewportRoi | null,
-): ParameterValuesById {
-  if (!region) return Object.freeze({ ...parameterValues });
-  return injectOperationRegionCorners(parameterValues, region, TONE_CURVE_REGION_PARAMETER_IDS);
 }
 
 function serializeToneCurveAnchors(anchors: ReadonlyArray<ToneCurveAnchor>): string {
@@ -769,18 +718,17 @@ function parseSerializedToneCurveChannelAnchors(raw: string): ToneCurveChannelAn
   return Object.fromEntries(entries) as ToneCurveChannelAnchors;
 }
 
-function createToneCurveSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createToneCurveSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const region = readToneCurveRegionIfPresent(parameterValues);
     const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
     if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
-      return { kind: "raster", raster: bakeCompositeToneCurve(source.raster, channelAnchors, region) };
+      return { kind: "raster", raster: await bakeCompositeToneCurve(source.raster, channelAnchors, onProgress) };
     }
     if (isWholeStackToneCurveScope(parameterValues)) {
-      return { kind: "raster", raster: bakeWholeStackToneCurve(source.raster, parameterValues) };
+      return { kind: "raster", raster: await bakeWholeStackToneCurve(source.raster, parameterValues, onProgress) };
     }
-    return { kind: "raster", raster: bakeSingleBandToneCurve(source.raster, parameterValues, region) };
+    return { kind: "raster", raster: await bakeSingleBandToneCurve(source.raster, parameterValues, onProgress) };
   };
 }
 
@@ -793,35 +741,41 @@ function isWholeStackToneCurveScope(parameterValues: ParameterValuesById): boole
 function bakeWholeStackToneCurve(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const bandIndex = readToneCurveBandIndex(parameterValues);
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return applyToneCurveToWholeStackPerBandMinMax(raster, bandIndex, anchors);
+  return applyToneCurveToWholeStackPerBandMinMaxReportingProgress(raster, bandIndex, anchors, onProgress);
 }
 
-function bakeSingleBandToneCurve(
+async function bakeSingleBandToneCurve(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
-  region: ViewportRoi | null,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const bandIndex = readToneCurveBandIndex(parameterValues);
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return applyToneCurveToRasterBand(raster, bandIndex, anchors, region ? { region } : {});
+  const baked = applyToneCurveToRasterBand(raster, bandIndex, anchors);
+  await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, 1, 1);
+  return baked;
 }
 
 // CT-178: bake every R/G/B band, folding the rgb/Value curve over each channel's
 // own curve, so all channel edits commit together in a single operation.
-function bakeCompositeToneCurve(
+async function bakeCompositeToneCurve(
   raster: RasterImage,
   channelAnchors: ToneCurveChannelAnchors,
-  region: ViewportRoi | null,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const valueAnchors = channelAnchors.rgb ?? null;
-  const options = region ? { region } : {};
-  return COLOR_TONE_CURVE_CHANNELS.reduce((current, channel) => {
+  let current = raster;
+  reportMultiUnitWorkStarting(onProgress, COLOR_TONE_CURVE_CHANNELS.length);
+  for (const [completedBefore, channel] of COLOR_TONE_CURVE_CHANNELS.entries()) {
     const bandIndex = colorBandIndexForToneCurveChannel(channel) ?? 0;
-    return applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors, options);
-  }, raster);
+    current = applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, COLOR_TONE_CURVE_CHANNELS.length);
+  }
+  return current;
 }
 
 function readToneCurveBandIndex(parameterValues: ParameterValuesById): number {
@@ -835,26 +789,10 @@ function readToneCurveAnchorsOrThrow(
 ): ReadonlyArray<ToneCurveAnchor> {
   const raw = parameterValues[TONE_CURVE_ANCHORS_PARAMETER_ID];
   if (typeof raw !== "string") {
-    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
+    throw new Error("Contrast Curve needs at least two anchor points. Adjust the curve first.");
   }
   const pairs = JSON.parse(raw) as ReadonlyArray<readonly [number, number]>;
   return pairs.map(([input, output]) => ({ input, output }));
-}
-
-function readToneCurveRegionIfPresent(
-  parameterValues: ParameterValuesById,
-): ViewportRoi | null {
-  const x0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x0];
-  const y0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y0];
-  const x1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x1];
-  const y1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y1];
-  if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
-  return {
-    imagePixelX0: Math.round(x0 as number),
-    imagePixelY0: Math.round(y0 as number),
-    imagePixelX1: Math.round(x1 as number),
-    imagePixelY1: Math.round(y1 as number),
-  };
 }
 
 function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): string {
@@ -862,7 +800,7 @@ function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): stri
   const label = channelAnchors
     ? formatCompositeToneCurveLabel(channelAnchors)
     : formatSingleBandToneCurveLabel(parameterValues);
-  return appendToneCurveRegionSuffix(appendToneCurveWholeStackSuffix(label, parameterValues), parameterValues);
+  return appendToneCurveWholeStackSuffix(label, parameterValues);
 }
 
 function appendToneCurveWholeStackSuffix(label: string, parameterValues: ParameterValuesById): string {
@@ -872,20 +810,13 @@ function appendToneCurveWholeStackSuffix(label: string, parameterValues: Paramet
 
 function formatSingleBandToneCurveLabel(parameterValues: ParameterValuesById): string {
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return `Tone curve (${anchors.length} points)`;
+  return `Contrast curve (${anchors.length} points)`;
 }
 
 function formatCompositeToneCurveLabel(channelAnchors: ToneCurveChannelAnchors): string {
   const editedNames = listEditedToneCurveChannels(channelAnchors).map(formatToneCurveChannelDisplayName);
-  if (editedNames.length === 0) return "Tone curve (no channel changes)";
-  return `Tone curve (channels: ${editedNames.join(", ")})`;
-}
-
-function appendToneCurveRegionSuffix(label: string, parameterValues: ParameterValuesById): string {
-  const region = readToneCurveRegionIfPresent(parameterValues);
-  if (!region) return label;
-  const canonical = canonicalizeViewportRoiCorners(region);
-  return `${label} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
+  if (editedNames.length === 0) return "Contrast curve (no channel changes)";
+  return `Contrast curve (channels: ${editedNames.join(", ")})`;
 }
 
 const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID = "brightnessPercent";
@@ -913,17 +844,21 @@ const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
   description:
     "Scales each pixel around the band mean: (value - mean) * contrast + mean. 1 leaves the band unchanged; values clip to the data-type range.",
   defaultValue: 1,
-  min: 0,
-  max: 4,
-  step: 0.05,
+  min: 0.05,
+  max: 20,
+  step: 0.005,
+  scale: "log-symmetric",
 };
 
+// CT-247: a true-colour photo always adjusts all three channels, so the
+// all-bands choice is hidden for composites (scientific stacks keep it).
 const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
   description: "Off applies to the selected band only; on applies to every band in the stack.",
   defaultValue: false,
+  hiddenForTrueColorComposite: true,
 };
 
 export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
@@ -940,44 +875,70 @@ export const BRIGHTNESS_CONTRAST_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatBrightnessContrastAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForBrightnessContrast,
   apply: (state) => state,
-  transformSource: createBrightnessContrastSourceTransform(),
+  transformSourceAsync: createBrightnessContrastSourceTransform(),
 };
 
+// CT-247: a composite Apply always adjusts all three channels, so the audit
+// params record applyToAllBands=true and the History label reads "all bands".
 function injectSelectedBandIndexForBrightnessContrast(
   rawParameterValues: ParameterValuesById,
   sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
 ): ParameterValuesById {
-  return Object.freeze({
+  const values: Record<string, ParameterValue> = {
     ...rawParameterValues,
     [BRIGHTNESS_CONTRAST_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
-  });
+  };
+  if (sourceRaster && shouldRenderRasterAsRgbComposite(sourceRaster)) {
+    values[BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID] = true;
+  }
+  return Object.freeze(values);
 }
 
-function createBrightnessContrastSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createBrightnessContrastSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveBrightnessContrastBandIndexes(parameterValues, source.raster);
-    return { kind: "raster", raster: adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues) };
+    const raster = await adjustBrightnessThenContrast(source.raster, bandIndexes, parameterValues, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
-function adjustBrightnessThenContrast(
+// CT-222: the brightness pass fills the first half of the progress bar and the
+// contrast pass the second half, one tick per band inside each pass.
+async function adjustBrightnessThenContrast(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
   parameterValues: ParameterValuesById,
-): RasterImage {
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
   const brightnessFraction = readBrightnessPercent(parameterValues) / 100;
   const firstBand = getRasterBandPixelsOrThrow(raster, bandIndexes[0] ?? 0);
   const brightnessDelta = brightnessDeltaForRangeFractionOfBand(firstBand, raster.sampleFormat, brightnessFraction);
-  const brightened = applyBrightnessToRasterBands(raster, bandIndexes, brightnessDelta);
-  return applyContrastToRasterBands(brightened, bandIndexes, readContrastRatio(parameterValues));
+  const brightened = await applyBrightnessToRasterBandsReportingProgress(
+    raster,
+    bandIndexes,
+    brightnessDelta,
+    scaleProgressToWindow(onProgress, 0, 0.5),
+  );
+  return applyContrastToRasterBandsReportingProgress(
+    brightened,
+    bandIndexes,
+    readContrastRatio(parameterValues),
+    scaleProgressToWindow(onProgress, 0.5, 1),
+  );
 }
 
+// CT-247: a true-colour composite ALWAYS adjusts all three channels (contrast
+// still centres on each band's own brightened mean inside the per-band apply).
 function resolveBrightnessContrastBandIndexes(
   parameterValues: ParameterValuesById,
   raster: RasterImage,
 ): ReadonlyArray<number> {
-  if (readApplyToAllBands(parameterValues)) return listAllBandIndexes(raster.bandPixels.length);
+  if (shouldRenderRasterAsRgbComposite(raster) || readApplyToAllBands(parameterValues)) {
+    return listAllBandIndexes(raster.bandPixels.length);
+  }
   return [readBrightnessContrastTargetBandIndex(parameterValues)];
 }
 
@@ -1051,7 +1012,7 @@ export const INVERT_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatInvertAppliedLabel,
   prepareParameterValuesForApply: injectSelectedBandIndexForInvert,
   apply: (state) => state,
-  transformSource: createInvertSourceTransform(),
+  transformSourceAsync: createInvertSourceTransform(),
   transformSourceToSecondaryOutputs: createInvertSecondaryOutputsTransform(),
 };
 
@@ -1065,19 +1026,21 @@ function injectSelectedBandIndexForInvert(
   });
 }
 
-function createInvertSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createInvertSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const bandIndexes = resolveInvertBandIndexes(parameterValues, source.raster);
-    return { kind: "raster", raster: resolveInvertPrimaryRaster(source.raster, bandIndexes) };
+    const raster = await resolveInvertPrimaryRaster(source.raster, bandIndexes, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
-function resolveInvertPrimaryRaster(
+async function resolveInvertPrimaryRaster(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
-): RasterImage {
-  const outcome = planInvertForRaster(raster, bandIndexes);
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const outcome = await planInvertForRasterReportingProgress(raster, bandIndexes, onProgress);
   return outcome.kind === "direct" ? outcome.inverted : outcome.normalizedThenInverted;
 }
 
@@ -1104,7 +1067,9 @@ function resolveInvertBandIndexes(
   return [readInvertTargetBandIndex(parameterValues)];
 }
 
-function readInvertApplyToAllBands(parameterValues: ParameterValuesById): boolean {
+// Exported for the CT-239 apply-allocation estimator: an all-bands invert
+// allocates the whole cube, a single-band invert only the target band.
+export function readInvertApplyToAllBands(parameterValues: ParameterValuesById): boolean {
   return parameterValues[INVERT_ALL_BANDS_PARAMETER_ID] === true;
 }
 
@@ -1124,7 +1089,7 @@ function describeInvertAffectedBands(parameterValues: ParameterValuesById): stri
 }
 
 const NORMALIZE_SCOPE_PARAMETER_ID = "scope";
-const NORMALIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const NORMALIZE_BAND_COUNT_PARAMETER_ID = "sourceBandCount";
 const NORMALIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const NORMALIZE_METHOD_PARAMETER_ID = "method";
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
@@ -1136,14 +1101,21 @@ const MIN_MAX_METHOD_VALUE = "min-max";
 const ROBUST_PERCENTILE_METHOD_VALUE = "robust-percentile";
 const CLIP_ABSOLUTE_METHOD_VALUE = "clip-absolute";
 
+const NORMALIZE_SCOPE_IDS: CubeScopeParameterIds = {
+  scopeParameterId: NORMALIZE_SCOPE_PARAMETER_ID,
+  bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
+  bandCountParameterId: NORMALIZE_BAND_COUNT_PARAMETER_ID,
+};
+
 const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full stack scales every band by one stack-wide min and max; band-wise scales each entered band by its own min and max (defaults to the current band).",
+    "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.",
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
+  emptyBandRangeMeansAllBands: true,
 };
 
 const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
@@ -1151,20 +1123,20 @@ const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
   id: NORMALIZE_METHOD_PARAMETER_ID,
   label: "Method",
   description:
-    "Min-max scales by the absolute min and max. Robust scales by the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1). Clip by value clamps to an absolute low/high range, keeping the data type and in-range values.",
+    "Min-max scales by (value - min) / (max - min). Percentile clip does the same using the low and high percentile values, so sparse outliers do not flatten the image; the result spans 0 to 1 and values outside the percentile range clip to 0 and 1.",
   defaultValue: MIN_MAX_METHOD_VALUE,
   options: [
-    { value: MIN_MAX_METHOD_VALUE, label: "Min-max (absolute)" },
-    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Robust (percentile clip)" },
-    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value (absolute)" },
+    { value: MIN_MAX_METHOD_VALUE, label: "Min-max" },
+    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Percentile clip" },
+    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value" },
   ],
 };
 
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: NORMALIZE_LOW_PERCENTILE_PARAMETER_ID,
-  label: "Low percentile (robust)",
-  description: "Lower clip percentile used by the robust method.",
+  label: "Low percentile",
+  description: "Lower clip percentile.",
   defaultValue: 2,
   min: 0,
   max: 100,
@@ -1175,8 +1147,8 @@ const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID,
-  label: "High percentile (robust)",
-  description: "Upper clip percentile used by the robust method.",
+  label: "High percentile",
+  description: "Upper clip percentile.",
   defaultValue: 98,
   min: 0,
   max: 100,
@@ -1189,7 +1161,7 @@ const NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
   id: NORMALIZE_CLIP_BOUNDS_PARAMETER_ID,
   label: "Clip range",
   description:
-    "Values below the low value clamp to it and values above the high value clamp to it. The data type and in-range values are kept.",
+    "Values below the low value clip to it and values above the high value clip to it. The data type and in-range values are kept.",
   loParameterId: NORMALIZE_CLIP_LOW_PARAMETER_ID,
   hiParameterId: NORMALIZE_CLIP_HIGH_PARAMETER_ID,
   loLabel: "Clip low",
@@ -1214,27 +1186,29 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   appliedLabel: "Normalize",
   loadingMessage: "Normalizing...",
   formatAppliedLabel: formatNormalizeAppliedLabel,
-  prepareParameterValuesForApply: injectSelectedBandIndexForNormalize,
+  prepareParameterValuesForApply: injectSourceBandCountForNormalize,
   apply: (state) => state,
-  transformSource: createNormalizeSourceTransform(),
+  transformSourceAsync: createNormalizeSourceTransform(),
 };
 
-function injectSelectedBandIndexForNormalize(
+// CT-251: the source band count is captured at Apply time so an empty-field
+// band-wise apply can record the full band range in its History label.
+function injectSourceBandCountForNormalize(
   rawParameterValues: ParameterValuesById,
-  sourceRenderingState: ViewportRenderingState,
+  _sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
 ): ParameterValuesById {
-  return Object.freeze({
-    ...rawParameterValues,
-    [NORMALIZE_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
-  });
+  return injectSourceBandCountForBandWiseLabels(NORMALIZE_SCOPE_IDS, rawParameterValues, sourceRaster);
 }
 
-function createNormalizeSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createNormalizeSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveNormalizeScopeSelection(parameterValues, source.raster.bandCount);
     const method = resolveNormalizeRangeMethod(parameterValues);
-    return { kind: "raster", raster: applyNormalizeToRaster(source.raster, selection, method) };
+    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -1242,16 +1216,7 @@ function resolveNormalizeScopeSelection(
   parameterValues: ParameterValuesById,
   bandCount: number,
 ): ResolvedCubeScopeSelection {
-  const choice = readCubeScopeChoiceOrDefault(
-    parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
-    FULL_CUBE_SCOPE,
-  );
-  if (choice === FULL_CUBE_SCOPE) return { scope: "full-cube" };
-  return resolveBandWiseScopeOrThrow(
-    parameterValues[NORMALIZE_BAND_RANGE_PARAMETER_ID],
-    readNormalizeTargetBandIndex(parameterValues),
-    bandCount,
-  );
+  return resolveCubeScopeSelectionFromParameters(NORMALIZE_SCOPE_IDS, parameterValues, bandCount);
 }
 
 function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
@@ -1259,6 +1224,15 @@ function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): Norm
   if (method === CLIP_ABSOLUTE_METHOD_VALUE) return resolveClipAbsoluteMethod(parameterValues);
   if (method === ROBUST_PERCENTILE_METHOD_VALUE) return resolveRobustPercentileMethod(parameterValues);
   return MIN_MAX_NORMALIZE_METHOD;
+}
+
+// Exported for the CT-239 apply-allocation estimator: clip-absolute preserves
+// the source data type (band-sized output), the scaling methods build a
+// float32 cube.
+export function normalizeMethodPreservesSourceDataType(
+  parameterValues: ParameterValuesById,
+): boolean {
+  return parameterValues[NORMALIZE_METHOD_PARAMETER_ID] === CLIP_ABSOLUTE_METHOD_VALUE;
 }
 
 function resolveRobustPercentileMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
@@ -1290,12 +1264,6 @@ function readNormalizePercentile(
   return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
 }
 
-function readNormalizeTargetBandIndex(parameterValues: ParameterValuesById): number {
-  const raw = parameterValues[NORMALIZE_BAND_PARAMETER_ID];
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.round(raw));
-}
-
 function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
   const method = resolveNormalizeRangeMethod(parameterValues);
   if (method.kind === "clip-absolute") {
@@ -1305,59 +1273,36 @@ function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): stri
 }
 
 function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string {
-  const choice = readCubeScopeChoiceOrDefault(
-    parameterValues[NORMALIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
-    FULL_CUBE_SCOPE,
-  );
-  if (choice === FULL_CUBE_SCOPE) return "full stack";
-  return `band-wise: bands ${describeBandWiseBandSet(
-    parameterValues[NORMALIZE_BAND_RANGE_PARAMETER_ID],
-    readNormalizeTargetBandIndex(parameterValues),
-  )}`;
+  return describeCubeScopeForAppliedLabel(NORMALIZE_SCOPE_IDS, parameterValues);
 }
 
 function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
   const method = resolveNormalizeRangeMethod(parameterValues);
   if (method.kind !== "percentile") return "";
-  return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
-}
-
-function resolveBandWiseScopeOrThrow(
-  bandRangeValue: ParameterValue | undefined,
-  fallbackBandIndex: number,
-  bandCount: number,
-): ResolvedCubeScopeSelection {
-  const text = readBandRangeTextOrEmpty(bandRangeValue);
-  if (text.trim() === "") return { scope: "band-wise", bandIndexes: [fallbackBandIndex] };
-  const parsed = parseBandRangeText(text, bandCount);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return { scope: "band-wise", bandIndexes: parsed.bandNumbers.map((bandNumber) => bandNumber - 1) };
-}
-
-function describeBandWiseBandSet(
-  bandRangeValue: ParameterValue | undefined,
-  fallbackBandIndex: number,
-): string {
-  const text = readBandRangeTextOrEmpty(bandRangeValue);
-  if (text.trim() === "") return String(fallbackBandIndex + 1);
-  const parsed = parseBandRangeText(text, Number.MAX_SAFE_INTEGER);
-  return parsed.ok ? formatBandNumbersAsRangeText(parsed.bandNumbers) : text.trim();
+  return `, percentile ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 
 const STANDARDIZE_SCOPE_PARAMETER_ID = "scope";
-const STANDARDIZE_BAND_PARAMETER_ID = "targetBandIndex";
+const STANDARDIZE_BAND_COUNT_PARAMETER_ID = "sourceBandCount";
 const STANDARDIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
 const STANDARDIZE_TARGET_MEAN_PARAMETER_ID = "targetMean";
 const STANDARDIZE_TARGET_STD_PARAMETER_ID = "targetStandardDeviation";
+
+const STANDARDIZE_SCOPE_IDS: CubeScopeParameterIds = {
+  scopeParameterId: STANDARDIZE_SCOPE_PARAMETER_ID,
+  bandRangeParameterId: STANDARDIZE_BAND_RANGE_PARAMETER_ID,
+  bandCountParameterId: STANDARDIZE_BAND_COUNT_PARAMETER_ID,
+};
 
 const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: STANDARDIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes each entered band by its own mean and std (defaults to the current band).",
+    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes each entered band by its own mean and std. Leave the band field empty to process every band.",
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: STANDARDIZE_BAND_RANGE_PARAMETER_ID,
+  emptyBandRangeMeansAllBands: true,
 };
 
 const STANDARDIZE_TARGET_MEAN_PARAMETER_SCHEMA: NumberParameterSchema = {
@@ -1391,27 +1336,29 @@ export const STANDARDIZE_ACTION: RegisteredViewportAction = {
   appliedLabel: "Standardize",
   loadingMessage: "Standardizing...",
   formatAppliedLabel: formatStandardizeAppliedLabel,
-  prepareParameterValuesForApply: injectSelectedBandIndexForStandardize,
+  prepareParameterValuesForApply: injectSourceBandCountForStandardize,
   apply: (state) => state,
-  transformSource: createStandardizeSourceTransform(),
+  transformSourceAsync: createStandardizeSourceTransform(),
 };
 
-function injectSelectedBandIndexForStandardize(
+// CT-251: the source band count is captured at Apply time so an empty-field
+// band-wise apply can record the full band range in its History label.
+function injectSourceBandCountForStandardize(
   rawParameterValues: ParameterValuesById,
-  sourceRenderingState: ViewportRenderingState,
+  _sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
 ): ParameterValuesById {
-  return Object.freeze({
-    ...rawParameterValues,
-    [STANDARDIZE_BAND_PARAMETER_ID]: sourceRenderingState.selectedBandIndex,
-  });
+  return injectSourceBandCountForBandWiseLabels(STANDARDIZE_SCOPE_IDS, rawParameterValues, sourceRaster);
 }
 
-function createStandardizeSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createStandardizeSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveStandardizeScopeSelection(parameterValues, source.raster.bandCount);
     const target = readStandardizeTargetDistribution(parameterValues);
-    return { kind: "raster", raster: applyStandardizeToRaster(source.raster, selection, target) };
+    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -1419,22 +1366,7 @@ function resolveStandardizeScopeSelection(
   parameterValues: ParameterValuesById,
   bandCount: number,
 ): ResolvedCubeScopeSelection {
-  const choice = readCubeScopeChoiceOrDefault(
-    parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
-    FULL_CUBE_SCOPE,
-  );
-  if (choice === FULL_CUBE_SCOPE) return { scope: "full-cube" };
-  return resolveBandWiseScopeOrThrow(
-    parameterValues[STANDARDIZE_BAND_RANGE_PARAMETER_ID],
-    readStandardizeTargetBandIndex(parameterValues),
-    bandCount,
-  );
-}
-
-function readStandardizeTargetBandIndex(parameterValues: ParameterValuesById): number {
-  const raw = parameterValues[STANDARDIZE_BAND_PARAMETER_ID];
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.round(raw));
+  return resolveCubeScopeSelectionFromParameters(STANDARDIZE_SCOPE_IDS, parameterValues, bandCount);
 }
 
 function readStandardizeTargetDistribution(parameterValues: ParameterValuesById): {
@@ -1467,15 +1399,7 @@ function formatStandardizeAppliedLabel(parameterValues: ParameterValuesById): st
 }
 
 function describeStandardizeScope(parameterValues: ParameterValuesById): string {
-  const choice = readCubeScopeChoiceOrDefault(
-    parameterValues[STANDARDIZE_SCOPE_PARAMETER_ID] ?? FULL_CUBE_SCOPE,
-    FULL_CUBE_SCOPE,
-  );
-  if (choice === FULL_CUBE_SCOPE) return "full stack";
-  return `band-wise: bands ${describeBandWiseBandSet(
-    parameterValues[STANDARDIZE_BAND_RANGE_PARAMETER_ID],
-    readStandardizeTargetBandIndex(parameterValues),
-  )}`;
+  return describeCubeScopeForAppliedLabel(STANDARDIZE_SCOPE_IDS, parameterValues);
 }
 
 const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID = "redWeight";
@@ -1486,7 +1410,8 @@ const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID,
   label: "Red weight",
-  description: "Weight applied to the red band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the first band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.red,
   step: 0.001,
 };
@@ -1495,7 +1420,8 @@ const RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_ID,
   label: "Green weight",
-  description: "Weight applied to the green band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the second band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.green,
   step: 0.001,
 };
@@ -1504,7 +1430,8 @@ const RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_ID,
   label: "Blue weight",
-  description: "Weight applied to the blue band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the third band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.blue,
   step: 0.001,
 };
@@ -1681,27 +1608,27 @@ const REFLECTION_PARAMETER_SCHEMA: EnumParameterSchema = buildGeometricTransform
 export const ROTATE_ACTION: RegisteredViewportAction = {
   id: "rotate",
   label: "Rotate",
-  icon: RotateCw,
+  icon: RotateCwSquare,
   parameters: [ROTATION_PARAMETER_SCHEMA],
   successMessage: "Rotation applied",
   appliedLabel: "Rotate",
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
-  transformSource: createGeometricTransformSourceTransform(),
+  transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
 export const REFLECT_ACTION: RegisteredViewportAction = {
   id: "reflect",
   label: "Reflect",
-  icon: FlipHorizontal,
+  icon: FlipHorizontal2,
   parameters: [REFLECTION_PARAMETER_SCHEMA],
   successMessage: "Reflection applied",
   appliedLabel: "Reflect",
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
-  transformSource: createGeometricTransformSourceTransform(),
+  transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
 export function findGeometricTransformActionForChoice(
@@ -1714,11 +1641,12 @@ function clearRegionAfterGeometricTransform(state: ViewportRenderingState): View
   return { ...state, roi: null };
 }
 
-function createGeometricTransformSourceTransform(): ViewportActionSourceTransform {
-  return (rawSource, parameterValues) => {
+function createGeometricTransformSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const transform = readGeometricTransformChoice(parameterValues);
-    return { kind: "raster", raster: applyGeometricTransformToRasterImage(source.raster, transform) };
+    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress);
+    return { kind: "raster", raster };
   };
 }
 
@@ -1749,4 +1677,12 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   PCA_ACTION,
   MNF_ACTION,
   ICA_ACTION,
+  THRESHOLD_ACTION,
+  SPECTRAL_DERIVATIVE_ACTION,
+  SPATIAL_FILTER_ACTION,
+  DENOISE_ACTION,
+  PERCENTILE_CLIP_ACTION,
+  BAND_WEIGHTING_ACTION,
+  BAND_SELECTION_ACTION,
+  CUSTOM_TRANSFORM_ACTION,
 ];

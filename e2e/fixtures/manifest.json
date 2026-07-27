@@ -23,6 +23,83 @@
       }
     ]
   },
+  "bimodalGrayPng": {
+    "fileName": "bimodal-gray.png",
+    "width": 4,
+    "height": 4,
+    "bandCount": 1,
+    "dataType": "uint8",
+    "expectedOtsuCutoff": 55,
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          40
+        ]
+      },
+      {
+        "x": 3,
+        "y": 1,
+        "valuesPerBand": [
+          54
+        ]
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "valuesPerBand": [
+          200
+        ]
+      },
+      {
+        "x": 3,
+        "y": 3,
+        "valuesPerBand": [
+          214
+        ]
+      }
+    ]
+  },
+  "noisyGrayPng": {
+    "fileName": "noisy-gray.png",
+    "width": 8,
+    "height": 8,
+    "bandCount": 1,
+    "dataType": "uint8",
+    "spikes": [
+      {
+        "x": 2,
+        "y": 2,
+        "noisyValue": 255,
+        "smoothValue": 108,
+        "medianDenoisedValue": 108
+      },
+      {
+        "x": 5,
+        "y": 5,
+        "noisyValue": 0,
+        "smoothValue": 120,
+        "medianDenoisedValue": 120
+      }
+    ],
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          100
+        ]
+      },
+      {
+        "x": 7,
+        "y": 7,
+        "valuesPerBand": [
+          128
+        ]
+      }
+    ]
+  },
   "rgbPng": {
     "fileName": "rgb.png",
     "width": 2,

@@ -1,3 +1,4 @@
+import { allocateTypedArrayLikeBandOrThrow } from "@/lib/image/raster-allocation";
 import {
   getRasterBandPixelsOrThrow,
   type RasterImage,
@@ -45,6 +46,5 @@ function weightedLuminanceOf(red: number, green: number, blue: number): number {
 }
 
 function createMatchingTypedArray(source: RasterTypedArray): RasterTypedArray {
-  const Constructor = source.constructor as new (length: number) => RasterTypedArray;
-  return new Constructor(source.length);
+  return allocateTypedArrayLikeBandOrThrow(source, source.length);
 }

@@ -1,10 +1,15 @@
 import type { RasterImage, RasterSampleFormat, RasterTypedArray } from "@/lib/image/raster-image";
-import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
+import {
+  applyNormalizeToRaster,
+  applyNormalizeToRasterReportingProgress,
+} from "@/lib/image/apply-normalize";
 import { dataTypeValueRangeForBand } from "@/lib/image/data-type-value-range";
 import {
   mapBandValuesPreservingType,
   mapSelectedRasterBandsPreservingType,
+  mapSelectedRasterBandsPreservingTypeReportingProgress,
 } from "@/lib/image/map-band-values";
+import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/unit-progress";
 
 const UNIT_INTERVAL_TOLERANCE = 1e-4;
 
@@ -86,6 +91,55 @@ function planAutoNormalizedThenInvert(
     normalized,
     normalizedThenInverted: applyInvertToRasterBands(normalized, bandIndexes),
   };
+}
+
+// CT-222: the async twin of planInvertForRaster. Identical math; a direct invert
+// ticks once per band, while the auto-normalized path reports the normalize as the
+// first half of the bar and the invert as the second half.
+export async function planInvertForRasterReportingProgress(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+  onProgress?: UnitProgressCallback,
+): Promise<InvertOutcome> {
+  if (isRasterDataRangeBoundedForInvert(raster)) {
+    return { kind: "direct", inverted: await invertRasterBandsReportingProgress(raster, bandIndexes, onProgress) };
+  }
+  return planAutoNormalizedThenInvertReportingProgress(raster, bandIndexes, onProgress);
+}
+
+async function planAutoNormalizedThenInvertReportingProgress(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+  onProgress?: UnitProgressCallback,
+): Promise<AutoNormalizedInvertOutcome> {
+  const normalized = await applyNormalizeToRasterReportingProgress(
+    raster,
+    { scope: "full-cube" },
+    undefined,
+    scaleProgressToWindow(onProgress, 0, 0.5),
+  );
+  return {
+    kind: "auto-normalized",
+    normalized,
+    normalizedThenInverted: await invertRasterBandsReportingProgress(
+      normalized,
+      bandIndexes,
+      scaleProgressToWindow(onProgress, 0.5, 1),
+    ),
+  };
+}
+
+function invertRasterBandsReportingProgress(
+  raster: RasterImage,
+  bandIndexes: ReadonlyArray<number>,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  return mapSelectedRasterBandsPreservingTypeReportingProgress(
+    raster,
+    bandIndexes,
+    (band) => invertBandAcrossDataTypeRange(band, raster.sampleFormat),
+    onProgress,
+  );
 }
 
 export function autoNormalizeUnboundedRasterToUnitRange(raster: RasterImage): RasterImage {

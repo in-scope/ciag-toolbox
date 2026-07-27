@@ -114,9 +114,14 @@ async function fillEverySixPanelOfMaxGrid(app: LaunchedApp): Promise<void> {
 async function expectFreshLaunchUsesStackWordingNotImage(app: LaunchedApp): Promise<void> {
   await expect(panelCell(app.window, 1)).toContainText("No stack loaded");
   const disabledOperation = applicationToolbar(app.window).getByRole("button", {
-    name: /^Bit Shift \(select a panel with a loaded stack\)/,
+    name: /^Contrast Curve \(select a panel with a loaded stack\)/,
   });
   await expect(disabledOperation).toBeVisible();
+  // CT-245: "Contrast Curve" is the locked term; the old "Tone Curve" label must not
+  // surface anywhere in the toolbar.
+  await expect(
+    applicationToolbar(app.window).getByRole("button", { name: /Tone Curve/i }),
+  ).toHaveCount(0);
 }
 
 async function expectLoadedPanelHeaderAvoidsImageNoun(app: LaunchedApp): Promise<void> {

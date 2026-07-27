@@ -48,7 +48,7 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("a loaded colour PNG renders as a composite with no band navigator and exposes the Histogram and Tone Curve", async () => {
+test("a loaded colour PNG renders as a composite with no band navigator and exposes the Histogram and Contrast Curve", async () => {
   launched = await launchToolboxApp();
   await loadFixtureAsStack(launched.window, rgbPng.fileName);
   await expectPanelRendersInColor();
@@ -91,7 +91,7 @@ test("a loaded grayscale PNG is promoted to a single-band uint8 raster", async (
 // the selected (Red) band to 0.
 async function flattenCurveOutputToBlack(): Promise<void> {
   await toneCurveEndpointHandles(launched.window).last().click();
-  await setToneCurveAnchorField(launched.window, "Output", UINT8_MIN);
+  await setToneCurveAnchorField(launched.window, "New value", UINT8_MIN);
 }
 
 async function expectPanelRendersInColor(): Promise<void> {

@@ -10,7 +10,9 @@ import { NO_PARAMETER_VALUES } from "./parameter-schema";
 import {
   DEFAULT_VIEWPORT_RENDERING_STATE,
   applyActionToSelectedViewports,
+  clearThresholdEditingState,
   clearToneCurveEditingState,
+  hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyActionCallbacks,
   type ViewportAction,
@@ -63,6 +65,7 @@ describe("applyActionToSelectedViewports", () => {
     expect(callbacks.setViewportRenderingState).toHaveBeenCalledWith(1, {
       normalizationEnabled: true,
       floatDisplayUsesFixedUnitWindow: false,
+      viewChannelsSeparately: false,
       lastAppliedOperationLabel: null,
       selectedBandIndex: 0,
       operationHistory: EMPTY_OPERATION_HISTORY,
@@ -71,6 +74,11 @@ describe("applyActionToSelectedViewports", () => {
       toneCurveAnchors: null,
       toneCurveChannelAnchors: {},
       toneCurveActiveChannel: "rgb",
+      thresholdBounds: null,
+      thresholdOtsuCutoffs: null,
+      bandWeights: null,
+      bandSelection: null,
+      cubeTransform: null,
       pinnedSpectra: EMPTY_PINNED_SPECTRA,
       pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],
@@ -126,6 +134,23 @@ describe("tone-curve editing state helpers", () => {
     const cleared = clearToneCurveEditingState(dirty);
     expect(hasToneCurveEditingState(cleared)).toBe(false);
     expect(cleared.toneCurveActiveChannel).toBe("rgb");
+  });
+});
+
+describe("threshold editing state helpers", () => {
+  it("reports no editing state for a default rendering state", () => {
+    expect(hasThresholdEditingState(DEFAULT_VIEWPORT_RENDERING_STATE)).toBe(false);
+  });
+
+  it("reports editing state once bounds exist and clears them back to null", () => {
+    const dirty = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      thresholdBounds: { lower: 100, upper: 120 },
+    };
+    expect(hasThresholdEditingState(dirty)).toBe(true);
+    const cleared = clearThresholdEditingState(dirty);
+    expect(hasThresholdEditingState(cleared)).toBe(false);
+    expect(cleared.thresholdBounds).toBeNull();
   });
 });
 

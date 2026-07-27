@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, X } from "lucide-react";
+import { Brackets, Contrast, FolderOpen, Layers, Link2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
@@ -8,6 +8,10 @@ import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import type { RasterImage } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import {
+  canViewCompositeChannelsSeparately,
+  resolveImageSourceForChannelView,
+} from "@/lib/image/composite-channel-view";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -32,6 +36,9 @@ import {
 } from "@/lib/webgl/roi-draw-input";
 import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
+import { getViewportIndexFromNumber } from "@/lib/grid/grid-layout";
+import type { PanelSize } from "@/lib/grid/panel-link-groups";
+import { usePanelLink, type PanelLinkApi, type PanelLinkTarget } from "@/state/panel-link-context";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import {
   usePixelReadoutPublisher,
@@ -50,6 +57,8 @@ interface ViewportProps {
   onToggleNormalizedViewing: () => void;
   floatDisplayUsesFixedUnitWindow: boolean;
   onToggleFixedUnitFloatView: () => void;
+  viewChannelsSeparately: boolean;
+  onToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
   onSelectBandIndex: (bandIndex: number) => void;
   onRemoveBand?: (bandIndex: number) => void;
@@ -68,12 +77,20 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const readoutContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
-  const imageSource = props.imageSource ?? null;
+  const compositeSource = props.imageSource ?? null;
+  const imageSource = resolveImageSourceForChannelView(
+    compositeSource,
+    props.viewChannelsSeparately,
+  );
+  const isChannelViewActive = imageSource !== compositeSource;
   const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
 
+  const panelLink = usePanelLink();
+  const linkGroupIndex = panelLinkGroupIndexOrNull(props.viewportNumber);
   useViewportRendererLifecycle(canvasRef, rendererRef);
+  useLinkedViewSynchronization(rendererRef, panelLink, linkGroupIndex, imageSource);
   useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
   useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
@@ -106,6 +123,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
     onPinPixelSpectrum: props.onPinPixelSpectrum,
   });
   const transformVersion = useRendererViewTransformVersion(rendererRef);
+  const isLinkedForPanZoom = linkGroupIndex !== null && panelLink.isPanelLinked(linkGroupIndex);
   const cursorClassName = props.isRegionToolActive ? "cursor-crosshair" : "";
 
   return (
@@ -113,6 +131,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
       <ViewportHeaderStrip
         viewportNumber={props.viewportNumber ?? null}
         fileName={props.fileName ?? null}
+        isLinkedForPanZoom={isLinkedForPanZoom}
         raster={getRasterFromSourceOrNull(imageSource)}
         selectedBandIndex={props.selectedBandIndex}
         lastAppliedOperationLabel={props.lastAppliedOperationLabel ?? null}
@@ -121,6 +140,9 @@ export function Viewport(props: ViewportProps): JSX.Element {
         showNormalizedViewingToggle={imageSource !== null}
         floatDisplayUsesFixedUnitWindow={props.floatDisplayUsesFixedUnitWindow}
         onToggleFixedUnitFloatView={props.onToggleFixedUnitFloatView}
+        showChannelViewToggle={canViewCompositeChannelsSeparately(compositeSource)}
+        channelViewEnabled={isChannelViewActive}
+        onToggleChannelView={props.onToggleViewChannelsSeparately}
         onClose={props.onClose ?? null}
         showCloseButton={imageSource !== null && Boolean(props.onClose)}
       />
@@ -141,7 +163,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
             bandCount={getMultiBandSourceBandCount(imageSource)}
             selectedBandIndex={props.selectedBandIndex}
             onSelectBandIndex={props.onSelectBandIndex}
-            onRemoveBand={props.onRemoveBand}
+            onRemoveBand={isChannelViewActive ? undefined : props.onRemoveBand}
           />
         ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
@@ -192,6 +214,7 @@ function getRasterFromSourceOrNull(source: ViewportImageSource | null): RasterIm
 interface ViewportHeaderStripProps {
   viewportNumber: number | null;
   fileName: string | null;
+  isLinkedForPanZoom: boolean;
   raster: RasterImage | null;
   selectedBandIndex: number;
   lastAppliedOperationLabel: string | null;
@@ -200,6 +223,9 @@ interface ViewportHeaderStripProps {
   showNormalizedViewingToggle: boolean;
   floatDisplayUsesFixedUnitWindow: boolean;
   onToggleFixedUnitFloatView: () => void;
+  showChannelViewToggle: boolean;
+  channelViewEnabled: boolean;
+  onToggleChannelView: () => void;
   onClose: (() => void) | null;
   showCloseButton: boolean;
 }
@@ -218,6 +244,7 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
           lastAppliedOperationLabel={props.lastAppliedOperationLabel}
         />
       ) : null}
+      {props.isLinkedForPanZoom ? <ViewportLinkedBadge /> : null}
       {props.showNormalizedViewingToggle ? (
         <NormalizedViewingToggleButton
           enabled={props.normalizationEnabled}
@@ -228,6 +255,12 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
         <FixedUnitFloatViewToggleButton
           enabled={props.floatDisplayUsesFixedUnitWindow}
           onToggle={props.onToggleFixedUnitFloatView}
+        />
+      ) : null}
+      {props.showChannelViewToggle ? (
+        <ChannelViewToggleButton
+          enabled={props.channelViewEnabled}
+          onToggle={props.onToggleChannelView}
         />
       ) : null}
       {props.showCloseButton && props.onClose ? (
@@ -284,8 +317,16 @@ interface FixedUnitFloatViewToggleButtonProps {
   onToggle: () => void;
 }
 
+// CT-259: the tooltip explains what the toggle does in each state; the aria-label stays
+// the stable "Fixed [0,1] float view" name so selectors and screen-reader identity hold.
+const AUTO_STRETCH_ACTIVE_TOOLTIP =
+  "Display is stretched to this band's own value range. Click to switch to the fixed 0 to 1 scale: 0 shows black, 1 shows white, values outside clip. Display only, data never changes.";
+const FIXED_SCALE_ACTIVE_TOOLTIP =
+  "Fixed 0 to 1 display scale: 0 shows black, 1 shows white, values outside clip. Click to stretch the display to this band's own value range. Display only, data never changes.";
+
 function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonProps): JSX.Element {
   const label = props.enabled ? "Fixed [0,1] float view (on)" : "Fixed [0,1] float view";
+  const tooltip = props.enabled ? FIXED_SCALE_ACTIVE_TOOLTIP : AUTO_STRETCH_ACTIVE_TOOLTIP;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -298,6 +339,35 @@ function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonPro
           onClick={stopPropagationThenToggle(props.onToggle)}
         >
           <Brackets className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// CT-248: a true-colour photo can be flipped into a display-only channel view
+// where its R/G/B scroll like a scientific stack. The button label names the
+// action each state offers, matching the display-only toggle family above.
+interface ChannelViewToggleButtonProps {
+  enabled: boolean;
+  onToggle: () => void;
+}
+
+function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Element {
+  const label = props.enabled ? "View color image" : "View channels separately";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
+          aria-label={label}
+          aria-pressed={props.enabled}
+          onClick={stopPropagationThenToggle(props.onToggle)}
+        >
+          <Layers className="size-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -373,6 +443,81 @@ function ViewportNumberBadge({
       {viewportNumber}
     </span>
   );
+}
+
+// CT-207: a small badge showing this panel's pan/zoom is linked to peers.
+function ViewportLinkedBadge(): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex items-center text-primary"
+          aria-label="Linked pan and zoom"
+        >
+          <Link2 className="size-4" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Linked pan and zoom</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function panelLinkGroupIndexOrNull(viewportNumber: number | null | undefined): number | null {
+  if (typeof viewportNumber !== "number") return null;
+  return getViewportIndexFromNumber(viewportNumber);
+}
+
+// CT-207: register this panel's renderer as a link target and broadcast its view
+// transform to linked peers whenever a gesture moves it.
+function useLinkedViewSynchronization(
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  panelLink: PanelLinkApi,
+  linkGroupIndex: number | null,
+  imageSource: ViewportImageSource | null,
+): void {
+  const panelLinkRef = useLatestValueRef(panelLink);
+  const imageSourceRef = useLatestValueRef(imageSource);
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || linkGroupIndex === null) return;
+    return attachLinkedViewSynchronization(renderer, panelLinkRef.current, linkGroupIndex, imageSourceRef);
+    // rendererRef is stable; latest-value refs hold the dynamic api and source.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkGroupIndex]);
+}
+
+function attachLinkedViewSynchronization(
+  renderer: ViewportRenderer,
+  panelLink: PanelLinkApi,
+  linkGroupIndex: number,
+  imageSourceRef: MutableRefObject<ViewportImageSource | null>,
+): () => void {
+  const unregister = panelLink.registerLinkTarget(
+    linkGroupIndex,
+    buildLinkTargetForRenderer(renderer, imageSourceRef),
+  );
+  const unsubscribe = renderer.subscribeToViewTransformChanges(() =>
+    panelLink.notifyPanelViewTransformChanged(linkGroupIndex),
+  );
+  return () => {
+    unregister();
+    unsubscribe();
+  };
+}
+
+function buildLinkTargetForRenderer(
+  renderer: ViewportRenderer,
+  imageSourceRef: MutableRefObject<ViewportImageSource | null>,
+): PanelLinkTarget {
+  return {
+    getUserView: () => renderer.getUserView(),
+    applyUserView: (view) => renderer.applyUserView(view),
+    getPanelSize: () => readPanelSizeFromSourceOrNull(imageSourceRef.current),
+  };
+}
+
+function readPanelSizeFromSourceOrNull(source: ViewportImageSource | null): PanelSize | null {
+  return source ? getImageSourceDimensions(source) : null;
 }
 
 function useViewportRendererLifecycle(

@@ -4,6 +4,12 @@ import type {
   RasterSourceInterleave,
   RasterTypedArray,
 } from "@/lib/image/raster-image";
+import {
+  computeArrayReportingPerUnitProgress,
+  runInChunksReportingProgress,
+  scaleProgressToWindow,
+  type UnitProgressCallback,
+} from "@/lib/image/unit-progress";
 
 export interface EnviEncodedFiles {
   readonly headerBytes: Uint8Array;
@@ -15,18 +21,29 @@ const DEFAULT_INTERLEAVE_FOR_NON_ENVI_SOURCE: RasterSourceInterleave = "bil";
 
 const ENVI_BYTE_ORDER_LITTLE_ENDIAN = 0;
 
+// CT-219f: samples written per main-thread slice in the chunked encoder; ~2M per-sample
+// DataView writes keep each slice in the tens of milliseconds so the busy bar paints.
+const DEFAULT_ENVI_SAMPLES_PER_CHUNK = 2_000_000;
+
+// The float conversion copies one band per tick; the binary fill dominates the encode.
+const FLOAT_CONVERSION_PROGRESS_WINDOW_END = 0.2;
+
 export function encodeRasterImageAsFloat32EnviFiles(raster: RasterImage): EnviEncodedFiles {
   return encodeRasterImageAsEnviFiles(convertRasterImageToFloat32(raster));
 }
 
 function convertRasterImageToFloat32(raster: RasterImage): RasterImage {
-  if (raster.sampleFormat === "float" && raster.bitsPerSample === 32) return raster;
+  if (rasterIsAlreadyFloat32(raster)) return raster;
   return {
     ...raster,
     sampleFormat: "float",
     bitsPerSample: 32,
     bandPixels: raster.bandPixels.map(copyBandPixelsToFloat32),
   };
+}
+
+function rasterIsAlreadyFloat32(raster: RasterImage): boolean {
+  return raster.sampleFormat === "float" && raster.bitsPerSample === 32;
 }
 
 function copyBandPixelsToFloat32(band: RasterTypedArray): Float32Array {
@@ -45,6 +62,57 @@ export function encodeRasterImageAsEnviFiles(raster: RasterImage): EnviEncodedFi
     binaryBytes,
     interleave,
   };
+}
+
+// CT-219f: async twins of the encoders above. Byte-identical output (equivalence-tested),
+// but the per-sample binary fill runs in chunks with paint yields so a reference-scale
+// stack no longer freezes the renderer for the whole encode.
+export async function encodeRasterImageAsEnviFilesReportingProgress(
+  raster: RasterImage,
+  onProgress?: UnitProgressCallback,
+  samplesPerChunk: number = DEFAULT_ENVI_SAMPLES_PER_CHUNK,
+): Promise<EnviEncodedFiles> {
+  const interleave = pickEnviInterleaveFromRasterSource(raster);
+  const dataType = pickEnviDataTypeForRasterOrThrow(raster);
+  const binaryBytes = await writeEnviBinaryInChunksReportingProgress(
+    raster,
+    interleave,
+    onProgress,
+    samplesPerChunk,
+  );
+  const headerText = buildEnviHeaderTextForRaster(raster, interleave, dataType);
+  return { headerBytes: encodeUtf8Text(headerText), binaryBytes, interleave };
+}
+
+export async function encodeRasterImageAsFloat32EnviFilesReportingProgress(
+  raster: RasterImage,
+  onProgress?: UnitProgressCallback,
+  samplesPerChunk: number = DEFAULT_ENVI_SAMPLES_PER_CHUNK,
+): Promise<EnviEncodedFiles> {
+  if (rasterIsAlreadyFloat32(raster)) {
+    return encodeRasterImageAsEnviFilesReportingProgress(raster, onProgress, samplesPerChunk);
+  }
+  const converted = await convertRasterImageToFloat32ReportingProgress(
+    raster,
+    scaleProgressToWindow(onProgress, 0, FLOAT_CONVERSION_PROGRESS_WINDOW_END),
+  );
+  return encodeRasterImageAsEnviFilesReportingProgress(
+    converted,
+    scaleProgressToWindow(onProgress, FLOAT_CONVERSION_PROGRESS_WINDOW_END, 1),
+    samplesPerChunk,
+  );
+}
+
+async function convertRasterImageToFloat32ReportingProgress(
+  raster: RasterImage,
+  onProgress: UnitProgressCallback | undefined,
+): Promise<RasterImage> {
+  const bandPixels = await computeArrayReportingPerUnitProgress(
+    raster.bandCount,
+    (bandIndex) => copyBandPixelsToFloat32(readBandPixelsOrThrow(raster, bandIndex)),
+    onProgress,
+  );
+  return { ...raster, sampleFormat: "float", bitsPerSample: 32, bandPixels };
 }
 
 function pickEnviInterleaveFromRasterSource(
@@ -136,12 +204,144 @@ function writeRasterBandPixelsAsEnviBinary(
   raster: RasterImage,
   interleave: RasterSourceInterleave,
 ): Uint8Array {
+  const plan = buildEnviWritePlanForRaster(raster, interleave);
+  const bytes = new Uint8Array(plan.totalUnits * plan.unitByteSize);
+  writeEnviUnitRangeIntoView(plan, new DataView(bytes.buffer), 0, 0, plan.totalUnits);
+  return bytes;
+}
+
+async function writeEnviBinaryInChunksReportingProgress(
+  raster: RasterImage,
+  interleave: RasterSourceInterleave,
+  onProgress: UnitProgressCallback | undefined,
+  samplesPerChunk: number,
+): Promise<Uint8Array> {
+  const plan = buildEnviWritePlanForRaster(raster, interleave);
+  const bytes = new Uint8Array(plan.totalUnits * plan.unitByteSize);
+  const view = new DataView(bytes.buffer);
+  const unitsPerChunk = Math.max(1, Math.floor(samplesPerChunk / plan.samplesPerUnit));
+  await runInChunksReportingProgress(
+    plan.totalUnits,
+    unitsPerChunk,
+    (startUnit, endUnit) =>
+      writeEnviUnitRangeIntoView(plan, view, startUnit * plan.unitByteSize, startUnit, endUnit),
+    onProgress,
+  );
+  return bytes;
+}
+
+// CT-235: chunked encoding plan for the project bake. The header is built eagerly
+// (small text); the binary NEVER materializes whole - byte length comes from the
+// layout, and chunks are produced on demand so the caller can spool each one before
+// the next exists. Every chunk is written by the SAME write plan the sync encoder
+// iterates, so the concatenated chunks are byte-identical to encodeRasterImageAsEnviFiles.
+export interface EnviChunkedEncoding {
+  readonly headerBytes: Uint8Array;
+  readonly binaryByteLength: number;
+  readonly interleave: RasterSourceInterleave;
+  readonly emitBinaryChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: (bytes: Uint8Array) => Promise<void>,
+  ) => Promise<void>;
+}
+
+export function planEnviFilesChunkedEncoding(raster: RasterImage): EnviChunkedEncoding {
+  const interleave = pickEnviInterleaveFromRasterSource(raster);
+  const dataType = pickEnviDataTypeForRasterOrThrow(raster);
   const layout = buildBinaryLayoutForRaster(raster);
-  const buffer = new ArrayBuffer(layout.totalByteSize);
-  const view = new DataView(buffer);
+  const headerText = buildEnviHeaderTextForRaster(raster, interleave, dataType);
+  return {
+    headerBytes: encodeUtf8Text(headerText),
+    binaryByteLength: layout.totalByteSize,
+    interleave,
+    emitBinaryChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitEnviBinaryChunksInOrder(buildEnviWritePlanForRaster(raster, interleave), maxChunkBytes, onChunk),
+  };
+}
+
+// CT-237: float32 twin of the plan above for the ENVI (32-bit float) export.
+// The source raster is NOT converted up front (a full float32 copy of a 10 GB
+// stack would double resident memory); the float writer narrows each sample as
+// the chunk is built, which matches Float32Array.set narrowing, so the output
+// is byte-identical to encodeRasterImageAsFloat32EnviFiles.
+export function planFloat32EnviFilesChunkedEncoding(raster: RasterImage): EnviChunkedEncoding {
+  const interleave = pickEnviInterleaveFromRasterSource(raster);
+  const layout = buildBinaryLayoutForRaster(raster, FLOAT32_BYTES_PER_SAMPLE);
+  const headerText = buildEnviHeaderTextForRaster(raster, interleave, FLOAT32_ENVI_DATA_TYPE_CODE);
+  return {
+    headerBytes: encodeUtf8Text(headerText),
+    binaryByteLength: layout.totalByteSize,
+    interleave,
+    emitBinaryChunksInOrder: (maxChunkBytes, onChunk) =>
+      emitEnviBinaryChunksInOrder(buildFloat32EnviWritePlanForRaster(raster, interleave), maxChunkBytes, onChunk),
+  };
+}
+
+const FLOAT32_ENVI_DATA_TYPE_CODE = 4;
+const FLOAT32_BYTES_PER_SAMPLE = 4;
+
+function buildFloat32EnviWritePlanForRaster(
+  raster: RasterImage,
+  interleave: RasterSourceInterleave,
+): EnviInterleaveWritePlan {
+  const layout = buildBinaryLayoutForRaster(raster, FLOAT32_BYTES_PER_SAMPLE);
+  const writer = SAMPLE_WRITERS_BY_FORMAT_KEY.get("float:32")!;
+  return buildEnviInterleaveWritePlan(raster, interleave, layout, writer);
+}
+
+async function emitEnviBinaryChunksInOrder(
+  plan: EnviInterleaveWritePlan,
+  maxChunkBytes: number,
+  onChunk: (bytes: Uint8Array) => Promise<void>,
+): Promise<void> {
+  const unitsPerChunk = Math.max(1, Math.floor(maxChunkBytes / plan.unitByteSize));
+  for (let startUnit = 0; startUnit < plan.totalUnits; startUnit += unitsPerChunk) {
+    const endUnit = Math.min(plan.totalUnits, startUnit + unitsPerChunk);
+    await onChunk(buildOneEnviBinaryChunk(plan, startUnit, endUnit));
+  }
+}
+
+function buildOneEnviBinaryChunk(
+  plan: EnviInterleaveWritePlan,
+  startUnit: number,
+  endUnit: number,
+): Uint8Array {
+  const bytes = new Uint8Array((endUnit - startUnit) * plan.unitByteSize);
+  writeEnviUnitRangeIntoView(plan, new DataView(bytes.buffer), 0, startUnit, endUnit);
+  return bytes;
+}
+
+// One unit is one row run of one band (bsq/bil) or one full image line (bip): a uniform,
+// row-sized slice of the fill that the sync path, the progress-reporting path, and the
+// CT-235 chunk emitter all iterate, so their outputs are identical by construction. Units
+// are contiguous in file order, so unit i occupies bytes [i*unitByteSize, (i+1)*unitByteSize).
+interface EnviInterleaveWritePlan {
+  readonly totalUnits: number;
+  readonly samplesPerUnit: number;
+  readonly unitByteSize: number;
+  readonly writeUnitAt: (view: DataView, unitByteOffset: number, unitIndex: number) => void;
+}
+
+function buildEnviWritePlanForRaster(
+  raster: RasterImage,
+  interleave: RasterSourceInterleave,
+): EnviInterleaveWritePlan {
+  const layout = buildBinaryLayoutForRaster(raster);
   const writer = pickSampleWriterForRaster(raster);
-  fillEnviBinaryAccordingToInterleave(view, raster, interleave, layout, writer);
-  return new Uint8Array(buffer);
+  return buildEnviInterleaveWritePlan(raster, interleave, layout, writer);
+}
+
+function writeEnviUnitRangeIntoView(
+  plan: EnviInterleaveWritePlan,
+  view: DataView,
+  viewByteOffsetOfStartUnit: number,
+  startUnit: number,
+  endUnit: number,
+): void {
+  for (let unitIndex = startUnit; unitIndex < endUnit; unitIndex += 1) {
+    const unitByteOffset = viewByteOffsetOfStartUnit + (unitIndex - startUnit) * plan.unitByteSize;
+    plan.writeUnitAt(view, unitByteOffset, unitIndex);
+  }
 }
 
 interface BinaryLayout {
@@ -152,8 +352,11 @@ interface BinaryLayout {
   readonly totalByteSize: number;
 }
 
-function buildBinaryLayoutForRaster(raster: RasterImage): BinaryLayout {
-  const bytesPerSample = readBytesPerSampleFromBandPixelsOrThrow(raster);
+function buildBinaryLayoutForRaster(
+  raster: RasterImage,
+  bytesPerSampleOverride?: number,
+): BinaryLayout {
+  const bytesPerSample = bytesPerSampleOverride ?? readBytesPerSampleFromBandPixelsOrThrow(raster);
   const totalSamples = raster.width * raster.height * raster.bandCount;
   return {
     samples: raster.width,
@@ -201,107 +404,84 @@ const SAMPLE_WRITERS_BY_FORMAT_KEY: ReadonlyMap<string, SampleWriterFunction> = 
   ["float:32", (view, offset, value) => view.setFloat32(offset, value, true)],
 ]);
 
-function fillEnviBinaryAccordingToInterleave(
-  view: DataView,
+function buildEnviInterleaveWritePlan(
   raster: RasterImage,
   interleave: RasterSourceInterleave,
   layout: BinaryLayout,
   writer: SampleWriterFunction,
-): void {
-  if (interleave === "bsq") {
-    writeBandSequentialBinary(view, raster, layout, writer);
-    return;
-  }
-  if (interleave === "bil") {
-    writeBandInterleavedByLineBinary(view, raster, layout, writer);
-    return;
-  }
-  writeBandInterleavedByPixelBinary(view, raster, layout, writer);
+): EnviInterleaveWritePlan {
+  if (interleave === "bsq") return buildBandSequentialWritePlan(raster, layout, writer);
+  if (interleave === "bil") return buildBandInterleavedByLineWritePlan(raster, layout, writer);
+  return buildBandInterleavedByPixelWritePlan(raster, layout, writer);
 }
 
-function writeBandSequentialBinary(
-  view: DataView,
+function buildBandSequentialWritePlan(
   raster: RasterImage,
   layout: BinaryLayout,
   writer: SampleWriterFunction,
-): void {
-  const bandSampleCount = layout.samples * layout.lines;
-  for (let bandIndex = 0; bandIndex < layout.bands; bandIndex++) {
-    const band = readBandPixelsOrThrow(raster, bandIndex);
-    const baseByteOffset = bandIndex * bandSampleCount * layout.bytesPerSample;
-    writeContiguousBandRunToBinary(view, baseByteOffset, layout, band, writer);
-  }
+): EnviInterleaveWritePlan {
+  return {
+    totalUnits: layout.bands * layout.lines,
+    samplesPerUnit: layout.samples,
+    unitByteSize: layout.samples * layout.bytesPerSample,
+    writeUnitAt: (view, unitByteOffset, unitIndex) => {
+      const bandIndex = Math.floor(unitIndex / layout.lines);
+      const line = unitIndex % layout.lines;
+      writeOneBandRowRunToBinary(view, unitByteOffset, line, layout, readBandPixelsOrThrow(raster, bandIndex), writer);
+    },
+  };
 }
 
-function writeContiguousBandRunToBinary(
+function buildBandInterleavedByLineWritePlan(
+  raster: RasterImage,
+  layout: BinaryLayout,
+  writer: SampleWriterFunction,
+): EnviInterleaveWritePlan {
+  return {
+    totalUnits: layout.lines * layout.bands,
+    samplesPerUnit: layout.samples,
+    unitByteSize: layout.samples * layout.bytesPerSample,
+    writeUnitAt: (view, unitByteOffset, unitIndex) => {
+      const line = Math.floor(unitIndex / layout.bands);
+      const bandIndex = unitIndex % layout.bands;
+      writeOneBandRowRunToBinary(view, unitByteOffset, line, layout, readBandPixelsOrThrow(raster, bandIndex), writer);
+    },
+  };
+}
+
+function writeOneBandRowRunToBinary(
   view: DataView,
   baseByteOffset: number,
-  layout: BinaryLayout,
-  band: RasterTypedArray,
-  writer: SampleWriterFunction,
-): void {
-  for (let i = 0; i < band.length; i++) {
-    const byteOffset = baseByteOffset + i * layout.bytesPerSample;
-    writer(view, byteOffset, band[i] ?? 0);
-  }
-}
-
-function writeBandInterleavedByLineBinary(
-  view: DataView,
-  raster: RasterImage,
-  layout: BinaryLayout,
-  writer: SampleWriterFunction,
-): void {
-  const lineByteSize = layout.samples * layout.bytesPerSample;
-  for (let line = 0; line < layout.lines; line++) {
-    const lineBaseOffset = line * layout.bands * lineByteSize;
-    writeOneLineRunForEachBand(view, lineBaseOffset, line, raster, layout, writer);
-  }
-}
-
-function writeOneLineRunForEachBand(
-  view: DataView,
-  lineBaseOffset: number,
-  line: number,
-  raster: RasterImage,
-  layout: BinaryLayout,
-  writer: SampleWriterFunction,
-): void {
-  const lineByteSize = layout.samples * layout.bytesPerSample;
-  for (let bandIndex = 0; bandIndex < layout.bands; bandIndex++) {
-    const band = readBandPixelsOrThrow(raster, bandIndex);
-    const bandBaseOffset = lineBaseOffset + bandIndex * lineByteSize;
-    writeSamplesAlongOneBilLine(view, bandBaseOffset, line, layout, band, writer);
-  }
-}
-
-function writeSamplesAlongOneBilLine(
-  view: DataView,
-  bandBaseOffset: number,
   line: number,
   layout: BinaryLayout,
   band: RasterTypedArray,
   writer: SampleWriterFunction,
 ): void {
   for (let sample = 0; sample < layout.samples; sample++) {
-    const byteOffset = bandBaseOffset + sample * layout.bytesPerSample;
+    const byteOffset = baseByteOffset + sample * layout.bytesPerSample;
     const pixelIndex = line * layout.samples + sample;
     writer(view, byteOffset, band[pixelIndex] ?? 0);
   }
 }
 
-function writeBandInterleavedByPixelBinary(
-  view: DataView,
+function buildBandInterleavedByPixelWritePlan(
   raster: RasterImage,
   layout: BinaryLayout,
   writer: SampleWriterFunction,
-): void {
+): EnviInterleaveWritePlan {
   const pixelByteStride = layout.bands * layout.bytesPerSample;
-  const totalPixels = layout.samples * layout.lines;
-  for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex++) {
-    const pixelBaseOffset = pixelIndex * pixelByteStride;
-    writeAllBandsForOnePixel(view, pixelBaseOffset, pixelIndex, raster, layout, writer);
-  }
+  return {
+    totalUnits: layout.lines,
+    samplesPerUnit: layout.samples * layout.bands,
+    unitByteSize: layout.samples * pixelByteStride,
+    writeUnitAt: (view, unitByteOffset, line) => {
+      const firstPixelIndex = line * layout.samples;
+      for (let sample = 0; sample < layout.samples; sample++) {
+        const pixelBaseOffset = unitByteOffset + sample * pixelByteStride;
+        writeAllBandsForOnePixel(view, pixelBaseOffset, firstPixelIndex + sample, raster, layout, writer);
+      }
+    },
+  };
 }
 
 function writeAllBandsForOnePixel(

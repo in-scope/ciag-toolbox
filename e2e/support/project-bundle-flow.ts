@@ -6,6 +6,7 @@ import type { ElectronApplication, Page } from "@playwright/test";
 
 import { enqueueOpenDialogPaths, enqueueSaveDialogPath } from "./dialog-stub-controls";
 import { triggerOpenProjectMenuItem, triggerSaveProjectMenuItem } from "./main-process";
+import { runAsStoryboardStep } from "./storyboard-step";
 
 // The project bundle round-trip reuses the CT-113 dialog stub. "Save Project" is a native
 // File-menu item (driven from the MAIN process), and on a fresh launch with no current
@@ -22,9 +23,14 @@ export interface SaveProjectBundleRequest {
 export async function saveProjectBundleThroughSaveDialog(
   request: SaveProjectBundleRequest,
 ): Promise<void> {
-  await enqueueSaveDialogPath(request.page, request.destinationPath);
-  await triggerSaveProjectMenuItem(request.app);
-  await expectProjectSavedToast(request.page);
+  await runAsStoryboardStep(
+    request.page,
+    "Save the project bundle through the save dialog",
+    async () => {
+    await enqueueSaveDialogPath(request.page, request.destinationPath);
+    await triggerSaveProjectMenuItem(request.app);
+    await expectProjectSavedToast(request.page);
+  });
 }
 
 async function expectProjectSavedToast(page: Page): Promise<void> {
@@ -40,9 +46,14 @@ export interface OpenProjectBundleRequest {
 export async function openProjectBundleThroughOpenDialog(
   request: OpenProjectBundleRequest,
 ): Promise<void> {
-  await enqueueOpenDialogPaths(request.page, [request.bundlePath]);
-  await triggerOpenProjectMenuItem(request.app);
-  await expectProjectOpenedToast(request.page);
+  await runAsStoryboardStep(
+    request.page,
+    "Open the project bundle through the open dialog",
+    async () => {
+    await enqueueOpenDialogPaths(request.page, [request.bundlePath]);
+    await triggerOpenProjectMenuItem(request.app);
+    await expectProjectOpenedToast(request.page);
+  });
 }
 
 async function expectProjectOpenedToast(page: Page): Promise<void> {

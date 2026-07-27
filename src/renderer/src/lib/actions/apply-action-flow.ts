@@ -2,6 +2,10 @@ import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
+import {
+  estimateApplyAllocationBytesForAction,
+  estimateSourceCloneBytes,
+} from "@/lib/actions/estimate-apply-allocation";
 import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
 import {
   describeOperationLoadingMessage,
@@ -9,16 +13,25 @@ import {
 } from "@/lib/actions/operation-loading-message";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
-import type { ViewportActionOutput, ViewportRenderingState } from "@/lib/actions/viewport-action";
+import {
+  actionTransformsSource,
+  runActionSourceTransform,
+  type ViewportActionOutput,
+  type ViewportRenderingState,
+} from "@/lib/actions/viewport-action";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
-import { cloneViewportImageSource } from "@/lib/image/clone-viewport-image-source";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
 import {
   placeClonedSourceContentAtIndex,
   type ViewportContentMap,
   type ViewportContentMapUpdater,
 } from "@/lib/image/place-cloned-source-content";
+import {
+  assertRasterAllocationFitsMemoryBudget,
+  OPERATION_MEMORY_REFUSAL_MESSAGE,
+  sumLiveRasterBytesAcrossSources,
+} from "@/lib/image/raster-memory-budget";
 import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
@@ -34,6 +47,11 @@ export interface ApplyActionFlowBindings {
   // next action targets the result rather than the original source panel.
   selectViewportIndex?: (index: number) => void;
   busyRegistrar: BusyEntryRegistrar;
+  // Reports how an apply run ended (the run is asynchronous, so this fires
+  // after the click returns). App uses it for actions whose panel stays open
+  // until a run SUCCEEDS (keepsPanelOpenUntilApplySucceeds): success closes
+  // the panel, failure leaves it open for correction.
+  reportApplyOutcome?: (outcome: { succeeded: boolean }) => void;
 }
 
 export function applyActionInPlaceAtSourceIndex(
@@ -42,13 +60,66 @@ export function applyActionInPlaceAtSourceIndex(
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
-  if (action.transformSource) {
+  if (actionTransformsSource(action)) {
+    const content = bindings.imagesByIndex.get(sourceIndex);
+    if (content && reportApplyExceedsMemoryBudget(action, content.source, parameterValues, bindings)) return;
     void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
     return;
   }
   applyActionInPlaceWithoutBusyIndicator(action, parameterValues, sourceIndex, bindings);
 }
 
+// CT-239: refuse an apply whose new band arrays cannot fit in the renderer's
+// ArrayBuffer pool alongside the panels already open, BEFORE a result panel is
+// reserved or any allocation starts. An in-place apply is gated identically:
+// the transform still materializes the whole output while the source is alive.
+function reportApplyExceedsMemoryBudget(
+  action: RegisteredViewportAction,
+  source: ViewportImageSource,
+  parameterValues: ParameterValuesById,
+  bindings: ApplyActionFlowBindings,
+): boolean {
+  try {
+    const allocationBytes = actionTransformsSource(action)
+      ? estimateApplyAllocationBytesForAction(action, source, parameterValues)
+      : estimateSourceCloneBytes(source);
+    assertRasterAllocationFitsMemoryBudget(
+      allocationBytes,
+      sumLiveRasterBytesAcrossSources(listSourcesAcrossViewports(bindings.imagesByIndex)),
+      OPERATION_MEMORY_REFUSAL_MESSAGE,
+    );
+    return false;
+  } catch (error) {
+    reportApplyFailedWithToast(action, bindings, error);
+    return true;
+  }
+}
+
+// Success and failure both toast AND report the outcome to the optional
+// binding, so panel-close decisions stay in one place per outcome.
+function reportApplySucceededWithToast(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+): void {
+  toast.success(action.successMessage);
+  bindings.reportApplyOutcome?.({ succeeded: true });
+}
+
+function reportApplyFailedWithToast(
+  action: RegisteredViewportAction,
+  bindings: ApplyActionFlowBindings,
+  error: unknown,
+): void {
+  toast.error(formatActionErrorMessage(action.label, error));
+  bindings.reportApplyOutcome?.({ succeeded: false });
+}
+
+function listSourcesAcrossViewports(imagesByIndex: ViewportContentMap): ViewportImageSource[] {
+  return [...imagesByIndex.values()].map((content) => content.source);
+}
+
+// Only non-transforming actions land here (the transforming ones are routed to
+// the busy-indicator path above), so this path never touches the source.
 function applyActionInPlaceWithoutBusyIndicator(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
@@ -56,7 +127,6 @@ function applyActionInPlaceWithoutBusyIndicator(
   bindings: ApplyActionFlowBindings,
 ): void {
   try {
-    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -65,9 +135,9 @@ function applyActionInPlaceWithoutBusyIndicator(
       bindings,
     );
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   }
 }
 
@@ -83,7 +153,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
-    replaceSourceAtIndexWhenActionTransformsSource(action, parameterValues, sourceIndex, bindings);
+    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings, handle);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -92,9 +162,9 @@ async function runApplyActionInPlaceWithBusyIndicator(
       bindings,
     );
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   } finally {
     handle.clear();
   }
@@ -104,19 +174,33 @@ function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function replaceSourceAtIndexWhenActionTransformsSource(
+async function replaceSourceAtIndexWithTransformedSource(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
-): void {
-  if (!action.transformSource) return;
+  busyHandle: BusyEntryHandle,
+): Promise<void> {
+  if (!actionTransformsSource(action)) return;
   const content = bindings.imagesByIndex.get(sourceIndex);
   if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
-  const nextSource = action.transformSource(content.source, parameterValues);
+  const nextSource = await runActionSourceTransform(
+    action,
+    content.source,
+    parameterValues,
+    forwardTransformProgressToBusyEntry(busyHandle),
+  );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
   );
+}
+
+// CT-221: async transforms report per-band progress; forwarding it to the busy
+// entry turns the operation overlay's spinner into a percentage bar.
+function forwardTransformProgressToBusyEntry(
+  busyHandle: BusyEntryHandle,
+): (fraction: number) => void {
+  return (fraction) => busyHandle.update({ progress: fraction });
 }
 
 function writeAppliedRenderingStateInheritingFromSource(
@@ -260,6 +344,7 @@ export function applyActionToDuplicateOfSource(
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
   if (reportActionCannotApplyToSourceBeforeOpeningPanel(action, sourceContent.source, parameterValues)) return;
+  if (reportApplyExceedsMemoryBudget(action, sourceContent.source, parameterValues, bindings)) return;
   if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   bindings.setPendingDuplicate({
@@ -312,18 +397,19 @@ export async function runDuplicateAndApplyAtTargetIndex(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
-  const handle = action.transformSource
+  const handle = actionTransformsSource(action)
     ? registerResultPanelBusyEntry(action, targetIndex, bindings)
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
-    if (action.transformSource) {
+    if (actionTransformsSource(action) && handle) {
       await placeTransformedDuplicateAtTargetIndex(
         action,
         parameterValues,
         sourceContent,
         targetIndex,
         bindings,
+        handle,
       );
     } else {
       await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
@@ -338,9 +424,9 @@ export async function runDuplicateAndApplyAtTargetIndex(
     clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, targetIndex, bindings);
     selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
-    toast.success(action.successMessage);
+    reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    reportApplyFailedWithToast(action, bindings, error);
   } finally {
     handle?.clear();
   }
@@ -390,24 +476,35 @@ async function placeTransformedDuplicateAtTargetIndex(
   sourceContent: ViewportCellContent,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle,
 ): Promise<void> {
-  const transformedContent = await cloneAndTransformSourceContent(
+  const transformedContent = await transformImmutableSourceContent(
     sourceContent,
-    action.transformSource!,
+    action,
     parameterValues,
+    busyHandle,
   );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, targetIndex, transformedContent),
   );
 }
 
-async function cloneAndTransformSourceContent(
+// CT-233: the source is handed to the transform directly, with no defensive
+// whole-cube clone. Transforms are bound by the immutability contract on
+// ViewportActionSourceTransform, so a failure leaves the source panel intact
+// and unchanged bands may be shared by reference between source and result.
+async function transformImmutableSourceContent(
   sourceContent: ViewportCellContent,
-  transform: NonNullable<RegisteredViewportAction["transformSource"]>,
+  action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
+  busyHandle: BusyEntryHandle,
 ): Promise<ViewportCellContent> {
-  const clonedSource = await cloneViewportImageSource(sourceContent.source);
-  const transformedSource = transform(clonedSource, parameterValues);
+  const transformedSource = await runActionSourceTransform(
+    action,
+    sourceContent.source,
+    parameterValues,
+    forwardTransformProgressToBusyEntry(busyHandle),
+  );
   return {
     fileName: sourceContent.fileName,
     source: transformedSource,

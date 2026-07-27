@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 import { applicationToolbar } from "./operations";
+import { runAsStoryboardStep } from "./storyboard-step";
 
 // The unified Open Images flow (CT-055, manual section 7): the toolbar "Open image"
 // control and the File menu both route here. A selection of one path takes the
@@ -13,8 +14,14 @@ export async function enqueueAndTriggerOpenImages(
   page: Page,
   filePaths: ReadonlyArray<string>,
 ): Promise<void> {
-  await enqueueOpenDialogPaths(page, filePaths);
-  await applicationToolbar(page).getByRole("button", { name: "Open image" }).click();
+  await runAsStoryboardStep(
+    page,
+    `Trigger Open image with ${filePaths.length} selected ${filePaths.length === 1 ? "file" : "files"}`,
+    async () => {
+      await enqueueOpenDialogPaths(page, filePaths);
+      await applicationToolbar(page).getByRole("button", { name: "Open image" }).click();
+    },
+  );
 }
 
 export function openImagesReviewModal(page: Page): Locator {
@@ -33,8 +40,21 @@ export function reviewModalNewStackButton(page: Page): Locator {
   return openImagesReviewModal(page).getByRole("button", { name: "New stack" });
 }
 
+export function reviewModalGroups(page: Page): Locator {
+  return openImagesReviewModal(page).getByRole("region");
+}
+
 export function reviewModalGroupModeSelect(page: Page): Locator {
   return openImagesReviewModal(page).getByRole("combobox", { name: "Group mode" });
+}
+
+export async function chooseReviewModalGroupMode(
+  page: Page,
+  optionLabel: "Combine into one stack" | "Open bands separately",
+): Promise<void> {
+  await runAsStoryboardStep(page, `Switch the group mode to "${optionLabel}"`, async () => {
+    await reviewModalGroupModeSelect(page).selectOption({ label: optionLabel });
+  });
 }
 
 export async function readReviewModalGroupModeOptionLabels(page: Page): Promise<string[]> {
@@ -56,15 +76,19 @@ function extractFileNameFromRowAriaLabel(ariaLabel: string): string {
 }
 
 export async function confirmReviewModal(page: Page): Promise<void> {
-  const modal = openImagesReviewModal(page);
-  await modal.getByRole("button", { name: /^Open \d+ stack/ }).click();
-  await expect(modal).toBeHidden();
+  await runAsStoryboardStep(page, "Confirm the Review stacks modal to open the stacks", async () => {
+    const modal = openImagesReviewModal(page);
+    await modal.getByRole("button", { name: /^Open \d+ stack/ }).click();
+    await expect(modal).toBeHidden();
+  });
 }
 
 export async function cancelReplaceTargetPicker(page: Page): Promise<void> {
-  const picker = openImagesReplaceTargetPicker(page);
-  await picker.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(picker).toBeHidden();
+  await runAsStoryboardStep(page, "Cancel the replace-panel picker", async () => {
+    const picker = openImagesReplaceTargetPicker(page);
+    await picker.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(picker).toBeHidden();
+  });
 }
 
 export function openImagesErrorToast(page: Page): Locator {

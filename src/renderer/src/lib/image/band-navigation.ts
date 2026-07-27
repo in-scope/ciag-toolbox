@@ -10,8 +10,10 @@ export function stepBandIndexInDirection(
   direction: number,
   bandCount: number,
 ): number {
+  if (bandCount <= 1) return 0;
   const stepSign = direction < 0 ? -1 : 1;
-  return clampBandIndexWithinCount(currentBandIndex + stepSign, bandCount);
+  const startIndex = clampBandIndexWithinCount(currentBandIndex, bandCount);
+  return (startIndex + stepSign + bandCount) % bandCount;
 }
 
 export function parseTypedBandNumberToIndexOrNull(

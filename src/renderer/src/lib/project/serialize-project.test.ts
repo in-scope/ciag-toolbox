@@ -16,24 +16,24 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(draft.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
   });
 
-  it("bakes a modified raster source as a single-band TIFF asset", () => {
+  it("bakes a modified raster source as a single-band TIFF encoding plan", () => {
     const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
-    expect(first.asset.extension).toBe("tif");
+    expect(first.asset.primary.extension).toBe("tif");
     expect(first.asset.sidecar).toBeUndefined();
-    expect(first.asset.bytes.byteLength).toBeGreaterThan(0);
+    expect(first.asset.primary.byteLength).toBeGreaterThan(0);
   });
 
-  it("bakes a modified multi-band raster source as an ENVI asset with a .bin sidecar", () => {
+  it("bakes a modified multi-band raster source as an ENVI plan with a .bin sidecar", () => {
     const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
-    expect(first.asset.extension).toBe("hdr");
+    expect(first.asset.primary.extension).toBe("hdr");
     expect(first.asset.sidecar?.extension).toBe("bin");
-    expect(first.asset.sidecar?.bytes.byteLength).toBeGreaterThan(0);
+    expect(first.asset.sidecar?.byteLength).toBeGreaterThan(0);
   });
 
   it("references an unmodified on-disk raster as an external asset instead of baking it", () => {
@@ -55,9 +55,15 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(draft.viewports[0]?.asset.kind).toBe("external");
   });
 
-  it("rejects baking a modified raster that exceeds the bundle bake size limit", () => {
+  // CT-235: the 1.8 GB bake cap is gone. A modified multi-gigabyte cube plans a
+  // chunked bake (metadata only, nothing allocated) instead of being rejected.
+  it("plans a chunked bake for a modified raster beyond the old bake size limit", () => {
     const snapshot = withAppliedOperation(buildLargeUnmodifiedEnviSnapshot());
-    expect(() => buildDraftBundleFromSnapshot(snapshot)).toThrow(/too large/i);
+    const draft = buildDraftBundleFromSnapshot(snapshot);
+    const [first] = draft.viewports;
+    expect(first?.asset.kind).toBe("baked");
+    if (first?.asset.kind !== "baked") return;
+    expect(first.asset.sidecar?.byteLength).toBe(20_000 * 20_000 * 10 * 2);
   });
 
   it("sorts the selected viewport indices ascending", () => {

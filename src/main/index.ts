@@ -15,14 +15,35 @@ import {
 } from "./e2e-dialog-stub";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
+import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
 import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
-import { registerSaveBundleDialogIpcHandler } from "./save-bundle-dialog";
-import { registerSaveImageDialogIpcHandler } from "./save-image-dialog";
+import { registerSaveBundleDialogIpcHandlers } from "./save-bundle-dialog";
+import { registerSaveImageDialogIpcHandlers } from "./save-image-dialog";
 import { initializeThemeControllerFromDisk } from "./theme-controller";
+import { initializePythonEnvironmentControllerFromDisk } from "./python/python-environment-controller";
+import { registerRunUserScriptIpcHandler } from "./python/user-script-ipc";
+import { registerRendererCrashLogging } from "./renderer-crash-logging";
 import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
+import {
+  interceptWindowCloseUntilRendererConfirms,
+  registerConfirmCloseIpcHandler,
+} from "./window-close-guard";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// CT-239 test surface (MSI_E2E only, like the dialog stubs): expose window.gc
+// in every renderer so the scale10 sweep can deterministically release closed
+// panels' cubes between full-scale applies. The renderer's ArrayBuffer pool is
+// a hard ~17 GB cap and V8 does not run a last-resort collection when a
+// backing-store allocation fails, so tests cannot rely on collection timing.
+// No effect on production launches.
+function exposeGarbageCollectionForE2eTestMode(): void {
+  if (!isE2eTestModeEnabled()) return;
+  app.commandLine.appendSwitch("js-flags", "--expose-gc");
+}
+
+exposeGarbageCollectionForE2eTestMode();
 
 function buildPreloadScriptPath(): string {
   return join(__dirname, "../preload/index.js");
@@ -94,13 +115,24 @@ function maximizeWindowIfPreviouslyMaximized(
   if (bounds.isMaximized) window.maximize();
 }
 
+// The main window can be closed while the splash minimum is still running
+// (CT-258 made that an ordinary flow); showing a destroyed window would throw
+// and leak the splash as a ghost window that keeps the app process alive.
 async function showMainWindowAfterSplashMinimumElapsed(
   mainWindow: BrowserWindow,
   splash: SplashWindowHandle | null,
 ): Promise<void> {
   if (splash !== null) await splash.waitUntilMinimumDisplayDurationElapsed();
-  mainWindow.show();
+  if (!mainWindow.isDestroyed()) mainWindow.show();
   if (splash !== null) splash.dismiss();
+}
+
+function dismissSplashWhenMainWindowClosesFirst(
+  mainWindow: BrowserWindow,
+  splash: SplashWindowHandle | null,
+): void {
+  if (splash === null) return;
+  mainWindow.on("closed", () => splash.dismiss());
 }
 
 function deferMainWindowShowUntilReadyAndSplashElapsed(
@@ -117,8 +149,10 @@ function createMainWindow(splash: SplashWindowHandle | null): BrowserWindow {
   const window = new BrowserWindow(buildBrowserWindowOptionsFrom(savedBounds));
   maximizeWindowIfPreviouslyMaximized(window, savedBounds);
   deferMainWindowShowUntilReadyAndSplashElapsed(window, splash);
+  dismissSplashWhenMainWindowClosesFirst(window, splash);
   attachExternalLinkHandler(window);
   attachWindowStatePersistence(window);
+  interceptWindowCloseUntilRendererConfirms(window);
   installApplicationMenu(window);
   loadRendererIntoWindow(window);
   if (isRunningInDevelopment()) {
@@ -140,14 +174,19 @@ function quitWhenAllWindowsClosed(): void {
 }
 
 app.whenReady().then(() => {
+  registerRendererCrashLogging();
   setWindowsAppUserModelIdForTaskbarGrouping();
   initializeThemeControllerFromDisk();
+  initializePythonEnvironmentControllerFromDisk();
+  registerRunUserScriptIpcHandler();
   registerAppInfoIpcHandler();
   registerOpenImageDialogIpcHandler();
   registerOpenImagesDialogIpcHandlers();
-  registerSaveImageDialogIpcHandler();
+  registerChunkedOpenedImageReadIpcHandlers();
+  registerSaveImageDialogIpcHandlers();
   registerOpenBundleDialogIpcHandlers();
-  registerSaveBundleDialogIpcHandler();
+  registerSaveBundleDialogIpcHandlers();
+  registerConfirmCloseIpcHandler();
   registerE2eDialogStubTestChannelsWhenEnabled();
   const splash = createSplashWindow();
   createMainWindow(splash);

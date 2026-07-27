@@ -3,6 +3,11 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { classifyDecodedViewportSourceForOpenImagesFlow } from "./classify-opened-raster";
 
+// CT-231: an ENVI header's binary sibling streams through the chunked decoder
+// and is never held as bytes; rows carry its SIZE (for display) and file name.
+// CT-232: no raw file bytes are retained AT ALL once decode completes - identity
+// and re-import work from contentHash and filePath, so steady-state memory after
+// an open is one cube, not cube plus file.
 export interface OpenedFileForGrouping {
   readonly fileName: string;
   readonly filePath: string;
@@ -12,8 +17,7 @@ export interface OpenedFileForGrouping {
   readonly decodeError: string | null;
   readonly contentHash: string;
   readonly sidecarFileName?: string;
-  readonly sidecarBytes?: Uint8Array;
-  readonly bytes: Uint8Array;
+  readonly sidecarSizeBytes?: number;
 }
 
 export interface GroupedOpenedFileRow {
@@ -27,8 +31,7 @@ export interface GroupedOpenedFileRow {
   readonly differentiatingSubstring: string;
   readonly contentHash: string;
   readonly sidecarFileName?: string;
-  readonly sidecarBytes?: Uint8Array;
-  readonly bytes: Uint8Array;
+  readonly sidecarSizeBytes?: number;
 }
 
 export type OpenedFilesGroupMode = "stack" | "singles";
@@ -121,8 +124,7 @@ function buildRowFromFileAndSuggestion(
     differentiatingSubstring:
       suggestion.differentiatingSubstringByFileName.get(file.fileName) ?? file.fileName,
     contentHash: file.contentHash,
-    bytes: file.bytes,
-    ...(file.sidecarBytes ? { sidecarBytes: file.sidecarBytes } : {}),
+    ...(file.sidecarSizeBytes !== undefined ? { sidecarSizeBytes: file.sidecarSizeBytes } : {}),
     ...(file.sidecarFileName ? { sidecarFileName: file.sidecarFileName } : {}),
   };
 }
@@ -131,25 +133,44 @@ function buildSingleImageGroupFromFile(
   file: OpenedFileForGrouping,
   index: number,
 ): OpenedFilesGroup {
+  return buildSingleImageGroupWithId(`single-${index + 1}-${file.fileName}`, file);
+}
+
+// CT-252: "Open bands separately" physically splits a multi-row group into one
+// single-image group per row, in the same order, each shaped exactly like the
+// groups built for files that arrive isolated (buildSingleImageGroupFromFile).
+export function splitGroupRowsIntoSingleImageGroups(
+  group: OpenedFilesGroup,
+): ReadonlyArray<OpenedFilesGroup> {
+  return group.rows.map((row, index) =>
+    buildSingleImageGroupWithId(`${group.id}-split-${index + 1}-${row.fileName}`, row),
+  );
+}
+
+function buildSingleImageGroupWithId(
+  id: string,
+  file: OpenedFileForGrouping,
+): OpenedFilesGroup {
   return {
-    id: `single-${index + 1}-${file.fileName}`,
+    id,
     mode: "singles",
-    rows: [
-      {
-        fileName: file.fileName,
-        filePath: file.filePath,
-        fileSizeBytes: file.fileSizeBytes,
-        mtimeMs: file.mtimeMs,
-        source: file.source,
-        decodeError: file.decodeError,
-        wavelength: null,
-        differentiatingSubstring: file.fileName,
-        contentHash: file.contentHash,
-        bytes: file.bytes,
-        ...(file.sidecarBytes ? { sidecarBytes: file.sidecarBytes } : {}),
-        ...(file.sidecarFileName ? { sidecarFileName: file.sidecarFileName } : {}),
-      },
-    ],
+    rows: [buildIsolatedSingleImageRowFromFile(file)],
     hadConfidentWavelengthParse: false,
+  };
+}
+
+function buildIsolatedSingleImageRowFromFile(file: OpenedFileForGrouping): GroupedOpenedFileRow {
+  return {
+    fileName: file.fileName,
+    filePath: file.filePath,
+    fileSizeBytes: file.fileSizeBytes,
+    mtimeMs: file.mtimeMs,
+    source: file.source,
+    decodeError: file.decodeError,
+    wavelength: null,
+    differentiatingSubstring: file.fileName,
+    contentHash: file.contentHash,
+    ...(file.sidecarSizeBytes !== undefined ? { sidecarSizeBytes: file.sidecarSizeBytes } : {}),
+    ...(file.sidecarFileName ? { sidecarFileName: file.sidecarFileName } : {}),
   };
 }

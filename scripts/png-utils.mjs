@@ -1,6 +1,6 @@
 // Shared helpers for generating PNGs in pure Node (zlib + Buffer; no native deps).
 
-import { deflateSync } from "node:zlib";
+import { createDeflate, deflateSync } from "node:zlib";
 
 export const PLACEHOLDER_BACKGROUND_COLOR = { r: 24, g: 121, b: 219, a: 255 };
 
@@ -92,4 +92,73 @@ export function buildRgbaPng(width, height, rgbaPixelBuffer) {
 
 export function buildSolidColorPng(width, height, color) {
   return buildRgbaPng(width, height, buildSolidColorRgbaPixelBuffer(width, height, color));
+}
+
+// --- Streaming RGBA PNG (CT-230) ---------------------------------------------
+// Emits a PNG row by row so a 10000x5000 photo never materializes its full
+// pixel or scanline buffer. One zlib deflate stream spans multiple IDAT chunks,
+// which is valid PNG; each IDAT is emitted once ~1 MB of deflated bytes exist.
+
+const STREAMED_IDAT_TARGET_BYTES = 1 << 20;
+
+export async function streamRgbaPngUsingRowProvider(width, height, provideRowRgba, emitPngBytes) {
+  await emitPngBytes(PNG_SIGNATURE);
+  await emitPngBytes(buildPngHeaderChunk(width, height));
+  await deflateRowsIntoIdatChunks(width, height, provideRowRgba, emitPngBytes);
+  await emitPngBytes(buildPngImageEndChunk());
+}
+
+async function deflateRowsIntoIdatChunks(width, height, provideRowRgba, emitPngBytes) {
+  const deflateStream = createDeflate();
+  const deflatedParts = collectStreamOutputParts(deflateStream);
+  for (let y = 0; y < height; y++) {
+    await writeToStreamHonoringBackpressure(deflateStream, buildFilteredScanline(width, provideRowRgba(y)));
+    await emitCollectedPartsAsIdatWhenLargeEnough(deflatedParts, emitPngBytes);
+  }
+  await endStreamAndAwaitAllDataEmitted(deflateStream);
+  await emitCollectedPartsAsIdatChunk(deflatedParts, emitPngBytes);
+}
+
+function collectStreamOutputParts(stream) {
+  const parts = [];
+  stream.on("data", (chunk) => parts.push(chunk));
+  return parts;
+}
+
+function buildFilteredScanline(width, rowRgbaBuffer) {
+  const scanline = Buffer.alloc(1 + width * 4);
+  scanline[0] = 0;
+  scanline.set(rowRgbaBuffer.subarray(0, width * 4), 1);
+  return scanline;
+}
+
+function writeToStreamHonoringBackpressure(stream, buffer) {
+  return new Promise((resolve, reject) => {
+    stream.write(buffer, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+// The writable-side end() callback can fire BEFORE the final deflated bytes are
+// emitted on the readable side; waiting for the readable "end" event guarantees
+// every "data" chunk has been collected.
+function endStreamAndAwaitAllDataEmitted(stream) {
+  return new Promise((resolve, reject) => {
+    stream.once("error", reject);
+    stream.once("end", resolve);
+    stream.end();
+  });
+}
+
+async function emitCollectedPartsAsIdatWhenLargeEnough(parts, emitPngBytes) {
+  if (sumOfPartByteLengths(parts) < STREAMED_IDAT_TARGET_BYTES) return;
+  await emitCollectedPartsAsIdatChunk(parts, emitPngBytes);
+}
+
+async function emitCollectedPartsAsIdatChunk(parts, emitPngBytes) {
+  if (parts.length === 0) return;
+  await emitPngBytes(buildPngChunk("IDAT", Buffer.concat(parts.splice(0, parts.length))));
+}
+
+function sumOfPartByteLengths(parts) {
+  return parts.reduce((total, part) => total + part.length, 0);
 }

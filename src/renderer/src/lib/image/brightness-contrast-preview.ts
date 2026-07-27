@@ -10,6 +10,8 @@ import {
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
 import { TONE_CURVE_LUT_ENTRY_COUNT } from "@/lib/webgl/tone-curve-lut-texture";
 
 // CT-186: brightness/contrast preview is display-only, exactly like the tone-curve
@@ -36,6 +38,23 @@ export function buildBrightnessContrastPreviewLutOrNull(
     range,
     TONE_CURVE_LUT_ENTRY_COUNT,
   );
+}
+
+// CT-247: a true-colour composite previews through the SAME per-channel LUT
+// triple the tone curve uses (CT-177): each channel LUT applies the shared
+// brightness delta then contrast centred on that channel's OWN brightened mean,
+// which is exactly what the committed Apply does over bands 0/1/2.
+export function buildBrightnessContrastCompositePreviewLutsOrNull(
+  raster: RasterImage | null,
+  brightnessPercent: number,
+  contrastRatio: number,
+): ToneCurveChannelPreviewLuts | null {
+  if (!raster || !shouldRenderRasterAsRgbComposite(raster)) return null;
+  const red = buildBrightnessContrastPreviewLutOrNull(raster, 0, brightnessPercent, contrastRatio);
+  const green = buildBrightnessContrastPreviewLutOrNull(raster, 1, brightnessPercent, contrastRatio);
+  const blue = buildBrightnessContrastPreviewLutOrNull(raster, 2, brightnessPercent, contrastRatio);
+  if (!red || !green || !blue) return null;
+  return { red, green, blue };
 }
 
 function isIdentityBrightnessAndContrast(brightnessPercent: number, contrastRatio: number): boolean {

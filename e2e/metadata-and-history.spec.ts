@@ -14,8 +14,11 @@ import {
   openOperation,
   readMetadata,
   selectActiveBandNumber,
+  stepToNextBand,
+  stepToPreviousBand,
   toggleNormalizedViewing,
 } from "./support/page-objects";
+import { runAsStoryboardStep } from "./support/storyboard-step";
 
 // CT-035/CT-036: the Metadata panel reports format/dimensions/band count/data type and the
 // active band's original index + wavelength (where available), updating as the band
@@ -39,6 +42,7 @@ test("Metadata reports format, dimensions, band count, data type, and tracks the
     await loadFixtureAsStack(app.window, enviStack.headerFileName);
     await expectStackMetadataMatchesEnviFixture(app.window, enviStack);
     await expectEachBandReportsOriginalIndexAndWavelength(app.window, enviStack);
+    await expectBandNavigatorWrapsPastBothEnds(app.window, enviStack);
   } finally {
     await closeToolboxApp(app);
   }
@@ -89,6 +93,32 @@ async function expectActiveBandIdentity(
 ): Promise<void> {
   await selectActiveBandNumber(window, oneBasedBandNumber);
   await expect.poll(() => readActiveBandIdentity(window)).toEqual(expected);
+}
+
+// CT-253: the chevrons cycle - Next on the last band lands on band 1 and
+// Previous on band 1 lands on the last band - proven by the Metadata rows.
+async function expectBandNavigatorWrapsPastBothEnds(
+  window: AppWindow,
+  fixture: EnviFixture,
+): Promise<void> {
+  await runAsStoryboardStep(window, "Band navigator wraps past both ends", async () => {
+    await selectActiveBandNumber(window, fixture.bandCount);
+    await stepToNextBand(window);
+    await expectSteppedBandIdentity(window, fixture, 1);
+    await stepToPreviousBand(window);
+    await expectSteppedBandIdentity(window, fixture, fixture.bandCount);
+  });
+}
+
+async function expectSteppedBandIdentity(
+  window: AppWindow,
+  fixture: EnviFixture,
+  oneBasedBandNumber: number,
+): Promise<void> {
+  await expect.poll(() => readActiveBandIdentity(window)).toEqual({
+    originalBand: String(oneBasedBandNumber),
+    wavelength: `${fixture.wavelengths[oneBasedBandNumber - 1]} nm`,
+  });
 }
 
 async function readActiveBandIdentity(window: AppWindow): Promise<ActiveBandIdentity> {

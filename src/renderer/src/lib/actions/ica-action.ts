@@ -1,6 +1,7 @@
 import { Split } from "lucide-react";
 
-import { applyIca, fitIca, type IcaFit } from "@/lib/image/dimension-reduction/ica";
+import { fitIcaReportingProgress, type IcaFit } from "@/lib/image/dimension-reduction/ica";
+import { projectMeanCentredSamplesOntoComponentVectorsReportingProgress } from "@/lib/image/dimension-reduction/project-samples";
 
 import { registerDimensionReductionAction } from "./dimension-reduction-action";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -21,6 +22,7 @@ export const ICA_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   successMessage: "ICA applied",
   loadingMessage: "Computing independent components...",
   componentLabelPrefix: ICA_COMPONENT_LABEL_PREFIX,
-  fit: fitIca,
-  project: applyIca,
+  fit: fitIcaReportingProgress,
+  project: (samples, fit, keptCount, onProgress) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress),
 });

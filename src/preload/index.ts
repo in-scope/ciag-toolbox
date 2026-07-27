@@ -1,25 +1,65 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
+import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
+import {
+  OPENED_IMAGE_READ_ABORT_CHANNEL,
+  OPENED_IMAGE_READ_BEGIN_CHANNEL,
+  OPENED_IMAGE_READ_CHUNK_CHANNEL,
+  OPENED_IMAGE_READ_FINISH_CHANNEL,
+  type ChunkedOpenedImageReadAbortRequest,
+  type ChunkedOpenedImageReadBeginRequest,
+  type ChunkedOpenedImageReadBeginResult,
+  type ChunkedOpenedImageReadChunkRequest,
+  type ChunkedOpenedImageReadChunkResult,
+  type ChunkedOpenedImageReadFinishRequest,
+  type ChunkedOpenedImageReadFinishResult,
+} from "../shared/chunked-opened-image-read-protocol";
+import {
+  SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
+  SAVE_BUNDLE_BEGIN_CHANNEL,
+  SAVE_BUNDLE_FINISH_CHANNEL,
+  SAVE_BUNDLE_RELEASE_CHANNEL,
+  type SaveBundleAssetChunkRequest,
+  type SaveBundleBeginRequest,
+  type SaveBundleBeginResult,
+  type SaveBundleFinishRequest,
+  type SaveBundleFinishResult,
+  type SaveBundleReleaseRequest,
+} from "../shared/chunked-save-bundle-protocol";
+import {
+  SAVE_IMAGE_BEGIN_CHANNEL,
+  SAVE_IMAGE_CHUNK_CHANNEL,
+  SAVE_IMAGE_FINISH_CHANNEL,
+  SAVE_IMAGE_RELEASE_CHANNEL,
+  type SaveImageBeginRequest,
+  type SaveImageBeginResult,
+  type SaveImageChunkRequest,
+  type SaveImageFinishRequest,
+  type SaveImageFinishResult,
+  type SaveImageReleaseRequest,
+} from "../shared/chunked-save-image-protocol";
+import {
+  USER_SCRIPT_PICK_SCRIPT_CHANNEL,
+  USER_SCRIPT_RUN_BEGIN_CHANNEL,
+  USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
+  USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+  USER_SCRIPT_RUN_RELEASE_CHANNEL,
+  USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
+  type UserScriptPickScriptResult,
+  type UserScriptRunBeginRequest,
+  type UserScriptRunBeginResult,
+  type UserScriptRunCubeChunkRequest,
+  type UserScriptRunExecuteRequest,
+  type UserScriptRunExecuteResult,
+  type UserScriptRunReleaseRequest,
+  type UserScriptRunResultChunkRequest,
+  type UserScriptRunResultChunkResult,
+} from "../shared/chunked-user-script-run-protocol";
+
 export interface AppInfo {
   name: string;
   version: string;
 }
-
-export interface OpenImageDialogSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-export type OpenImageDialogResult =
-  | { canceled: true }
-  | {
-      canceled: false;
-      filePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      contentHash: string;
-      sidecar?: OpenImageDialogSidecar;
-    };
 
 export interface OpenImagesDialogFileMetadataEntry {
   fileName: string;
@@ -32,11 +72,15 @@ export type OpenImagesDialogResult =
   | { canceled: true }
   | { canceled: false; files: ReadonlyArray<OpenImagesDialogFileMetadataEntry> };
 
-export interface OpenedImagesFileSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
+// CT-234: the single-file dialog reply is metadata only; file bytes stream
+// through the chunked-read wrappers below (same rule as the multi-file dialog).
+export type OpenImageDialogResult =
+  | { canceled: true }
+  | { canceled: false; file: OpenImagesDialogFileMetadataEntry };
 
+// CT-231: an ENVI header's binary sibling never crosses as assembled bytes;
+// the renderer streams it through the chunked-read wrappers below, so the
+// entry carries the picked file only.
 export interface OpenedImagesFileEntry {
   fileName: string;
   filePath: string;
@@ -44,123 +88,33 @@ export interface OpenedImagesFileEntry {
   contentHash: string;
   fileSizeBytes: number;
   mtimeMs: number;
-  sidecar?: OpenedImagesFileSidecar;
 }
-
-export interface SaveImageDialogFilter {
-  name: string;
-  extensions: ReadonlyArray<string>;
-}
-
-export interface SaveImageDialogSidecar {
-  extension: string;
-  bytes: Uint8Array;
-}
-
-export interface SaveImageDialogRequest {
-  suggestedFileName: string;
-  bytes: Uint8Array;
-  fileFilter: SaveImageDialogFilter;
-  sidecar?: SaveImageDialogSidecar;
-}
-
-export type SaveImageDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
-
-export interface SaveBundleDraftRenderingState {
-  normalizationEnabled: boolean;
-  selectedBandIndex: number;
-  lastAppliedOperationLabel: string | null;
-}
-
-export type SaveBundleDraftOperationHistoryParameterValue = number | string | boolean;
-
-export interface SaveBundleDraftOperationHistoryEntry {
-  actionId: string;
-  actionLabel: string;
-  appliedLabel: string;
-  parameterValues: Readonly<Record<string, SaveBundleDraftOperationHistoryParameterValue>>;
-  timestampMs: number;
-}
-
-export interface SaveBundleDraftBakedAssetSidecar {
-  extension: string;
-  bytes: Uint8Array;
-}
-
-export interface SaveBundleDraftBakedAsset {
-  kind: "baked";
-  bytes: Uint8Array;
-  extension: string;
-  sidecar?: SaveBundleDraftBakedAssetSidecar;
-}
-
-export interface SaveBundleDraftExternalAsset {
-  kind: "external";
-  absolutePath: string;
-  extension: string;
-}
-
-export type SaveBundleDraftAsset =
-  | SaveBundleDraftBakedAsset
-  | SaveBundleDraftExternalAsset;
-
-export interface SaveBundleDraftViewportEntry {
-  index: number;
-  fileName: string;
-  asset: SaveBundleDraftAsset;
-  renderingState: SaveBundleDraftRenderingState;
-  operationHistory: ReadonlyArray<SaveBundleDraftOperationHistoryEntry>;
-  colorInterpretation?: "rgb";
-}
-
-export interface SaveBundleDraft {
-  formatVersion: number;
-  gridLayout: string;
-  selectedViewportIndices: ReadonlyArray<number>;
-  viewports: ReadonlyArray<SaveBundleDraftViewportEntry>;
-}
-
-export interface SaveBundleDialogRequest {
-  draft: SaveBundleDraft;
-  currentProjectFilePath: string | null;
-  saveAs: boolean;
-}
-
-export type SaveBundleDialogResult =
-  | { canceled: true }
-  | { canceled: false; filePath: string };
 
 export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
 
-export interface ReadBundleAssetRequest {
+// CT-236: the bundle-asset reply is metadata only; asset bytes stream through
+// the chunked-read wrappers below (same rule as the open-image dialogs).
+export interface ResolveBundleAssetRequest {
   projectFilePath: string;
   relativePath: string;
 }
 
-export interface ReadBundleAssetSidecar {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-export type ReadBundleAssetResult =
+export type ResolveBundleAssetResult =
   | { kind: "missing"; relativePath: string }
-  | {
-      kind: "found";
-      absolutePath: string;
-      fileName: string;
-      bytes: Uint8Array;
-      sidecar?: ReadBundleAssetSidecar;
-    };
+  | { kind: "found"; file: OpenImagesDialogFileMetadataEntry };
 
 export type ThemeMode = "system" | "light" | "dark";
 
 export interface ThemeSnapshot {
   mode: ThemeMode;
   isDark: boolean;
+}
+
+export interface PythonEnvironmentSnapshot {
+  ownInterpreterPath: string | null;
+  pathExists: boolean;
 }
 
 export type MenuEventListener = () => void;
@@ -172,20 +126,22 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
-const OPEN_IMAGES_READ_FILE_CHANNEL = "image:open-images-read-file";
-const SAVE_IMAGE_DIALOG_CHANNEL = "image:save-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
-const READ_BUNDLE_ASSET_CHANNEL = "project:read-bundle-asset";
-const SAVE_BUNDLE_DIALOG_CHANNEL = "project:save-bundle-dialog";
+const RESOLVE_BUNDLE_ASSET_CHANNEL = "project:resolve-bundle-asset";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
 const MENU_SAVE_IMAGE_CHANNEL = "menu:save-image";
 const MENU_OPEN_PROJECT_CHANNEL = "menu:open-project";
 const MENU_SAVE_PROJECT_CHANNEL = "menu:save-project";
 const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
+const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
+const MENU_CLOSE_REQUESTED_CHANNEL = "menu:close-requested";
+const APP_CONFIRM_CLOSE_CHANNEL = "app:confirm-close";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
+const PYTHON_ENVIRONMENT_GET_CHANNEL = "python-environment:get";
+const PYTHON_ENVIRONMENT_SET_CHANNEL = "python-environment:set";
 
 function fetchAppInfoFromMainProcess(): Promise<AppInfo> {
   return ipcRenderer.invoke(GET_APP_INFO_CHANNEL) as Promise<AppInfo>;
@@ -203,22 +159,93 @@ function showOpenImagesDialogThroughMainProcess(): Promise<OpenImagesDialogResul
   ) as Promise<OpenImagesDialogResult>;
 }
 
+// CT-219b: file bytes stream from main in chunks; one whole-file IPC reply
+// killed the main process for files of roughly 1 GiB and above.
 function readSingleOpenedImageFileThroughMainProcess(
   metadata: OpenImagesDialogFileMetadataEntry,
 ): Promise<OpenedImagesFileEntry> {
-  return ipcRenderer.invoke(
-    OPEN_IMAGES_READ_FILE_CHANNEL,
+  return readOpenedImageFileThroughChunkedProtocol(
+    (channel, payload) => ipcRenderer.invoke(channel, payload),
     metadata,
-  ) as Promise<OpenedImagesFileEntry>;
+  );
 }
 
-function showSaveImageDialogThroughMainProcess(
-  request: SaveImageDialogRequest,
-): Promise<SaveImageDialogResult> {
+// CT-231: the renderer drives the chunked read protocol directly for ENVI
+// headers, feeding each 64 MiB binary chunk straight into the streaming
+// decoder instead of assembling the whole multi-gigabyte sidecar.
+function beginOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadBeginRequest,
+): Promise<ChunkedOpenedImageReadBeginResult> {
   return ipcRenderer.invoke(
-    SAVE_IMAGE_DIALOG_CHANNEL,
+    OPENED_IMAGE_READ_BEGIN_CHANNEL,
     request,
-  ) as Promise<SaveImageDialogResult>;
+  ) as Promise<ChunkedOpenedImageReadBeginResult>;
+}
+
+function readOpenedImageChunkFromMainProcess(
+  request: ChunkedOpenedImageReadChunkRequest,
+): Promise<ChunkedOpenedImageReadChunkResult> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_CHUNK_CHANNEL,
+    request,
+  ) as Promise<ChunkedOpenedImageReadChunkResult>;
+}
+
+function finishOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadFinishRequest,
+): Promise<ChunkedOpenedImageReadFinishResult> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_FINISH_CHANNEL,
+    request,
+  ) as Promise<ChunkedOpenedImageReadFinishResult>;
+}
+
+function abortOpenedImageChunkedReadInMainProcess(
+  request: ChunkedOpenedImageReadAbortRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    OPENED_IMAGE_READ_ABORT_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+// Chunked save-image protocol (CT-237, see
+// src/shared/chunked-save-image-protocol.ts); these four thin wrappers keep
+// every context-bridge crossing and invoke far below the serializer danger zone.
+function beginSaveImageThroughMainProcess(
+  request: SaveImageBeginRequest,
+): Promise<SaveImageBeginResult> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_BEGIN_CHANNEL,
+    request,
+  ) as Promise<SaveImageBeginResult>;
+}
+
+function sendSaveImageChunkToMainProcess(
+  request: SaveImageChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function finishSaveImageInMainProcess(
+  request: SaveImageFinishRequest,
+): Promise<SaveImageFinishResult> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_FINISH_CHANNEL,
+    request,
+  ) as Promise<SaveImageFinishResult>;
+}
+
+function releaseSaveImageInMainProcess(
+  request: SaveImageReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_IMAGE_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
@@ -227,22 +254,52 @@ function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResul
   ) as Promise<OpenBundleDialogResult>;
 }
 
-function readBundleAssetThroughMainProcess(
-  request: ReadBundleAssetRequest,
-): Promise<ReadBundleAssetResult> {
+function resolveBundleAssetThroughMainProcess(
+  request: ResolveBundleAssetRequest,
+): Promise<ResolveBundleAssetResult> {
   return ipcRenderer.invoke(
-    READ_BUNDLE_ASSET_CHANNEL,
+    RESOLVE_BUNDLE_ASSET_CHANNEL,
     request,
-  ) as Promise<ReadBundleAssetResult>;
+  ) as Promise<ResolveBundleAssetResult>;
 }
 
-function showSaveBundleDialogThroughMainProcess(
-  request: SaveBundleDialogRequest,
-): Promise<SaveBundleDialogResult> {
+// Chunked project-save protocol (CT-219e, see
+// src/shared/chunked-save-bundle-protocol.ts); these four thin wrappers keep
+// every context-bridge crossing and invoke far below the serializer danger zone.
+function beginSaveBundleThroughMainProcess(
+  request: SaveBundleBeginRequest,
+): Promise<SaveBundleBeginResult> {
   return ipcRenderer.invoke(
-    SAVE_BUNDLE_DIALOG_CHANNEL,
+    SAVE_BUNDLE_BEGIN_CHANNEL,
     request,
-  ) as Promise<SaveBundleDialogResult>;
+  ) as Promise<SaveBundleBeginResult>;
+}
+
+function sendSaveBundleAssetChunkToMainProcess(
+  request: SaveBundleAssetChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function finishSaveBundleInMainProcess(
+  request: SaveBundleFinishRequest,
+): Promise<SaveBundleFinishResult> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_FINISH_CHANNEL,
+    request,
+  ) as Promise<SaveBundleFinishResult>;
+}
+
+function releaseSaveBundleInMainProcess(
+  request: SaveBundleReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    SAVE_BUNDLE_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
 }
 
 function subscribeToMenuChannel(
@@ -290,6 +347,93 @@ function subscribeToAboutMenuEvent(
   return subscribeToMenuChannel(MENU_ABOUT_CHANNEL, listener);
 }
 
+// CT-258: main intercepts the window close event and asks the renderer; the
+// renderer answers with confirmWindowClose once (or when the user decides).
+function subscribeToWindowCloseRequestedEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_CLOSE_REQUESTED_CHANNEL, listener);
+}
+
+function confirmWindowCloseThroughMainProcess(): Promise<void> {
+  return ipcRenderer.invoke(APP_CONFIRM_CLOSE_CHANNEL) as Promise<void>;
+}
+
+function subscribeToPythonEnvironmentMenuEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_PYTHON_ENVIRONMENT_CHANNEL, listener);
+}
+
+function fetchPythonEnvironmentFromMainProcess(): Promise<PythonEnvironmentSnapshot> {
+  return ipcRenderer.invoke(
+    PYTHON_ENVIRONMENT_GET_CHANNEL,
+  ) as Promise<PythonEnvironmentSnapshot>;
+}
+
+function setPythonEnvironmentThroughMainProcess(
+  ownInterpreterPath: string | null,
+): Promise<PythonEnvironmentSnapshot> {
+  return ipcRenderer.invoke(
+    PYTHON_ENVIRONMENT_SET_CHANNEL,
+    ownInterpreterPath,
+  ) as Promise<PythonEnvironmentSnapshot>;
+}
+
+// CT-219g: the user-script cube crosses IPC chunked (see
+// src/shared/chunked-user-script-run-protocol.ts); these five thin wrappers
+// keep each context-bridge crossing and each invoke far below the size that
+// wedged the renderer. The renderer orchestrator
+// (lib/python/run-user-script-chunked.ts) drives the sequence.
+function pickUserScriptFileThroughMainProcess(): Promise<UserScriptPickScriptResult> {
+  return ipcRenderer.invoke(USER_SCRIPT_PICK_SCRIPT_CHANNEL) as Promise<UserScriptPickScriptResult>;
+}
+
+function beginUserScriptRunThroughMainProcess(
+  request: UserScriptRunBeginRequest,
+): Promise<UserScriptRunBeginResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_BEGIN_CHANNEL,
+    request,
+  ) as Promise<UserScriptRunBeginResult>;
+}
+
+function sendUserScriptRunCubeChunkToMainProcess(
+  request: UserScriptRunCubeChunkRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
+function executeUserScriptRunInMainProcess(
+  request: UserScriptRunExecuteRequest,
+): Promise<UserScriptRunExecuteResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+    request,
+  ) as Promise<UserScriptRunExecuteResult>;
+}
+
+function readUserScriptRunResultChunkFromMainProcess(
+  request: UserScriptRunResultChunkRequest,
+): Promise<UserScriptRunResultChunkResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
+    request,
+  ) as Promise<UserScriptRunResultChunkResult>;
+}
+
+function releaseUserScriptRunInMainProcess(
+  request: UserScriptRunReleaseRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_RELEASE_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -325,17 +469,38 @@ const apiBridge = {
   openImageDialog: showOpenImageDialogThroughMainProcess,
   openImagesDialog: showOpenImagesDialogThroughMainProcess,
   readOpenedImageFile: readSingleOpenedImageFileThroughMainProcess,
-  saveImageDialog: showSaveImageDialogThroughMainProcess,
+  beginOpenedImageChunkedRead: beginOpenedImageChunkedReadInMainProcess,
+  readOpenedImageChunk: readOpenedImageChunkFromMainProcess,
+  finishOpenedImageChunkedRead: finishOpenedImageChunkedReadInMainProcess,
+  abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
+  beginSaveImage: beginSaveImageThroughMainProcess,
+  sendSaveImageChunk: sendSaveImageChunkToMainProcess,
+  finishSaveImage: finishSaveImageInMainProcess,
+  releaseSaveImage: releaseSaveImageInMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
-  readProjectBundleAsset: readBundleAssetThroughMainProcess,
-  saveProjectBundleDialog: showSaveBundleDialogThroughMainProcess,
+  resolveProjectBundleAsset: resolveBundleAssetThroughMainProcess,
+  beginSaveProjectBundle: beginSaveBundleThroughMainProcess,
+  sendSaveProjectBundleAssetChunk: sendSaveBundleAssetChunkToMainProcess,
+  finishSaveProjectBundle: finishSaveBundleInMainProcess,
+  releaseSaveProjectBundle: releaseSaveBundleInMainProcess,
   onMenuOpenImage: subscribeToOpenImageMenuEvent,
   onMenuSaveImage: subscribeToSaveImageMenuEvent,
   onMenuOpenProject: subscribeToOpenProjectMenuEvent,
   onMenuSaveProject: subscribeToSaveProjectMenuEvent,
   onMenuSaveProjectAs: subscribeToSaveProjectAsMenuEvent,
   onMenuAbout: subscribeToAboutMenuEvent,
+  onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
+  onWindowCloseRequested: subscribeToWindowCloseRequestedEvent,
+  confirmWindowClose: confirmWindowCloseThroughMainProcess,
+  getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
+  setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
+  pickUserScriptFile: pickUserScriptFileThroughMainProcess,
+  beginUserScriptRun: beginUserScriptRunThroughMainProcess,
+  sendUserScriptRunCubeChunk: sendUserScriptRunCubeChunkToMainProcess,
+  executeUserScriptRun: executeUserScriptRunInMainProcess,
+  readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
+  releaseUserScriptRun: releaseUserScriptRunInMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

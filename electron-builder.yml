@@ -12,6 +12,17 @@ files:
   - "!**/*.{ts,tsx,map}"
   - "!**/.{eslintrc,eslintrc.cjs,prettierrc,gitignore}"
 asar: true
+# The bundled Python runtime (installed into .python/ by scripts/setup-python-runtime.mjs)
+# ships outside the asar archive so the interpreter binaries stay executable.
+# Each OS build packages the runtime installed on that OS (build:win -> Windows
+# runtime, build:mac -> macOS runtime); the CI release workflow builds per-OS.
+extraResources:
+  - from: .python
+    to: python
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+afterPack: scripts/sign-macos-python-runtime.mjs
 publish: null
 win:
   target:
@@ -36,9 +47,18 @@ mac:
         - arm64
   icon: build/icon.icns
   category: public.app-category.graphics-design
+  # Local/CI default is ad-hoc signing; export MSI_MAC_SIGNING_IDENTITY (or CSC_NAME/
+  # CSC_LINK) for a real Developer ID. Hardened runtime + the entitlements below are
+  # required for notarizing the bundled Python binaries (signed inside-out by the
+  # afterPack hook before electron-builder signs the outer app).
   identity: '-'
-  hardenedRuntime: false
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
+  # Notarization runs only when Apple credentials are present in the environment
+  # (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID); otherwise it is skipped.
+  notarize: true
   artifactName: ${productName}-${version}-${arch}.${ext}
 dmg:
   writeUpdateInfo: false

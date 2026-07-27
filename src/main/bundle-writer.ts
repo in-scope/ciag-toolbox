@@ -26,16 +26,18 @@ export interface BundleDraftViewportRenderingState {
   readonly lastAppliedOperationLabel: string | null;
 }
 
-export interface BundleDraftBakedAssetSidecar {
+// CT-219e: baked asset bytes never cross IPC (or memory) whole; they arrive as
+// chunks spooled to temp files (chunked-save-bundle.ts) and the writer streams
+// those files into the zip from disk.
+export interface BundleDraftBakedAssetPart {
+  readonly absolutePath: string;
   readonly extension: string;
-  readonly bytes: Uint8Array;
 }
 
 export interface BundleDraftBakedAsset {
   readonly kind: "baked";
-  readonly bytes: Uint8Array;
-  readonly extension: string;
-  readonly sidecar?: BundleDraftBakedAssetSidecar;
+  readonly primary: BundleDraftBakedAssetPart;
+  readonly sidecar?: BundleDraftBakedAssetPart;
 }
 
 export interface BundleDraftExternalAsset {
@@ -90,9 +92,13 @@ function buildAssetPathsForViewport(
   const stem = `viewport-${viewport.index}`;
   return {
     viewportIndex: viewport.index,
-    primaryRelativePath: `assets/${stem}.${viewport.asset.extension}`,
+    primaryRelativePath: `assets/${stem}.${primaryExtensionOfAsset(viewport.asset)}`,
     sidecarRelativePath: pickSidecarRelativePathOrNull(stem, viewport.asset),
   };
+}
+
+function primaryExtensionOfAsset(asset: BundleDraftAsset): string {
+  return asset.kind === "baked" ? asset.primary.extension : asset.extension;
 }
 
 function pickSidecarRelativePathOrNull(stem: string, asset: BundleDraftAsset): string | null {
@@ -194,9 +200,9 @@ function appendBakedAssetEntriesToZip(
   asset: BundleDraftBakedAsset,
   paths: ResolvedBundleAssetPaths,
 ): void {
-  zip.addBuffer(Buffer.from(asset.bytes), paths.primaryRelativePath);
+  zip.addFile(asset.primary.absolutePath, paths.primaryRelativePath);
   if (!asset.sidecar || !paths.sidecarRelativePath) return;
-  zip.addBuffer(Buffer.from(asset.sidecar.bytes), paths.sidecarRelativePath);
+  zip.addFile(asset.sidecar.absolutePath, paths.sidecarRelativePath);
 }
 
 function buildBundleProjectJsonBuffer(

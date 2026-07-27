@@ -30,7 +30,7 @@ const FIXTURE_DIMENSIONS: PixelDimensions = {
 const ORIGIN_BAND0_VALUE = enviFloatStack.samplePixels[0]!.valuesPerBand[0]!; // -1.0
 const UNCHANGED_FRACTION_TOLERANCE = 0.1;
 
-test("opening the Tone Curve panel on a float band does not restretch the display or the data", async () => {
+test("opening the Contrast Curve panel on a float band does not restretch the display or the data", async () => {
   const app = await launchToolboxApp();
   try {
     await loadFixtureAsStack(app.window, enviFloatStack.headerFileName);

@@ -70,7 +70,7 @@ async function openComposityToneCurveOnRedChannel(): Promise<void> {
 // floor) so the other two channels' averages stay put.
 async function darkenActiveChannelRightEndpointTo(output: number): Promise<void> {
   await toneCurveEndpointHandles(launched.window).last().click();
-  await setToneCurveAnchorField(launched.window, "Output", output);
+  await setToneCurveAnchorField(launched.window, "New value", output);
 }
 
 async function editGreenChannelToProveSuccessiveEditsAreLutOnly(): Promise<void> {

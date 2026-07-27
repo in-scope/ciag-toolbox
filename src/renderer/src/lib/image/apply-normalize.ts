@@ -1,6 +1,8 @@
 import {
   makeFloatRasterFromBandComputation,
+  makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBands,
+  makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
   mapBandPixelsToFloat32,
   RasterMemoryAllocationError,
 } from "@/lib/image/make-float-raster";
@@ -14,8 +16,10 @@ import { isFloatTypedArray } from "@/lib/image/data-type-value-range";
 import {
   mapBandValuesPreservingType,
   mapSelectedRasterBandsPreservingType,
+  mapSelectedRasterBandsPreservingTypeReportingProgress,
 } from "@/lib/image/map-band-values";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
+import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 
 // CT-083: data-changing linear normalize to [0, 1]. Distinct from the view-only
 // Normalized viewing stretch. Full cube scales every band by one cube-wide
@@ -56,6 +60,48 @@ export function applyNormalizeToRaster(
   if (method.kind === "clip-absolute") return clipRasterToAbsoluteBounds(raster, selection, method.bounds);
   if (selection.scope === "full-cube") return normalizeWholeCubeToUnitRange(raster, method);
   return normalizeSelectedBandsIndependentlyToUnitRange(raster, selection.bandIndexes, method);
+}
+
+// CT-221: the async twin of applyNormalizeToRaster. Identical per-band math, one
+// progress tick per band so a long normalize can drive a determinate indicator.
+export async function applyNormalizeToRasterReportingProgress(
+  raster: RasterImage,
+  selection: NormalizeScopeSelection,
+  method: NormalizeRangeMethod = MIN_MAX_NORMALIZE_METHOD,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  if (method.kind === "clip-absolute") {
+    return mapSelectedRasterBandsPreservingTypeReportingProgress(
+      raster,
+      resolveClippedBandIndexes(raster, selection),
+      (band) => clipBandValuesToAbsoluteBounds(band, method.bounds),
+      onProgress,
+    );
+  }
+  return normalizeRasterToUnitRangeReportingProgress(raster, selection, method, onProgress);
+}
+
+async function normalizeRasterToUnitRangeReportingProgress(
+  raster: RasterImage,
+  selection: NormalizeScopeSelection,
+  method: NormalizeRangeMethod,
+  onProgress?: UnitProgressCallback,
+): Promise<RasterImage> {
+  const shouldClip = shouldClipScaledValuesToUnitRange(method);
+  if (selection.scope === "full-cube") {
+    const cubeRange = computeCubeWideRangeForMethod(raster, method);
+    return makeFloatRasterFromBandComputationReportingProgress(
+      raster,
+      (bandPixels) => mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange, shouldClip)),
+      onProgress,
+    );
+  }
+  return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
+    raster,
+    new Set(selection.bandIndexes),
+    (bandPixels) => normalizeSingleBandToUnitRange(bandPixels, method),
+    onProgress,
+  );
 }
 
 function clipRasterToAbsoluteBounds(
@@ -171,7 +217,7 @@ function allocateFloat64ArrayOrThrow(length: number): Float64Array {
   } catch {
     const megabytes = Math.ceil((length * Float64Array.BYTES_PER_ELEMENT) / (1024 * 1024));
     throw new RasterMemoryAllocationError(
-      `Not enough memory to allocate ${megabytes} MB for a robust full-stack normalize. ` +
+      `Not enough memory to allocate ${megabytes} MB for a percentile clip full-stack normalize. ` +
         `Free memory or normalize band-wise and try again.`,
     );
   }
