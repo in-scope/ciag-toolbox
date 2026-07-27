@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
@@ -35,6 +36,10 @@ import {
   type RasterSampleFormat,
 } from "@/lib/image/raster-image";
 import { dataTypeValueRangeForBand } from "@/lib/image/data-type-value-range";
+import {
+  clampViewportRoiToImageBounds,
+  type ViewportRoi,
+} from "@/lib/image/viewport-roi";
 import type { ToneCurveAnchor } from "@/lib/image/apply-tone-curve";
 import type { ToneCurveValueRanges } from "@/lib/image/tone-curve-editor-state";
 import { cn } from "@/lib/utils";
@@ -77,6 +82,7 @@ function HistogramSectionBody(props: HistogramSectionProps): JSX.Element {
     raster,
     props.activeSource.selectedBandIndex,
   );
+  const committedRegion = useCommittedRegionForHistogram(raster, props.activeSource.roi);
   return (
     <Collapsible
       open={!isCollapsed}
@@ -88,17 +94,31 @@ function HistogramSectionBody(props: HistogramSectionProps): JSX.Element {
           viewportNumber={props.activeSource.viewportNumber}
           activeBandLabel={formatRasterBandIdentityText(raster, activeBandIndex)}
           isCollapsed={isCollapsed}
+          isRegionScoped={committedRegion !== null}
         />
         <CollapsibleContent>
           <HistogramChartLoader
             raster={raster}
             bandIndex={activeBandIndex}
             viewportIndex={props.activeSource.viewportIndex}
+            region={committedRegion}
           />
         </CollapsibleContent>
       </section>
     </Collapsible>
   );
+}
+
+// CT-256: the histogram follows the panel's committed Region box; the rectangle
+// is canonicalized/clamped here so protocol requests and cache keys stay stable.
+function useCommittedRegionForHistogram(
+  raster: RasterImage,
+  roi: ViewportRoi | null,
+): ViewportRoi | null {
+  return useMemo(() => {
+    if (!roi) return null;
+    return clampViewportRoiToImageBounds(roi, { width: raster.width, height: raster.height });
+  }, [raster, roi]);
 }
 
 const RIGHT_PANEL_SECTION_CLASSES =
@@ -108,6 +128,7 @@ interface HistogramSectionHeaderProps {
   viewportNumber: number;
   activeBandLabel: string;
   isCollapsed: boolean;
+  isRegionScoped: boolean;
 }
 
 function HistogramSectionHeader(props: HistogramSectionHeaderProps): JSX.Element {
@@ -128,6 +149,11 @@ function HistogramSectionHeader(props: HistogramSectionHeaderProps): JSX.Element
               )}
             />
             <h2 className="text-sm font-medium text-foreground">Histogram</h2>
+            {props.isRegionScoped && (
+              <Badge variant="secondary" data-testid="histogram-region-badge">
+                Region
+              </Badge>
+            )}
           </span>
           <span className="text-xs text-muted-foreground">
             Panel {props.viewportNumber}
@@ -148,6 +174,7 @@ interface HistogramChartLoaderProps {
   raster: RasterImage;
   bandIndex: number;
   viewportIndex: number;
+  region: ViewportRoi | null;
 }
 
 function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
@@ -155,6 +182,7 @@ function HistogramChartLoader(props: HistogramChartLoaderProps): JSX.Element {
     props.raster,
     props.bandIndex,
     props.viewportIndex,
+    props.region,
   );
   if (!histogram) return <HistogramSkeleton />;
   return (
@@ -216,24 +244,29 @@ export function HistogramSkeleton(): JSX.Element {
   );
 }
 
+// CT-256: the Contrast Curve and threshold editors call this without a region,
+// so their embedded histograms stay whole-band; only the right-panel Histogram
+// section threads the panel's committed Region box through.
 export function useBandHistogramFromCacheOrWorker(
   raster: RasterImage,
   bandIndex: number,
   viewportIndex: number,
+  region: ViewportRoi | null = null,
 ): BandHistogram | null {
   const busyRegistrar = useBusyEntryRegistrar();
   const [histogram, setHistogram] = useState<BandHistogram | null>(() =>
-    sharedBandHistogramCache.read(raster, bandIndex, DEFAULT_BAND_HISTOGRAM_BIN_COUNT),
+    sharedBandHistogramCache.read(raster, bandIndex, DEFAULT_BAND_HISTOGRAM_BIN_COUNT, region),
   );
   useEffect(() => {
     return runBandHistogramRequestForActiveBand({
       raster,
       bandIndex,
       viewportIndex,
+      region,
       busyRegistrar,
       setHistogram,
     });
-  }, [raster, bandIndex, viewportIndex, busyRegistrar]);
+  }, [raster, bandIndex, viewportIndex, region, busyRegistrar]);
   return histogram;
 }
 
@@ -241,6 +274,7 @@ interface RunBandHistogramRequestInputs {
   raster: RasterImage;
   bandIndex: number;
   viewportIndex: number;
+  region: ViewportRoi | null;
   busyRegistrar: ReturnType<typeof useBusyEntryRegistrar>;
   setHistogram: (next: BandHistogram | null) => void;
 }
@@ -252,6 +286,7 @@ function runBandHistogramRequestForActiveBand(
     inputs.raster,
     inputs.bandIndex,
     DEFAULT_BAND_HISTOGRAM_BIN_COUNT,
+    inputs.region,
   );
   if (cached) {
     inputs.setHistogram(cached);
@@ -274,6 +309,7 @@ function triggerBandHistogramWorkerAndUpdateState(
       raster: inputs.raster,
       bandIndex: inputs.bandIndex,
       binCount: DEFAULT_BAND_HISTOGRAM_BIN_COUNT,
+      region: inputs.region,
     })
     .then((histogram) => {
       sharedBandHistogramCache.store(
@@ -281,6 +317,7 @@ function triggerBandHistogramWorkerAndUpdateState(
         inputs.bandIndex,
         DEFAULT_BAND_HISTOGRAM_BIN_COUNT,
         histogram,
+        inputs.region,
       );
       if (!canceled) inputs.setHistogram(histogram);
     })
