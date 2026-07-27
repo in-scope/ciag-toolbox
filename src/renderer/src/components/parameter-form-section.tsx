@@ -15,7 +15,6 @@ import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-referen
 import {
   BAND_RANGE_SYNTAX_EXAMPLES,
   BAND_RANGE_SYNTAX_HINT,
-  describeBandRangeErrorOrNull,
 } from "@/lib/image/parse-band-range";
 import {
   readReferenceTokenDisplayName,
@@ -30,6 +29,7 @@ import {
   clampSliderParameterValueToSchema,
   describeBandNumberRangeErrorOrNull,
   describeClipBoundsErrorOrNull,
+  describeCubeScopeBandRangeErrorOrNull,
   isParameterSchemaVisibleForSource,
   readBandNumberOrDefault,
   readBandRangeTextOrEmpty,
@@ -519,6 +519,7 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
       />
       {props.value === "band-wise" ? (
         <BandRangeTextInput
+          schema={props.schema}
           value={props.bandRangeText}
           sourceBandCount={props.sourceBandCount}
           onChangeValue={props.onChangeBandRangeText}
@@ -529,6 +530,7 @@ function CubeScopeParameterField(props: CubeScopeParameterFieldProps): JSX.Eleme
 }
 
 interface BandRangeTextInputProps {
+  schema: CubeScopeParameterSchema;
   value: string;
   sourceBandCount: number | null;
   onChangeValue: (next: string) => void;
@@ -536,7 +538,7 @@ interface BandRangeTextInputProps {
 
 function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
   const id = useId();
-  const rangeError = describeBandRangeErrorOrNull(props.value, props.sourceBandCount);
+  const rangeError = describeCubeScopeBandRangeErrorOrNull(props.schema, props.value, props.sourceBandCount);
   const hintId = `${id}-syntax-hint`;
   return (
     <div className="flex flex-col gap-1 pl-6 text-sm">

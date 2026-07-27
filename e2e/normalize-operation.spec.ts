@@ -151,6 +151,25 @@ test("Band-wise normalize records its band selection in History", async () => {
   });
 });
 
+// CT-251: an empty band field under Band-wise scope means every band. The panel
+// seeds the field with the current band number, so the test clears it; the
+// oracle is a band OTHER than the viewed band 1 spanning 0..1 afterwards, which
+// the old current-band fallback would have left untouched.
+test("Band-wise normalize with an empty band field processes every band (CT-251)", async () => {
+  await openOperation(launched.window, NORMALIZE);
+  await selectBandWiseScopeForBands(launched.window, NORMALIZE, "");
+  await applyOperationInPlace(launched.window, NORMALIZE);
+
+  await expectOutputIsFloat32();
+  await expectActiveBandReadout(3, BAND_MINIMUM_PIXEL, 0);
+  await expectActiveBandReadout(3, BAND_MAXIMUM_PIXEL, 1);
+  await expectActiveBandReadout(1, BAND_MAXIMUM_PIXEL, 1);
+  await expectHistoryToRecordOperation(launched.window, {
+    actionLabel: NORMALIZE,
+    detailSubstrings: [ALL_BANDS_HISTORY_DETAIL],
+  });
+});
+
 async function applyNormalizeWithScope(
   chooseScope: (page: LaunchedApp["window"], operationLabel: string) => Promise<void>,
 ): Promise<void> {

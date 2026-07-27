@@ -17,7 +17,7 @@ import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/un
 
 import {
   describeCubeScopeForAppliedLabel,
-  injectSelectedBandAsBandWiseDefault,
+  injectSourceBandCountForBandWiseLabels,
   resolveScopedBandIndexSet,
   type CubeScopeParameterIds,
 } from "./band-scope-selection";
@@ -30,13 +30,18 @@ import {
   type ParameterValuesById,
 } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
-import type { ViewportActionAsyncSourceTransform, ViewportRenderingState } from "./viewport-action";
+import type {
+  ApplyScope,
+  ViewportActionAsyncSourceTransform,
+  ViewportRenderingState,
+} from "./viewport-action";
 
 // CT-205: percentile clipping (np.clip semantics) with the locked scope
 // control deciding WHERE the cut points come from: Full stack computes one
 // pair of percentile cut points over every band together and clips the whole
 // stack to it; Band-wise computes each entered band's own cut points from
-// that band alone and carries the other bands through unchanged. Output is
+// that band alone (an empty field means every band, CT-251) and carries the
+// other bands through unchanged. Output is
 // always float32 with the source's dimensions and band count (Stage 3 float
 // path).
 
@@ -45,7 +50,7 @@ export const PERCENTILE_CLIP_LOWER_PARAMETER_ID = "lowerPercentile";
 export const PERCENTILE_CLIP_UPPER_PARAMETER_ID = "upperPercentile";
 export const PERCENTILE_CLIP_SCOPE_PARAMETER_ID = "scope";
 export const PERCENTILE_CLIP_BAND_RANGE_PARAMETER_ID = "bandRange";
-const PERCENTILE_CLIP_TARGET_BAND_PARAMETER_ID = "targetBandIndex";
+const PERCENTILE_CLIP_BAND_COUNT_PARAMETER_ID = "sourceBandCount";
 
 const DEFAULT_LOWER_PERCENTILE = 2;
 const DEFAULT_UPPER_PERCENTILE = 98;
@@ -53,7 +58,7 @@ const DEFAULT_UPPER_PERCENTILE = 98;
 const PERCENTILE_CLIP_SCOPE_IDS: CubeScopeParameterIds = {
   scopeParameterId: PERCENTILE_CLIP_SCOPE_PARAMETER_ID,
   bandRangeParameterId: PERCENTILE_CLIP_BAND_RANGE_PARAMETER_ID,
-  targetBandParameterId: PERCENTILE_CLIP_TARGET_BAND_PARAMETER_ID,
+  bandCountParameterId: PERCENTILE_CLIP_BAND_COUNT_PARAMETER_ID,
 };
 
 const PERCENTILE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
@@ -77,10 +82,11 @@ const PERCENTILE_CLIP_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   label: "Scope",
   description:
     "Full stack computes one pair of cut points over every band together and clips the " +
-    "whole stack to it. Band-wise computes each entered band's own cut points (defaults " +
-    "to the current band) and carries the other bands through unchanged.",
+    "whole stack to it. Band-wise computes each entered band's own cut points and carries " +
+    "the other bands through unchanged. Leave the band field empty to process every band.",
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: PERCENTILE_CLIP_BAND_RANGE_PARAMETER_ID,
+  emptyBandRangeMeansAllBands: true,
 };
 
 export const PERCENTILE_CLIP_ACTION: RegisteredViewportAction = {
@@ -92,21 +98,23 @@ export const PERCENTILE_CLIP_ACTION: RegisteredViewportAction = {
   appliedLabel: "Percentile clip",
   loadingMessage: "Clipping stack to percentiles...",
   formatAppliedLabel: formatPercentileClipAppliedLabel,
-  prepareParameterValuesForApply: injectSelectedBandIntoPercentileClipParameters,
+  prepareParameterValuesForApply: injectSourceBandCountIntoPercentileClipParameters,
   apply: (state) => state,
   transformSourceAsync: createPercentileClipSourceTransform(),
 };
 
-// Band-wise scope with an empty range falls back to the band the user is
-// looking at, so the viewed band is captured at Apply time (threshold pattern).
-function injectSelectedBandIntoPercentileClipParameters(
+// CT-251: the source band count is captured at Apply time so an empty-field
+// band-wise apply can record the full band range in its History label.
+function injectSourceBandCountIntoPercentileClipParameters(
   rawParameterValues: ParameterValuesById,
-  sourceRenderingState: ViewportRenderingState,
+  _sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
 ): ParameterValuesById {
-  return injectSelectedBandAsBandWiseDefault(
+  return injectSourceBandCountForBandWiseLabels(
     PERCENTILE_CLIP_SCOPE_IDS,
     rawParameterValues,
-    sourceRenderingState,
+    sourceRaster,
   );
 }
 

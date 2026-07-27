@@ -80,16 +80,28 @@ describe("DENOISE_ACTION", () => {
     expect(Array.from(raster.bandPixels[1]!)).toEqual(Array.from(new Float32Array(16).fill(40)));
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
+  it("denoises every band when band-wise scope has an empty range (CT-251)", async () => {
     const prepared = DENOISE_ACTION.prepareParameterValuesForApply!(
-      { method: "median", medianRadius: 1, scope: "band-wise" },
+      { method: "median", medianRadius: 1, scope: "band-wise", bandRange: "" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
+      makeSpikedTwoBandStack(),
     );
     const raster = await transformRaster({ ...prepared });
-    const spikedCarriedThrough = raster.bandPixels[0]!;
-    expect(spikedCarriedThrough[5]).toBe(255);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual(Array.from(new Float32Array(16).fill(100)));
     expect(Array.from(raster.bandPixels[1]!)).toEqual(Array.from(new Float32Array(16).fill(40)));
+  });
+
+  it("records the full band range for an empty-field band-wise apply (CT-251)", () => {
+    const prepared = DENOISE_ACTION.prepareParameterValuesForApply!(
+      { method: "median", medianRadius: 2, scope: "band-wise", bandRange: "" },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeSpikedTwoBandStack(),
+    );
+    expect(DENOISE_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Denoise (median, radius 2, band-wise: bands 1-2)",
+    );
   });
 
   it("rejects an invalid band range with a user-facing error", async () => {

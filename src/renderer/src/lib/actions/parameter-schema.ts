@@ -67,6 +67,10 @@ export interface CubeScopeParameterSchema extends ParameterSchemaBase {
   readonly kind: "cube-scope";
   readonly defaultValue: CubeScopeChoice;
   readonly bandRangeParameterId: string;
+  // CT-251: when set, an empty band-wise field is VALID and means "every band"
+  // (Normalize, Standardize, spatial filter, denoise, percentile clip).
+  // Threshold keeps the flag off, so its empty field still blocks Apply.
+  readonly emptyBandRangeMeansAllBands?: boolean;
 }
 
 export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
@@ -248,7 +252,22 @@ function describeBandWiseRangeErrorForSchemaOrNull(
   if (!shouldShowCubeScopeControl(bandCount)) return null;
   const choice = readCubeScopeChoiceOrDefault(values[schema.id] ?? schema.defaultValue, schema.defaultValue);
   if (choice !== BAND_WISE_SCOPE) return null;
-  return describeBandRangeErrorOrNull(readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]), bandCount);
+  return describeCubeScopeBandRangeErrorOrNull(
+    schema,
+    readBandRangeTextOrEmpty(values[schema.bandRangeParameterId]),
+    bandCount,
+  );
+}
+
+// CT-251: the single validity rule for a cube-scope band field, shared by the
+// Apply gate above and the inline field error in parameter-form-section.tsx.
+export function describeCubeScopeBandRangeErrorOrNull(
+  schema: CubeScopeParameterSchema,
+  bandRangeText: string,
+  bandCount: number | null,
+): string | null {
+  if (schema.emptyBandRangeMeansAllBands && bandRangeText.trim() === "") return null;
+  return describeBandRangeErrorOrNull(bandRangeText, bandCount);
 }
 
 export function readBandNumberOrDefault(value: ParameterValue | undefined, fallback: number): number {

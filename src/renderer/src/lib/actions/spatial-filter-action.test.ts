@@ -83,15 +83,28 @@ describe("SPATIAL_FILTER_ACTION", () => {
     expectBandIsNumericallyZero(raster.bandPixels[1]!);
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
+  it("filters every band when band-wise scope has an empty range (CT-251)", async () => {
     const prepared = SPATIAL_FILTER_ACTION.prepareParameterValuesForApply!(
-      { mode: "highpass", highpassCutoff: 0.05, scope: "band-wise" },
+      { mode: "highpass", highpassCutoff: 0.05, scope: "band-wise", bandRange: "" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
+      makeTwoFlatBandStack(),
     );
     const raster = await transformRaster({ ...prepared });
-    expect(Array.from(raster.bandPixels[0]!)).toEqual(Array.from(new Float32Array(16).fill(100)));
+    expectBandIsNumericallyZero(raster.bandPixels[0]!);
     expectBandIsNumericallyZero(raster.bandPixels[1]!);
+  });
+
+  it("records the full band range for an empty-field band-wise apply (CT-251)", () => {
+    const prepared = SPATIAL_FILTER_ACTION.prepareParameterValuesForApply!(
+      { mode: "highpass", highpassCutoff: 0.05, scope: "band-wise", bandRange: "" },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeTwoFlatBandStack(),
+    );
+    expect(SPATIAL_FILTER_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Spatial filter (high-pass, cutoff 0.05, band-wise: bands 1-2)",
+    );
   });
 
   it("rejects an invalid band range with a user-facing error", async () => {

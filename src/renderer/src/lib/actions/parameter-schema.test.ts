@@ -178,9 +178,21 @@ describe("describeBandScopeBlockingErrorOrNull", () => {
     expect(describeBandScopeBlockingErrorOrNull([buildCubeScopeSchema()], values, 10)).toMatch(/out of range/i);
   });
 
-  it("reports an error for an empty band-wise range", () => {
+  it("reports an error for an empty band-wise range when empty does not mean all bands", () => {
     const values = { scope: "band-wise", bandRange: "" };
     expect(describeBandScopeBlockingErrorOrNull([buildCubeScopeSchema()], values, 10)).not.toBeNull();
+  });
+
+  it("accepts an empty band-wise range when the schema treats empty as all bands (CT-251)", () => {
+    const values = { scope: "band-wise", bandRange: "  " };
+    const schemas = [buildAllBandsWhenEmptyCubeScopeSchema()];
+    expect(describeBandScopeBlockingErrorOrNull(schemas, values, 10)).toBeNull();
+  });
+
+  it("still reports an invalid non-empty range when empty means all bands (CT-251)", () => {
+    const values = { scope: "band-wise", bandRange: "99" };
+    const schemas = [buildAllBandsWhenEmptyCubeScopeSchema()];
+    expect(describeBandScopeBlockingErrorOrNull(schemas, values, 10)).toMatch(/out of range/i);
   });
 
   it("never reports a band-range error for a single-band stack", () => {
@@ -300,6 +312,10 @@ function buildCubeScopeSchema(): CubeScopeParameterSchema {
     defaultValue: "full-cube",
     bandRangeParameterId: "bandRange",
   };
+}
+
+function buildAllBandsWhenEmptyCubeScopeSchema(): CubeScopeParameterSchema {
+  return { ...buildCubeScopeSchema(), emptyBandRangeMeansAllBands: true };
 }
 
 function buildIntegerSchema(id: string, defaultValue: number): ParameterSchema {

@@ -73,18 +73,30 @@ describe("PERCENTILE_CLIP_ACTION", () => {
     );
   });
 
-  it("falls back to the viewed band when band-wise scope has no entered range", async () => {
+  it("clips every band with its own cut points when band-wise scope has an empty range (CT-251)", async () => {
     const prepared = PERCENTILE_CLIP_ACTION.prepareParameterValuesForApply!(
-      { lowerPercentile: 25, upperPercentile: 75, scope: "band-wise" },
+      { lowerPercentile: 25, upperPercentile: 75, scope: "band-wise", bandRange: "" },
       { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 1 },
       "whole-image",
+      makeTwoBandRampStack(),
     );
     const raster = await transformRaster({ ...prepared });
-    expect(Array.from(raster.bandPixels[0]!)).toEqual(
-      Array.from({ length: 16 }, (_unused, index) => index),
-    );
+    expect(raster.bandPixels[0]![0]).toBeCloseTo(3.75, 5);
+    expect(raster.bandPixels[0]![15]).toBeCloseTo(11.25, 5);
     expect(raster.bandPixels[1]![0]).toBeCloseTo(103.75, 5);
     expect(raster.bandPixels[1]![15]).toBeCloseTo(111.25, 5);
+  });
+
+  it("records the full band range for an empty-field band-wise apply (CT-251)", () => {
+    const prepared = PERCENTILE_CLIP_ACTION.prepareParameterValuesForApply!(
+      { lowerPercentile: 5, upperPercentile: 95, scope: "band-wise", bandRange: "" },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      makeTwoBandRampStack(),
+    );
+    expect(PERCENTILE_CLIP_ACTION.formatAppliedLabel!(prepared)).toBe(
+      "Percentile clip (5 - 95%, band-wise: bands 1-2)",
+    );
   });
 
   it("is a no-op at the 0/100 percentiles", async () => {
