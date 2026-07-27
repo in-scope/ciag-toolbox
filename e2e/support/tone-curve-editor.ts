@@ -6,8 +6,9 @@ import { operationPanel } from "./operations";
 import { dragMouseFromTo } from "./viewport-navigation";
 
 // CT-139 / manual sections 6, 24, 25 (CT-080, CT-098, CT-099): the tone-curve editor.
-// The editor is embedded OVER the band histogram INSIDE the Tone Curve tool-options panel
-// (aside[aria-label="Tone Curve options"]). The handles are <button>s: endpoints
+// The editor is embedded OVER the band histogram INSIDE the Contrast Curve tool-options
+// panel (aside[aria-label="Contrast Curve options"]; the internal tone-curve names stay,
+// CT-245 renamed only the user-facing label). The handles are <button>s: endpoints
 // "Curve endpoint", interior "Curve anchor (right-click to remove)". The handle position is
 // the curve's control point: inline style left% = input fraction across the X axis (input
 // min..max), top% = 1 - output fraction across the Y axis (output min..max).
@@ -18,7 +19,7 @@ import { dragMouseFromTo } from "./viewport-navigation";
 // because band 0's data (100..250) occupies <0.4% of the input axis, exact per-pixel oracles
 // read the resulting anchors back from the DOM rather than relying on sub-pixel drag accuracy.
 
-export const TONE_CURVE_LABEL = "Tone Curve";
+export const TONE_CURVE_LABEL = "Contrast Curve";
 
 const ENDPOINT_HANDLE_NAME = "Curve endpoint";
 const INTERIOR_HANDLE_NAME = "Curve anchor (right-click to remove)";
@@ -172,7 +173,7 @@ export async function expectToneCurveReferenceGridIsPresent(page: Page): Promise
 // CT-176: a true-colour composite shows a channel selector (RGB/R/G/B) above the histogram;
 // each option re-targets the editor at that channel's own curve + histogram backdrop. The
 // selector is a role="group" of toggle buttons whose accessible names are RGB/Red/Green/Blue.
-const CHANNEL_SELECTOR_GROUP_NAME = "Tone curve channel";
+const CHANNEL_SELECTOR_GROUP_NAME = "Contrast curve channel";
 
 export type ToneCurveChannelButtonName = "RGB" | "Red" | "Green" | "Blue";
 export type ToneCurveChannelBackdropName = "Value" | "Red" | "Green" | "Blue";

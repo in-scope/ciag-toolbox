@@ -13,7 +13,7 @@ import {
 // Manual test script section 4 (CT-004): the toolbar strip, its controls,
 // accessible names, and the disabled-until-a-panel-is-loaded affordance.
 
-const OPERATION_APPLY_AFFORDANCE = "Tone Curve";
+const OPERATION_APPLY_AFFORDANCE = "Contrast Curve";
 const FRESHLY_LOADED_PANEL = 1;
 
 // The toolbar rule (operation-menu-catalog.ts): mode toggles, zero-parameter
@@ -29,7 +29,7 @@ const EXPECTED_TOOLBAR_BUTTON_LABELS = [
   "Rotate 90° counterclockwise",
   "Reflect horizontally",
   "Reflect vertically",
-  "Tone Curve",
+  "Contrast Curve",
   "Brightness & Contrast",
 ];
 
@@ -84,7 +84,7 @@ async function readToolbarButtonBaseNames(app: LaunchedApp): Promise<string[]> {
     elements.map((element) => element.getAttribute("aria-label") ?? ""),
   );
   // Accessible names carry state suffixes ("Grid layout (currently 2x2)",
-  // "Tone Curve (select a panel with a loaded stack)"); compare the stable prefix.
+  // "Contrast Curve (select a panel with a loaded stack)"); compare the stable prefix.
   return accessibleNames.map((name) => name.replace(/ \(.*\)$/, ""));
 }
 

@@ -50,10 +50,10 @@ describe("operation menu structure", () => {
   it("puts per-pixel intensity mapping under Adjust", () => {
     expect(listMenuItemLabels(findMenuByLabel("Adjust"))).toEqual([
       "Brightness & Contrast",
+      "Contrast Curve",
       "Invert",
       "Percentile Clip",
       "Threshold",
-      "Tone Curve",
     ]);
   });
 

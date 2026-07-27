@@ -108,7 +108,7 @@ test("Spectralon requests its own region and calibrates against the fresh region
 // Full image and Whole stack, the panel shows no region affordance even with a stale
 // inspection ROI on screen, and a Full image apply remaps pixels EVERYWHERE (the drag
 // clamps the black point to (0, 65535), so the 2-anchor curve maps every value to max).
-test("Tone Curve offers exactly Full image and Whole stack, and Full image remaps everywhere", async () => {
+test("Contrast Curve offers exactly Full image and Whole stack, and Full image remaps everywhere", async () => {
   await openOperation(launched.window, TONE_CURVE_LABEL);
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
   await expectToneCurveScopesAreExactlyFullImageAndWholeStack();

@@ -10,7 +10,7 @@
 // Toolbar rule: a command is showInToolbar only if it is a mode toggle
 // (Select Region, Subset Bands), a one-click direct apply with zero
 // parameters (the quick rotate/flip variants), or an everyday panel-opener
-// used in essentially every session (Crop, Tone Curve, Brightness &
+// used in essentially every session (Crop, Contrast Curve, Brightness &
 // Contrast). Parameterized pipeline operations are menu-only.
 //
 // Groups drive the TOOLBAR separators only. The native operation menus are
@@ -92,7 +92,7 @@ const EDIT_REGION_GROUP: OperationGroup = {
 const ADJUST_GROUP: OperationGroup = {
   key: "adjust",
   commands: [
-    buildMenuAndToolbarCommand("tone-curve", "Tone Curve", "open-action-panel"),
+    buildMenuAndToolbarCommand("tone-curve", "Contrast Curve", "open-action-panel"),
     buildMenuAndToolbarCommand("brightness-contrast", "Brightness & Contrast", "open-action-panel"),
     buildMenuOnlyActionCommand("invert", "Invert"),
   ],

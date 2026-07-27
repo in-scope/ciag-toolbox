@@ -441,12 +441,12 @@ function standardizedRampValue(x: number, y: number): number {
 
 test("tone curve full image and whole stack both bake the flat-max curve", async () => {
   test.setTimeout(TWO_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Tone Curve (Full image, then Whole stack)", async () => {
+  await recordSweepVerdict("operation: Contrast Curve (Full image, then Whole stack)", async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const fullImage = await openConfigureAndApplyFromSourcePanel("Tone Curve", () => configureFlatMaxToneCurve(selectFullImageScope));
+    const fullImage = await openConfigureAndApplyFromSourcePanel("Contrast Curve", () => configureFlatMaxToneCurve(selectFullImageScope));
     const fullImageOracle = await verifyResultBandAgainstOracle(1, () => UINT16_MAX, exactly(1));
     await closeResultPanelAndLetMemorySettle();
-    const wholeStack = await openConfigureAndApplyFromSourcePanel("Tone Curve", () => configureFlatMaxToneCurve(selectWholeStackScope));
+    const wholeStack = await openConfigureAndApplyFromSourcePanel("Contrast Curve", () => configureFlatMaxToneCurve(selectWholeStackScope));
     const wholeStackBand1 = await verifyResultBandAgainstOracle(1, () => UINT16_MAX, exactly(1));
     const wholeStackTopBand = await verifyResultBandAgainstOracle(OPS_TOP_BAND_NUMBER, () => UINT16_MAX, exactly(1));
     return {
@@ -461,7 +461,7 @@ test("tone curve full image and whole stack both bake the flat-max curve", async
 async function configureFlatMaxToneCurve(
   selectScope: (page: LaunchedApp["window"], operationLabel: string) => Promise<void>,
 ): Promise<void> {
-  await selectScope(launched.window, "Tone Curve");
+  await selectScope(launched.window, "Contrast Curve");
   await setToneCurveAnchorField(launched.window, "Output", UINT16_MAX);
 }
 

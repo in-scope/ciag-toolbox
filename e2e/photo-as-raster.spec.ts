@@ -48,7 +48,7 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("a loaded colour PNG renders as a composite with no band navigator and exposes the Histogram and Tone Curve", async () => {
+test("a loaded colour PNG renders as a composite with no band navigator and exposes the Histogram and Contrast Curve", async () => {
   launched = await launchToolboxApp();
   await loadFixtureAsStack(launched.window, rgbPng.fileName);
   await expectPanelRendersInColor();

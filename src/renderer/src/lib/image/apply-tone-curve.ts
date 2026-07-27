@@ -310,7 +310,7 @@ function inputForLookupTableEntry(
 function assertAnchorsAreOrderedWithAtLeastTwo(
   anchors: ReadonlyArray<ToneCurveAnchor>,
 ): ReadonlyArray<ToneCurveAnchor> {
-  if (anchors.length < 2) throw new Error("A tone curve needs at least two anchor points.");
+  if (anchors.length < 2) throw new Error("A contrast curve needs at least two anchor points.");
   assertAnchorInputsStrictlyIncrease(anchors);
   return anchors;
 }
@@ -318,7 +318,7 @@ function assertAnchorsAreOrderedWithAtLeastTwo(
 function assertAnchorInputsStrictlyIncrease(anchors: ReadonlyArray<ToneCurveAnchor>): void {
   for (let index = 1; index < anchors.length; index += 1) {
     if (anchors[index]!.input > anchors[index - 1]!.input) continue;
-    throw new Error("Tone curve anchors must be ordered by strictly increasing input.");
+    throw new Error("Contrast curve anchors must be ordered by strictly increasing input.");
   }
 }
 

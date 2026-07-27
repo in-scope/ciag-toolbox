@@ -192,14 +192,14 @@ describe("TONE_CURVE_ACTION", () => {
     };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
     expect(prepared).not.toHaveProperty("regionImagePixelX0");
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (2 points)");
   });
 
   it("ignores a stale inspection ROI and curves the whole band when scope is whole-image", () => {
     const roi = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, roi, toneCurveAnchors: linearStretchAnchors };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (2 points)");
   });
 
   // CT-178: on a true-colour composite Apply bakes every R/G/B band in one operation,
@@ -223,7 +223,7 @@ describe("TONE_CURVE_ACTION", () => {
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
     expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
     expect(Array.from(result.raster.bandPixels[2]!)).toEqual([50]);
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: Red)");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (channels: Red)");
   });
 
   it("folds an rgb/Value curve into every channel band on a composite", async () => {
@@ -236,7 +236,7 @@ describe("TONE_CURVE_ACTION", () => {
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
     expect(Array.from(result.raster.bandPixels[1]!)).toEqual([50]);
     expect(Array.from(result.raster.bandPixels[2]!)).toEqual([25]);
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (channels: RGB)");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (channels: RGB)");
   });
 
   it("keeps the single-band path for a scientific stack even though it has three bands", async () => {
@@ -248,7 +248,7 @@ describe("TONE_CURVE_ACTION", () => {
     };
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([100]);
     expect(Array.from(result.raster.bandPixels[1]!)).toEqual([100]);
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (2 points)");
   });
 
   // CT-192: whole-stack scope bakes the same curve shape into every band, each
@@ -261,7 +261,7 @@ describe("TONE_CURVE_ACTION", () => {
   it("records the Whole stack scope in the applied label", () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, toneCurveAnchors: linearStretchAnchors };
     const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-stack");
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points) on Whole stack");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Contrast curve (2 points) on Whole stack");
   });
 
   it("bakes every band through the curve shape normalized by its own min/max under Whole stack scope", async () => {

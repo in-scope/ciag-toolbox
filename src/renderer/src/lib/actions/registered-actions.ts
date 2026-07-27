@@ -622,11 +622,11 @@ const TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID = "toneCurveChannelAnchorsJson";
 
 export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   id: "tone-curve",
-  label: "Tone Curve",
+  label: "Contrast Curve",
   icon: Spline,
-  successMessage: "Tone curve applied",
-  appliedLabel: "Tone curve",
-  loadingMessage: "Applying tone curve...",
+  successMessage: "Contrast curve applied",
+  appliedLabel: "Contrast curve",
+  loadingMessage: "Applying contrast curve...",
   resolveApplyScopeOptions: resolveToneCurveApplyScopeOptions,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
@@ -642,7 +642,7 @@ function prepareToneCurveParameterValues(
 ): ParameterValuesById {
   const anchors = sourceRenderingState.toneCurveAnchors;
   if (!anchors || anchors.length < 2) {
-    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
+    throw new Error("Contrast Curve needs at least two anchor points. Adjust the curve first.");
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
   const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
@@ -789,7 +789,7 @@ function readToneCurveAnchorsOrThrow(
 ): ReadonlyArray<ToneCurveAnchor> {
   const raw = parameterValues[TONE_CURVE_ANCHORS_PARAMETER_ID];
   if (typeof raw !== "string") {
-    throw new Error("Tone Curve needs at least two anchor points. Adjust the curve first.");
+    throw new Error("Contrast Curve needs at least two anchor points. Adjust the curve first.");
   }
   const pairs = JSON.parse(raw) as ReadonlyArray<readonly [number, number]>;
   return pairs.map(([input, output]) => ({ input, output }));
@@ -810,13 +810,13 @@ function appendToneCurveWholeStackSuffix(label: string, parameterValues: Paramet
 
 function formatSingleBandToneCurveLabel(parameterValues: ParameterValuesById): string {
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  return `Tone curve (${anchors.length} points)`;
+  return `Contrast curve (${anchors.length} points)`;
 }
 
 function formatCompositeToneCurveLabel(channelAnchors: ToneCurveChannelAnchors): string {
   const editedNames = listEditedToneCurveChannels(channelAnchors).map(formatToneCurveChannelDisplayName);
-  if (editedNames.length === 0) return "Tone curve (no channel changes)";
-  return `Tone curve (channels: ${editedNames.join(", ")})`;
+  if (editedNames.length === 0) return "Contrast curve (no channel changes)";
+  return `Contrast curve (channels: ${editedNames.join(", ")})`;
 }
 
 const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID = "brightnessPercent";
