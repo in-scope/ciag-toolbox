@@ -308,7 +308,7 @@ interface HistogramCanvasProps {
 export function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [canvasWidthPx, setCanvasWidthPx] = useState<number>(props.histogram.binCount);
-  useObserveCanvasWidthInPixels(canvasRef, setCanvasWidthPx);
+  useObserveElementWidthInPixels(canvasRef, setCanvasWidthPx);
   useEffect(() => {
     drawHistogramBarsToCanvasOrSkip(
       canvasRef.current,
@@ -339,7 +339,7 @@ export function HistogramCanvas(props: HistogramCanvasProps): JSX.Element {
       </div>
       <div className="flex gap-1">
         <div className={HISTOGRAM_Y_AXIS_COLUMN_CLASSES} aria-hidden="true" />
-        <HistogramAxisTickLabelsRow
+        <HistogramValueAxis
           histogram={props.histogram}
           sampleFormat={props.sampleFormat}
         />
@@ -393,18 +393,27 @@ function translateYForCountAxisFraction(fraction: number): string {
   return "translateY(-50%)";
 }
 
-interface HistogramAxisTickLabelsRowProps {
+interface HistogramValueAxisProps {
   histogram: BandHistogram;
   sampleFormat: RasterSampleFormat;
 }
 
-function HistogramAxisTickLabelsRow(props: HistogramAxisTickLabelsRowProps): JSX.Element {
+function HistogramValueAxis(props: HistogramValueAxisProps): JSX.Element {
+  const axisRef = useRef<HTMLDivElement | null>(null);
+  const [axisWidthPx, setAxisWidthPx] = useState<number>(0);
+  useObserveElementWidthInPixels(axisRef, setAxisWidthPx);
   const ticks = computeHistogramAxisTickLabels(
     { min: props.histogram.min, max: props.histogram.max },
     props.sampleFormat,
+    axisWidthPx,
   );
   return (
-    <div className="relative h-4 flex-1" data-testid="histogram-value-axis" aria-hidden="true">
+    <div
+      ref={axisRef}
+      className="relative h-4 flex-1"
+      data-testid="histogram-value-axis"
+      aria-hidden="true"
+    >
       {ticks.map((tick) => (
         <span
           key={tick.value}
@@ -433,20 +442,19 @@ function translateXForAxisTickAnchor(anchor: HistogramAxisTickAnchor): string {
   return "translateX(-50%)";
 }
 
-function useObserveCanvasWidthInPixels(
-  canvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
-  setCanvasWidthPx: (next: number) => void,
+function useObserveElementWidthInPixels<T extends HTMLElement>(
+  elementRef: React.MutableRefObject<T | null>,
+  setWidthPx: (next: number) => void,
 ): void {
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const update = () =>
-      setCanvasWidthPx(Math.max(1, Math.floor(canvas.clientWidth)));
+    const element = elementRef.current;
+    if (!element) return undefined;
+    const update = () => setWidthPx(Math.max(1, Math.floor(element.clientWidth)));
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(canvas);
+    observer.observe(element);
     return () => observer.disconnect();
-  }, [canvasRef, setCanvasWidthPx]);
+  }, [elementRef, setWidthPx]);
 }
 
 function drawHistogramBarsToCanvasOrSkip(
