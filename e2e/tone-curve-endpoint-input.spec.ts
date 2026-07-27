@@ -15,8 +15,9 @@ import {
   type PixelDimensions,
 } from "./support/page-objects";
 
-// CT-199: the selected endpoint's Input field is now EDITABLE (GIMP black/white-point semantics),
-// not disabled. Moving the left endpoint Input inward sets a black point: source pixels below it
+// CT-199: the selected endpoint's Original value field (relabelled from "Input" by CT-246) is
+// EDITABLE (GIMP black/white-point semantics), not disabled. Moving the left endpoint's
+// Original value inward sets a black point: source pixels below it
 // clip to the output floor while the curve preserves the band maximum at the right endpoint.
 //
 // The fixture's displayed band 0 has only the two extreme values (-1.0 / +1.5), where the output
@@ -42,15 +43,15 @@ const BELOW_BLACK_POINT_PIXEL = { x: 2, y: 1 };
 // (3,3) holds 1.30 (the ramp maximum), the right endpoint -> preserved unchanged.
 const PRESERVED_MAXIMUM_PIXEL = { x: 3, y: 3 };
 
-test("editing the left endpoint Input sets a black point that clips low pixels and preserves the maximum", async () => {
+test("editing the left endpoint's Original value sets a black point that clips low pixels and preserves the maximum", async () => {
   const app = await launchToolboxApp();
   try {
     await loadFixtureAsStack(app.window, enviFloatStack.headerFileName);
     await selectActiveBandNumber(app.window, RAMP_BAND_NUMBER);
     await openOperation(app.window, TONE_CURVE_LABEL);
 
-    await expect(toneCurveAnchorField(app.window, "Input")).not.toBeDisabled();
-    await setToneCurveAnchorField(app.window, "Input", BLACK_POINT_INPUT);
+    await expect(toneCurveAnchorField(app.window, "Original value")).not.toBeDisabled();
+    await setToneCurveAnchorField(app.window, "Original value", BLACK_POINT_INPUT);
     await applyOperationInPlace(app.window, TONE_CURVE_LABEL);
 
     await selectActiveBandNumber(app.window, RAMP_BAND_NUMBER);

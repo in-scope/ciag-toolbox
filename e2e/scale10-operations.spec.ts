@@ -462,7 +462,7 @@ async function configureFlatMaxToneCurve(
   selectScope: (page: LaunchedApp["window"], operationLabel: string) => Promise<void>,
 ): Promise<void> {
   await selectScope(launched.window, "Contrast Curve");
-  await setToneCurveAnchorField(launched.window, "Output", UINT16_MAX);
+  await setToneCurveAnchorField(launched.window, "New value", UINT16_MAX);
 }
 
 test("threshold manual bounds and the Otsu auto cutoff both binarize band 1", async () => {

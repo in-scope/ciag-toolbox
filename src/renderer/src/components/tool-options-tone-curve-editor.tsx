@@ -377,14 +377,14 @@ function SelectedToneCurveAnchorFields(props: SelectedToneCurveAnchorFieldsProps
   return (
     <div className="grid grid-cols-2 gap-2">
       <ToneCurveAnchorField
-        label="Input"
+        label="Original value"
         value={anchor.input}
         step={step}
         isIntegerBand={props.isIntegerBand}
         onCommitValue={(value) => props.onChange(moveSelectedAnchorInputTo(props.anchors, index, value, props.ranges))}
       />
       <ToneCurveAnchorField
-        label="Output"
+        label="New value"
         value={anchor.output}
         step={step}
         isIntegerBand={props.isIntegerBand}

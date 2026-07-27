@@ -91,7 +91,7 @@ test("a loaded grayscale PNG is promoted to a single-band uint8 raster", async (
 // the selected (Red) band to 0.
 async function flattenCurveOutputToBlack(): Promise<void> {
   await toneCurveEndpointHandles(launched.window).last().click();
-  await setToneCurveAnchorField(launched.window, "Output", UINT8_MIN);
+  await setToneCurveAnchorField(launched.window, "New value", UINT8_MIN);
 }
 
 async function expectPanelRendersInColor(): Promise<void> {

@@ -67,7 +67,7 @@ async function setRedOnlyCurveHalvingRed(): Promise<void> {
   await selectToneCurveChannel(launched.window, "Red");
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
   await toneCurveEndpointHandles(launched.window).last().click();
-  await setToneCurveAnchorField(launched.window, "Output", RED_RIGHT_ENDPOINT_HALF_OUTPUT);
+  await setToneCurveAnchorField(launched.window, "New value", RED_RIGHT_ENDPOINT_HALF_OUTPUT);
 }
 
 async function expectTopLeftRedReadoutEquals(expected: number): Promise<void> {

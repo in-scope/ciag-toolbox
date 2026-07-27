@@ -137,7 +137,7 @@ test("a realistic edit chain (add, fields, nudge, reset) applies the identity cu
 test("a numeric Output edit plus a keyboard nudge applies the exact resulting curve", async () => {
   await openOperation(launched.window, TONE_CURVE_LABEL);
   await expectToneCurveOpensWithTwoEndpoints(launched.window);
-  await setToneCurveAnchorField(launched.window, "Output", UINT16_TYPE_MAX);
+  await setToneCurveAnchorField(launched.window, "New value", UINT16_TYPE_MAX);
   await clickToneCurveAnchorHandle(toneCurveEndpointHandles(launched.window).first());
   await nudgeSelectedToneCurveAnchor(launched.window, "down");
   const [black, white] = await readToneCurveAnchors(launched.window, UINT16_RANGES);
@@ -151,8 +151,8 @@ test("a numeric Output edit plus a keyboard nudge applies the exact resulting cu
 async function addNumericallyPlacedAnchorThenNudgeIt(): Promise<void> {
   await addToneCurveAnchorAtFraction(launched.window, 0.5, 0.5);
   await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
-  await setToneCurveAnchorField(launched.window, "Input", 30000);
-  await setToneCurveAnchorField(launched.window, "Output", 40000);
+  await setToneCurveAnchorField(launched.window, "Original value", 30000);
+  await setToneCurveAnchorField(launched.window, "New value", 40000);
   await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
   await nudgeSelectedToneCurveAnchor(launched.window, "right");
 }

@@ -50,23 +50,23 @@ test.afterEach(async () => {
 test("arrow keys nudge the selected anchor's Input and Output by one step", async () => {
   await addToneCurveAnchorAtFraction(launched.window, 0.4, 0.5);
   await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
-  const inputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Input"));
-  const outputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Output"));
+  const inputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Original value"));
+  const outputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "New value"));
   await nudgeSelectedToneCurveAnchor(launched.window, "right");
   await nudgeSelectedToneCurveAnchor(launched.window, "up");
-  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Input"))).toBe(inputBefore + 1);
-  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Output"))).toBe(outputBefore + 1);
+  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Original value"))).toBe(inputBefore + 1);
+  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "New value"))).toBe(outputBefore + 1);
 });
 
 test("left/down nudges move the selected anchor the opposite way", async () => {
   await addToneCurveAnchorAtFraction(launched.window, 0.4, 0.5);
   await clickToneCurveAnchorHandle(toneCurveInteriorHandles(launched.window).first());
-  const inputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Input"));
-  const outputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Output"));
+  const inputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "Original value"));
+  const outputBefore = Number(await readToneCurveAnchorFieldValue(launched.window, "New value"));
   await nudgeSelectedToneCurveAnchor(launched.window, "left");
   await nudgeSelectedToneCurveAnchor(launched.window, "down");
-  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Input"))).toBe(inputBefore - 1);
-  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Output"))).toBe(outputBefore - 1);
+  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "Original value"))).toBe(inputBefore - 1);
+  expect(Number(await readToneCurveAnchorFieldValue(launched.window, "New value"))).toBe(outputBefore - 1);
 });
 
 test("Delete removes the selected interior anchor and updates the live preview", async () => {

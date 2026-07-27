@@ -79,10 +79,11 @@ export async function clickToneCurveAnchorHandle(handle: Locator): Promise<void>
   await handle.click();
 }
 
-// CT-165: the selected anchor's Input/Output numeric fields with +/- steppers. Each field
-// is an <input aria-label="Input"|"Output"> flanked by "Decrease <label>"/"Increase <label>"
-// stepper buttons inside the Tone Curve tool-options panel.
-export type ToneCurveAnchorFieldLabel = "Input" | "Output";
+// CT-165: the selected anchor's numeric fields with +/- steppers, relabelled by CT-246 to
+// "Original value" (the anchor input) and "New value" (the anchor output). Each field is an
+// <input aria-label="Original value"|"New value"> flanked by "Decrease <label>"/"Increase
+// <label>" stepper buttons inside the Contrast Curve tool-options panel.
+export type ToneCurveAnchorFieldLabel = "Original value" | "New value";
 
 export function toneCurveAnchorField(page: Page, label: ToneCurveAnchorFieldLabel): Locator {
   return operationPanel(page, TONE_CURVE_LABEL).getByLabel(label, { exact: true });
@@ -115,7 +116,7 @@ export async function stepToneCurveAnchorField(
 }
 
 // CT-166: with an anchor selected and the editor focused, arrow keys nudge the selected
-// anchor (Left/Right = Input, Up/Down = Output) by one data-type step and Delete/Backspace
+// anchor (Left/Right = Original value, Up/Down = New value) by one data-type step and Delete/Backspace
 // removes the selected interior anchor. Clicking a handle focuses it (the keydown bubbles to
 // the editor surface), so callers select a handle before pressing keys.
 export type ToneCurveNudgeDirection = "left" | "right" | "up" | "down";
