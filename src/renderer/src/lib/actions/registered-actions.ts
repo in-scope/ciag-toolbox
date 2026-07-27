@@ -218,7 +218,7 @@ const BIT_SHIFT_PARAMETER_SCHEMA: IntegerParameterSchema = {
   id: BIT_SHIFT_PARAMETER_ID,
   label: "Shift amount",
   description:
-    "Brightens images from cameras that pack a smaller bit depth (such as 12-bit) into a 16-bit file, scaling the values up so they fill the full expected brightness range. Each step doubles the values.",
+    "Brightens images from imaging systems that pack a smaller bit depth into a larger bit-depth file, such as 12-bit data in a 16-bit file. Each shift step doubles the values; for example, 4 shifts take 12-bit data to 16-bit.",
   defaultValue: 4,
   min: 0,
   max: 8,
@@ -1461,7 +1461,8 @@ const RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_RED_WEIGHT_PARAMETER_ID,
   label: "Red weight",
-  description: "Weight applied to the red band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the first band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.red,
   step: 0.001,
 };
@@ -1470,7 +1471,8 @@ const RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_GREEN_WEIGHT_PARAMETER_ID,
   label: "Green weight",
-  description: "Weight applied to the green band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the second band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.green,
   step: 0.001,
 };
@@ -1479,7 +1481,8 @@ const RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: RGB_TO_GRAYSCALE_BLUE_WEIGHT_PARAMETER_ID,
   label: "Blue weight",
-  description: "Weight applied to the blue band. Defaults to the luminance weight; enter 0.3333 for a straight average.",
+  description:
+    "Weight applied to the third band. Default set to standard weighting; enter 0.3333 to average the bands.",
   defaultValue: LUMINANCE_GRAYSCALE_WEIGHTS.blue,
   step: 0.001,
 };

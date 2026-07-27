@@ -30,9 +30,13 @@ import {
 // The panel must show neither the "Apply to" scope selector nor the region-picker
 // affordance, and the shift must land on pixels OUTSIDE a previously drawn
 // Region-tool box, proving the operation always applies to the whole stack.
+//
+// CT-249: the shift-amount description is Anna's wording; the exact copy is pinned here.
 
 const PANEL = 1;
 const BIT_SHIFT = "Bit Shift";
+const SHIFT_AMOUNT_DESCRIPTION =
+  "Brightens images from imaging systems that pack a smaller bit depth into a larger bit-depth file, such as 12-bit data in a 16-bit file. Each shift step doubles the values; for example, 4 shifts take 12-bit data to 16-bit.";
 const DEFAULT_SHIFT_AMOUNT = 4;
 const SHIFT_MULTIPLIER = 2 ** DEFAULT_SHIFT_AMOUNT;
 const DIMENSIONS = { width: multiBandTiff.width, height: multiBandTiff.height };
@@ -72,6 +76,7 @@ test("Bit Shift by 4 multiplies a known pixel's true value by 16, including outs
 
   await openOperation(launched.window, BIT_SHIFT);
   await expectBitShiftPanelOffersNoScopeOrRegionControls();
+  await expectBitShiftPanelShowsTheShiftAmountDescription();
   await applyOperationInPlace(launched.window, BIT_SHIFT);
 
   await expectActiveBandReadoutEquals(TOP_LEFT, activeBandValueOf(TOP_LEFT) * SHIFT_MULTIPLIER);
@@ -112,6 +117,10 @@ async function expectBitShiftPanelOffersNoScopeOrRegionControls(): Promise<void>
   await expect(applyScopeFieldset(page, BIT_SHIFT)).toHaveCount(0);
   await expect(selectOperationRegionButton(page, BIT_SHIFT)).toHaveCount(0);
   await expect(operationRegionPlaceholder(page, BIT_SHIFT)).toHaveCount(0);
+}
+
+async function expectBitShiftPanelShowsTheShiftAmountDescription(): Promise<void> {
+  await expect(operationPanel(launched.window, BIT_SHIFT)).toContainText(SHIFT_AMOUNT_DESCRIPTION);
 }
 
 async function expectActiveBandReadoutEquals(
