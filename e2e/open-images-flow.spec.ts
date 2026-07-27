@@ -13,7 +13,9 @@ import type { LaunchedApp } from "./support/launch-app";
 import {
   applicationToolbar,
   cancelReplaceTargetPicker,
+  chooseReviewModalGroupMode,
   confirmReviewModal,
+  DISTINCT_VALUE_BAND_FIXTURE_SIDE,
   enqueueAndTriggerOpenImages,
   expectPanelHoldsFile,
   loadFixtureAsStack,
@@ -21,11 +23,15 @@ import {
   openImagesReplaceTargetPicker,
   openImagesReviewModal,
   readMetadata,
+  readPixelValueAt,
   readReviewModalRowFileNamesInOrder,
+  reviewModalGroupModeSelect,
+  reviewModalGroups,
   reviewModalRows,
   selectGridLayout,
   clickGridBackgroundToClearSelection,
   writeTemporaryCorruptImageFixture,
+  writeTemporaryDistinctValueWavelengthBandFixtures,
   writeTemporaryWavelengthStackTiffFixtures,
   type WavelengthStackFixtureFile,
 } from "./support/page-objects";
@@ -74,6 +80,25 @@ test("a multi-file selection opens the review modal with one wavelength-ordered 
     await expectReviewModalShowsOneWavelengthOrderedStack(app);
     await confirmReviewModal(app.window);
     await expectFirstPanelHoldsThreeBandStack(app);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-252: choosing "Open bands separately" physically splits the proposed stack group
+// into one single-image group per row, exactly like files that arrive isolated; each
+// image then opens in its own panel, distinguished by the pixel-readout oracle (every
+// band file holds a uniform value equal to its wavelength).
+test("'Open bands separately' splits the group into single-image rows that open in their own panels", async () => {
+  const app = await launchToolboxApp();
+  try {
+    const bandFiles = await writeTemporaryDistinctValueWavelengthBandFixtures();
+    await enqueueAndTriggerOpenImages(app.window, bandFiles.map((file) => file.filePath));
+    await expectReviewModalShowsOneProposedStackGroup(app);
+    await chooseReviewModalGroupMode(app.window, "Open bands separately");
+    await expectReviewModalShowsOneSingleImageGroupPerFile(app, bandFiles);
+    await confirmReviewModal(app.window);
+    await expectEachBandFileLandedInItsOwnPanel(app, bandFiles);
   } finally {
     await closeToolboxApp(app);
   }
@@ -129,6 +154,52 @@ async function expectReviewModalShowsOneWavelengthOrderedStack(app: LaunchedApp)
     "capture_w550.tif",
     "capture_w650.tif",
   ]);
+}
+
+async function expectReviewModalShowsOneProposedStackGroup(app: LaunchedApp): Promise<void> {
+  await expect(openImagesReviewModal(app.window)).toBeVisible();
+  await expect(reviewModalGroups(app.window)).toHaveCount(1);
+  await expect(openImagesReviewModal(app.window).getByLabel(/^Multi-band Stack 1/)).toBeVisible();
+  await expect(reviewModalRows(app.window)).toHaveCount(3);
+}
+
+async function expectReviewModalShowsOneSingleImageGroupPerFile(
+  app: LaunchedApp,
+  bandFiles: ReadonlyArray<WavelengthStackFixtureFile>,
+): Promise<void> {
+  await expect(reviewModalGroups(app.window)).toHaveCount(bandFiles.length);
+  await expect(reviewModalRows(app.window)).toHaveCount(bandFiles.length);
+  expect(await readReviewModalRowFileNamesInOrder(app.window)).toEqual(
+    bandFiles.map((file) => file.fileName),
+  );
+  await expectSplitGroupsLookLikeIsolatedSingles(app, bandFiles.length);
+}
+
+async function expectSplitGroupsLookLikeIsolatedSingles(
+  app: LaunchedApp,
+  fileCount: number,
+): Promise<void> {
+  const modal = openImagesReviewModal(app.window);
+  await expect(modal.getByLabel(/bands open separately \(1 rows\)/)).toHaveCount(fileCount);
+  await expect(modal.getByLabel(/^Multi-band Stack/)).toHaveCount(0);
+  await expect(reviewModalGroupModeSelect(app.window)).toHaveCount(0);
+  await expect(modal.getByRole("button", { name: `Open ${fileCount} stacks` })).toBeEnabled();
+}
+
+async function expectEachBandFileLandedInItsOwnPanel(
+  app: LaunchedApp,
+  bandFiles: ReadonlyArray<WavelengthStackFixtureFile>,
+): Promise<void> {
+  const side = DISTINCT_VALUE_BAND_FIXTURE_SIDE;
+  for (const [index, file] of bandFiles.entries()) {
+    const panelNumber = index + 1;
+    await expectPanelHoldsFile(app.window, panelNumber, file.fileName);
+    const readout = await readPixelValueAt(app.window, panelNumber, side / 2, side / 2, {
+      width: side,
+      height: side,
+    });
+    expect(Number.parseInt(readout.value, 10)).toBe(file.wavelength);
+  }
 }
 
 async function expectFirstPanelHoldsThreeBandStack(app: LaunchedApp): Promise<void> {

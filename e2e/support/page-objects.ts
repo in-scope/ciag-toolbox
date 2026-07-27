@@ -149,8 +149,10 @@ export {
   openImagesReviewModal,
   openImagesReplaceTargetPicker,
   reviewModalRows,
+  reviewModalGroups,
   reviewModalNewStackButton,
   reviewModalGroupModeSelect,
+  chooseReviewModalGroupMode,
   readReviewModalGroupModeOptionLabels,
   readReviewModalRowFileNamesInOrder,
   confirmReviewModal,
@@ -163,6 +165,8 @@ export {
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,
+  writeTemporaryDistinctValueWavelengthBandFixtures,
+  DISTINCT_VALUE_BAND_FIXTURE_SIDE,
   writeTemporaryCorruptImageFixture,
   type WavelengthStackFixtureFile,
 } from "./temporary-open-images-fixtures";

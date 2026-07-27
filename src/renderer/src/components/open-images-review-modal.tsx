@@ -21,9 +21,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatFileSizeBytesForDisplay } from "@/lib/image/image-metadata-display";
 import { findStackedRasterMismatchOrNull } from "@/lib/image/stack-rasters";
 import type { RasterImage } from "@/lib/image/raster-image";
+import { splitGroupRowsIntoSingleImageGroups } from "@/lib/image/group-opened-files";
 import type {
   GroupedOpenedFileRow,
   OpenedFilesGroup,
+  OpenedFilesGroupMode,
   OpenedFilesGroupingProposal,
 } from "@/lib/image/group-opened-files";
 import { cn } from "@/lib/utils";
@@ -111,14 +113,26 @@ function convertGroupingToViewModel(group: OpenedFilesGroup): ReviewGroupViewMod
 function convertViewModelsToGroups(
   models: ReadonlyArray<ReviewGroupViewModel>,
 ): ReadonlyArray<OpenedFilesGroup> {
-  return models
-    .filter((model) => model.rows.length > 0)
-    .map((model) => ({
-      id: model.id,
-      mode: model.mode,
-      rows: model.rows,
-      hadConfidentWavelengthParse: model.hadConfidentWavelengthParse,
-    }));
+  return models.filter((model) => model.rows.length > 0).map(convertViewModelToGroup);
+}
+
+function convertViewModelToGroup(model: ReviewGroupViewModel): OpenedFilesGroup {
+  return {
+    id: model.id,
+    mode: model.mode,
+    rows: model.rows,
+    hadConfidentWavelengthParse: model.hadConfidentWavelengthParse,
+  };
+}
+
+function replaceGroupWithItsSingleImageSplits(
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+  target: ReviewGroupViewModel,
+): ReadonlyArray<ReviewGroupViewModel> {
+  const splitModels = splitGroupRowsIntoSingleImageGroups(convertViewModelToGroup(target)).map(
+    convertGroupingToViewModel,
+  );
+  return groups.flatMap((group) => (group.id === target.id ? splitModels : [group]));
 }
 
 function appendEmptyStackGroup(
@@ -285,7 +299,7 @@ function applyRowMoveStepToGroup(
     ? stripRowAtIndexFromGroup(group, source.rowIndex)
     : group;
   if (stripped.id !== target.groupId) return stripped;
-  return insertRowIntoGroupAtIndex(stripped, movingRow, target.rowIndex, source.groupId);
+  return insertRowIntoGroupAtIndex(stripped, movingRow, target.rowIndex);
 }
 
 function stripRowAtIndexFromGroup(
@@ -299,7 +313,6 @@ function insertRowIntoGroupAtIndex(
   group: ReviewGroupViewModel,
   row: GroupedOpenedFileRow,
   rowIndex: number,
-  sourceGroupId: string,
 ): ReviewGroupViewModel {
   const clampedIndex = Math.max(0, Math.min(rowIndex, group.rows.length));
   const inserted = [
@@ -307,8 +320,21 @@ function insertRowIntoGroupAtIndex(
     row,
     ...group.rows.slice(clampedIndex),
   ];
-  const nextSortBy: GroupSortBy = sourceGroupId === group.id ? "custom" : "custom";
-  return { ...group, rows: inserted, sortBy: nextSortBy };
+  return {
+    ...group,
+    mode: pickGroupModeAfterRowInsert(group.mode, inserted.length),
+    rows: inserted,
+    sortBy: "custom",
+  };
+}
+
+// CT-252: singles groups hold exactly one row; dragging rows together always
+// combines them into a stack group (recombine by dragging, per the split model).
+function pickGroupModeAfterRowInsert(
+  mode: OpenedFilesGroupMode,
+  insertedRowCount: number,
+): OpenedFilesGroupMode {
+  return insertedRowCount >= 2 ? "stack" : mode;
 }
 
 interface OpenImagesReviewGroupListProps {
@@ -327,6 +353,9 @@ function OpenImagesReviewGroupList(props: OpenImagesReviewGroupListProps): JSX.E
           groupIndex={index}
           onUpdateGroup={(next) => props.setGroups(replaceGroupById(props.groups, group.id, next))}
           onRemoveGroup={() => props.setGroups(removeGroupById(props.groups, group.id))}
+          onSplitGroupIntoSingleImages={() =>
+            props.setGroups(replaceGroupWithItsSingleImageSplits(props.groups, group))
+          }
           dragHandlers={props.dragHandlers}
         />
       ))}
@@ -354,6 +383,7 @@ interface OpenImagesReviewGroupCardProps {
   readonly groupIndex: number;
   readonly onUpdateGroup: (next: ReviewGroupViewModel) => void;
   readonly onRemoveGroup: () => void;
+  readonly onSplitGroupIntoSingleImages: () => void;
   readonly dragHandlers: DragBetweenGroupsHandlers;
 }
 
@@ -374,6 +404,7 @@ function OpenImagesReviewGroupCard(props: OpenImagesReviewGroupCardProps): JSX.E
         groupIndex={props.groupIndex}
         onUpdateGroup={props.onUpdateGroup}
         onRemoveGroup={props.onRemoveGroup}
+        onSplitGroupIntoSingleImages={props.onSplitGroupIntoSingleImages}
         canSwitchModes={canSwitchGroupToStackMode(props.group, validation)}
       />
       {props.group.mode === "stack" ? (
@@ -501,6 +532,7 @@ interface OpenImagesReviewGroupCardHeaderProps {
   readonly groupIndex: number;
   readonly onUpdateGroup: (next: ReviewGroupViewModel) => void;
   readonly onRemoveGroup: () => void;
+  readonly onSplitGroupIntoSingleImages: () => void;
   readonly canSwitchModes: boolean;
 }
 
@@ -515,6 +547,7 @@ function OpenImagesReviewGroupCardHeader(
         <GroupModeDropdown
           group={props.group}
           onUpdateGroup={props.onUpdateGroup}
+          onSplitGroupIntoSingleImages={props.onSplitGroupIntoSingleImages}
           canSwitchToStack={props.canSwitchModes}
         />
       ) : null}
@@ -538,6 +571,7 @@ function pickGroupTitle(group: ReviewGroupViewModel, groupIndex: number): string
 interface GroupModeDropdownProps {
   readonly group: ReviewGroupViewModel;
   readonly onUpdateGroup: (next: ReviewGroupViewModel) => void;
+  readonly onSplitGroupIntoSingleImages: () => void;
   readonly canSwitchToStack: boolean;
 }
 
@@ -550,6 +584,7 @@ function GroupModeDropdown(props: GroupModeDropdownProps): JSX.Element {
           <GroupModeNativeSelect
             group={props.group}
             onUpdateGroup={props.onUpdateGroup}
+            onSplitGroupIntoSingleImages={props.onSplitGroupIntoSingleImages}
             canSwitchToStack={props.canSwitchToStack}
           />
         </span>
@@ -564,12 +599,7 @@ function GroupModeNativeSelect(props: GroupModeDropdownProps): JSX.Element {
     <select
       aria-label="Group mode"
       value={props.group.mode}
-      onChange={(event) =>
-        props.onUpdateGroup({
-          ...props.group,
-          mode: event.target.value as OpenedFilesGroup["mode"],
-        })
-      }
+      onChange={(event) => applyGroupModeChoice(event.target.value as OpenedFilesGroupMode, props)}
       className="h-8 w-44 rounded-md border bg-card px-2 text-xs text-foreground"
     >
       <option value="stack" disabled={!props.canSwitchToStack}>
@@ -578,6 +608,16 @@ function GroupModeNativeSelect(props: GroupModeDropdownProps): JSX.Element {
       <option value="singles">Open bands separately</option>
     </select>
   );
+}
+
+// CT-252: choosing "Open bands separately" physically splits the group into one
+// single-image group per row; it is no longer a mode a multi-row group can hold.
+function applyGroupModeChoice(mode: OpenedFilesGroupMode, props: GroupModeDropdownProps): void {
+  if (mode === "singles") {
+    props.onSplitGroupIntoSingleImages();
+    return;
+  }
+  props.onUpdateGroup({ ...props.group, mode });
 }
 
 function RemoveGroupButton({ onRemoveGroup }: { onRemoveGroup: () => void }): JSX.Element {

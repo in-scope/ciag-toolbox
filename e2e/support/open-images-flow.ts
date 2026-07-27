@@ -40,8 +40,21 @@ export function reviewModalNewStackButton(page: Page): Locator {
   return openImagesReviewModal(page).getByRole("button", { name: "New stack" });
 }
 
+export function reviewModalGroups(page: Page): Locator {
+  return openImagesReviewModal(page).getByRole("region");
+}
+
 export function reviewModalGroupModeSelect(page: Page): Locator {
   return openImagesReviewModal(page).getByRole("combobox", { name: "Group mode" });
+}
+
+export async function chooseReviewModalGroupMode(
+  page: Page,
+  optionLabel: "Combine into one stack" | "Open bands separately",
+): Promise<void> {
+  await runAsStoryboardStep(page, `Switch the group mode to "${optionLabel}"`, async () => {
+    await reviewModalGroupModeSelect(page).selectOption({ label: optionLabel });
+  });
 }
 
 export async function readReviewModalGroupModeOptionLabels(page: Page): Promise<string[]> {
