@@ -35,23 +35,13 @@ export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.El
       onWheel={(event) => handleBandNavigatorWheel(event, stepBandBy)}
     >
       <span className="shrink-0 text-xs font-medium text-muted-foreground">Band</span>
-      <BandStepButton
-        label="Previous band"
-        icon={<ChevronLeft />}
-        disabled={displayedBandIndex <= 0}
-        onStep={() => stepBandBy(-1)}
-      />
+      <BandStepButton label="Previous band" icon={<ChevronLeft />} onStep={() => stepBandBy(-1)} />
       <BandSlider
         bandCount={props.bandCount}
         activeBandIndex={displayedBandIndex}
         onRequestBandIndex={selection.requestBandSelectionDebounced}
       />
-      <BandStepButton
-        label="Next band"
-        icon={<ChevronRight />}
-        disabled={displayedBandIndex >= props.bandCount - 1}
-        onStep={() => stepBandBy(1)}
-      />
+      <BandStepButton label="Next band" icon={<ChevronRight />} onStep={() => stepBandBy(1)} />
       <BandNumberInput
         bandCount={props.bandCount}
         activeBandIndex={displayedBandIndex}
@@ -104,10 +94,11 @@ function handleBandNavigatorWheel(
 interface BandStepButtonProps {
   label: string;
   icon: JSX.Element;
-  disabled: boolean;
   onStep: () => void;
 }
 
+// The chevrons wrap past either end (CT-253), so they are never disabled; the
+// navigator only renders for multi-band stacks.
 function BandStepButton(props: BandStepButtonProps): JSX.Element {
   return (
     <Button
@@ -116,7 +107,6 @@ function BandStepButton(props: BandStepButtonProps): JSX.Element {
       size="icon"
       aria-label={props.label}
       className="size-7 shrink-0"
-      disabled={props.disabled}
       onClick={props.onStep}
     >
       {props.icon}

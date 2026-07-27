@@ -35,12 +35,22 @@ describe("stepBandIndexInDirection", () => {
     expect(stepBandIndexInDirection(10, -1, 300)).toBe(9);
   });
 
-  it("does not step past the last band", () => {
-    expect(stepBandIndexInDirection(299, 1, 300)).toBe(299);
+  it("wraps forward from the last band to the first", () => {
+    expect(stepBandIndexInDirection(299, 1, 300)).toBe(0);
   });
 
-  it("does not step before the first band", () => {
-    expect(stepBandIndexInDirection(0, -1, 300)).toBe(0);
+  it("wraps backward from the first band to the last", () => {
+    expect(stepBandIndexInDirection(0, -1, 300)).toBe(299);
+  });
+
+  it("stays on the only band of a single-band stack", () => {
+    expect(stepBandIndexInDirection(0, 1, 1)).toBe(0);
+    expect(stepBandIndexInDirection(0, -1, 1)).toBe(0);
+  });
+
+  it("wraps in the direction picked from a wheel delta", () => {
+    expect(stepBandIndexInDirection(2, pickBandStepDirectionFromWheelDelta(40), 3)).toBe(0);
+    expect(stepBandIndexInDirection(0, pickBandStepDirectionFromWheelDelta(-40), 3)).toBe(2);
   });
 });
 
