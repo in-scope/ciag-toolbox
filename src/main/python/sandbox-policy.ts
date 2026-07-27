@@ -91,7 +91,8 @@ _SANDBOX_ADDRESS_SPACE_LIMIT_BYTES = ${PYTHON_SANDBOX_ADDRESS_SPACE_LIMIT_BYTES}
 def _sandbox_reject(attempted_capability):
     raise PermissionError(
         "This script tried to " + attempted_capability + ", which is blocked in bundled mode. "
-        "Run it in your own Python environment (an unsandboxed, trusted mode) to allow it."
+        "To allow it, switch to your own Python environment (an unsandboxed, trusted mode): "
+        "open View > Python Environment and point the toolbox at your interpreter."
     )
 
 

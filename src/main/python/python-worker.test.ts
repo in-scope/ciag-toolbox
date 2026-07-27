@@ -1,6 +1,7 @@
 // Integration tests for the subprocess worker harness against the real bundled
 // interpreter. The runtime is installed by `node scripts/setup-python-runtime.mjs`;
 // on a machine without it, the suite is skipped rather than failing the unit run.
+import { execFileSync } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -313,6 +314,62 @@ describe.skipIf(interpreterPath === null)("python worker integration (bundled ru
     );
     expect(outcome).toEqual({ kind: "completed", value: 2 });
   }, 60_000);
+
+  it("rejects importing an unbundled package (pandas) in bundled mode, pointing at View > Python Environment", async () => {
+    const outcome = await runSandboxedScript("def run():\n    import pandas\n    return 'imported'\n");
+    expect(outcome).toMatchObject({ kind: "failed", reason: "script-error" });
+    const message = (outcome as { userFacingMessage: string }).userFacingMessage;
+    expect(message).toContain("import 'pandas'");
+    expect(message).toContain("blocked in bundled mode");
+    expect(message).toContain("View > Python Environment");
+  }, 60_000);
+
+  function venvPythonExecutablePath(venvDirectory: string): string {
+    return process.platform === "win32"
+      ? path.join(venvDirectory, "Scripts", "python.exe")
+      : path.join(venvDirectory, "bin", "python");
+  }
+
+  function queryVenvSitePackagesDirectory(venvPython: string): string {
+    const printPurelib = "import sysconfig; print(sysconfig.get_paths()['purelib'])";
+    return execFileSync(venvPython, ["-c", printPurelib], { encoding: "utf8" }).trim();
+  }
+
+  // Builds the smallest honest "own environment": a venv off the bundled
+  // interpreter whose site-packages holds a module the bundle does not ship.
+  async function createOwnEnvironmentContainingLocalOnlyPackage(venvDirectory: string): Promise<string> {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    execFileSync(interpreterPath, ["-m", "venv", "--without-pip", venvDirectory]);
+    const venvPython = venvPythonExecutablePath(venvDirectory);
+    const sitePackages = queryVenvSitePackagesDirectory(venvPython);
+    await fs.writeFile(path.join(sitePackages, "local_only_probe_package.py"), "PROBE_VALUE = 12345\n");
+    return venvPython;
+  }
+
+  function runOwnEnvironmentScript(ownInterpreterPath: string, scriptSource: string) {
+    return runUserScriptInPythonSubprocess({
+      interpreterPath: ownInterpreterPath,
+      input: { kind: "script", scriptSource },
+      cube: null,
+      resultKind: "value",
+      sandbox: false,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
+  }
+
+  it("runs a script importing a locally installed, unbundled package through an own-environment interpreter", async () => {
+    const venvDirectory = await fs.mkdtemp(path.join(tmpdir(), "msi-own-env-test-"));
+    try {
+      const ownInterpreterPath = await createOwnEnvironmentContainingLocalOnlyPackage(venvDirectory);
+      const outcome = await runOwnEnvironmentScript(
+        ownInterpreterPath,
+        "def run():\n    import local_only_probe_package\n    return local_only_probe_package.PROBE_VALUE\n",
+      );
+      expect(outcome).toEqual({ kind: "completed", value: 12345 });
+    } finally {
+      await fs.rm(venvDirectory, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it("returns a doubled cube from a cube-result formula, matching a pure-TS reference", async () => {
     const outcome = await runFormulaForCubeResult("cube * 2", sampleCube);
