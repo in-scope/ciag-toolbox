@@ -181,17 +181,18 @@ describe("TONE_CURVE_ACTION", () => {
     expect(Array.from((result as { raster: RasterImage }).raster.bandPixels[0]!)).toEqual([0, 128, 255, 255]);
   });
 
-  it("records the anchor count and the per-operation region in the applied label", () => {
+  // CT-244: the ROI scope is gone; a stale operation region left by another panel
+  // never reaches the parameters or the applied label.
+  it("ignores a stale operation region: the applied label records no region", () => {
     const operationRegion = { imagePixelX0: 1, imagePixelY0: 2, imagePixelX1: 5, imagePixelY1: 6 };
     const state = {
       ...DEFAULT_VIEWPORT_RENDERING_STATE,
       operationRegion,
       toneCurveAnchors: linearStretchAnchors,
     };
-    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "roi");
-    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe(
-      "Tone curve (2 points) in (1, 2) - (5, 6)",
-    );
+    const prepared = TONE_CURVE_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+    expect(prepared).not.toHaveProperty("regionImagePixelX0");
+    expect(TONE_CURVE_ACTION.formatAppliedLabel!(prepared)).toBe("Tone curve (2 points)");
   });
 
   it("ignores a stale inspection ROI and curves the whole band when scope is whole-image", () => {

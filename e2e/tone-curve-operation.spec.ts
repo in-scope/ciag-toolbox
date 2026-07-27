@@ -23,9 +23,7 @@ import {
   panelCanvas,
   readPixelValueAt,
   readToneCurveAnchors,
-  selectOperationRegionByDrag,
   selectPanel,
-  selectRegionOfInterestScope,
   setToneCurveAnchorField,
   summarizeCanvasPixels,
   toneCurveEndpointHandles,
@@ -37,8 +35,9 @@ import {
 // The editor opens over the band histogram with two endpoint anchors; with exactly two
 // anchors the engine degenerates to a straight line, so the result is a linear black/white
 // stretch out = (in - B)/(W - B) * (Wout - Bout) + Bout (CT-080). Adding/dragging anchors
-// updates the viewport preview live before Apply; Apply commits data + a History entry. With
-// "Region of interest" scope the remap touches only the requested region.
+// updates the viewport preview live before Apply; Apply commits data + a History entry.
+// (CT-244 removed the "Region of interest" scope: the curve applies to the full image or
+// the whole stack, never a sub-rectangle.)
 //
 // FIXTURE SUBSTITUTION (no E2E-BUG): the manual uses low-contrast-sample.png. A PNG loads as an
 // image-bitmap and, when an operation runs, is auto-promoted (CT-109) to an 8-bit 3-band RGB
@@ -110,18 +109,6 @@ test("adding/dragging anchors updates the viewport preview live and Apply change
   expect(await historyEntryCount(launched.window)).toBe(0);
   await applyThreeAnchorCurveAndAssertHistory();
   await expectDarkPixelLiftedTowardWhite({ x: 0, y: 0 });
-});
-
-test("region-of-interest scope remaps only pixels inside the requested region", async () => {
-  await openOperation(launched.window, TONE_CURVE_LABEL);
-  await expectToneCurveOpensWithTwoEndpoints(launched.window);
-  await dragToneCurveEndpointTo(launched.window, "left", -0.2, -0.2);
-  await selectRegionOfInterestScope(launched.window, TONE_CURVE_LABEL);
-  await selectRegion({ x: 0, y: 0 }, { x: 1, y: 1 });
-  await applyOperationInPlace(launched.window, TONE_CURVE_LABEL);
-  await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: 4, height: 4 });
-  await expectExactReadout({ x: 1, y: 1 }, UINT16_TYPE_MAX);
-  await expectExactReadout({ x: 3, y: 3 }, bandZeroValueAt(3, 3));
 });
 
 test("exposes no separate standalone black/white-marker UI", async () => {
@@ -224,16 +211,6 @@ async function expectPreviewBrightenedAbove(baselineFraction: number): Promise<v
 
 function panelNonClearFraction(): Promise<number> {
   return summarizeCanvasPixels(panelCanvas(launched.window, PANEL)).then(nonClearPixelFraction);
-}
-
-async function selectRegion(start: { x: number; y: number }, end: { x: number; y: number }): Promise<void> {
-  await selectOperationRegionByDrag(launched.window, {
-    panelNumber: PANEL,
-    operationLabel: TONE_CURVE_LABEL,
-    startPixel: start,
-    endPixel: end,
-    imageDimensions: FOUR_BY_FOUR,
-  });
 }
 
 async function expectNoBlackWhitePointUiOnPage(): Promise<void> {

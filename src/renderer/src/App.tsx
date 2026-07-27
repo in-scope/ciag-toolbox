@@ -1916,6 +1916,7 @@ function deriveSingleSelectedSource(
       operationRegion: renderingState.operationRegion,
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
       selectedBandNumber: renderingState.selectedBandIndex + 1,
+      isTrueColorComposite: readIsTrueColorPhotoFromContent(content),
     },
   };
 }

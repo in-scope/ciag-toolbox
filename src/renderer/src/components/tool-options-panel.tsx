@@ -38,6 +38,7 @@ export interface ToolOptionsSourceViewport {
   readonly operationRegion: ViewportRoi | null;
   readonly sourceBandCount: number | null;
   readonly selectedBandNumber: number;
+  readonly isTrueColorComposite: boolean;
 }
 
 interface ToolOptionsPanelProps {
@@ -150,9 +151,10 @@ function useApplyScopeOptions(
   sourceViewport: ToolOptionsSourceViewport | null,
 ): ReadonlyArray<ApplyScopeOption> {
   const bandCount = sourceViewport?.sourceBandCount ?? null;
+  const isTrueColorComposite = sourceViewport?.isTrueColorComposite ?? false;
   return useMemo(
-    () => action.resolveApplyScopeOptions?.(bandCount) ?? DEFAULT_APPLY_SCOPE_OPTIONS,
-    [action, bandCount],
+    () => action.resolveApplyScopeOptions?.(bandCount, isTrueColorComposite) ?? DEFAULT_APPLY_SCOPE_OPTIONS,
+    [action, bandCount, isTrueColorComposite],
   );
 }
 
@@ -161,9 +163,15 @@ function shouldShowApplyScopeSelector(
   sourceViewport: ToolOptionsSourceViewport | null,
   applyScopeOptions: ReadonlyArray<ApplyScopeOption>,
 ): boolean {
-  if (!action.supportsRoiScope) return false;
+  if (!actionOffersAnApplyScopeChoice(action)) return false;
   if (sourceViewport === null) return false;
   return applyScopeOptions.length >= 2;
+}
+
+// CT-244: the tone curve keeps its Full image / Whole stack selector without any
+// ROI scope, so offering custom scope options is enough to render the control.
+function actionOffersAnApplyScopeChoice(action: RegisteredViewportAction): boolean {
+  return Boolean(action.supportsRoiScope) || action.resolveApplyScopeOptions !== undefined;
 }
 
 function clampApplyScopeToOptions(

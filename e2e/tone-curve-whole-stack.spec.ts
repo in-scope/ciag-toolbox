@@ -6,6 +6,7 @@ import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
   applyOperationInPlace,
+  applyScopeFieldset,
   applyScopeRadio,
   dragToneCurveEndpointTo,
   expectHistoryToRecordOperation,
@@ -28,8 +29,9 @@ import {
 // CT-192: the tone curve's "Whole stack" scope applies one curve SHAPE to every band,
 // each band normalized by its own min/max, so every band gets the same contrast shaping
 // (Full image only touches the viewed band). The scope is display-only until Apply and is
-// recorded in History. A single-band stack hides "Whole stack" (it would coincide with
-// "Full image"), following CT-189.
+// recorded in History. CT-244: a single-band stack drops "Whole stack" (it would coincide
+// with "Full image"), and with only one scope left the whole "Apply to" control hides,
+// following CT-189. The "Region of interest" scope no longer exists.
 //
 // Fixture multiband-12bit.tif: band N = base[N] + index*10, index = y*4 + x, with bases
 // [100, 800, 1600]; so band 0 spans [100, 250], band 1 [800, 950], band 2 [1600, 1750].
@@ -75,17 +77,17 @@ test("the whole-stack preview is display-only until Apply", async () => {
   await expectViewedBandReadoutUnchanged();
 });
 
-test("the Whole stack scope is hidden for a single-band stack and shown for a multi-band stack", async () => {
+test("the scope control hides for a single-band stack and lists exactly two scopes for a multi-band stack", async () => {
   await loadFixtureAsStack(launched.window, lowContrastGrayPng.fileName);
   await selectPanel(launched.window, PANEL);
   await openOperation(launched.window, TONE_CURVE_LABEL);
-  await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, WHOLE_STACK_SCOPE_LABEL)).toHaveCount(0);
-  await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, FULL_IMAGE_SCOPE_LABEL)).toBeVisible();
+  await expect(applyScopeFieldset(launched.window, TONE_CURVE_LABEL)).toHaveCount(0);
   await loadFixtureAsStack(launched.window, multiBandTiff.fileName);
   await selectPanel(launched.window, 2);
   await openOperation(launched.window, TONE_CURVE_LABEL);
   await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, WHOLE_STACK_SCOPE_LABEL)).toBeVisible();
   await expect(applyScopeRadio(launched.window, TONE_CURVE_LABEL, FULL_IMAGE_SCOPE_LABEL)).toBeVisible();
+  await expect(applyScopeFieldset(launched.window, TONE_CURVE_LABEL).getByRole("radio")).toHaveCount(2);
 });
 
 async function liftTheBlackPointSoEveryBandBrightens(): Promise<void> {

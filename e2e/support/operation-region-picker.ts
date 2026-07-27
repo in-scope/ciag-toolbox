@@ -6,10 +6,11 @@ import { operationPanel } from "./operations";
 import { dragMouseFromTo, pagePointForImagePixelCenter, type ImagePixel } from "./viewport-navigation";
 
 // The shared per-operation region-request flow (CT-095 / CT-130). Operations that need an
-// area (Crop to Region, Tone Curve region scope, Spectralon) DO NOT consume the inspection
-// ROI; their tool-options panel shows an "Operation region" picker that prompts for a fresh
-// region. Until a region is selected the placeholder shows and Apply stays disabled; clicking
-// "Select region" then dragging on the panel canvas commits the operation's own region.
+// area (Crop to Region, Spectralon, dimension reduction's ROI scope) DO NOT consume the
+// inspection ROI; their tool-options panel shows an "Operation region" picker that prompts
+// for a fresh region. Until a region is selected the placeholder shows and Apply stays
+// disabled; clicking "Select region" then dragging on the panel canvas commits the
+// operation's own region.
 
 const OPERATION_REGION_PLACEHOLDER_TEXT = "Select a region on the image for this operation.";
 

@@ -170,11 +170,13 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly supportsRoiScope?: boolean;
   /**
    * CT-192: a custom set of "Apply to" scope options for this action, resolved against
-   * the source band count (e.g. the tone curve drops "Whole stack" for a single band).
-   * Actions without this fall back to DEFAULT_APPLY_SCOPE_OPTIONS.
+   * the source band count and photo-ness (e.g. the tone curve drops "Whole stack" for a
+   * single band and for a true-colour photo). Actions without this fall back to
+   * DEFAULT_APPLY_SCOPE_OPTIONS.
    */
   readonly resolveApplyScopeOptions?: (
     bandCount: number | null,
+    isTrueColorComposite: boolean,
   ) => ReadonlyArray<ApplyScopeOption>;
   readonly formatAppliedLabel?: (parameterValues: ParameterValuesById) => string;
   readonly prepareParameterValuesForApply?: (
@@ -253,20 +255,6 @@ function readBitShiftAmountFromParameterValues(parameterValues: ParameterValuesB
     return BIT_SHIFT_PARAMETER_SCHEMA.defaultValue;
   }
   return Math.round(raw);
-}
-
-function areAllRegionCornersFiniteNumbers(
-  x0: unknown,
-  y0: unknown,
-  x1: unknown,
-  y1: unknown,
-): boolean {
-  return (
-    typeof x0 === "number" && Number.isFinite(x0) &&
-    typeof y0 === "number" && Number.isFinite(y0) &&
-    typeof x1 === "number" && Number.isFinite(x1) &&
-    typeof y1 === "number" && Number.isFinite(y1)
-  );
 }
 
 function formatBitShiftAppliedLabel(parameterValues: ParameterValuesById): string {
@@ -631,12 +619,6 @@ function formatSpectralonAppliedLabel(parameterValues: ParameterValuesById): str
 const TONE_CURVE_ANCHORS_PARAMETER_ID = "toneCurveAnchorsJson";
 const TONE_CURVE_BAND_PARAMETER_ID = "targetBandIndex";
 const TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID = "toneCurveChannelAnchorsJson";
-const TONE_CURVE_REGION_PARAMETER_IDS = {
-  x0: "regionImagePixelX0",
-  y0: "regionImagePixelY0",
-  x1: "regionImagePixelX1",
-  y1: "regionImagePixelY1",
-} as const;
 
 export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   id: "tone-curve",
@@ -645,18 +627,12 @@ export const TONE_CURVE_ACTION: RegisteredViewportAction = {
   successMessage: "Tone curve applied",
   appliedLabel: "Tone curve",
   loadingMessage: "Applying tone curve...",
-  supportsRoiScope: true,
   resolveApplyScopeOptions: resolveToneCurveApplyScopeOptions,
   formatAppliedLabel: formatToneCurveAppliedLabel,
   prepareParameterValuesForApply: prepareToneCurveParameterValues,
-  apply: clearToneCurveAfterApply,
-  clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
+  apply: clearToneCurveEditingState,
   transformSourceAsync: createToneCurveSourceTransform(),
 };
-
-function clearToneCurveAfterApply(state: ViewportRenderingState): ViewportRenderingState {
-  return clearToneCurveEditingState({ ...state, operationRegion: null });
-}
 
 function prepareToneCurveParameterValues(
   rawParameterValues: ParameterValuesById,
@@ -670,13 +646,11 @@ function prepareToneCurveParameterValues(
   }
   const withAnchors = withToneCurveAnchorsAndBandValues(rawParameterValues, anchors, sourceRenderingState.selectedBandIndex);
   const withChannels = withToneCurveChannelAnchorsForComposite(withAnchors, sourceRenderingState, anchors, sourceRaster);
-  const withScope = withToneCurveWholeStackScope(withChannels, applyScope);
-  return injectToneCurveRegionIfPresent(withScope, resolveToneCurveRegion(sourceRenderingState, applyScope));
+  return Object.freeze(withToneCurveWholeStackScope(withChannels, applyScope));
 }
 
 // CT-192: mark a whole-stack apply so the transform bakes every band and the History
-// entry records the scope. Whole stack and ROI are mutually exclusive (ROI never injects
-// a region for the whole-stack scope, see resolveToneCurveRegion).
+// entry records the scope.
 function withToneCurveWholeStackScope(
   parameterValues: ParameterValuesById,
   applyScope: ApplyScope,
@@ -703,14 +677,6 @@ function withToneCurveChannelAnchorsForComposite(
   return { ...parameterValues, [TONE_CURVE_CHANNEL_ANCHORS_PARAMETER_ID]: serializeToneCurveChannelAnchors(merged) };
 }
 
-function resolveToneCurveRegion(
-  sourceRenderingState: ViewportRenderingState,
-  applyScope: ApplyScope,
-): ViewportRoi | null {
-  if (applyScope !== "roi") return null;
-  return requireOperationRegionForApply(sourceRenderingState, "Tone Curve");
-}
-
 function withToneCurveAnchorsAndBandValues(
   rawParameterValues: ParameterValuesById,
   anchors: ReadonlyArray<ToneCurveAnchor>,
@@ -721,14 +687,6 @@ function withToneCurveAnchorsAndBandValues(
     [TONE_CURVE_ANCHORS_PARAMETER_ID]: serializeToneCurveAnchors(anchors),
     [TONE_CURVE_BAND_PARAMETER_ID]: selectedBandIndex,
   };
-}
-
-function injectToneCurveRegionIfPresent(
-  parameterValues: ParameterValuesById,
-  region: ViewportRoi | null,
-): ParameterValuesById {
-  if (!region) return Object.freeze({ ...parameterValues });
-  return injectOperationRegionCorners(parameterValues, region, TONE_CURVE_REGION_PARAMETER_IDS);
 }
 
 function serializeToneCurveAnchors(anchors: ReadonlyArray<ToneCurveAnchor>): string {
@@ -763,15 +721,14 @@ function parseSerializedToneCurveChannelAnchors(raw: string): ToneCurveChannelAn
 function createToneCurveSourceTransform(): ViewportActionAsyncSourceTransform {
   return async (rawSource, parameterValues, onProgress) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const region = readToneCurveRegionIfPresent(parameterValues);
     const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
     if (channelAnchors && shouldRenderRasterAsRgbComposite(source.raster)) {
-      return { kind: "raster", raster: await bakeCompositeToneCurve(source.raster, channelAnchors, region, onProgress) };
+      return { kind: "raster", raster: await bakeCompositeToneCurve(source.raster, channelAnchors, onProgress) };
     }
     if (isWholeStackToneCurveScope(parameterValues)) {
       return { kind: "raster", raster: await bakeWholeStackToneCurve(source.raster, parameterValues, onProgress) };
     }
-    return { kind: "raster", raster: await bakeSingleBandToneCurve(source.raster, parameterValues, region, onProgress) };
+    return { kind: "raster", raster: await bakeSingleBandToneCurve(source.raster, parameterValues, onProgress) };
   };
 }
 
@@ -794,12 +751,11 @@ function bakeWholeStackToneCurve(
 async function bakeSingleBandToneCurve(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
-  region: ViewportRoi | null,
   onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
   const bandIndex = readToneCurveBandIndex(parameterValues);
   const anchors = readToneCurveAnchorsOrThrow(parameterValues);
-  const baked = applyToneCurveToRasterBand(raster, bandIndex, anchors, region ? { region } : {});
+  const baked = applyToneCurveToRasterBand(raster, bandIndex, anchors);
   await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, 1, 1);
   return baked;
 }
@@ -809,16 +765,14 @@ async function bakeSingleBandToneCurve(
 async function bakeCompositeToneCurve(
   raster: RasterImage,
   channelAnchors: ToneCurveChannelAnchors,
-  region: ViewportRoi | null,
   onProgress?: UnitProgressCallback,
 ): Promise<RasterImage> {
   const valueAnchors = channelAnchors.rgb ?? null;
-  const options = region ? { region } : {};
   let current = raster;
   reportMultiUnitWorkStarting(onProgress, COLOR_TONE_CURVE_CHANNELS.length);
   for (const [completedBefore, channel] of COLOR_TONE_CURVE_CHANNELS.entries()) {
     const bandIndex = colorBandIndexForToneCurveChannel(channel) ?? 0;
-    current = applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors, options);
+    current = applyComposedToneCurveToRasterBand(current, bandIndex, channelAnchors[channel] ?? null, valueAnchors);
     await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, COLOR_TONE_CURVE_CHANNELS.length);
   }
   return current;
@@ -841,28 +795,12 @@ function readToneCurveAnchorsOrThrow(
   return pairs.map(([input, output]) => ({ input, output }));
 }
 
-function readToneCurveRegionIfPresent(
-  parameterValues: ParameterValuesById,
-): ViewportRoi | null {
-  const x0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x0];
-  const y0 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y0];
-  const x1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.x1];
-  const y1 = parameterValues[TONE_CURVE_REGION_PARAMETER_IDS.y1];
-  if (!areAllRegionCornersFiniteNumbers(x0, y0, x1, y1)) return null;
-  return {
-    imagePixelX0: Math.round(x0 as number),
-    imagePixelY0: Math.round(y0 as number),
-    imagePixelX1: Math.round(x1 as number),
-    imagePixelY1: Math.round(y1 as number),
-  };
-}
-
 function formatToneCurveAppliedLabel(parameterValues: ParameterValuesById): string {
   const channelAnchors = readToneCurveChannelAnchorsIfPresent(parameterValues);
   const label = channelAnchors
     ? formatCompositeToneCurveLabel(channelAnchors)
     : formatSingleBandToneCurveLabel(parameterValues);
-  return appendToneCurveRegionSuffix(appendToneCurveWholeStackSuffix(label, parameterValues), parameterValues);
+  return appendToneCurveWholeStackSuffix(label, parameterValues);
 }
 
 function appendToneCurveWholeStackSuffix(label: string, parameterValues: ParameterValuesById): string {
@@ -879,13 +817,6 @@ function formatCompositeToneCurveLabel(channelAnchors: ToneCurveChannelAnchors):
   const editedNames = listEditedToneCurveChannels(channelAnchors).map(formatToneCurveChannelDisplayName);
   if (editedNames.length === 0) return "Tone curve (no channel changes)";
   return `Tone curve (channels: ${editedNames.join(", ")})`;
-}
-
-function appendToneCurveRegionSuffix(label: string, parameterValues: ParameterValuesById): string {
-  const region = readToneCurveRegionIfPresent(parameterValues);
-  if (!region) return label;
-  const canonical = canonicalizeViewportRoiCorners(region);
-  return `${label} in (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
 }
 
 const BRIGHTNESS_CONTRAST_BRIGHTNESS_PARAMETER_ID = "brightnessPercent";

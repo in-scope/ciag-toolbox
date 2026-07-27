@@ -35,7 +35,7 @@
 //   MSI_SCALE10=1 MSI_E2E_TRACE_LABEL=CT-239 pnpm e2e scale10-operations.spec.ts
 import { expect, test } from "@playwright/test";
 
-import { selectFullImageScope, selectRegionOfInterestScope, selectWholeStackScope } from "./support/apply-scope-control";
+import { selectFullImageScope, selectWholeStackScope } from "./support/apply-scope-control";
 import { nonClearPixelFraction, summarizeCanvasPixels } from "./support/canvas-pixels";
 import { selectBandWiseScopeForBands, selectFullStackScope } from "./support/cube-scope-control";
 import { chooseFlatFieldReferenceFileThroughDialog, FLAT_FIELD_LIGHT_FIELD_LABEL } from "./support/flat-field-operation";
@@ -129,8 +129,6 @@ const ROTATED_DIMENSIONS: PixelDimensions = {
 const ROTATED_PROBE_PIXEL = { x: 2_000, y: 4_000 };
 const OPERATION_REGION = { start: { x: 1_000, y: 1_000 }, end: { x: 3_000, y: 2_600 } };
 const SPECTRALON_REGION = { start: { x: 1_000, y: 1_000 }, end: { x: 2_000, y: 2_000 } };
-const ROI_INSIDE_PROBE = { x: 2_000, y: 1_800 };
-const ROI_OUTSIDE_PROBE = { x: 7_000, y: 4_000 };
 
 let launched: LaunchedApp;
 
@@ -464,31 +462,6 @@ async function configureFlatMaxToneCurve(
   selectScope: (page: LaunchedApp["window"], operationLabel: string) => Promise<void>,
 ): Promise<void> {
   await selectScope(launched.window, "Tone Curve");
-  await setToneCurveAnchorField(launched.window, "Output", UINT16_MAX);
-}
-
-test("tone curve region of interest remaps only the selected region", async () => {
-  test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Tone Curve (Region of interest)", async () => {
-    await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("Tone Curve", configureRegionOfInterestToneCurve);
-    const inside = await verifyResultBandAgainstOracle(1, () => UINT16_MAX, exactly(1), { probe: ROI_INSIDE_PROBE });
-    const outside = await verifyResultBandAgainstOracle(1, (x, y) => scale10Value(0, x, y), exactly(), {
-      probe: ROI_OUTSIDE_PROBE,
-    });
-    return { ...applied, oracle: `inside ${inside}; outside ${outside}` };
-  });
-});
-
-async function configureRegionOfInterestToneCurve(): Promise<void> {
-  await selectRegionOfInterestScope(launched.window, "Tone Curve");
-  await selectOperationRegionByDrag(launched.window, {
-    panelNumber: SOURCE_PANEL,
-    operationLabel: "Tone Curve",
-    startPixel: OPERATION_REGION.start,
-    endPixel: OPERATION_REGION.end,
-    imageDimensions: SCALE10_DIMENSIONS,
-  });
   await setToneCurveAnchorField(launched.window, "Output", UINT16_MAX);
 }
 
