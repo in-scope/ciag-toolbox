@@ -24,6 +24,10 @@ import { initializePythonEnvironmentControllerFromDisk } from "./python/python-e
 import { registerRunUserScriptIpcHandler } from "./python/user-script-ipc";
 import { registerRendererCrashLogging } from "./renderer-crash-logging";
 import { createSplashWindow, type SplashWindowHandle } from "./splash-window";
+import {
+  interceptWindowCloseUntilRendererConfirms,
+  registerConfirmCloseIpcHandler,
+} from "./window-close-guard";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -111,13 +115,24 @@ function maximizeWindowIfPreviouslyMaximized(
   if (bounds.isMaximized) window.maximize();
 }
 
+// The main window can be closed while the splash minimum is still running
+// (CT-258 made that an ordinary flow); showing a destroyed window would throw
+// and leak the splash as a ghost window that keeps the app process alive.
 async function showMainWindowAfterSplashMinimumElapsed(
   mainWindow: BrowserWindow,
   splash: SplashWindowHandle | null,
 ): Promise<void> {
   if (splash !== null) await splash.waitUntilMinimumDisplayDurationElapsed();
-  mainWindow.show();
+  if (!mainWindow.isDestroyed()) mainWindow.show();
   if (splash !== null) splash.dismiss();
+}
+
+function dismissSplashWhenMainWindowClosesFirst(
+  mainWindow: BrowserWindow,
+  splash: SplashWindowHandle | null,
+): void {
+  if (splash === null) return;
+  mainWindow.on("closed", () => splash.dismiss());
 }
 
 function deferMainWindowShowUntilReadyAndSplashElapsed(
@@ -134,8 +149,10 @@ function createMainWindow(splash: SplashWindowHandle | null): BrowserWindow {
   const window = new BrowserWindow(buildBrowserWindowOptionsFrom(savedBounds));
   maximizeWindowIfPreviouslyMaximized(window, savedBounds);
   deferMainWindowShowUntilReadyAndSplashElapsed(window, splash);
+  dismissSplashWhenMainWindowClosesFirst(window, splash);
   attachExternalLinkHandler(window);
   attachWindowStatePersistence(window);
+  interceptWindowCloseUntilRendererConfirms(window);
   installApplicationMenu(window);
   loadRendererIntoWindow(window);
   if (isRunningInDevelopment()) {
@@ -169,6 +186,7 @@ app.whenReady().then(() => {
   registerSaveImageDialogIpcHandlers();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandlers();
+  registerConfirmCloseIpcHandler();
   registerE2eDialogStubTestChannelsWhenEnabled();
   const splash = createSplashWindow();
   createMainWindow(splash);

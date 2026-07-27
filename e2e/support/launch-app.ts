@@ -99,11 +99,24 @@ async function startTracingIfEnabled(app: ElectronApplication): Promise<void> {
     .tracing.start({ screenshots: true, snapshots: true, sources: true });
 }
 
+const appsWithStoppedTracing = new WeakSet<ElectronApplication>();
+
 async function stopTracingIfEnabled(app: ElectronApplication): Promise<void> {
   if (!tracingIsEnabled()) return;
+  if (appsWithStoppedTracing.has(app)) return;
+  appsWithStoppedTracing.add(app);
   const tracePath = nextTraceOutputPath();
   await app.context().tracing.stop({ path: tracePath });
   await attachTraceZipToCurrentTest(tracePath);
+}
+
+// For specs whose final action makes the app itself exit (the CT-258 close
+// guard tests): save the trace while the context is still alive, then let the
+// exit happen. closeToolboxApp stays safe to skip afterwards.
+export async function saveTraceBeforeExpectedAppExit(launched: LaunchedApp): Promise<void> {
+  await runAsStoryboardStep(null, "Save the trace before the app exits", async () => {
+    await stopTracingIfEnabled(launched.app);
+  });
 }
 
 let savedTraceCount = 0;
@@ -156,6 +169,25 @@ export async function launchToolboxApp(): Promise<LaunchedApp> {
 export async function closeToolboxApp(launched: LaunchedApp): Promise<void> {
   await runAsStoryboardStep(null, "Close the app and save its trace", async () => {
     await stopTracingIfEnabled(launched.app);
-    await launched.app.close();
+    await confirmWindowCloseBypassingTheSaveGuard(launched);
+    await launched.app.close().catch(() => undefined);
   });
+}
+
+// CT-258: the app asks before closing when unsaved work exists, and most specs
+// end with unsaved panels on purpose. Teardown must close unconditionally, so
+// it confirms the close through the same IPC the renderer's guard uses; the
+// confirmed close still runs the window's close listeners (window-state
+// persistence), unlike a destroy(). A crashed or already-closed page is fine:
+// main lets those windows close without asking.
+declare global {
+  interface Window {
+    toolboxApi: { confirmWindowClose: () => Promise<void> };
+  }
+}
+
+async function confirmWindowCloseBypassingTheSaveGuard(launched: LaunchedApp): Promise<void> {
+  await launched.window
+    .evaluate(() => window.toolboxApi.confirmWindowClose())
+    .catch(() => undefined);
 }

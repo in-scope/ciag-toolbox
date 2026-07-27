@@ -165,6 +165,12 @@ import {
   listOccupiedViewportEntries,
 } from "@/lib/image/find-empty-viewport";
 import { placeClonedSourceContentAtIndex } from "@/lib/image/place-cloned-source-content";
+import { SaveBeforeCloseDialog } from "@/components/save-before-close-dialog";
+import {
+  useProjectContentRevisionTracker,
+  type ProjectContentRevisionTracker,
+} from "@/lib/project/use-project-content-revisions";
+import { useWindowCloseGuard } from "@/lib/project/use-window-close-guard";
 import {
   runOpenProjectFlowThroughMainProcess,
   type OpenedProject,
@@ -347,6 +353,7 @@ function ApplicationShell(): JSX.Element {
     useState<ParameterValuesById>(NO_PARAMETER_VALUES);
   const cellCount = getGridLayoutCellCount(gridLayout);
   const imagesByIndexRef = useLatestRef(imagesByIndex);
+  const projectRevisionTracker = useProjectContentRevisionTracker(imagesByIndex);
   const handleGridLayoutChange = createGridLayoutChangeHandler({
     currentLayout: gridLayout,
     imagesByIndex,
@@ -382,6 +389,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     currentProjectFilePathRef: useLatestRef(currentProjectFilePath),
     setCurrentProjectFilePath,
+    projectRevisionTracker,
     busyRegistrar,
   });
   useMenuSaveProjectTriggersHandler(handleSaveProjectRequested.saveOrPromptForPath);
@@ -390,9 +398,15 @@ function ApplicationShell(): JSX.Element {
     setGridLayout,
     setImagesByIndex,
     setCurrentProjectFilePath,
+    projectRevisionTracker,
     replaceAllRenderingStates: renderingApi.replaceAllRenderingStates,
     replaceSelection,
     busyRegistrar,
+  });
+  const windowCloseGuard = useWindowCloseGuard({
+    imagesByIndexRef,
+    revisionTracker: projectRevisionTracker,
+    saveProjectReportingSuccess: handleSaveProjectRequested.saveReportingSuccess,
   });
   useMenuOpenProjectTriggersHandler(handleOpenProjectRequested);
   const applyActionFlowBindings = buildApplyActionFlowBindings({
@@ -580,6 +594,12 @@ function ApplicationShell(): JSX.Element {
             busyRegistrar,
           })
         }
+      />
+      <SaveBeforeCloseDialog
+        open={windowCloseGuard.isSaveBeforeCloseDialogOpen}
+        onSaveAndClose={windowCloseGuard.saveProjectThenCloseWindow}
+        onCloseWithoutSaving={windowCloseGuard.closeWindowWithoutSaving}
+        onCancel={windowCloseGuard.cancelCloseRequest}
       />
       <StatusBar />
     </div>
@@ -2622,12 +2642,14 @@ interface SaveProjectRequestBindings {
   readonly renderingApi: ViewportRenderingApi;
   readonly currentProjectFilePathRef: MutableRefObject<string | null>;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
+  readonly projectRevisionTracker: ProjectContentRevisionTracker;
   readonly busyRegistrar: BusyEntryRegistrar;
 }
 
 interface SaveProjectRequestHandlers {
   readonly saveOrPromptForPath: () => void;
   readonly alwaysPromptForPath: () => void;
+  readonly saveReportingSuccess: () => Promise<boolean>;
 }
 
 function useSaveProjectRequestHandler(
@@ -2641,26 +2663,34 @@ function useSaveProjectRequestHandler(
     () => void runSaveProjectFlowAndShowToast(bindings, true),
     [bindings],
   );
-  return { saveOrPromptForPath, alwaysPromptForPath };
+  const saveReportingSuccess = useCallback(
+    () => runSaveProjectFlowAndShowToast(bindings, false),
+    [bindings],
+  );
+  return { saveOrPromptForPath, alwaysPromptForPath, saveReportingSuccess };
 }
 
+// Resolves true only when a bundle was actually written (the CT-258 close
+// guard confirms the window close on that signal alone).
 async function runSaveProjectFlowAndShowToast(
   bindings: SaveProjectRequestBindings,
   saveAs: boolean,
-): Promise<void> {
+): Promise<boolean> {
+  const revisionBeingSaved = bindings.projectRevisionTracker.readContentRevision();
   const snapshot = buildSaveableProjectSnapshotFromCurrentState(bindings);
   if (snapshot.viewports.length === 0) {
     toast.info("No panels with loaded files to save");
-    return;
+    return false;
   }
-  await invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings);
+  return invokeSaveProjectFlowWithToastFeedback(snapshot, saveAs, bindings, revisionBeingSaved);
 }
 
 async function invokeSaveProjectFlowWithToastFeedback(
   snapshot: SaveableProjectSnapshot,
   saveAs: boolean,
   bindings: SaveProjectRequestBindings,
-): Promise<void> {
+  revisionBeingSaved: number,
+): Promise<boolean> {
   const handle = bindings.busyRegistrar.registerAppBusyEntry({
     label: "Saving project...",
     progress: 0,
@@ -2673,9 +2703,10 @@ async function invokeSaveProjectFlowWithToastFeedback(
       saveAs,
       onProgress: (event) => updateSaveBundleProgressOnHandle(handle, event),
     });
-    handleSaveProjectFlowOutcome(result, bindings.setCurrentProjectFilePath);
+    return handleSaveProjectFlowOutcome(result, bindings, revisionBeingSaved);
   } catch (error) {
     toast.error(`Could not save project: ${describeUnknownError(error)}`);
+    return false;
   } finally {
     handle.clear();
   }
@@ -2701,11 +2732,14 @@ function updateSaveBundleProgressOnHandle(
 
 function handleSaveProjectFlowOutcome(
   result: { canceled: boolean; filePath?: string },
-  setCurrentProjectFilePath: SetCurrentProjectFilePath,
-): void {
-  if (result.canceled || !result.filePath) return;
-  setCurrentProjectFilePath(result.filePath);
+  bindings: SaveProjectRequestBindings,
+  revisionBeingSaved: number,
+): boolean {
+  if (result.canceled || !result.filePath) return false;
+  bindings.setCurrentProjectFilePath(result.filePath);
+  bindings.projectRevisionTracker.markContentRevisionAsSaved(revisionBeingSaved);
   toast.success(`Saved project to ${result.filePath}`);
+  return true;
 }
 
 function buildSaveableProjectSnapshotFromCurrentState(
@@ -2768,6 +2802,7 @@ interface OpenProjectRequestBindings {
   readonly setGridLayout: SetGridLayout;
   readonly setImagesByIndex: SetImagesByIndex;
   readonly setCurrentProjectFilePath: SetCurrentProjectFilePath;
+  readonly projectRevisionTracker: ProjectContentRevisionTracker;
   readonly replaceAllRenderingStates: ViewportRenderingApi["replaceAllRenderingStates"];
   readonly replaceSelection: ViewportSelectionState["replaceSelection"];
   readonly busyRegistrar: BusyEntryRegistrar;
@@ -2832,6 +2867,7 @@ function applyOpenedProjectToApplicationState(
   opened: OpenedProject,
   bindings: OpenProjectRequestBindings,
 ): void {
+  bindings.projectRevisionTracker.markNextContentChangeAsSaved();
   bindings.setGridLayout(opened.project.gridLayout);
   bindings.setImagesByIndex(buildImagesByIndexMapFromOpenedProject(opened));
   bindings.replaceAllRenderingStates(buildRenderingByIndexMapFromOpenedProject(opened));

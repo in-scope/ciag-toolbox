@@ -389,6 +389,10 @@ interface ToolboxApi {
   onMenuInvokeCommand: (
     listener: ToolboxMenuCommandListener,
   ) => ToolboxUnsubscribeMenuListener;
+  onWindowCloseRequested: (
+    listener: ToolboxMenuEventListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  confirmWindowClose: () => Promise<void>;
   getPythonEnvironment: () => Promise<ToolboxPythonEnvironmentSnapshot>;
   setPythonEnvironment: (
     ownInterpreterPath: string | null,

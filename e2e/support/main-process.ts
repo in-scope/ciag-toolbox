@@ -131,6 +131,23 @@ export function triggerOpenProjectMenuItem(app: ElectronApplication): Promise<vo
   return clickFileMenuItemWhoseLabelStartsWith(app, "Open Project");
 }
 
+// CT-258: drives the real window close (the path the save-on-close guard
+// intercepts), exactly as the user clicking the window's close button would.
+export function triggerMainWindowClose(app: ElectronApplication): Promise<void> {
+  return app.evaluate(({ BrowserWindow }) => {
+    const isMainUrl = (url: string): boolean =>
+      url !== "" &&
+      url !== "about:blank" &&
+      !url.startsWith("devtools://") &&
+      !url.includes("splash");
+    const window = BrowserWindow.getAllWindows().find((candidate) =>
+      isMainUrl(candidate.webContents.getURL()),
+    );
+    if (!window) throw new Error("No main window found in the main process");
+    window.close();
+  });
+}
+
 export function readAppNameAndVersion(
   app: ElectronApplication,
 ): Promise<AppNameAndVersion> {

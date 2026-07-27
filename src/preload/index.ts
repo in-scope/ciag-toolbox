@@ -136,6 +136,8 @@ const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
+const MENU_CLOSE_REQUESTED_CHANNEL = "menu:close-requested";
+const APP_CONFIRM_CLOSE_CHANNEL = "app:confirm-close";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
 const THEME_CHANGED_CHANNEL = "theme:changed";
 const PYTHON_ENVIRONMENT_GET_CHANNEL = "python-environment:get";
@@ -345,6 +347,18 @@ function subscribeToAboutMenuEvent(
   return subscribeToMenuChannel(MENU_ABOUT_CHANNEL, listener);
 }
 
+// CT-258: main intercepts the window close event and asks the renderer; the
+// renderer answers with confirmWindowClose once (or when the user decides).
+function subscribeToWindowCloseRequestedEvent(
+  listener: MenuEventListener,
+): UnsubscribeMenuListener {
+  return subscribeToMenuChannel(MENU_CLOSE_REQUESTED_CHANNEL, listener);
+}
+
+function confirmWindowCloseThroughMainProcess(): Promise<void> {
+  return ipcRenderer.invoke(APP_CONFIRM_CLOSE_CHANNEL) as Promise<void>;
+}
+
 function subscribeToPythonEnvironmentMenuEvent(
   listener: MenuEventListener,
 ): UnsubscribeMenuListener {
@@ -477,6 +491,8 @@ const apiBridge = {
   onMenuAbout: subscribeToAboutMenuEvent,
   onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
+  onWindowCloseRequested: subscribeToWindowCloseRequestedEvent,
+  confirmWindowClose: confirmWindowCloseThroughMainProcess,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
   pickUserScriptFile: pickUserScriptFileThroughMainProcess,
