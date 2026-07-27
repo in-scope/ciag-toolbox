@@ -1,16 +1,22 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
 import type { FixtureSamplePixel } from "./fixtures/fixture-manifest";
+import { applyScopeFieldset } from "./support/apply-scope-control";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
+import { operationRegionPlaceholder, selectOperationRegionButton } from "./support/operation-region-picker";
 import {
+  activateRegionTool,
   applyOperationInPlace,
+  drawInspectionRoiBetweenPixels,
+  ensureRegionToolInactive,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
   expectPixelReadoutToEqual,
   loadFixtureAsStack,
   openOperation,
+  operationPanel,
   selectPanel,
 } from "./support/page-objects";
 
@@ -19,6 +25,11 @@ import {
 // value multiplies by 16; the data type stays the integer container type (uint16, not
 // promoted to float); and a History entry records the shift amount. Numbers come from the
 // fixture manifest (multiband-12bit.tif), not hardcoded, so a fixture change updates once.
+//
+// CT-243: Bit Shift no longer offers a Region of interest scope (crop first instead).
+// The panel must show neither the "Apply to" scope selector nor the region-picker
+// affordance, and the shift must land on pixels OUTSIDE a previously drawn
+// Region-tool box, proving the operation always applies to the whole stack.
 
 const PANEL = 1;
 const BIT_SHIFT = "Bit Shift";
@@ -53,14 +64,18 @@ test.afterAll(async () => {
   await closeToolboxApp(launched);
 });
 
-test("Bit Shift by 4 multiplies a known pixel's true value by 16", async () => {
+test("Bit Shift by 4 multiplies a known pixel's true value by 16, including outside a drawn Region-tool box", async () => {
   await expectActiveBandReadoutEquals(TOP_LEFT, activeBandValueOf(TOP_LEFT));
   await expectActiveBandReadoutEquals(BOTTOM_RIGHT, activeBandValueOf(BOTTOM_RIGHT));
 
+  await drawRegionToolBoxAroundTopLeftCorner();
+
   await openOperation(launched.window, BIT_SHIFT);
+  await expectBitShiftPanelOffersNoScopeOrRegionControls();
   await applyOperationInPlace(launched.window, BIT_SHIFT);
 
   await expectActiveBandReadoutEquals(TOP_LEFT, activeBandValueOf(TOP_LEFT) * SHIFT_MULTIPLIER);
+  // BOTTOM_RIGHT sits outside the drawn box: the shift applies to the whole stack.
   await expectActiveBandReadoutEquals(BOTTOM_RIGHT, activeBandValueOf(BOTTOM_RIGHT) * SHIFT_MULTIPLIER);
 });
 
@@ -78,6 +93,26 @@ test("History records the bit-shift amount", async () => {
     detailSubstrings: [`+${DEFAULT_SHIFT_AMOUNT}`],
   });
 });
+
+async function drawRegionToolBoxAroundTopLeftCorner(): Promise<void> {
+  await activateRegionTool(launched.window);
+  await drawInspectionRoiBetweenPixels(
+    launched.window,
+    PANEL,
+    { x: TOP_LEFT.x, y: TOP_LEFT.y },
+    { x: TOP_LEFT.x + 1, y: TOP_LEFT.y + 1 },
+    DIMENSIONS,
+  );
+  await ensureRegionToolInactive(launched.window);
+}
+
+async function expectBitShiftPanelOffersNoScopeOrRegionControls(): Promise<void> {
+  const page = launched.window;
+  await expect(operationPanel(page, BIT_SHIFT)).toBeVisible();
+  await expect(applyScopeFieldset(page, BIT_SHIFT)).toHaveCount(0);
+  await expect(selectOperationRegionButton(page, BIT_SHIFT)).toHaveCount(0);
+  await expect(operationRegionPlaceholder(page, BIT_SHIFT)).toHaveCount(0);
+}
 
 async function expectActiveBandReadoutEquals(
   pixel: FixtureSamplePixel,
