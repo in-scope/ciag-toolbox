@@ -2,7 +2,18 @@ import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent, type WheelEvent } from "react";
 
 import { useDebouncedBandSelection } from "@/components/use-debounced-band-selection";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -51,6 +62,7 @@ export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.El
       {props.onRemoveBand ? (
         <RemoveBandButton
           bandNumber={displayedBandIndex + 1}
+          bandCount={props.bandCount}
           disabled={props.bandCount <= 1}
           onRemove={() => props.onRemoveBand?.(displayedBandIndex)}
         />
@@ -61,11 +73,27 @@ export function ViewportBandNavigator(props: ViewportBandNavigatorProps): JSX.El
 
 interface RemoveBandButtonProps {
   bandNumber: number;
+  bandCount: number;
   disabled: boolean;
   onRemove: () => void;
 }
 
+// Band removal is irreversible (there is no undo), so the trash button opens a
+// confirmation dialog (CT-254); the existing removal path runs only on confirm.
 function RemoveBandButton(props: RemoveBandButtonProps): JSX.Element {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>{buildRemoveBandTriggerButton(props)}</AlertDialogTrigger>
+      <RemoveBandConfirmationDialogContent
+        bandNumber={props.bandNumber}
+        bandCount={props.bandCount}
+        onConfirmRemove={props.onRemove}
+      />
+    </AlertDialog>
+  );
+}
+
+function buildRemoveBandTriggerButton(props: RemoveBandButtonProps): JSX.Element {
   return (
     <Button
       type="button"
@@ -75,10 +103,45 @@ function RemoveBandButton(props: RemoveBandButtonProps): JSX.Element {
       title={`Remove band ${props.bandNumber}`}
       className="size-7 shrink-0 text-destructive hover:text-destructive"
       disabled={props.disabled}
-      onClick={props.onRemove}
     >
       <Trash2 />
     </Button>
+  );
+}
+
+interface RemoveBandConfirmationDialogContentProps {
+  bandNumber: number;
+  bandCount: number;
+  onConfirmRemove: () => void;
+}
+
+function RemoveBandConfirmationDialogContent(
+  props: RemoveBandConfirmationDialogContentProps,
+): JSX.Element {
+  return (
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{`Remove band ${props.bandNumber}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {`Band ${props.bandNumber} of ${props.bandCount} will be removed from the stack. This cannot be undone.`}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <RemoveBandConfirmationDialogFooter onConfirmRemove={props.onConfirmRemove} />
+    </AlertDialogContent>
+  );
+}
+
+function RemoveBandConfirmationDialogFooter(props: { onConfirmRemove: () => void }): JSX.Element {
+  return (
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancel</AlertDialogCancel>
+      <AlertDialogAction
+        className={buttonVariants({ variant: "destructive" })}
+        onClick={props.onConfirmRemove}
+      >
+        Remove band
+      </AlertDialogAction>
+    </AlertDialogFooter>
   );
 }
 

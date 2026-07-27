@@ -19,8 +19,28 @@ export function removeBandButton(page: Page, bandNumber: number): Locator {
   return page.getByRole("button", { name: `Remove band ${bandNumber}` });
 }
 
+// CT-254: the trash button no longer removes directly; it opens a confirmation
+// AlertDialog ("Remove band N?") and the removal runs only after the destructive
+// "Remove band" button is confirmed. Cancel (button or Esc) leaves the stack untouched.
+export function removeBandConfirmationDialog(page: Page): Locator {
+  return page.getByRole("alertdialog", { name: /^Remove band \d+\?$/ });
+}
+
 export async function removeDisplayedBand(page: Page, bandNumber: number): Promise<void> {
   await removeBandButton(page, bandNumber).click();
+  await confirmPendingBandRemoval(page);
+}
+
+export async function confirmPendingBandRemoval(page: Page): Promise<void> {
+  const dialog = removeBandConfirmationDialog(page);
+  await dialog.getByRole("button", { name: "Remove band", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+export async function cancelPendingBandRemoval(page: Page): Promise<void> {
+  const dialog = removeBandConfirmationDialog(page);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
 }
 
 export function subsetBandsToggleButton(page: Page): Locator {

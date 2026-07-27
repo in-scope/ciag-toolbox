@@ -754,6 +754,10 @@ function clearSelectionWhenClickIsOutsideAnyCell(
   clearSelection: () => void,
 ): void {
   const targetElement = event.target as HTMLElement;
+  // Portaled overlays owned by grid content (e.g. the remove-band confirmation
+  // dialog) live at document.body but bubble clicks through the React tree, so
+  // only a click whose DOM target sits inside the stage counts as a stage click.
+  if (!event.currentTarget.contains(targetElement)) return;
   if (targetElement.closest('[role="gridcell"]')) return;
   clearSelection();
 }

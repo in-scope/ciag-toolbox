@@ -117,7 +117,10 @@ export {
 } from "./panel-header-label";
 export {
   removeBandButton,
+  removeBandConfirmationDialog,
   removeDisplayedBand,
+  confirmPendingBandRemoval,
+  cancelPendingBandRemoval,
   subsetBandsToggleButton,
   subsetBandsEditor,
   openSubsetBandsEditor,
