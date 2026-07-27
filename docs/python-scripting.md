@@ -62,7 +62,26 @@ Every return must be numeric and finite: a result containing NaN or Inf is rejec
 
 ## Bundled packages
 
-The bundled runtime ships numpy, scipy, and scikit-image (import `skimage`). pandas is not bundled; if your tool needs it, use your own Python environment (below).
+The bundled runtime is CPython 3.12 with the packages below preinstalled, so a script can import any of them with no setup. The set and versions come from the sample analysis environments collected in July 2026; where a sample pin could not run on this runtime (Python 3.12 with numpy 2), the nearest compatible release is bundled instead, noted per row. Anything not listed here needs your own Python environment (below).
+
+| Package | Version | Import as | Note |
+| --- | --- | --- | --- |
+| numpy | 2.5.0 | `numpy` | |
+| scipy | 1.18.0 | `scipy` | |
+| scikit-image | 0.26.0 | `skimage` | |
+| scikit-learn | 1.8.0 | `sklearn` | |
+| pandas | 2.3.3 | `pandas` | bumped from the sample 1.5.2, which needs numpy 1 |
+| matplotlib | 3.10.8 | `matplotlib` | renders in memory (Agg); the sandbox blocks saving figures to disk |
+| seaborn | 0.13.2 | `seaborn` | bumped from the sample 0.11.2, which needs pandas 1 |
+| opencv-python | 4.13.0.92 | `cv2` | bumped from the sample 4.9.0.80, which needs numpy 1 |
+| pillow | 12.1.1 | `PIL` | |
+| sympy | 1.14.0 | `sympy` | |
+| spectral | 0.25 | `spectral` | bumped from the sample 0.22.4, which predates numpy 2 |
+| tifffile | 2024.8.30 | `tifffile` | |
+| pyvips | 3.1.1 | `pyvips` | ships with its own libvips binary |
+| joblib | 1.5.3 | `joblib` | |
+| requests | 2.32.5 | `requests` | importable, but the sandbox blocks network access in bundled mode |
+| pyyaml | 6.0.3 | `yaml` | |
 
 ## The sandbox (bundled mode)
 

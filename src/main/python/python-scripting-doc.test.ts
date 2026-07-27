@@ -17,6 +17,17 @@ import {
 const REPOSITORY_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 const DOCS_DIRECTORY = join(REPOSITORY_ROOT, "docs");
 
+interface BundledRuntimePackage {
+  readonly distribution: string;
+  readonly version: string;
+  readonly importName: string;
+}
+
+function readBundledRuntimePackageManifest(): ReadonlyArray<BundledRuntimePackage> {
+  const manifestPath = join(REPOSITORY_ROOT, "scripts", "python-runtime-packages.json");
+  return (JSON.parse(readFileSync(manifestPath, "utf-8")) as { packages: BundledRuntimePackage[] }).packages;
+}
+
 const TEMPLATE_RELATIVE_PATHS = [
   "examples/weighting-template.py",
   "examples/selection-template.py",
@@ -61,10 +72,11 @@ describe("hosted scripting doc (docs/python-scripting.md)", () => {
     expect(text).toContain("height and width must match the source stack");
   });
 
-  it("documents the bundled package list, with pandas called out as absent", () => {
-    const text = readHostedScriptingDocLowercased();
-    expect(text).toContain("numpy, scipy, and scikit-image");
-    expect(text).toContain("pandas is not bundled");
+  it("documents every bundled package at its pinned version and import name", () => {
+    const text = readHostedScriptingDoc();
+    for (const entry of readBundledRuntimePackageManifest()) {
+      expect(text).toContain(`| ${entry.distribution} | ${entry.version} | \`${entry.importName}\` |`);
+    }
   });
 
   it("documents the required top-level main.py entry for .zip tools", () => {

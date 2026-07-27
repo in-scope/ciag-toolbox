@@ -27,6 +27,20 @@ export const PYTHON_SANDBOX_ALLOWED_IMPORT_ROOTS = [
   "numpy",
   "scipy",
   "skimage",
+  "sklearn",
+  "pandas",
+  "matplotlib",
+  "mpl_toolkits",
+  "seaborn",
+  "cv2",
+  "PIL",
+  "sympy",
+  "spectral",
+  "tifffile",
+  "pyvips",
+  "joblib",
+  "requests",
+  "yaml",
   "math",
   "cmath",
   "statistics",
@@ -96,12 +110,25 @@ def _sandbox_reject(attempted_capability):
     )
 
 
+# pyvips dlopens libvips and sklearn's Windows _distributor_init preloads
+# vcomp140.dll via ctypes (denied audit events once the hook is live), and
+# matplotlib builds and reads its font cache under the user profile (outside
+# the readable prefixes), so those MUST finish loading before the hook
+# installs. The rest of the curated stack loads cleanly under the hook and
+# stays lazy. A broken optional package must never take down every sandboxed
+# run, hence the broad excepts.
 def _sandbox_preimport_curated_stack():
-    for module_name in ("numpy", "scipy", "skimage"):
+    for module_name in ("numpy", "scipy", "skimage", "sklearn", "pyvips"):
         try:
             __import__(module_name)
-        except ImportError:
+        except Exception:
             pass
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot
+    except Exception:
+        pass
 
 
 def _sandbox_import_initiator_filename():

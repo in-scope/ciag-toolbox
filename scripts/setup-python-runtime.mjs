@@ -1,11 +1,12 @@
 // Installs the bundled Python runtime for development into repo-local .python/.
 // Downloads a pinned python-build-standalone CPython release (tag + SHA256 verified),
-// extracts it, and installs the curated scientific stack (numpy + scipy + scikit-image;
-// pandas is deliberately NOT included - pandas users take own-environment mode).
+// extracts it, and installs the curated scientific stack pinned in
+// scripts/python-runtime-packages.json (the single source of truth also enforced
+// by the docs and worker tests).
 // Packaged builds ship this same directory via electron-builder extraResources.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,10 +14,18 @@ import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const RUNTIME_INSTALL_DIR = resolve(PROJECT_ROOT, ".python");
+const RUNTIME_PACKAGES_MANIFEST_PATH = resolve(PROJECT_ROOT, "scripts", "python-runtime-packages.json");
 
 const PINNED_RELEASE_TAG = "20260623";
 const PINNED_CPYTHON_VERSION = "3.12.13";
-const PINNED_CURATED_PACKAGES = ["numpy==2.5.0", "scipy==1.18.0", "scikit-image==0.26.0"];
+
+function pinnedCuratedPackageSpecifiers() {
+  const manifest = JSON.parse(readFileSync(RUNTIME_PACKAGES_MANIFEST_PATH, "utf-8"));
+  return manifest.packages.map((entry) => {
+    const extras = entry.pipExtras ? `[${entry.pipExtras}]` : "";
+    return `${entry.distribution}${extras}==${entry.version}`;
+  });
+}
 
 const PINNED_RUNTIME_DOWNLOADS = {
   "win32-x64": {
@@ -88,8 +97,9 @@ function bundledInterpreterPath() {
 }
 
 function installCuratedPackagesIntoRuntime(interpreterPath) {
-  console.log(`Installing curated packages: ${PINNED_CURATED_PACKAGES.join(", ")}`);
-  execFileSync(interpreterPath, ["-m", "pip", "install", "--no-input", ...PINNED_CURATED_PACKAGES], {
+  const specifiers = pinnedCuratedPackageSpecifiers();
+  console.log(`Installing curated packages: ${specifiers.join(", ")}`);
+  execFileSync(interpreterPath, ["-m", "pip", "install", "--no-input", ...specifiers], {
     stdio: "inherit",
   });
 }
