@@ -2,6 +2,7 @@
 // band-major little-endian float32 byte chunks (see
 // src/shared/chunked-user-script-run-protocol.ts) into one Float32Array per
 // band. Pure so the chunk-boundary handling is unit-testable without IPC.
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 
 export interface CubeResultChunkAssembler {
   readonly append: (bytes: Uint8Array) => void;
@@ -36,7 +37,9 @@ function allocateBandsForShapeOrThrow(
   if (bandCount * height * width * Float32Array.BYTES_PER_ELEMENT !== totalBytes) {
     throw new Error("The script result byte count did not match its stack shape.");
   }
-  return Array.from({ length: bandCount }, () => new Float32Array(height * width));
+  // Band-sized allocations on the run path go through the mapped allocator so
+  // a pool-edge failure keeps the locked error vocabulary (CT-241).
+  return Array.from({ length: bandCount }, () => allocateFloat32ArrayOrThrow(height * width));
 }
 
 function assertShapeDimensionsArePositiveIntegers(

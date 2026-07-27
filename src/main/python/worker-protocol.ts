@@ -1,7 +1,11 @@
 // Typed IPC protocol between the TS/Node worker harness and the Python subprocess.
-// Every message travels as a frame: a 4-byte little-endian uint32 payload length
-// followed by that many bytes of UTF-8 JSON. Length-prefixed framing (rather than
-// newline-delimited) so later stories can add raw binary payload frames (CT-208b).
+// Every JSON message travels as a frame: a 4-byte little-endian uint32 payload
+// length followed by that many bytes of UTF-8 JSON. Length-prefixed framing
+// (rather than newline-delimited) so later stories can add raw binary payload
+// frames (CT-208b). The raw CUBE frame alone carries an 8-byte little-endian
+// uint64 length (CT-241): a uint32 prefix caps the cube at 4 GiB, and the
+// scale10 25-band subset is already a 5 GB float32 cube. JSON frames stay
+// 4-byte - none of them can legally approach 4 GiB (see the decoder notes).
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -69,31 +73,40 @@ export class MalformedWorkerResponseError extends Error {
 
 const FRAME_LENGTH_HEADER_BYTES = 4;
 const MAX_FRAME_PAYLOAD_BYTES = 0xffff_ffff;
+const CUBE_FRAME_LENGTH_HEADER_BYTES = 8;
 
-// The frame prefix of a payload that is written as multiple segments (the
-// CT-219g cube path): a reference-scale cube cannot exist as one Buffer, so
-// the sender writes this prefix followed by each segment.
-export function encodeFrameLengthPrefix(payloadByteLength: number): Buffer {
+function encodeJsonFrameLengthPrefix(payloadByteLength: number): Buffer {
   if (payloadByteLength > MAX_FRAME_PAYLOAD_BYTES) {
-    throw new Error("The stack is too large to send to the script worker (4 GB frame limit).");
+    throw new Error("The message is too large to send to the script worker (4 GB frame limit).");
   }
   const header = Buffer.alloc(FRAME_LENGTH_HEADER_BYTES);
   header.writeUInt32LE(payloadByteLength, 0);
   return header;
 }
 
-function prefixWithLittleEndianByteLength(payload: Buffer): Buffer {
-  return Buffer.concat([encodeFrameLengthPrefix(payload.length), payload]);
+// The 8-byte prefix of the raw cube payload, which is written as multiple
+// segments (the CT-219g cube path): a reference-scale cube cannot exist as one
+// Buffer, so the sender writes this prefix followed by each segment. CT-241
+// widened it from uint32 - a 4 GiB frame cap starved the 5 GB scale10 subset
+// cube. Mirror any change in worker-bootstrap.ts's read_cube_frame_payload.
+export function encodeCubeFrameLengthPrefix(payloadByteLength: number): Buffer {
+  if (!Number.isSafeInteger(payloadByteLength) || payloadByteLength < 0) {
+    throw new Error("The stack payload byte length is not a valid frame size.");
+  }
+  const header = Buffer.alloc(CUBE_FRAME_LENGTH_HEADER_BYTES);
+  header.writeBigUInt64LE(BigInt(payloadByteLength), 0);
+  return header;
 }
 
 export function encodeWorkerRequestFrame(request: RunUserScriptRequest): Buffer {
-  return prefixWithLittleEndianByteLength(Buffer.from(JSON.stringify(request), "utf8"));
+  const payload = Buffer.from(JSON.stringify(request), "utf8");
+  return Buffer.concat([encodeJsonFrameLengthPrefix(payload.length), payload]);
 }
 
-// The raw cube frame that follows a request whose header declares a cube; it uses the
-// same length-prefixed framing so the Python side reads it exactly like a JSON frame.
+// The raw cube frame that follows a request whose header declares a cube; the
+// Python side reads its 8-byte length then the float32 bytes.
 export function encodeRawBinaryFrame(payload: Buffer): Buffer {
-  return prefixWithLittleEndianByteLength(payload);
+  return Buffer.concat([encodeCubeFrameLengthPrefix(payload.length), payload]);
 }
 
 function parseWorkerResponsePayload(payload: Buffer): PythonWorkerResponse {

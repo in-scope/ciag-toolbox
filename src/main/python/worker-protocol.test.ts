@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  encodeCubeFrameLengthPrefix,
   encodeRawBinaryFrame,
   encodeWorkerRequestFrame,
   MalformedWorkerResponseError,
@@ -51,11 +52,23 @@ describe("encodeWorkerRequestFrame", () => {
 });
 
 describe("encodeRawBinaryFrame", () => {
-  it("length-prefixes a raw payload so it decodes like any other frame", () => {
+  it("prefixes a raw cube payload with its 8-byte little-endian length", () => {
     const payload = Buffer.from([1, 2, 3, 4, 5]);
     const frame = encodeRawBinaryFrame(payload);
-    expect(frame.readUInt32LE(0)).toBe(payload.length);
-    expect(frame.subarray(4)).toEqual(payload);
+    expect(frame.readBigUInt64LE(0)).toBe(BigInt(payload.length));
+    expect(frame.subarray(8)).toEqual(payload);
+  });
+});
+
+describe("encodeCubeFrameLengthPrefix", () => {
+  it("encodes a length past the uint32 cap (the 5 GB scale10 subset cube)", () => {
+    const fiveGigabytes = 5_000_000_000;
+    expect(encodeCubeFrameLengthPrefix(fiveGigabytes).readBigUInt64LE(0)).toBe(BigInt(fiveGigabytes));
+  });
+
+  it("rejects non-integer and negative lengths as harness bugs", () => {
+    expect(() => encodeCubeFrameLengthPrefix(-1)).toThrow(/not a valid frame size/);
+    expect(() => encodeCubeFrameLengthPrefix(1.5)).toThrow(/not a valid frame size/);
   });
 });
 

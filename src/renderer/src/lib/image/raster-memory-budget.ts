@@ -29,9 +29,9 @@ const TRANSIENT_ALLOCATION_SAFETY_MARGIN_BYTES = 2_500_000_000;
 export const USABLE_RASTER_MEMORY_BUDGET_BYTES =
   RENDERER_ARRAY_BUFFER_POOL_BYTES - TRANSIENT_ALLOCATION_SAFETY_MARGIN_BYTES;
 
-export const OPERATION_MEMORY_REFUSAL_MESSAGE =
-  "There is not enough memory for this operation with the current panels open. " +
-  "Close panels you no longer need, use a band-wise scope, or crop the stack and try again.";
+// The operation refusal copy is shared with the main process's user-script
+// run gate (CT-241), so the string itself lives in src/shared.
+export { OPERATION_MEMORY_REFUSAL_MESSAGE } from "@shared/memory-refusal-copy";
 
 export const OPEN_IMAGES_MEMORY_REFUSAL_MESSAGE =
   "There is not enough memory to open these files with the current panels open. " +

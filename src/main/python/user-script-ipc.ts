@@ -1,3 +1,4 @@
+import { totalmem } from "node:os";
 import { basename } from "node:path";
 
 import { BrowserWindow, ipcMain } from "electron";
@@ -22,7 +23,8 @@ import {
   runUserScriptInPythonSubprocess,
   type PythonWorkerOutcome,
 } from "./python-worker";
-import { wallClockTimeoutMsForUserScriptResultKind } from "./user-script-timeouts";
+import { describeUserScriptRunMemoryRefusalOrNull } from "./user-script-run-memory";
+import { wallClockTimeoutMsForUserScriptRun } from "./user-script-timeouts";
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
@@ -92,6 +94,14 @@ async function handleBeginUserScriptRun(
   event: Electron.IpcMainInvokeEvent,
   request: UserScriptRunBeginRequest,
 ): Promise<UserScriptRunBeginResult> {
+  // CT-241: refuse a run whose worker memory cannot fit the machine BEFORE the
+  // import dialog shows or any cube bytes spool (no session, no temp file).
+  const memoryRefusal = describeUserScriptRunMemoryRefusalOrNull(
+    request.cube,
+    request.resultKind,
+    totalmem(),
+  );
+  if (memoryRefusal !== null) return { status: "failed", message: memoryRefusal };
   try {
     const selection = resolveInterpreterSelectionOrThrow();
     const run = await prepareUserScriptInputOrCancel(findWindowForIpcEvent(event), request.source);
@@ -210,7 +220,7 @@ function runExecutableUserScriptInSubprocess(
     resultKind: run.resultKind,
     cubeResultSpoolPath: run.cubeResultSpoolPath,
     sandbox: run.sandbox,
-    timeoutMs: wallClockTimeoutMsForUserScriptResultKind(run.resultKind),
+    timeoutMs: wallClockTimeoutMsForUserScriptRun(run.resultKind, run.cube.totalByteLength),
   });
 }
 

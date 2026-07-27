@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   USER_SCRIPT_CUBE_WALL_CLOCK_TIMEOUT_MS,
+  USER_SCRIPT_TRANSFER_TIMEOUT_MS_PER_GIB,
   USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS,
 } from "./user-script-timeouts";
 
@@ -83,8 +84,16 @@ describe("hosted scripting doc (docs/python-scripting.md)", () => {
     const text = readHostedScriptingDoc();
     const valueSeconds = USER_SCRIPT_WALL_CLOCK_TIMEOUT_MS / 1000;
     const cubeSeconds = USER_SCRIPT_CUBE_WALL_CLOCK_TIMEOUT_MS / 1000;
-    expect(text).toContain(`Band weighting and band selection runs: ${valueSeconds} seconds.`);
-    expect(text).toContain(`Custom transform (cube) runs: ${cubeSeconds} seconds.`);
+    const perGibSeconds = USER_SCRIPT_TRANSFER_TIMEOUT_MS_PER_GIB / 1000;
+    expect(text).toContain(`${perGibSeconds} seconds per gibibyte`);
+    expect(text).toContain(`Band weighting and band selection runs: ${valueSeconds} seconds, plus`);
+    expect(text).toContain(`Custom transform (cube) runs: ${cubeSeconds} seconds, plus`);
+  });
+
+  it("documents the up-front memory refusal for oversized stacks", () => {
+    expect(readHostedScriptingDocLowercased()).toContain(
+      "would not fit in the machine's memory is refused before any data moves",
+    );
   });
 
   it("documents the own-environment opt-in as trusted, unsandboxed, no installs", () => {

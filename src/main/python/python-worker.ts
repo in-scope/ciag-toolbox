@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { EncodedCubePayload } from "./cube-payload";
 import { PYTHON_WORKER_BOOTSTRAP_SOURCE } from "./worker-bootstrap";
 import {
-  encodeFrameLengthPrefix,
+  encodeCubeFrameLengthPrefix,
   encodeWorkerRequestFrame,
   WorkerResponseFrameDecoder,
   type CubeResultShape,
@@ -107,7 +107,7 @@ async function writeCubePayloadAsRawFrame(
   cube: EncodedCubePayload | null,
 ): Promise<void> {
   if (cube === null) return;
-  await writeToStreamAwaitingFlush(stdin, encodeFrameLengthPrefix(cube.totalByteLength));
+  await writeToStreamAwaitingFlush(stdin, encodeCubeFrameLengthPrefix(cube.totalByteLength));
   for await (const segment of cube.readSegments()) {
     await writeToStreamAwaitingFlush(stdin, segment);
   }

@@ -2,7 +2,8 @@
 // passed to the interpreter via `-c`. This shim is product infrastructure (framing,
 // cube reconstruction, dispatch, error capture); only the formula/script it executes is
 // user Python. It must mirror the frame layout in worker-protocol.ts exactly: the JSON
-// request frame is followed by a raw little-endian float32 cube frame when the request
+// request frame (4-byte uint32 length) is followed by a raw little-endian float32 cube
+// frame (8-byte uint64 length, CT-241 - a uint32 caps the cube at 4 GiB) when the request
 // header declares a cube. A resultKind "cube" run WRITES its raw little-endian float32
 // result (band-major) to the request's cubeResultSpoolPath file and responds with ONE
 // JSON completed frame naming the shape and spooled byte length (CT-214 as amended by
@@ -28,6 +29,20 @@ def read_frame_payload(stream):
     if len(header) < 4:
         return None
     (length,) = struct.unpack("<I", header)
+    payload = stream.read(length)
+    if len(payload) < length:
+        return None
+    return payload
+
+
+def read_cube_frame_payload(stream):
+    # The raw cube frame alone carries an 8-byte little-endian length (CT-241):
+    # a uint32 prefix caps the cube at 4 GiB and the scale10 subset is 5 GB.
+    # Mirrors encodeCubeFrameLengthPrefix in worker-protocol.ts.
+    header = stream.read(8)
+    if len(header) < 8:
+        return None
+    (length,) = struct.unpack("<Q", header)
     payload = stream.read(length)
     if len(payload) < length:
         return None
@@ -215,7 +230,7 @@ def read_cube_if_present(request, stream):
     header = request.get("cube") if isinstance(request, dict) else None
     if header is None:
         return None
-    cube_bytes = read_frame_payload(stream)
+    cube_bytes = read_cube_frame_payload(stream)
     if cube_bytes is None:
         raise RuntimeError("The cube payload frame was missing.")
     return reconstruct_cube_from_frame(cube_bytes, header)

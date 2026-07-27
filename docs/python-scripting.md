@@ -77,8 +77,12 @@ A script that exceeds these is stopped and surfaced as an error.
 
 ## Wall-clock limits
 
-- Band weighting and band selection runs: 30 seconds.
-- Custom transform (cube) runs: 120 seconds.
+Each limit grows with the stack: on top of its base, a run gets 60 seconds per gibibyte of stack data for each direction the stack crosses (in for weighting/selection runs; in and out for custom transform runs).
+
+- Band weighting and band selection runs: 30 seconds, plus the transfer allowance.
+- Custom transform (cube) runs: 120 seconds, plus the transfer allowance in each direction.
+
+A run whose stack would not fit in the machine's memory is refused before any data moves.
 
 ## Your own Python environment (opt-in)
 

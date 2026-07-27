@@ -1,3 +1,5 @@
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
+
 import type { BandSelectionEditingState, BandSelectionPreset } from "./band-selection";
 
 // CT-210: pure helpers shared by the band-selection editor. A custom formula/tool
@@ -18,7 +20,7 @@ export function flattenBandMatrixToFloat32(
   width: number,
   height: number,
 ): Float32Array {
-  const output = new Float32Array(width * height);
+  const output = allocateFloat32ArrayOrThrow(width * height);
   for (let row = 0; row < height; row += 1) {
     copyBandRowIntoFloat32(output, rows[row] ?? [], row, width);
   }

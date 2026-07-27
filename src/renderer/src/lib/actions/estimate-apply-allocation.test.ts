@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
 import { DENOISE_ACTION } from "./denoise-action";
 import {
   estimateApplyAllocationBytesForAction,
@@ -68,6 +69,12 @@ describe("estimateApplyAllocationBytesForAction", () => {
         FLOAT32_CUBE_BYTES,
       );
     }
+  });
+
+  it("bills the custom transform a source-band-count float32 cube (its output band count is only known after the Python runs)", () => {
+    expect(estimateApplyAllocationBytesForAction(CUSTOM_TRANSFORM_ACTION, uint16Source(), {})).toBe(
+      FLOAT32_CUBE_BYTES,
+    );
   });
 
   it("bills normalize a float32 cube for scaling methods and the source bytes for clip-absolute", () => {

@@ -1,3 +1,4 @@
+import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
 import type { UserScriptRunCubeInput } from "./run-user-script-chunked";
@@ -25,7 +26,12 @@ function rasterBandAsFloat32(raster: RasterImage, bandIndex: number): Float32Arr
   return toFloat32Band(band);
 }
 
+// The per-band conversion is a band-sized allocation on a run path, so it goes
+// through the mapped allocator: a pool-edge failure surfaces the in-vocabulary
+// "Not enough memory" message instead of the raw allocator string (CT-241).
 function toFloat32Band(band: RasterTypedArray): Float32Array {
   if (band instanceof Float32Array) return band;
-  return Float32Array.from(band);
+  const converted = allocateFloat32ArrayOrThrow(band.length);
+  converted.set(band);
+  return converted;
 }
