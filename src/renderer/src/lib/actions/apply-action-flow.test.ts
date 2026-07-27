@@ -320,6 +320,7 @@ function buildRenderingStateWithHistory(
   return {
     normalizationEnabled: false,
     floatDisplayUsesFixedUnitWindow: false,
+    viewChannelsSeparately: false,
     lastAppliedOperationLabel: null,
     selectedBandIndex: 0,
     operationHistory: history,

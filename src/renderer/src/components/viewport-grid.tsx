@@ -144,6 +144,8 @@ function renderViewportCellViewport(
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
       floatDisplayUsesFixedUnitWindow={settings.floatDisplayUsesFixedUnitWindow}
       onToggleFixedUnitFloatView={settings.handleToggleFixedUnitFloatView}
+      viewChannelsSeparately={settings.viewChannelsSeparately}
+      onToggleViewChannelsSeparately={settings.handleToggleViewChannelsSeparately}
       selectedBandIndex={settings.selectedBandIndex}
       onSelectBandIndex={settings.handleSelectBandIndex}
       onRemoveBand={settings.handleRemoveBand}
@@ -181,6 +183,8 @@ interface ViewportCellInteractionSettings {
   handleToggleNormalizedViewing: () => void;
   floatDisplayUsesFixedUnitWindow: boolean;
   handleToggleFixedUnitFloatView: () => void;
+  viewChannelsSeparately: boolean;
+  handleToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
   handleSelectBandIndex: (bandIndex: number) => void;
   handleRemoveBand: (bandIndex: number) => void;
@@ -276,6 +280,18 @@ function useViewportCellInteractionSettings(
       }),
     [cellIndex, renderingState, setRenderingState],
   );
+  // CT-248: display-only channel view for a colour photo. Both directions land
+  // on band 0 so entering starts at Red and leaving restores the composite's
+  // untouched readout state exactly as it was before the toggle.
+  const handleToggleViewChannelsSeparately = useCallback(
+    () =>
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        viewChannelsSeparately: !renderingState.viewChannelsSeparately,
+        selectedBandIndex: 0,
+      }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   const handleSelectBandIndex = useCallback(
     (bandIndex: number) =>
       setRenderingState(cellIndex, { ...renderingState, selectedBandIndex: bandIndex }),
@@ -296,6 +312,8 @@ function useViewportCellInteractionSettings(
     handleToggleNormalizedViewing,
     floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
     handleToggleFixedUnitFloatView,
+    viewChannelsSeparately: renderingState.viewChannelsSeparately,
+    handleToggleViewChannelsSeparately,
     selectedBandIndex: renderingState.selectedBandIndex,
     handleSelectBandIndex,
     handleRemoveBand,

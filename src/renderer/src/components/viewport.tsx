@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
+import { Brackets, Contrast, FolderOpen, Layers, Link2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
@@ -8,6 +8,10 @@ import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import type { RasterImage } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import {
+  canViewCompositeChannelsSeparately,
+  resolveImageSourceForChannelView,
+} from "@/lib/image/composite-channel-view";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -53,6 +57,8 @@ interface ViewportProps {
   onToggleNormalizedViewing: () => void;
   floatDisplayUsesFixedUnitWindow: boolean;
   onToggleFixedUnitFloatView: () => void;
+  viewChannelsSeparately: boolean;
+  onToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
   onSelectBandIndex: (bandIndex: number) => void;
   onRemoveBand?: (bandIndex: number) => void;
@@ -71,7 +77,12 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const readoutContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
-  const imageSource = props.imageSource ?? null;
+  const compositeSource = props.imageSource ?? null;
+  const imageSource = resolveImageSourceForChannelView(
+    compositeSource,
+    props.viewChannelsSeparately,
+  );
+  const isChannelViewActive = imageSource !== compositeSource;
   const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
@@ -129,6 +140,9 @@ export function Viewport(props: ViewportProps): JSX.Element {
         showNormalizedViewingToggle={imageSource !== null}
         floatDisplayUsesFixedUnitWindow={props.floatDisplayUsesFixedUnitWindow}
         onToggleFixedUnitFloatView={props.onToggleFixedUnitFloatView}
+        showChannelViewToggle={canViewCompositeChannelsSeparately(compositeSource)}
+        channelViewEnabled={isChannelViewActive}
+        onToggleChannelView={props.onToggleViewChannelsSeparately}
         onClose={props.onClose ?? null}
         showCloseButton={imageSource !== null && Boolean(props.onClose)}
       />
@@ -149,7 +163,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
             bandCount={getMultiBandSourceBandCount(imageSource)}
             selectedBandIndex={props.selectedBandIndex}
             onSelectBandIndex={props.onSelectBandIndex}
-            onRemoveBand={props.onRemoveBand}
+            onRemoveBand={isChannelViewActive ? undefined : props.onRemoveBand}
           />
         ) : null}
         {imageSource === null ? <ViewportEmptyState onOpenImage={props.onOpenImage} /> : null}
@@ -209,6 +223,9 @@ interface ViewportHeaderStripProps {
   showNormalizedViewingToggle: boolean;
   floatDisplayUsesFixedUnitWindow: boolean;
   onToggleFixedUnitFloatView: () => void;
+  showChannelViewToggle: boolean;
+  channelViewEnabled: boolean;
+  onToggleChannelView: () => void;
   onClose: (() => void) | null;
   showCloseButton: boolean;
 }
@@ -238,6 +255,12 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
         <FixedUnitFloatViewToggleButton
           enabled={props.floatDisplayUsesFixedUnitWindow}
           onToggle={props.onToggleFixedUnitFloatView}
+        />
+      ) : null}
+      {props.showChannelViewToggle ? (
+        <ChannelViewToggleButton
+          enabled={props.channelViewEnabled}
+          onToggle={props.onToggleChannelView}
         />
       ) : null}
       {props.showCloseButton && props.onClose ? (
@@ -308,6 +331,35 @@ function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonPro
           onClick={stopPropagationThenToggle(props.onToggle)}
         >
           <Brackets className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// CT-248: a true-colour photo can be flipped into a display-only channel view
+// where its R/G/B scroll like a scientific stack. The button label names the
+// action each state offers, matching the display-only toggle family above.
+interface ChannelViewToggleButtonProps {
+  enabled: boolean;
+  onToggle: () => void;
+}
+
+function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Element {
+  const label = props.enabled ? "View color image" : "View channels separately";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
+          aria-label={label}
+          aria-pressed={props.enabled}
+          onClick={stopPropagationThenToggle(props.onToggle)}
+        >
+          <Layers className="size-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
