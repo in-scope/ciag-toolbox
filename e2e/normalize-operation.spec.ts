@@ -12,9 +12,11 @@ import {
   historyEntryCount,
   loadFixtureAsStack,
   openOperation,
+  operationPanel,
   selectActiveBandNumber,
   selectBandWiseScopeForBands,
   selectFullStackScope,
+  setOperationEnumParameter,
   toggleNormalizedViewing,
 } from "./support/page-objects";
 
@@ -34,6 +36,19 @@ import {
 
 const PANEL = 1;
 const NORMALIZE = "Normalize";
+
+// CT-250: the Normalize panel copy is Anna's wording; the exact strings are pinned here.
+const SCOPE_DESCRIPTION =
+  "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.";
+const METHOD_DESCRIPTION =
+  "Min-max scales by (value - min) / (max - min). Percentile clip does the same using the low and high percentile values, so sparse outliers do not flatten the image; the result spans 0 to 1 and values outside the percentile range clip to 0 and 1.";
+const METHOD_OPTION_LABELS = ["Min-max", "Percentile clip", "Clip by value"];
+const PERCENTILE_METHOD_VALUE = "robust-percentile";
+const PERCENTILE_FIELD_LABELS = ["Low percentile", "High percentile"];
+const PERCENTILE_FIELD_DESCRIPTIONS = ["Lower clip percentile.", "Upper clip percentile."];
+const CLIP_BY_VALUE_METHOD_VALUE = "clip-absolute";
+const CLIP_RANGE_DESCRIPTION =
+  "Values below the low value clip to it and values above the high value clip to it. The data type and in-range values are kept.";
 const FLOAT32 = "float32";
 const ALL_BANDS_RANGE = "1-3";
 const FULL_STACK_HISTORY_DETAIL = "full stack";
@@ -96,6 +111,37 @@ test("Normalize records the chosen scope and stays separate from the display-onl
 
   await expectNormalizedViewingToggleAddsNoHistory();
 });
+
+test("Normalize panel shows the CT-250 method labels and descriptions", async () => {
+  await openOperation(launched.window, NORMALIZE);
+  const panel = operationPanel(launched.window, NORMALIZE);
+
+  await expect(panel).toContainText(SCOPE_DESCRIPTION);
+  await expect(panel).toContainText(METHOD_DESCRIPTION);
+  await expect(panel.locator("select option")).toHaveText(METHOD_OPTION_LABELS);
+
+  await expectPercentileClipFieldsUseTheNewCopy(panel);
+  await expectClipByValueRangeUsesTheNewCopy(panel);
+});
+
+async function expectPercentileClipFieldsUseTheNewCopy(
+  panel: ReturnType<typeof operationPanel>,
+): Promise<void> {
+  await setOperationEnumParameter(launched.window, NORMALIZE, PERCENTILE_METHOD_VALUE);
+  for (const fieldLabel of PERCENTILE_FIELD_LABELS) {
+    await expect(panel.getByLabel(fieldLabel, { exact: true })).toBeVisible();
+  }
+  for (const fieldDescription of PERCENTILE_FIELD_DESCRIPTIONS) {
+    await expect(panel).toContainText(fieldDescription);
+  }
+}
+
+async function expectClipByValueRangeUsesTheNewCopy(
+  panel: ReturnType<typeof operationPanel>,
+): Promise<void> {
+  await setOperationEnumParameter(launched.window, NORMALIZE, CLIP_BY_VALUE_METHOD_VALUE);
+  await expect(panel).toContainText(CLIP_RANGE_DESCRIPTION);
+}
 
 test("Band-wise normalize records its band selection in History", async () => {
   await applyNormalizeOverAllBandsBandWise();

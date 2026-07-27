@@ -217,7 +217,7 @@ function allocateFloat64ArrayOrThrow(length: number): Float64Array {
   } catch {
     const megabytes = Math.ceil((length * Float64Array.BYTES_PER_ELEMENT) / (1024 * 1024));
     throw new RasterMemoryAllocationError(
-      `Not enough memory to allocate ${megabytes} MB for a robust full-stack normalize. ` +
+      `Not enough memory to allocate ${megabytes} MB for a percentile clip full-stack normalize. ` +
         `Free memory or normalize band-wise and try again.`,
     );
   }

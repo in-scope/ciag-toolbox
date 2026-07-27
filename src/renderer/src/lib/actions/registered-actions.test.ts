@@ -650,14 +650,14 @@ describe("NORMALIZE_DATA_ACTION", () => {
     expect(normalized[99]).toBe(1);
   });
 
-  it("records the robust variant and percentiles in the applied label (CT-107)", () => {
-    const robust = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
+  it("records the percentile variant and percentiles in the applied label (CT-107 / CT-250)", () => {
+    const percentileClip = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
       { scope: "full-cube", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
     );
-    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(robust)).toBe(
-      "Normalize to [0,1] (full stack, robust 2-98%)",
+    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(percentileClip)).toBe(
+      "Normalize to [0,1] (full stack, percentile 2-98%)",
     );
   });
 });

@@ -1105,7 +1105,7 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
   description:
-    "Full stack scales every band by one stack-wide min and max; band-wise scales each entered band by its own min and max (defaults to the current band).",
+    "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.",
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
 };
@@ -1115,20 +1115,20 @@ const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
   id: NORMALIZE_METHOD_PARAMETER_ID,
   label: "Method",
   description:
-    "Min-max scales by the absolute min and max. Robust scales by the low/high percentiles so sparse bright outliers do not flatten the image (values outside the percentile range clip to 0/1). Clip by value clamps to an absolute low/high range, keeping the data type and in-range values.",
+    "Min-max scales by (value - min) / (max - min). Percentile clip does the same using the low and high percentile values, so sparse outliers do not flatten the image; the result spans 0 to 1 and values outside the percentile range clip to 0 and 1.",
   defaultValue: MIN_MAX_METHOD_VALUE,
   options: [
-    { value: MIN_MAX_METHOD_VALUE, label: "Min-max (absolute)" },
-    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Robust (percentile clip)" },
-    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value (absolute)" },
+    { value: MIN_MAX_METHOD_VALUE, label: "Min-max" },
+    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Percentile clip" },
+    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value" },
   ],
 };
 
 const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: NORMALIZE_LOW_PERCENTILE_PARAMETER_ID,
-  label: "Low percentile (robust)",
-  description: "Lower clip percentile used by the robust method.",
+  label: "Low percentile",
+  description: "Lower clip percentile.",
   defaultValue: 2,
   min: 0,
   max: 100,
@@ -1139,8 +1139,8 @@ const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
 const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
   kind: "number",
   id: NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID,
-  label: "High percentile (robust)",
-  description: "Upper clip percentile used by the robust method.",
+  label: "High percentile",
+  description: "Upper clip percentile.",
   defaultValue: 98,
   min: 0,
   max: 100,
@@ -1153,7 +1153,7 @@ const NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
   id: NORMALIZE_CLIP_BOUNDS_PARAMETER_ID,
   label: "Clip range",
   description:
-    "Values below the low value clamp to it and values above the high value clamp to it. The data type and in-range values are kept.",
+    "Values below the low value clip to it and values above the high value clip to it. The data type and in-range values are kept.",
   loParameterId: NORMALIZE_CLIP_LOW_PARAMETER_ID,
   hiParameterId: NORMALIZE_CLIP_HIGH_PARAMETER_ID,
   loLabel: "Clip low",
@@ -1293,7 +1293,7 @@ function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string
 function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
   const method = resolveNormalizeRangeMethod(parameterValues);
   if (method.kind !== "percentile") return "";
-  return `, robust ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
+  return `, percentile ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
 }
 
 function resolveBandWiseScopeOrThrow(
