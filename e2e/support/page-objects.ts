@@ -95,6 +95,9 @@ export {
   fixedUnitFloatViewToggle,
   toggleFixedUnitFloatView,
   expectFixedUnitFloatViewEnabled,
+  expectFixedUnitFloatViewTooltip,
+  FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP,
+  FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP,
 } from "./fixed-unit-float-view";
 export {
   goToBandNumberInput,

@@ -15,6 +15,24 @@ export function fixedUnitFloatViewToggle(page: Page, panelNumber: number): Locat
   return panelCell(page, panelNumber).getByRole("button", { name: /^Fixed \[0,1\] float view/ });
 }
 
+// CT-259: the toggle's tooltip explains what each state does (the aria-label above stays
+// the stable "Fixed [0,1] float view" name). Hovering the button reveals the copy for the
+// CURRENT state; a click closes the tooltip, so move the pointer away and re-hover before
+// reading the other state's copy.
+export const FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP =
+  "Display is stretched to this band's own value range. Click to switch to the fixed 0 to 1 scale: 0 shows black, 1 shows white, values outside clip. Display only, data never changes.";
+export const FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP =
+  "Fixed 0 to 1 display scale: 0 shows black, 1 shows white, values outside clip. Click to stretch the display to this band's own value range. Display only, data never changes.";
+
+export async function expectFixedUnitFloatViewTooltip(
+  page: Page,
+  panelNumber: number,
+  tooltipCopy: string,
+): Promise<void> {
+  await fixedUnitFloatViewToggle(page, panelNumber).hover();
+  await expect(page.getByRole("tooltip").filter({ hasText: tooltipCopy })).toBeVisible();
+}
+
 export async function toggleFixedUnitFloatView(page: Page, panelNumber: number): Promise<void> {
   await fixedUnitFloatViewToggle(page, panelNumber).click();
 }

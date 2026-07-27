@@ -317,8 +317,16 @@ interface FixedUnitFloatViewToggleButtonProps {
   onToggle: () => void;
 }
 
+// CT-259: the tooltip explains what the toggle does in each state; the aria-label stays
+// the stable "Fixed [0,1] float view" name so selectors and screen-reader identity hold.
+const AUTO_STRETCH_ACTIVE_TOOLTIP =
+  "Display is stretched to this band's own value range. Click to switch to the fixed 0 to 1 scale: 0 shows black, 1 shows white, values outside clip. Display only, data never changes.";
+const FIXED_SCALE_ACTIVE_TOOLTIP =
+  "Fixed 0 to 1 display scale: 0 shows black, 1 shows white, values outside clip. Click to stretch the display to this band's own value range. Display only, data never changes.";
+
 function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonProps): JSX.Element {
   const label = props.enabled ? "Fixed [0,1] float view (on)" : "Fixed [0,1] float view";
+  const tooltip = props.enabled ? FIXED_SCALE_ACTIVE_TOOLTIP : AUTO_STRETCH_ACTIVE_TOOLTIP;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -333,7 +341,7 @@ function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonPro
           <Brackets className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
