@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
@@ -16,9 +16,11 @@ import {
   BRIGHTNESS_CONTRAST_LABEL,
   BRIGHTNESS_SLIDER_LABEL,
   CONTRAST_SLIDER_LABEL,
+  contrastSliderDisplayedValue,
   maximizeBrightnessContrastSlider,
   setApplyToAllBands,
   setBrightnessContrastSlider,
+  setLogSymmetricContrastSlider,
 } from "./support/brightness-contrast-controls";
 
 // CT-140 / manual section 7 / CT-081: Brightness & Contrast verified numerically.
@@ -37,6 +39,9 @@ const UINT16_CONTAINER_SPAN = UINT16_CONTAINER_MAX - 0;
 const TOP_LEFT = sampleAt(0);
 const BOTTOM_RIGHT = sampleAt(1);
 const BAND_ZERO_MEAN = requireBandMean(0);
+// CT-257: the log-symmetric contrast slider quantizes to round2(20^(0.01k)) stops, so
+// exactly 2 is unreachable; 1.99 is its nearest stop and keeps the oracle exact.
+const NEAR_DOUBLE_CONTRAST_RATIO = 1.99;
 
 let launched: LaunchedApp;
 
@@ -74,17 +79,38 @@ test("a pixel that would exceed the type maximum clips to the max instead of wra
   await expectBandZeroReadout(BOTTOM_RIGHT.x, BOTTOM_RIGHT.y, UINT16_CONTAINER_MAX);
 });
 
-test("Contrast doubles a pixel's distance from the band mean", async () => {
+test("Contrast stretches a pixel's distance from the band mean by the slider ratio", async () => {
   await openOperation(launched.window, BRIGHTNESS_CONTRAST_LABEL);
-  await setBrightnessContrastSlider(launched.window, CONTRAST_SLIDER_LABEL, 2);
+  await setLogSymmetricContrastSlider(launched.window, NEAR_DOUBLE_CONTRAST_RATIO);
   await applyOperationInPlace(launched.window, BRIGHTNESS_CONTRAST_LABEL);
 
   // The gradient fixture has no pixel exactly at the mean (175 sits between 170 and 180),
-  // so the around-the-mean rule is proven by doubling the distance of a below-mean and an
-  // above-mean pixel: 100 (dist -75) -> 25 (dist -150); 250 (dist +75) -> 325 (dist +150).
-  // Scaling around zero would instead give 200 / 500, which these exact values rule out.
-  await expectBandZeroReadout(TOP_LEFT.x, TOP_LEFT.y, contrastedBandZeroValue(0, 2));
-  await expectBandZeroReadout(BOTTOM_RIGHT.x, BOTTOM_RIGHT.y, contrastedBandZeroValue(1, 2));
+  // so the around-the-mean rule is proven by stretching a below-mean and an above-mean
+  // pixel: at ratio 1.99 (the log slider's nearest reachable stop to 2), 100 (dist -75)
+  // -> 26 and 250 (dist +75) -> 324. Scaling around zero would instead give 199 / 498,
+  // which these exact values rule out.
+  await expectBandZeroReadout(TOP_LEFT.x, TOP_LEFT.y, contrastedBandZeroValue(0, NEAR_DOUBLE_CONTRAST_RATIO));
+  await expectBandZeroReadout(
+    BOTTOM_RIGHT.x,
+    BOTTOM_RIGHT.y,
+    contrastedBandZeroValue(1, NEAR_DOUBLE_CONTRAST_RATIO),
+  );
+});
+
+test("Contrast reaches 20x at the slider's End key and clips around the band mean (CT-257)", async () => {
+  await openOperation(launched.window, BRIGHTNESS_CONTRAST_LABEL);
+  await maximizeBrightnessContrastSlider(launched.window, CONTRAST_SLIDER_LABEL);
+  await expect(contrastSliderDisplayedValue(launched.window)).toHaveText("20");
+  await applyOperationInPlace(launched.window, BRIGHTNESS_CONTRAST_LABEL);
+
+  // clip((v - mean) * 20 + mean) from the fixture values: 100 -> (100-175)*20+175 = -1325,
+  // clipped to 0; 250 -> (250-175)*20+175 = 1675 (in range, exact).
+  await expectBandZeroReadout(TOP_LEFT.x, TOP_LEFT.y, contrastedBandZeroValue(0, 20));
+  await expectBandZeroReadout(BOTTOM_RIGHT.x, BOTTOM_RIGHT.y, contrastedBandZeroValue(1, 20));
+  await expectHistoryToRecordOperation(launched.window, {
+    actionLabel: BRIGHTNESS_CONTRAST_LABEL,
+    detailSubstrings: ["contrast 20.00"],
+  });
 });
 
 test("with Apply to all bands off, only the displayed band changes", async () => {

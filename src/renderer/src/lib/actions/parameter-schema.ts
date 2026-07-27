@@ -38,8 +38,13 @@ export interface SliderParameterSchema extends ParameterSchemaBase {
   readonly defaultValue: number;
   readonly min: number;
   readonly max: number;
+  // CT-257: for a log-symmetric slider the Radix track runs over positions
+  // 0..1, step is the POSITION step, and min must equal 1 / max so the track
+  // center maps to exactly 1 (see log-symmetric-slider-scale.ts). Linear
+  // sliders keep step in value units.
   readonly step: number;
   readonly valueSuffix?: string;
+  readonly scale?: "log-symmetric";
 }
 
 export interface EnumParameterSchema extends ParameterSchemaBase {

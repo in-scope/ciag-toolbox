@@ -20,8 +20,8 @@ import {
   applyToAllBandsSwitch,
   BRIGHTNESS_CONTRAST_LABEL,
   BRIGHTNESS_SLIDER_LABEL,
-  CONTRAST_SLIDER_LABEL,
   setBrightnessContrastSlider,
+  setLogSymmetricContrastSlider,
 } from "./support/brightness-contrast-controls";
 
 // CT-247: Brightness & Contrast on a true-colour composite previews LIVE by remapping
@@ -77,7 +77,7 @@ test("composite preview remaps all three channels display-only, hides the all-ba
   });
   const preview = await test.step("adjust sliders: all three channels brighten, data unchanged", async () => {
     await setBrightnessContrastSlider(launched.window, BRIGHTNESS_SLIDER_LABEL, BRIGHTNESS_PERCENT);
-    await setBrightnessContrastSlider(launched.window, CONTRAST_SLIDER_LABEL, CONTRAST_RATIO);
+    await setLogSymmetricContrastSlider(launched.window, CONTRAST_RATIO);
     const previewColor = await expectAllChannelsBrightenedAbove(baseline);
     await expectProbeRedReadout(PROBE_RED_BEFORE);
     expect(await historyEntryCount(launched.window)).toBe(0);

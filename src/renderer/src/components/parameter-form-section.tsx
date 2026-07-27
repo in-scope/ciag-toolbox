@@ -24,6 +24,7 @@ import {
   formatComponentCountLabel,
   resolveComponentCount,
 } from "@/lib/image/dimension-reduction/component-count";
+import { describeSliderTrackForSchema } from "@/lib/actions/log-symmetric-slider-scale";
 import {
   clampNumericParameterValueToSchema,
   clampSliderParameterValueToSchema,
@@ -429,6 +430,14 @@ interface SliderParameterFieldProps {
 
 function SliderParameterField(props: SliderParameterFieldProps): JSX.Element {
   const id = useId();
+  const track = describeSliderTrackForSchema(props.schema, props.value);
+  const commitThumbPosition = (thumbPositions: number[]): void =>
+    props.onChangeValue(
+      clampSliderParameterValueToSchema(
+        props.schema,
+        track.valueAtThumbPosition(thumbPositions[0] ?? track.thumbPosition),
+      ),
+    );
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -442,13 +451,11 @@ function SliderParameterField(props: SliderParameterFieldProps): JSX.Element {
       <Slider
         id={id}
         aria-label={props.schema.label}
-        min={props.schema.min}
-        max={props.schema.max}
-        step={props.schema.step}
-        value={[props.value]}
-        onValueChange={(values) =>
-          props.onChangeValue(clampSliderParameterValueToSchema(props.schema, values[0] ?? props.value))
-        }
+        min={track.trackMin}
+        max={track.trackMax}
+        step={track.trackStep}
+        value={[track.thumbPosition]}
+        onValueChange={commitThumbPosition}
       />
     </div>
   );

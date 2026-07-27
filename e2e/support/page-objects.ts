@@ -357,6 +357,9 @@ export {
   brightnessContrastSliderThumb,
   setBrightnessContrastSlider,
   maximizeBrightnessContrastSlider,
+  setLogSymmetricContrastSlider,
+  contrastRatioAtSliderPosition,
+  contrastSliderDisplayedValue,
   applyToAllBandsSwitch,
   setApplyToAllBands,
 } from "./brightness-contrast-controls";

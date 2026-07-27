@@ -844,9 +844,10 @@ const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
   description:
     "Scales each pixel around the band mean: (value - mean) * contrast + mean. 1 leaves the band unchanged; values clip to the data-type range.",
   defaultValue: 1,
-  min: 0,
-  max: 4,
-  step: 0.05,
+  min: 0.05,
+  max: 20,
+  step: 0.005,
+  scale: "log-symmetric",
 };
 
 // CT-247: a true-colour photo always adjusts all three channels, so the
