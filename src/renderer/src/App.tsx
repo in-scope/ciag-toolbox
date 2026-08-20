@@ -2563,7 +2563,6 @@ function buildMetadataDisplayForActiveContentOrNull(
     fileName: content.fileName,
     source: content.source,
     originalFilePath: content.originalFilePath,
-    fileSizeBytes: content.fileSizeBytes,
     currentProjectFilePath,
   });
 }

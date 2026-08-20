@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { classifyOpenedRasterByShape } from "@/lib/image/classify-opened-raster";
-import { formatFileSizeBytesForDisplay } from "@/lib/image/image-metadata-display";
+import { formatByteCountForDisplay } from "@/lib/image/image-metadata-display";
 import { findStackedRasterMismatchOrNull } from "@/lib/image/stack-rasters";
 import type { RasterImage } from "@/lib/image/raster-image";
 import {
@@ -1070,7 +1070,7 @@ function RowMetadataLine({ row }: { row: GroupedOpenedFileRow }): JSX.Element {
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       {row.wavelength !== null ? <RowWavelengthBadge wavelength={row.wavelength} /> : null}
-      <span>{formatFileSizeBytesForDisplay(totalRowSizeIncludingSidecar(row))}</span>
+      <span>{formatByteCountForDisplay(totalRowSizeIncludingSidecar(row))}</span>
     </div>
   );
 }

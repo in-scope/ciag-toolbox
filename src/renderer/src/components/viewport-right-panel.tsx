@@ -386,7 +386,7 @@ function buildMetadataRowsFromDisplay(
     { label: "Bits per sample", value: metadata.bitsPerSample },
     { label: "Sample format", value: metadata.sampleFormat },
     { label: "Bands", value: metadata.bandCount },
-    { label: "File size", value: metadata.fileSize },
+    { label: "Data size", value: metadata.dataSize },
   ];
 }
 
