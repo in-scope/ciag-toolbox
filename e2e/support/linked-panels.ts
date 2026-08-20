@@ -30,6 +30,21 @@ export async function linkPanZoomFromPanelContextMenu(page: Page, panelNumber: n
   await linkPanZoomMenuItem(page).click();
 }
 
+// CT-265: with fewer than two panels selected the Link entry renders disabled
+// (aria-disabled) and carries this multi-select hint instead of being absent.
+export const LINK_PAN_ZOOM_MULTI_SELECT_HINT =
+  "Cmd-click (Mac) or Ctrl-click panels to select more, then link";
+
+export function linkPanZoomMenuItemWithHint(page: Page): Locator {
+  return page.getByRole("menuitem", { name: "Link pan & zoom" });
+}
+
+export async function expectLinkPanZoomMenuItemIsDisabledWithHint(page: Page): Promise<void> {
+  const menuItem = linkPanZoomMenuItemWithHint(page);
+  await expect(menuItem).toHaveAttribute("aria-disabled", "true");
+  await expect(menuItem.getByText(LINK_PAN_ZOOM_MULTI_SELECT_HINT)).toBeVisible();
+}
+
 export function linkedPanelBadge(page: Page, panelNumber: number): Locator {
   return panelCell(page, panelNumber).getByLabel("Linked pan and zoom");
 }

@@ -235,6 +235,9 @@ export {
   expectPanelIsLinked,
   expectPanelIsNotLinked,
   differentSizeLinkErrorToast,
+  LINK_PAN_ZOOM_MULTI_SELECT_HINT,
+  linkPanZoomMenuItemWithHint,
+  expectLinkPanZoomMenuItemIsDisabledWithHint,
 } from "./linked-panels";
 export {
   regionToolButton,

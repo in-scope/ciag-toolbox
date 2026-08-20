@@ -15,17 +15,21 @@ import {
   compactAnchorAfterRemovingIndex,
   compactIndexedSetAfterRemovingIndex,
 } from "@/lib/grid/compact-indexed-map";
+import {
+  computeSelectionAfterClick,
+  computeSelectionAfterContextMenuClick,
+  type ViewportSelectionAfterClick,
+  type ViewportSelectionClickModifiers,
+} from "@/lib/grid/viewport-selection-click";
 
-export interface ViewportSelectionClickModifiers {
-  ctrlOrMeta: boolean;
-  shift: boolean;
-}
+export type { ViewportSelectionClickModifiers } from "@/lib/grid/viewport-selection-click";
 
 export interface ViewportSelectionState {
   selectedIndices: ReadonlySet<number>;
   selectedCount: number;
   isViewportSelected: (index: number) => boolean;
   selectViewportFromClick: (index: number, modifiers: ViewportSelectionClickModifiers) => void;
+  selectViewportFromContextMenuClick: (index: number) => void;
   replaceSelection: (indices: ReadonlySet<number>) => void;
   clearSelection: () => void;
   pruneSelectionToCellCount: (cellCount: number) => void;
@@ -64,6 +68,10 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
   const [selectedIndices, setSelectedIndices] = useState<ReadonlySet<number>>(EMPTY_SELECTION);
   const anchorRef = useRef<number | null>(null);
   const selectViewportFromClick = useSelectViewportFromClickCallback(anchorRef, setSelectedIndices);
+  const selectViewportFromContextMenuClick = useSelectViewportFromContextMenuClickCallback(
+    anchorRef,
+    setSelectedIndices,
+  );
   const replaceSelection = useReplaceSelectionCallback(anchorRef, setSelectedIndices);
   const clearSelection = useClearSelectionCallback(anchorRef, setSelectedIndices);
   const pruneSelectionToCellCount = usePruneSelectionToCellCountCallback(
@@ -79,6 +87,7 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
       buildSelectionState({
         selectedIndices,
         selectViewportFromClick,
+        selectViewportFromContextMenuClick,
         replaceSelection,
         clearSelection,
         pruneSelectionToCellCount,
@@ -87,6 +96,7 @@ function useViewportSelectionInternalState(): ViewportSelectionState {
     [
       selectedIndices,
       selectViewportFromClick,
+      selectViewportFromContextMenuClick,
       replaceSelection,
       clearSelection,
       pruneSelectionToCellCount,
@@ -116,6 +126,7 @@ function pickFirstIndexFromSetOrNull(indices: ReadonlySet<number>): number | nul
 interface SelectionStateInputs {
   selectedIndices: ReadonlySet<number>;
   selectViewportFromClick: ViewportSelectionState["selectViewportFromClick"];
+  selectViewportFromContextMenuClick: ViewportSelectionState["selectViewportFromContextMenuClick"];
   replaceSelection: ViewportSelectionState["replaceSelection"];
   clearSelection: ViewportSelectionState["clearSelection"];
   pruneSelectionToCellCount: ViewportSelectionState["pruneSelectionToCellCount"];
@@ -128,6 +139,7 @@ function buildSelectionState(inputs: SelectionStateInputs): ViewportSelectionSta
     selectedCount: inputs.selectedIndices.size,
     isViewportSelected: (index) => inputs.selectedIndices.has(index),
     selectViewportFromClick: inputs.selectViewportFromClick,
+    selectViewportFromContextMenuClick: inputs.selectViewportFromContextMenuClick,
     replaceSelection: inputs.replaceSelection,
     clearSelection: inputs.clearSelection,
     pruneSelectionToCellCount: inputs.pruneSelectionToCellCount,
@@ -142,11 +154,39 @@ function useSelectViewportFromClickCallback(
   return useCallback(
     (index, modifiers) => {
       setSelectedIndices((previous) =>
-        computeSelectionAfterClick(previous, anchorRef, index, modifiers),
+        applySelectionResultToAnchorRef(
+          computeSelectionAfterClick(previous, anchorRef.current, index, modifiers),
+          anchorRef,
+        ),
       );
     },
     [anchorRef, setSelectedIndices],
   );
+}
+
+function useSelectViewportFromContextMenuClickCallback(
+  anchorRef: SelectionAnchorRef,
+  setSelectedIndices: SelectionSetter,
+): ViewportSelectionState["selectViewportFromContextMenuClick"] {
+  return useCallback(
+    (index) => {
+      setSelectedIndices((previous) =>
+        applySelectionResultToAnchorRef(
+          computeSelectionAfterContextMenuClick(previous, anchorRef.current, index),
+          anchorRef,
+        ),
+      );
+    },
+    [anchorRef, setSelectedIndices],
+  );
+}
+
+function applySelectionResultToAnchorRef(
+  result: ViewportSelectionAfterClick,
+  anchorRef: SelectionAnchorRef,
+): ReadonlySet<number> {
+  anchorRef.current = result.anchor;
+  return result.selection;
 }
 
 function useClearSelectionCallback(
@@ -202,37 +242,3 @@ function keepIndicesBelowCellCount(
   return next.size === previous.size ? previous : next;
 }
 
-function computeSelectionAfterClick(
-  previous: ReadonlySet<number>,
-  anchorRef: SelectionAnchorRef,
-  index: number,
-  modifiers: ViewportSelectionClickModifiers,
-): ReadonlySet<number> {
-  if (modifiers.shift && anchorRef.current !== null) {
-    return makeRowMajorRangeSet(anchorRef.current, index);
-  }
-  if (modifiers.ctrlOrMeta) {
-    anchorRef.current = index;
-    return toggleIndexInSelection(previous, index);
-  }
-  anchorRef.current = index;
-  return new Set([index]);
-}
-
-function makeRowMajorRangeSet(anchor: number, current: number): ReadonlySet<number> {
-  const start = Math.min(anchor, current);
-  const end = Math.max(anchor, current);
-  const range = new Set<number>();
-  for (let index = start; index <= end; index++) range.add(index);
-  return range;
-}
-
-function toggleIndexInSelection(previous: ReadonlySet<number>, index: number): ReadonlySet<number> {
-  const next = new Set(previous);
-  if (next.has(index)) {
-    next.delete(index);
-  } else {
-    next.add(index);
-  }
-  return next;
-}

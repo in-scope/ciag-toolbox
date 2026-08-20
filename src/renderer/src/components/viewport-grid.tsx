@@ -16,6 +16,10 @@ import {
   type GridLayout,
 } from "@/lib/grid/grid-layout";
 import {
+  collectPanelIndicesToLinkFromSelection,
+  extractClickModifiers,
+} from "@/lib/grid/viewport-selection-click";
+import {
   computePixelSpectrumOrNull,
   computeRoiMeanSpectrumOrNull,
 } from "@/lib/image/compute-spectrum";
@@ -44,10 +48,7 @@ import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
-import {
-  useViewportSelection,
-  type ViewportSelectionClickModifiers,
-} from "@/state/selection-context";
+import { useViewportSelection } from "@/state/selection-context";
 import { usePanelLink, type PanelLinkApi, type PanelLinkFailureReason } from "@/state/panel-link-context";
 
 export interface ViewportCellContent {
@@ -120,6 +121,7 @@ function renderViewportCellGridcellElement(
       role="gridcell"
       aria-selected={settings.isSelected}
       onClick={settings.handleClick}
+      onContextMenu={settings.handleContextMenuClick}
       className={getViewportCellClassName(settings.isSelected)}
     >
       {renderViewportCellViewport(props, settings)}
@@ -175,6 +177,7 @@ function ViewportCellContextMenuContent(props: { sourceIndex: number }): JSX.Ele
 interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
+  handleContextMenuClick: () => void;
   handleClose: (() => void) | undefined;
   previewImageSource: ViewportImageSource | null;
   toneCurvePreviewLookupTable: ReadonlyArray<number> | null;
@@ -200,7 +203,8 @@ function useViewportCellInteractionSettings(
   cellIndex: number,
   content: ViewportCellContent | null,
 ): ViewportCellInteractionSettings {
-  const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
+  const { isViewportSelected, selectViewportFromClick, selectViewportFromContextMenuClick } =
+    useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
   const regionRequest = useRegionRequest();
@@ -213,6 +217,7 @@ function useViewportCellInteractionSettings(
   const isOperationRegionRequestActive = regionRequest.isRegionRequestActiveForViewport(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
+  const handleContextMenuClick = (): void => selectViewportFromContextMenuClick(cellIndex);
   const handleClose = closing.hasContent(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
@@ -304,6 +309,7 @@ function useViewportCellInteractionSettings(
   return {
     isSelected,
     handleClick,
+    handleContextMenuClick,
     handleClose,
     previewImageSource: getPreviewSourceForViewport(cellIndex),
     toneCurvePreviewLookupTable: getLookupTableForViewport(cellIndex),
@@ -366,13 +372,6 @@ function getViewportCellClassName(isSelected: boolean): string {
   );
 }
 
-function extractClickModifiers(event: MouseEvent<HTMLDivElement>): ViewportSelectionClickModifiers {
-  return {
-    ctrlOrMeta: event.ctrlKey || event.metaKey,
-    shift: event.shiftKey,
-  };
-}
-
 function DuplicateContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const duplication = useViewportDuplication();
   return (
@@ -400,6 +399,9 @@ function ReimportSourceContextMenuItem(props: { sourceIndex: number }): JSX.Elem
   );
 }
 
+const LINK_PAN_ZOOM_MULTI_SELECT_HINT =
+  "Cmd-click (Mac) or Ctrl-click panels to select more, then link";
+
 function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const panelLink = usePanelLink();
   const { selectedIndices } = useViewportSelection();
@@ -410,23 +412,31 @@ function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element
       </ContextMenuItem>
     );
   }
+  const indicesToLink = collectPanelIndicesToLinkFromSelection(selectedIndices, props.sourceIndex);
+  if (indicesToLink.length < 2) return <LinkPanZoomDisabledHintMenuItem />;
   return (
-    <ContextMenuItem
-      onSelect={() => linkPanZoomFromSelection(panelLink, selectedIndices, props.sourceIndex)}
-    >
+    <ContextMenuItem onSelect={() => linkPanZoomAcrossPanels(panelLink, indicesToLink)}>
       Link pan &amp; zoom
     </ContextMenuItem>
   );
 }
 
-function linkPanZoomFromSelection(
+function LinkPanZoomDisabledHintMenuItem(): JSX.Element {
+  return (
+    <ContextMenuItem disabled>
+      <div className="flex flex-col gap-0.5">
+        <span>Link pan &amp; zoom</span>
+        <span className="text-xs text-muted-foreground">{LINK_PAN_ZOOM_MULTI_SELECT_HINT}</span>
+      </div>
+    </ContextMenuItem>
+  );
+}
+
+function linkPanZoomAcrossPanels(
   panelLink: PanelLinkApi,
-  selectedIndices: ReadonlySet<number>,
-  sourceIndex: number,
+  panelIndices: ReadonlyArray<number>,
 ): void {
-  const indices = new Set(selectedIndices);
-  indices.add(sourceIndex);
-  const result = panelLink.linkPanels([...indices]);
+  const result = panelLink.linkPanels([...panelIndices]);
   if (!result.ok) notifyError(describePanelLinkFailureMessage(result.reason));
 }
 
