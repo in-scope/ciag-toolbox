@@ -48,14 +48,21 @@ function keepDefinedStringEntries(
 }
 
 function buildElectronLaunchEnvironment(
-  extraEnvironment: Record<string, string>,
+  options: LaunchToolboxAppOptions,
 ): Record<string, string> {
-  return {
+  const environment: Record<string, string> = {
     ...keepDefinedStringEntries(process.env),
     ELECTRON_RENDERER_URL: resolveRendererDevServerUrl(),
     MSI_E2E: "1",
-    ...extraEnvironment,
+    ...(options.extraEnvironment ?? {}),
   };
+  // A packaged build must load its own built renderer: main treats a set
+  // ELECTRON_RENDERER_URL as "running in development" and would load the
+  // (absent) dev server into a blank window and open detached DevTools.
+  if (options.packagedExecutablePath !== undefined) {
+    delete environment["ELECTRON_RENDERER_URL"];
+  }
+  return environment;
 }
 
 function isMainApplicationWindowUrl(url: string): boolean {
@@ -160,6 +167,18 @@ export interface LaunchToolboxAppOptions {
   // variable (MSI_E2E_MEMORY_BUDGET_BYTES) that makes refusals reproducible
   // with tiny fixtures.
   readonly extraEnvironment?: Record<string, string>;
+  // Launch an installed/packed build instead of the dev checkout (the CT-262
+  // packaged smoke). A packaged main ignores ELECTRON_RENDERER_URL and loads
+  // its own built renderer, so no dev server is needed; the MSI_E2E test
+  // surface still activates because it is gated on the environment at runtime.
+  readonly packagedExecutablePath?: string;
+}
+
+function electronLaunchTarget(
+  options: LaunchToolboxAppOptions,
+): { args: string[]; executablePath?: string } {
+  if (options.packagedExecutablePath === undefined) return { args: [APPLICATION_ROOT_PATH] };
+  return { args: [], executablePath: options.packagedExecutablePath };
 }
 
 export async function launchToolboxApp(
@@ -167,8 +186,8 @@ export async function launchToolboxApp(
 ): Promise<LaunchedApp> {
   return runAsStoryboardStep(null, "Launch the app and wait for the main window", async () => {
     const app = await electron.launch({
-      args: [APPLICATION_ROOT_PATH],
-      env: buildElectronLaunchEnvironment(options.extraEnvironment ?? {}),
+      ...electronLaunchTarget(options),
+      env: buildElectronLaunchEnvironment(options),
     });
     await startTracingIfEnabled(app);
     const window = await waitForMainApplicationWindow(app);

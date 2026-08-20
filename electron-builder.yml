@@ -22,7 +22,10 @@ extraResources:
     filter:
       - "**/*"
       - "!**/__pycache__/**"
-afterPack: scripts/sign-macos-python-runtime.mjs
+# afterPack verifies the runtime actually landed in the packed app (electron-builder
+# only WARNS when the .python extraResources source is missing) and then signs the
+# runtime binaries on macOS (CT-262).
+afterPack: scripts/after-pack.mjs
 publish: null
 win:
   target:
