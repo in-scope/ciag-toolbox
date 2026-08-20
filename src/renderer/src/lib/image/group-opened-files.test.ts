@@ -40,6 +40,54 @@ function buildMultiBandRasterSource(bandCount: number): ViewportImageSource {
   return { kind: "raster", raster: buildMultiBandRasterFixture(bandCount) };
 }
 
+// CT-263: what a browser-decoded photo looks like after promotion - a
+// grayscale photo is a plain single-band uint8 raster, a colour photo a
+// 3-band raster tagged rgb.
+function buildPromotedGrayscalePhotoSource(): ViewportImageSource {
+  return {
+    kind: "raster",
+    raster: {
+      bandPixels: [new Uint8Array(4)],
+      width: 2,
+      height: 2,
+      bitsPerSample: 8,
+      sampleFormat: "uint",
+      bandCount: 1,
+    },
+  };
+}
+
+function buildPromotedColorPhotoSource(): ViewportImageSource {
+  return {
+    kind: "raster",
+    raster: {
+      bandPixels: [new Uint8Array(4), new Uint8Array(4), new Uint8Array(4)],
+      width: 2,
+      height: 2,
+      bitsPerSample: 8,
+      sampleFormat: "uint",
+      bandCount: 3,
+      bandLabels: ["Red", "Green", "Blue"],
+      colorInterpretation: "rgb",
+    },
+  };
+}
+
+function buildFileWithSource(
+  fileName: string,
+  source: ViewportImageSource,
+): OpenedFileForGrouping {
+  return {
+    fileName,
+    filePath: `/test/${fileName}`,
+    fileSizeBytes: 100,
+    mtimeMs: 1,
+    source,
+    decodeError: null,
+    contentHash: `hash-${fileName}`,
+  };
+}
+
 function buildStackableFile(fileName: string): OpenedFileForGrouping {
   return {
     fileName,
@@ -106,6 +154,32 @@ describe("proposeGroupsForOpenedFiles", () => {
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]!.mode).toBe("singles");
     expect(result.groups[0]!.rows.map((row) => row.fileName)).toEqual(["rgb.png"]);
+  });
+
+  it("clusters promoted grayscale photos (single-band uint8 rasters) into one stack group (CT-263)", () => {
+    const files = [
+      buildFileWithSource("scan_a.png", buildPromotedGrayscalePhotoSource()),
+      buildFileWithSource("scan_b.png", buildPromotedGrayscalePhotoSource()),
+      buildFileWithSource("scan_c.png", buildPromotedGrayscalePhotoSource()),
+    ];
+    const result = proposeGroupsForOpenedFiles(files);
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]!.mode).toBe("stack");
+    expect(result.groups[0]!.rows).toHaveLength(3);
+  });
+
+  it("isolates a colour photo (rgb-tagged 3-band raster) into its own single-image proposal (CT-263)", () => {
+    const files = [
+      buildFileWithSource("scan_a.png", buildPromotedGrayscalePhotoSource()),
+      buildFileWithSource("scan_b.png", buildPromotedGrayscalePhotoSource()),
+      buildFileWithSource("photo.jpg", buildPromotedColorPhotoSource()),
+    ];
+    const result = proposeGroupsForOpenedFiles(files);
+    expect(result.groups).toHaveLength(2);
+    expect(result.groups[0]!.mode).toBe("stack");
+    expect(result.groups[0]!.rows.map((row) => row.fileName)).toEqual(["scan_a.png", "scan_b.png"]);
+    expect(result.groups[1]!.mode).toBe("singles");
+    expect(result.groups[1]!.rows[0]!.fileName).toBe("photo.jpg");
   });
 
   it("returns decode-failed files as their own single-image proposals", () => {

@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { classifyOpenedRasterByShape } from "@/lib/image/classify-opened-raster";
 import { formatFileSizeBytesForDisplay } from "@/lib/image/image-metadata-display";
 import { findStackedRasterMismatchOrNull } from "@/lib/image/stack-rasters";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -209,10 +210,13 @@ function buildDragSourceForGroupAndRow(
   return { groupId, rowIndex, isMultiBandRaster: sourceRow ? isMultiBandRasterRow(sourceRow) : false };
 }
 
+// CT-263: only an already-multi-band SCIENTIFIC raster refuses the cross-group
+// drag outright; a colour photo may land in a stack group, where its row badge
+// explains it opens on its own and blocks the combine.
 function isMultiBandRasterRow(row: GroupedOpenedFileRow): boolean {
   if (row.source === null) return false;
   if (row.source.kind !== "raster") return false;
-  return row.source.raster.bandCount > 1;
+  return classifyOpenedRasterByShape(row.source.raster).kind === "already-multi-band";
 }
 
 function rejectMultiBandDragIntoDifferentGroupOrPass(
@@ -435,6 +439,7 @@ interface GroupValidationSummary {
 type RowValidationState =
   | { readonly kind: "valid" }
   | { readonly kind: "decode-failed"; readonly message: string }
+  | { readonly kind: "color-photo" }
   | { readonly kind: "already-multi-band"; readonly bandCount: number }
   | {
       readonly kind: "property-mismatch";
@@ -471,16 +476,18 @@ function pickFirstStackableRasterBaseline(
   return null;
 }
 
+// CT-263: validation keys on the decoded raster's shape via the shared
+// classifier, so a single-band image of ANY source kind is stackable and a
+// colour photo is called out as a photo (never as a "(1 bands)" raster).
 function deriveRowValidationState(
   row: GroupedOpenedFileRow,
   baseline: RasterImage | null,
 ): RowValidationState {
   if (row.decodeError !== null) return { kind: "decode-failed", message: row.decodeError };
   if (row.source === null) return { kind: "decode-failed", message: "Failed to decode" };
-  if (row.source.kind !== "raster") return { kind: "already-multi-band", bandCount: 1 };
-  if (row.source.raster.bandCount > 1) {
-    return { kind: "already-multi-band", bandCount: row.source.raster.bandCount };
-  }
+  if (row.source.kind !== "raster") return { kind: "color-photo" };
+  const classification = classifyOpenedRasterByShape(row.source.raster);
+  if (classification.kind !== "stackable-plane") return classification;
   return checkAgainstBaselineOrReturnValid(row.source.raster, baseline);
 }
 
@@ -512,6 +519,7 @@ function describeStackDisabledReason(
 ): string {
   if (rows.length < 2) return "Need at least 2 rows to combine bands";
   if (perRow.some((state) => state.kind === "decode-failed")) return "One or more rows failed to decode";
+  if (perRow.some((state) => state.kind === "color-photo")) return "Color photos open on their own; they cannot be combined";
   if (perRow.some((state) => state.kind === "already-multi-band")) return "Already multi-band rasters cannot be combined";
   if (perRow.some((state) => state.kind === "property-mismatch")) return "Row dimensions or formats do not match";
   return "Cannot combine bands";
@@ -833,6 +841,7 @@ function filterValidationStateForGroupMode(
 ): RowValidationState {
   if (mode !== "singles") return state;
   if (state.kind === "already-multi-band") return { kind: "valid" };
+  if (state.kind === "color-photo") return { kind: "valid" };
   if (state.kind === "property-mismatch") return { kind: "valid" };
   return state;
 }
@@ -1001,6 +1010,7 @@ function ValidationErrorBadge({ state }: { state: RowValidationState }): JSX.Ele
 function describeRowValidationErrorTooltip(state: RowValidationState): string {
   if (state.kind === "valid") return "";
   if (state.kind === "decode-failed") return state.message;
+  if (state.kind === "color-photo") return "Color photo; opens on its own";
   if (state.kind === "already-multi-band") {
     return `Multi-band raster (${state.bandCount} bands); will open as its own stack`;
   }

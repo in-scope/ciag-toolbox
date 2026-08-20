@@ -2,6 +2,7 @@ import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import { loadEnviAsRasterReportingPerBandProgress } from "@/lib/image/load-envi";
 import { loadRawAsRaster } from "@/lib/image/load-raw";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
+import { promoteBrowserSourceToRaster } from "@/lib/image/promote-source-to-raster";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export interface OpenedImageBundle {
@@ -34,7 +35,7 @@ export async function decodeImageBytesToViewportSource(
   if (looksLikeTiffFileName(bundle.fileName) || looksLikeTiffByteHeader(bundle.bytes)) {
     return decodeTiffBytesAsRasterSource(bundle.bytes, onDecodeProgress);
   }
-  return decodeBrowserImageBytesAsBitmapSource(bundle.bytes);
+  return decodeBrowserImageBytesAsPromotedRasterSource(bundle.bytes);
 }
 
 async function decodeEnviHeaderAndBinaryAsRasterSource(
@@ -69,12 +70,20 @@ async function decodeRawCameraBytesAsRasterSource(
   return { kind: "raster", raster };
 }
 
-async function decodeBrowserImageBytesAsBitmapSource(
+// CT-263: browser decodes (PNG/JPG) are promoted to rasters HERE, before the
+// open-images grouping, so the review classification keys on the decoded band
+// count: a grayscale photo is a stackable single-band plane, a colour photo a
+// 3-band rgb composite that opens on its own.
+async function decodeBrowserImageBytesAsPromotedRasterSource(
   bytes: Uint8Array,
 ): Promise<ViewportImageSource> {
   const blob = new Blob([copyBytesToOwnArrayBuffer(bytes)]);
   const bitmap = await createImageBitmap(blob);
-  return { kind: "image-bitmap", image: bitmap };
+  try {
+    return { kind: "raster", raster: promoteBrowserSourceToRaster({ kind: "image-bitmap", image: bitmap }) };
+  } finally {
+    bitmap.close();
+  }
 }
 
 // Exported so the open flow can route .hdr files to the CT-231 streaming

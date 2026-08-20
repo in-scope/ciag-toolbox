@@ -79,9 +79,11 @@ function pickStackSuggestedFileName(
 ): string {
   const first = includedEntries[0];
   if (!first) return "stack.tif";
-  return `${stripTiffExtensionFromFileName(first.fileName)}-stack-${includedEntries.length}.tif`;
+  return `${stripImageExtensionFromFileName(first.fileName)}-stack-${includedEntries.length}.tif`;
 }
 
-function stripTiffExtensionFromFileName(fileName: string): string {
-  return fileName.replace(/\.(tif|tiff)$/i, "");
+// CT-263: single-band PNG/JPG planes can stack too, so their extensions strip
+// from the suggested name just like TIFF's.
+function stripImageExtensionFromFileName(fileName: string): string {
+  return fileName.replace(/\.(tif|tiff|png|jpg|jpeg)$/i, "");
 }
