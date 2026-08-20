@@ -17,6 +17,7 @@ import {
   type ViewportActionOutput,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
+import { clearOperationRegionAtViewportIndex } from "@/lib/actions/operation-region";
 import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
@@ -61,7 +62,7 @@ export function applyActionInPlaceAtSourceIndex(
 ): void {
   if (actionTransformsSource(action)) {
     const content = bindings.imagesByIndex.get(sourceIndex);
-    if (content && reportApplyExceedsMemoryBudget(action, content.source, parameterValues, bindings)) return;
+    if (content && reportApplyExceedsMemoryBudget(action, content.source, parameterValues, sourceIndex, bindings)) return;
     void runApplyActionInPlaceWithBusyIndicator(action, parameterValues, sourceIndex, bindings);
     return;
   }
@@ -76,6 +77,7 @@ function reportApplyExceedsMemoryBudget(
   action: RegisteredViewportAction,
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
   try {
@@ -89,7 +91,7 @@ function reportApplyExceedsMemoryBudget(
     );
     return false;
   } catch (error) {
-    reportApplyFailedWithToast(action, bindings, error);
+    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
     return true;
   }
 }
@@ -104,12 +106,17 @@ function reportApplySucceededWithToast(
   bindings.reportApplyOutcome?.({ succeeded: true });
 }
 
+// CT-261: a failed apply also clears the source's operation region, so no
+// unremovable box survives the failure (success clears it via
+// clearConsumedSourceStateAfterApply).
 function reportApplyFailedWithToast(
   action: RegisteredViewportAction,
+  sourceIndex: number,
   bindings: ApplyActionFlowBindings,
   error: unknown,
 ): void {
   notifyError(formatActionErrorMessage(action.label, error));
+  clearOperationRegionAtViewportIndex(sourceIndex, bindings);
   bindings.reportApplyOutcome?.({ succeeded: false });
 }
 
@@ -136,7 +143,7 @@ function applyActionInPlaceWithoutBusyIndicator(
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyFailedWithToast(action, bindings, error);
+    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
   }
 }
 
@@ -163,7 +170,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyFailedWithToast(action, bindings, error);
+    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
   } finally {
     handle.clear();
   }
@@ -343,7 +350,7 @@ export function applyActionToDuplicateOfSource(
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
   if (reportActionCannotApplyToSourceBeforeOpeningPanel(action, sourceContent.source, parameterValues)) return;
-  if (reportApplyExceedsMemoryBudget(action, sourceContent.source, parameterValues, bindings)) return;
+  if (reportApplyExceedsMemoryBudget(action, sourceContent.source, parameterValues, sourceIndex, bindings)) return;
   if (tryDuplicateAndApplyInEmptyViewport(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   if (tryDuplicateAndApplyByExpandingGrid(action, parameterValues, sourceContent, sourceIndex, bindings)) return;
   bindings.setPendingDuplicate({
@@ -425,7 +432,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
     selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyFailedWithToast(action, bindings, error);
+    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
   } finally {
     handle?.clear();
   }

@@ -728,4 +728,71 @@ function buildCropLikeActionThatClearsSourceRoi(): RegisteredViewportAction {
   } as unknown as RegisteredViewportAction;
 }
 
+describe("apply failure clears the operation region (CT-261)", () => {
+  it("clears the source's operation region when an in-place apply fails", () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatThrowsOnApply(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).operationRegion).toBeNull();
+  });
+
+  it("clears the source's operation region when a duplicate-flow transform fails", async () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).operationRegion).toBeNull();
+  });
+
+  it("leaves the region's sibling inspection ROI untouched when clearing on failure", () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatThrowsOnApply(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).roi).toEqual(buildSampleRoi());
+  });
+});
+
+function buildFlowHarnessWithSourceOperationRegion(): DuplicateFlowHarness {
+  const initialSource = {
+    ...buildRenderingStateWithHistory([]),
+    roi: buildSampleRoi(),
+    operationRegion: buildSampleRoi(),
+  };
+  const renderingByIndex = new Map<number, ViewportRenderingState>([[SOURCE_INDEX, initialSource]]);
+  const setRenderingState = vi.fn((index: number, next: ViewportRenderingState) =>
+    renderingByIndex.set(index, next),
+  );
+  const bindings = buildBindingsBackedByMaps(renderingByIndex, setRenderingState);
+  return {
+    bindings,
+    findLatestRenderingStateWriteAtIndex: (i) => readLatestWrite(setRenderingState, i),
+  };
+}
+
+function buildActionThatThrowsOnApply(): RegisteredViewportAction {
+  return {
+    id: "throws-on-apply",
+    label: "Throws On Apply",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Throws",
+    apply: () => {
+      throw new Error("boom");
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
 void EMPTY_OPERATION_HISTORY;

@@ -74,6 +74,10 @@ import {
   type OperationCommandHandlers,
 } from "@/lib/actions/operation-command-bindings";
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
+import {
+  clearOperationRegionAtViewportIndex,
+  clearOperationRegionOnViewportsLeavingSelection,
+} from "@/lib/actions/operation-region";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
 import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
@@ -448,6 +452,7 @@ function ApplicationShell(): JSX.Element {
     cellCount,
     renderingApi,
   });
+  useDeselectionClearsOperationRegionOnLeavingPanels({ selectedIndices, renderingApi });
   const regionRequestHandlers = buildToolPanelRegionRequestHandlers({
     activeSourceIndex: singleSelectedSource?.index ?? null,
     regionRequest,
@@ -1891,9 +1896,27 @@ function beginOperationRegionRequestForActiveSource(
 
 function clearOperationRegionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
   if (inputs.activeSourceIndex === null) return;
-  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
-  if (!state.operationRegion) return;
-  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, operationRegion: null });
+  clearOperationRegionAtViewportIndex(inputs.activeSourceIndex, inputs.renderingApi);
+}
+
+interface DeselectionClearsOperationRegionBindings {
+  readonly selectedIndices: ReadonlySet<number>;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+// CT-261: a panel that leaves the selection loses its pending operation region,
+// so switching to another panel mid-operation never strands a region box on the
+// panel the user moved away from.
+function useDeselectionClearsOperationRegionOnLeavingPanels(
+  bindings: DeselectionClearsOperationRegionBindings,
+): void {
+  const { selectedIndices, renderingApi } = bindings;
+  const previousSelectionRef = useRef(selectedIndices);
+  useEffect(() => {
+    const previousSelection = previousSelectionRef.current;
+    previousSelectionRef.current = selectedIndices;
+    clearOperationRegionOnViewportsLeavingSelection(previousSelection, selectedIndices, renderingApi);
+  }, [selectedIndices, renderingApi]);
 }
 
 interface ApplyActionFlowBindingsInputs {
