@@ -147,6 +147,76 @@ export function splitGroupRowsIntoSingleImageGroups(
   );
 }
 
+// CT-264: a split remembers the pre-split group so "Recombine into one stack"
+// can restore it exactly (same rows, same order, mode stack).
+export interface SplitGroupRecoveryRecord {
+  readonly originalGroup: OpenedFilesGroup;
+  readonly splitGroupIds: ReadonlyArray<string>;
+}
+
+export interface SplitGroupsWithRecoveryRecord {
+  readonly splitGroups: ReadonlyArray<OpenedFilesGroup>;
+  readonly recoveryRecord: SplitGroupRecoveryRecord;
+}
+
+export function splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord(
+  group: OpenedFilesGroup,
+): SplitGroupsWithRecoveryRecord {
+  const splitGroups = splitGroupRowsIntoSingleImageGroups(group);
+  return {
+    splitGroups,
+    recoveryRecord: {
+      originalGroup: group,
+      splitGroupIds: splitGroups.map((splitGroup) => splitGroup.id),
+    },
+  };
+}
+
+export function canRecombineSplitGroupsIntoOriginal(
+  groups: ReadonlyArray<OpenedFilesGroup>,
+  record: SplitGroupRecoveryRecord,
+): boolean {
+  if (record.splitGroupIds.length !== record.originalGroup.rows.length) return false;
+  return record.splitGroupIds.every((splitGroupId, index) =>
+    splitGroupStillHoldsItsOriginalRow(
+      groups.find((group) => group.id === splitGroupId),
+      record.originalGroup.rows[index],
+    ),
+  );
+}
+
+function splitGroupStillHoldsItsOriginalRow(
+  group: OpenedFilesGroup | undefined,
+  originalRow: GroupedOpenedFileRow | undefined,
+): boolean {
+  if (group === undefined || originalRow === undefined) return false;
+  if (group.mode !== "singles") return false;
+  if (group.rows.length !== 1) return false;
+  return group.rows[0]!.contentHash === originalRow.contentHash;
+}
+
+// The restored group takes the FIRST split group's position; the remaining
+// split groups are removed. Generic over the group shape so the review modal
+// can run it over its view models without losing per-model state.
+export function replaceSplitGroupsWithRestoredGroup<GroupShape extends { readonly id: string }>(
+  groups: ReadonlyArray<GroupShape>,
+  record: SplitGroupRecoveryRecord,
+  restoredGroup: GroupShape,
+): ReadonlyArray<GroupShape> {
+  const splitIds = new Set(record.splitGroupIds);
+  return groups.flatMap((group) => {
+    if (!splitIds.has(group.id)) return [group];
+    return group.id === record.splitGroupIds[0] ? [restoredGroup] : [];
+  });
+}
+
+export function recombineSplitGroupsIntoOriginal(
+  groups: ReadonlyArray<OpenedFilesGroup>,
+  record: SplitGroupRecoveryRecord,
+): ReadonlyArray<OpenedFilesGroup> {
+  return replaceSplitGroupsWithRestoredGroup(groups, record, record.originalGroup);
+}
+
 function buildSingleImageGroupWithId(
   id: string,
   file: OpenedFileForGrouping,

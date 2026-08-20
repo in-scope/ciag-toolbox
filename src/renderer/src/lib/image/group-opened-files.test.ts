@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canRecombineSplitGroupsIntoOriginal,
   proposeGroupsForOpenedFiles,
+  recombineSplitGroupsIntoOriginal,
+  replaceSplitGroupsWithRestoredGroup,
   splitGroupRowsIntoSingleImageGroups,
+  splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord,
   type OpenedFileForGrouping,
   type OpenedFilesGroup,
 } from "./group-opened-files";
@@ -281,6 +285,14 @@ describe("splitGroupRowsIntoSingleImageGroups", () => {
     });
   });
 
+  it("records the split group ids in row order alongside the untouched original group", () => {
+    const { group } = proposeWavelengthStackGroup();
+    const { splitGroups, recoveryRecord } =
+      splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord(group);
+    expect(recoveryRecord.originalGroup).toBe(group);
+    expect(recoveryRecord.splitGroupIds).toEqual(splitGroups.map((splitGroup) => splitGroup.id));
+  });
+
   it("carries ENVI sidecar facts through the split", () => {
     const group: OpenedFilesGroup = {
       id: "image-1",
@@ -305,5 +317,95 @@ describe("splitGroupRowsIntoSingleImageGroups", () => {
     const split = splitGroupRowsIntoSingleImageGroups(group);
     expect(split[0]!.rows[0]!.sidecarFileName).toBe("cube.raw");
     expect(split[0]!.rows[0]!.sidecarSizeBytes).toBe(4096);
+  });
+});
+
+// CT-264: "Recombine into one stack" restores the pre-split group exactly.
+describe("recombineSplitGroupsIntoOriginal", () => {
+  function proposeAndSplitWavelengthStackGroup(): {
+    original: OpenedFilesGroup;
+    splitGroups: ReadonlyArray<OpenedFilesGroup>;
+    record: ReturnType<typeof splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord>["recoveryRecord"];
+  } {
+    const files = [
+      buildStackableFile("img_w450_capture.tif"),
+      buildStackableFile("img_w501_capture.tif"),
+      buildStackableFile("img_w552_capture.tif"),
+    ];
+    const original = proposeGroupsForOpenedFiles(files).groups[0]!;
+    const { splitGroups, recoveryRecord } =
+      splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord(original);
+    return { original, splitGroups, record: recoveryRecord };
+  }
+
+  it("split then recombine returns a grouping deep-equal to the original", () => {
+    const { original, splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    expect(recombineSplitGroupsIntoOriginal(splitGroups, record)).toEqual([original]);
+  });
+
+  it("restores the original at the first split group's position, keeping neighbours", () => {
+    const { original, splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    const before = proposeGroupsForOpenedFiles([buildMultiBandFile("rgb.png", 3)]).groups[0]!;
+    const after = proposeGroupsForOpenedFiles([buildMultiBandFile("photo.jpg", 3)]).groups[0]!;
+    const recombined = recombineSplitGroupsIntoOriginal([before, ...splitGroups, after], record);
+    expect(recombined).toEqual([before, original, after]);
+  });
+
+  it("replaces the split run with a caller-supplied restored group shape", () => {
+    const { splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    const restored = { id: "restored" };
+    const shapes = splitGroups.map((group) => ({ id: group.id }));
+    expect(replaceSplitGroupsWithRestoredGroup(shapes, record, restored)).toEqual([restored]);
+  });
+});
+
+describe("canRecombineSplitGroupsIntoOriginal", () => {
+  function proposeAndSplitWavelengthStackGroup(): {
+    original: OpenedFilesGroup;
+    splitGroups: ReadonlyArray<OpenedFilesGroup>;
+    record: ReturnType<typeof splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord>["recoveryRecord"];
+  } {
+    const files = [
+      buildStackableFile("img_w450_capture.tif"),
+      buildStackableFile("img_w501_capture.tif"),
+      buildStackableFile("img_w552_capture.tif"),
+    ];
+    const original = proposeGroupsForOpenedFiles(files).groups[0]!;
+    const { splitGroups, recoveryRecord } =
+      splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord(original);
+    return { original, splitGroups, record: recoveryRecord };
+  }
+
+  it("allows recombining immediately after the split, regardless of neighbours", () => {
+    const { splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    const neighbour = proposeGroupsForOpenedFiles([buildMultiBandFile("rgb.png", 3)]).groups[0]!;
+    expect(canRecombineSplitGroupsIntoOriginal(splitGroups, record)).toBe(true);
+    expect(canRecombineSplitGroupsIntoOriginal([neighbour, ...splitGroups], record)).toBe(true);
+  });
+
+  it("refuses once a split group was removed", () => {
+    const { splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    expect(canRecombineSplitGroupsIntoOriginal(splitGroups.slice(1), record)).toBe(false);
+  });
+
+  it("refuses once a split group gained a second row (it became a stack again)", () => {
+    const { splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    const [first, ...rest] = splitGroups;
+    const grown: OpenedFilesGroup = {
+      ...first!,
+      mode: "stack",
+      rows: [first!.rows[0]!, rest[0]!.rows[0]!],
+    };
+    expect(canRecombineSplitGroupsIntoOriginal([grown, ...rest], record)).toBe(false);
+  });
+
+  it("refuses once a split group's row was swapped for a different file", () => {
+    const { splitGroups, record } = proposeAndSplitWavelengthStackGroup();
+    const [first, ...rest] = splitGroups;
+    const swapped: OpenedFilesGroup = {
+      ...first!,
+      rows: [{ ...first!.rows[0]!, contentHash: "hash-of-some-other-file" }],
+    };
+    expect(canRecombineSplitGroupsIntoOriginal([swapped, ...rest], record)).toBe(false);
   });
 });

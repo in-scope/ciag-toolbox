@@ -8,9 +8,12 @@ import {
   multiBandTiff,
   rgbPng,
 } from "./fixtures/fixture-manifest";
+import { writeTemporaryGrayscalePngVariantFixtures } from "./support/create-temporary-png-fixture";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
+  clickReviewModalRecombineIntoOneStack,
+  reviewModalRecombineIntoOneStackButton,
   applicationToolbar,
   cancelReplaceTargetPicker,
   chooseReviewModalGroupMode,
@@ -99,6 +102,26 @@ test("'Open bands separately' splits the group into single-image rows that open 
     await expectReviewModalShowsOneSingleImageGroupPerFile(app, bandFiles);
     await confirmReviewModal(app.window);
     await expectEachBandFileLandedInItsOwnPanel(app, bandFiles);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-264: after "Open bands separately" splits a group, a "Recombine into one
+// stack" affordance restores the pre-split group (same rows, same order, mode
+// stack) and disappears once recombined. Fixture: the CT-263 grayscale PNG trio
+// (low-contrast-gray.png plus two temp-generated uniform-value variants).
+test("'Recombine into one stack' restores a split group that opens as one combined stack", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await enqueueAndTriggerOpenImages(app.window, await writeGrayscalePngTrioPaths());
+    await expectReviewModalShowsOneProposedStackGroup(app);
+    const preSplitRowOrder = await readReviewModalRowFileNamesInOrder(app.window);
+    await chooseReviewModalGroupMode(app.window, "Open bands separately");
+    await expect(reviewModalGroups(app.window)).toHaveCount(3);
+    await recombineSplitRowsAndExpectRestoredStack(app, preSplitRowOrder);
+    await confirmReviewModal(app.window);
+    await expectFirstPanelHoldsThreeBandStack(app);
   } finally {
     await closeToolboxApp(app);
   }
@@ -200,6 +223,25 @@ async function expectEachBandFileLandedInItsOwnPanel(
     });
     expect(Number.parseInt(readout.value, 10)).toBe(file.wavelength);
   }
+}
+
+async function writeGrayscalePngTrioPaths(): Promise<ReadonlyArray<string>> {
+  const variants = await writeTemporaryGrayscalePngVariantFixtures();
+  return [fixturePath(lowContrastGrayPng.fileName), ...variants.map((variant) => variant.filePath)];
+}
+
+async function recombineSplitRowsAndExpectRestoredStack(
+  app: LaunchedApp,
+  preSplitRowOrder: ReadonlyArray<string>,
+): Promise<void> {
+  await expect(reviewModalRecombineIntoOneStackButton(app.window)).toBeVisible();
+  await clickReviewModalRecombineIntoOneStack(app.window);
+  await expect(reviewModalRecombineIntoOneStackButton(app.window)).toBeHidden();
+  await expect(reviewModalGroups(app.window)).toHaveCount(1);
+  await expect(
+    openImagesReviewModal(app.window).getByLabel(/^Multi-band Stack 1 \(3 rows\)/),
+  ).toBeVisible();
+  expect(await readReviewModalRowFileNamesInOrder(app.window)).toEqual(preSplitRowOrder);
 }
 
 async function expectFirstPanelHoldsThreeBandStack(app: LaunchedApp): Promise<void> {

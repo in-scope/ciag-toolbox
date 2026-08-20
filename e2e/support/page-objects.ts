@@ -161,6 +161,8 @@ export {
   chooseReviewModalGroupMode,
   readReviewModalGroupModeOptionLabels,
   readReviewModalRowFileNamesInOrder,
+  reviewModalRecombineIntoOneStackButton,
+  clickReviewModalRecombineIntoOneStack,
   confirmReviewModal,
   cancelReplaceTargetPicker,
   openImagesErrorToast,

@@ -75,6 +75,18 @@ function extractFileNameFromRowAriaLabel(ariaLabel: string): string {
   return separatorIndex < 0 ? ariaLabel : ariaLabel.slice(separatorIndex + 2);
 }
 
+// CT-264: after "Open bands separately" splits a group, this affordance sits
+// above the run of split single-image groups and restores the pre-split stack.
+export function reviewModalRecombineIntoOneStackButton(page: Page): Locator {
+  return openImagesReviewModal(page).getByRole("button", { name: "Recombine into one stack" });
+}
+
+export async function clickReviewModalRecombineIntoOneStack(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Recombine the split rows into one stack", async () => {
+    await reviewModalRecombineIntoOneStackButton(page).click();
+  });
+}
+
 export async function confirmReviewModal(page: Page): Promise<void> {
   await runAsStoryboardStep(page, "Confirm the Review stacks modal to open the stacks", async () => {
     const modal = openImagesReviewModal(page);
