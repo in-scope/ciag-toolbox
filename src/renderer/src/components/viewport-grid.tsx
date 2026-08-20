@@ -1,5 +1,5 @@
 import { useCallback, type MouseEvent } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ViewportBusyOverlay } from "@/components/busy-indicators";
 import {
@@ -427,7 +427,7 @@ function linkPanZoomFromSelection(
   const indices = new Set(selectedIndices);
   indices.add(sourceIndex);
   const result = panelLink.linkPanels([...indices]);
-  if (!result.ok) toast.error(describePanelLinkFailureMessage(result.reason));
+  if (!result.ok) notifyError(describePanelLinkFailureMessage(result.reason));
 }
 
 function describePanelLinkFailureMessage(reason: PanelLinkFailureReason): string {

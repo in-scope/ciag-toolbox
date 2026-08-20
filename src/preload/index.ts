@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
+import { readMemoryBudgetOverrideBytesFromArguments } from "../shared/e2e-memory-budget-argument";
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
   OPENED_IMAGE_READ_ABORT_CHANNEL,
@@ -535,6 +536,9 @@ const e2eTestBridge = {
   enqueueOpenDialogPaths: enqueueOpenDialogPathsForTest,
   enqueueSaveDialogPath: enqueueSaveDialogPathForTest,
   resetDialogQueues: resetDialogQueuesForTest,
+  // CT-260: a lowered raster-memory budget (see src/shared/e2e-memory-budget-argument.ts)
+  // so e2e can trigger memory refusals with tiny fixtures.
+  memoryBudgetOverrideBytes: readMemoryBudgetOverrideBytesFromArguments(process.argv),
 } as const;
 
 export type ToolboxE2eBridge = typeof e2eTestBridge;

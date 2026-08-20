@@ -4,7 +4,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ScriptDocsLink } from "@/components/script-docs-link";
 import { Button } from "@/components/ui/button";
@@ -114,7 +114,7 @@ async function executeUserScriptForWeights(
     const result = await runUserScriptOnRasterShowingViewportBusy(bindings, raster, source);
     applyUserScriptWeightsResult(result, raster.bandCount, setWeights);
   } catch (error) {
-    toast.error(describeWeightsScriptError(error));
+    notifyError(describeWeightsScriptError(error));
   } finally {
     setIsRunning(false);
   }

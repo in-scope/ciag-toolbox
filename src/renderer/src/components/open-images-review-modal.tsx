@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { AlertTriangle, Check, GripVertical, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -221,9 +221,7 @@ function rejectMultiBandDragIntoDifferentGroupOrPass(
 ): boolean {
   const isCrossGroupMove = source.groupId !== targetGroupId;
   if (!source.isMultiBandRaster || !isCrossGroupMove) return true;
-  toast.error("Multi-band stack must open as its own stack; it cannot be combined with other bands.", {
-    duration: 8000,
-  });
+  notifyError("Multi-band stack must open as its own stack; it cannot be combined with other bands.");
   return false;
 }
 

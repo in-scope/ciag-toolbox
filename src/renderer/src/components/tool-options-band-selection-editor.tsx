@@ -4,7 +4,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ScriptDocsLink } from "@/components/script-docs-link";
 import { Button } from "@/components/ui/button";
@@ -120,7 +120,7 @@ async function executeUserScriptForBand(
     const result = await runUserScriptOnRasterShowingViewportBusy(bindings, raster, source);
     rememberUserScriptBandResult(result, raster, setCustomResult);
   } catch (error) {
-    toast.error(describeBandScriptError(error));
+    notifyError(describeBandScriptError(error));
   } finally {
     setIsRunning(false);
   }

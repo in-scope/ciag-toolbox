@@ -1,5 +1,3 @@
-import { toast } from "sonner";
-
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { PendingDuplicateReplace } from "@/components/viewport-duplicate-replace-target-picker";
 import {
@@ -19,6 +17,7 @@ import {
   type ViewportActionOutput,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
+import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
@@ -101,7 +100,7 @@ function reportApplySucceededWithToast(
   action: RegisteredViewportAction,
   bindings: ApplyActionFlowBindings,
 ): void {
-  toast.success(action.successMessage);
+  notifySuccess(action.successMessage);
   bindings.reportApplyOutcome?.({ succeeded: true });
 }
 
@@ -110,7 +109,7 @@ function reportApplyFailedWithToast(
   bindings: ApplyActionFlowBindings,
   error: unknown,
 ): void {
-  toast.error(formatActionErrorMessage(action.label, error));
+  notifyError(formatActionErrorMessage(action.label, error));
   bindings.reportApplyOutcome?.({ succeeded: false });
 }
 
@@ -537,7 +536,7 @@ function reportActionCannotApplyToSourceBeforeOpeningPanel(
     action.assertCanApplyToSource(source, parameterValues);
     return false;
   } catch (error) {
-    toast.error(formatActionErrorMessage(action.label, error));
+    notifyError(formatActionErrorMessage(action.label, error));
     return true;
   }
 }

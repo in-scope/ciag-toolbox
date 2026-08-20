@@ -6,6 +6,7 @@ import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
+import { buildErrorToastOptions } from "@/lib/notifications/toast-options";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -246,7 +247,10 @@ describe("applyActionToDuplicateOfSource with assertCanApplyToSource (CT-190)", 
     expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
     expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
     expect(harness.bindings.setGridLayout).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Reject Source failed: not appliable");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Reject Source failed: not appliable",
+      buildErrorToastOptions(),
+    );
   });
 });
 
@@ -607,7 +611,9 @@ describe("apply without the whole-cube clone (CT-233)", () => {
       SOURCE_INDEX,
       harness.bindings,
     );
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Throws failed: boom"));
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Throws failed: boom", buildErrorToastOptions()),
+    );
     expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
     sourceRaster.bandPixels.forEach((band, index) => {
       expect(Array.from(band)).toEqual(bandSnapshots[index]);

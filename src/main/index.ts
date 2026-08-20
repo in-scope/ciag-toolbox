@@ -13,6 +13,10 @@ import {
   isE2eTestModeEnabled,
   registerE2eDialogStubTestChannelsWhenEnabled,
 } from "./e2e-dialog-stub";
+import {
+  buildMemoryBudgetPreloadArgumentOrNull,
+  E2E_MEMORY_BUDGET_ENVIRONMENT_VARIABLE,
+} from "../shared/e2e-memory-budget-argument";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
@@ -105,7 +109,18 @@ function buildBrowserWindowOptionsFrom(
 }
 
 function buildPreloadAdditionalArguments(): string[] {
-  return isE2eTestModeEnabled() ? [E2E_TEST_MODE_PRELOAD_ARGUMENT] : [];
+  if (!isE2eTestModeEnabled()) return [];
+  return [E2E_TEST_MODE_PRELOAD_ARGUMENT, ...listMemoryBudgetOverrideArguments()];
+}
+
+// CT-260 e2e test surface: forward a lowered raster-memory budget into the
+// preload so memory refusals are reproducible with tiny fixtures. Only ever
+// reached under MSI_E2E, so production launches carry no override.
+function listMemoryBudgetOverrideArguments(): string[] {
+  const argument = buildMemoryBudgetPreloadArgumentOrNull(
+    process.env[E2E_MEMORY_BUDGET_ENVIRONMENT_VARIABLE],
+  );
+  return argument === null ? [] : [argument];
 }
 
 function maximizeWindowIfPreviouslyMaximized(

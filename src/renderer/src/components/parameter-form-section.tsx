@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -654,7 +654,7 @@ async function pickReferenceRasterIntoField(
     const picked = await pickAndRememberReferenceRasterFromDisk();
     if (picked) onChangeValue(picked.token);
   } catch (error) {
-    toast.error(describeReferencePickError(error));
+    notifyError(describeReferencePickError(error));
   } finally {
     setIsPicking(false);
   }

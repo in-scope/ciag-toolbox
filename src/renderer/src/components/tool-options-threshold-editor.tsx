@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import {
   HistogramCanvas,
@@ -138,7 +138,7 @@ function useApplyOtsuAutoThresholdBounds(
 }
 
 function notifyOtsuAutoFailureToast(message: string): void {
-  toast.error(message);
+  notifyError(message);
 }
 
 async function deriveOtsuBoundsAndStoreThem(

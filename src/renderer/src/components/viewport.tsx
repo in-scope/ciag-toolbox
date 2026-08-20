@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import { Brackets, Contrast, FolderOpen, Layers, Link2, X } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
@@ -539,7 +539,7 @@ function useViewportRendererLifecycle(
 }
 
 function showRendererErrorToast(message: string): void {
-  toast.error(message);
+  notifyError(message);
 }
 
 function useImageSourceUploadEffect(

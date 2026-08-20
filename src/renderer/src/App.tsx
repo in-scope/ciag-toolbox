@@ -127,6 +127,7 @@ import {
   planOpenImagesPlacement,
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
+import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
@@ -965,9 +966,9 @@ async function runSaveImageFlowAndShowToast(
       onProgress: (fraction) => handle.update({ progress: fraction }),
     });
     if (result.canceled) return;
-    toast.success(`Saved to ${result.filePath}`);
+    notifySuccess(`Saved to ${result.filePath}`);
   } catch (error) {
-    toast.error(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
+    notifyError(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
   } finally {
     handle.clear();
   }
@@ -1030,7 +1031,7 @@ async function runOpenImagesDialogFlow(bindings: OpenImagesBindings): Promise<vo
   try {
     await runOpenImagesDialogPhaseAndDispatchOutcome(bindings, handle);
   } catch (error) {
-    toast.error(`Could not open images: ${describeUnknownError(error)}`);
+    notifyError(`Could not open images: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -1110,7 +1111,7 @@ function placeSingleDecodedFileIntoViewport(
   bindings: OpenImagesBindings,
 ): void {
   if (file.decodeError !== null || file.source === null) {
-    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
+    notifyError(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
     return;
   }
   routeSingleDecodedSourceToCell(file, targetIndex, bindings);
@@ -1157,7 +1158,7 @@ function applyLoadedImageAtIndex(
     }),
   );
   bindings.selectViewportFromClick(index, { ctrlOrMeta: false, shift: false });
-  toast.success(`Loaded ${pending.fileName}`);
+  notifySuccess(`Loaded ${pending.fileName}`);
 }
 
 interface ConfirmReplaceBindings extends ApplyLoadedImageBindings {
@@ -1192,7 +1193,7 @@ async function confirmOpenImagesReviewGroups(
     if (pendingItems.length === 0) return;
     placePendingItemsAcrossViewports(pendingItems, bindings);
   } catch (error) {
-    toast.error(`Could not place stacks: ${describeUnknownError(error)}`);
+    notifyError(`Could not place stacks: ${describeUnknownError(error)}`);
   }
 }
 
@@ -1479,7 +1480,7 @@ function reportDuplicateExceedsMemoryBudget(
   if (!rasterAllocationExceedsMemoryBudget(estimateSourceCloneBytes(sourceContent.source), liveBytes)) {
     return false;
   }
-  toast.error(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
+  notifyError(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
   return true;
 }
 
@@ -1522,9 +1523,9 @@ async function applyDuplicateToTargetIndex(
   try {
     await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
     bindings.setRenderingState(targetIndex, bindings.getRenderingState(sourceIndex));
-    toast.success(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
+    notifySuccess(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
   } catch (error) {
-    toast.error(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
+    notifyError(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
   }
 }
 
@@ -1681,7 +1682,7 @@ async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImag
   try {
     return await window.toolboxApi.openImageDialog();
   } catch (error) {
-    toast.error(`Could not open the file dialog: ${describeUnknownError(error)}`);
+    notifyError(`Could not open the file dialog: ${describeUnknownError(error)}`);
     return null;
   }
 }
@@ -1716,9 +1717,9 @@ async function replaceViewportSourceWithReimportedFile(
       }),
     );
     bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
-    toast.success(`Re-imported ${file.fileName}`);
+    notifySuccess(`Re-imported ${file.fileName}`);
   } catch (error) {
-    toast.error(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
+    notifyError(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -2344,12 +2345,12 @@ function pickKeptBandOriginalNumbersForSubsetOrNull(
 ): ReadonlyArray<number> | null {
   const { raster, removedBandIndexes } = inputs;
   if (!raster) {
-    toast.error("Subset Bands requires a raster source.");
+    notifyError("Subset Bands requires a raster source.");
     return null;
   }
   const keptBandIndexes = listKeptBandIndexesFromRemoved(raster.bandCount, removedBandIndexes);
   if (keptBandIndexes.length === 0) {
-    toast.error("Keep at least one band before applying.");
+    notifyError("Keep at least one band before applying.");
     return null;
   }
   if (keptBandIndexes.length === raster.bandCount) {
@@ -2401,7 +2402,7 @@ function pickKeptBandNumbersAfterSingleRemovalOrNull(
   removedBandIndex: number,
 ): ReadonlyArray<number> | null {
   if (!raster) {
-    toast.error("Removing a band requires a raster source.");
+    notifyError("Removing a band requires a raster source.");
     return null;
   }
   if (raster.bandCount <= 1) {
@@ -2616,7 +2617,7 @@ function mergeParameterValuesWithSourceRenderingState(
   try {
     return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope, sourceRaster);
   } catch (error) {
-    toast.error(formatActionPreparationErrorMessage(action.label, error));
+    notifyError(formatActionPreparationErrorMessage(action.label, error));
     return null;
   }
 }
@@ -2705,7 +2706,7 @@ async function invokeSaveProjectFlowWithToastFeedback(
     });
     return handleSaveProjectFlowOutcome(result, bindings, revisionBeingSaved);
   } catch (error) {
-    toast.error(`Could not save project: ${describeUnknownError(error)}`);
+    notifyError(`Could not save project: ${describeUnknownError(error)}`);
     return false;
   } finally {
     handle.clear();
@@ -2738,7 +2739,7 @@ function handleSaveProjectFlowOutcome(
   if (result.canceled || !result.filePath) return false;
   bindings.setCurrentProjectFilePath(result.filePath);
   bindings.projectRevisionTracker.markContentRevisionAsSaved(revisionBeingSaved);
-  toast.success(`Saved project to ${result.filePath}`);
+  notifySuccess(`Saved project to ${result.filePath}`);
   return true;
 }
 
@@ -2830,7 +2831,7 @@ async function runOpenProjectFlowAndShowToast(
     });
     handleOpenProjectFlowOutcome(result, bindings);
   } catch (error) {
-    toast.error(`Could not open project: ${describeUnknownError(error)}`);
+    notifyError(`Could not open project: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -2856,7 +2857,7 @@ function handleOpenProjectFlowOutcome(
 ): void {
   if (result.canceled || !result.opened) return;
   applyOpenedProjectToApplicationState(result.opened, bindings);
-  toast.success(formatOpenedProjectToastMessage(result.opened));
+  notifySuccess(formatOpenedProjectToastMessage(result.opened));
 }
 
 function formatOpenedProjectToastMessage(opened: OpenedProject): string {

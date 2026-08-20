@@ -20,6 +20,10 @@ function Toaster(props: ToasterProps): JSX.Element {
         // pointer-transparent lets a hover pass through to the canvas/readout (and
         // stops a hover from pausing auto-dismiss), so a toast over the lowest panel
         // can no longer block reading a pixel value underneath it.
+        // CT-260 exception: ERROR toasts persist until dismissed, so they opt back
+        // in to pointer events per-toast (lib/notifications/toast-options.ts spreads
+        // pointerEvents "auto" after this default) to keep their close button
+        // hoverable and clickable.
         style: { pointerEvents: "none" },
         classNames: {
           toast:

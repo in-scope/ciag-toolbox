@@ -47,11 +47,14 @@ function keepDefinedStringEntries(
   return defined;
 }
 
-function buildElectronLaunchEnvironment(): Record<string, string> {
+function buildElectronLaunchEnvironment(
+  extraEnvironment: Record<string, string>,
+): Record<string, string> {
   return {
     ...keepDefinedStringEntries(process.env),
     ELECTRON_RENDERER_URL: resolveRendererDevServerUrl(),
     MSI_E2E: "1",
+    ...extraEnvironment,
   };
 }
 
@@ -152,11 +155,20 @@ async function attachTraceZipToCurrentTest(tracePath: string): Promise<void> {
   }
 }
 
-export async function launchToolboxApp(): Promise<LaunchedApp> {
+export interface LaunchToolboxAppOptions {
+  // Extra launch environment entries, e.g. the CT-260 lowered-memory-budget
+  // variable (MSI_E2E_MEMORY_BUDGET_BYTES) that makes refusals reproducible
+  // with tiny fixtures.
+  readonly extraEnvironment?: Record<string, string>;
+}
+
+export async function launchToolboxApp(
+  options: LaunchToolboxAppOptions = {},
+): Promise<LaunchedApp> {
   return runAsStoryboardStep(null, "Launch the app and wait for the main window", async () => {
     const app = await electron.launch({
       args: [APPLICATION_ROOT_PATH],
-      env: buildElectronLaunchEnvironment(),
+      env: buildElectronLaunchEnvironment(options.extraEnvironment ?? {}),
     });
     await startTracingIfEnabled(app);
     const window = await waitForMainApplicationWindow(app);
