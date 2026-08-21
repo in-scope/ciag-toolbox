@@ -17,6 +17,7 @@ import {
   type ViewportActionOutput,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
+import { composeApplySuccessMessage } from "@/lib/actions/apply-success-message";
 import { clearOperationRegionAtViewportIndex } from "@/lib/actions/operation-region";
 import type {
   InFlightApplyRunReservation,
@@ -116,8 +117,9 @@ function reportApplyExceedsMemoryBudget(
 function reportApplySucceededWithToast(
   action: RegisteredViewportAction,
   bindings: ApplyActionFlowBindings,
+  resultOpenedInNewPanel: boolean,
 ): void {
-  notifySuccess(action.successMessage);
+  notifySuccess(composeApplySuccessMessage(action, resultOpenedInNewPanel));
   bindings.reportApplyOutcome?.({ succeeded: true });
 }
 
@@ -209,7 +211,7 @@ function applyActionInPlaceWithoutBusyIndicator(
     );
     const sourceContent = bindings.imagesByIndex.get(sourceIndex) ?? null;
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, sourceIndex, bindings);
-    reportApplySucceededWithToast(action, bindings);
+    reportApplySucceededWithToast(action, bindings, false);
   } catch (error) {
     reportApplyFailedWithToast(action, sourceIndex, bindings, error);
   }
@@ -231,7 +233,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
   try {
     await yieldOnceSoBusyOverlayCanPaint();
     await transformSourceInPlaceAndFinishBookkeeping(action, parameterValues, sourceIndex, reservation, bindings, handle, stopController?.signal);
-    reportApplySucceededWithToast(action, bindings);
+    reportApplySucceededWithToast(action, bindings, false);
   } catch (error) {
     reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
   } finally {
@@ -506,7 +508,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
     await placeDuplicateOutputAtReservedTarget(action, parameterValues, sourceContent, reservation, bindings, handle, stopController?.signal);
     finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, reservation, bindings);
-    reportApplySucceededWithToast(action, bindings);
+    reportApplySucceededWithToast(action, bindings, resultLandedOutsideTheSourcePanel(reservation));
   } catch (error) {
     reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
   } finally {
@@ -553,6 +555,13 @@ function finishDuplicateApplyBookkeeping(
   clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
   placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, targetIndex, bindings);
   selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
+}
+
+// CT-276: the duplicate path normally lands in a fresh panel, but the
+// replace-target picker can point it back at the source panel itself; only a
+// result living in ANOTHER panel leaves the original holding its memory.
+function resultLandedOutsideTheSourcePanel(reservation: InFlightApplyRunReservation): boolean {
+  return reservation.currentTargetIndex() !== reservation.currentSourceIndex();
 }
 
 function selectResultPanelHoldingTheDuplicateOutput(

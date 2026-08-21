@@ -1120,4 +1120,67 @@ function buildActionWithDeferredAsyncTransform(): {
   return { action, resolveNextTransform };
 }
 
+// --- CT-276: new-panel success hint ----------------------------------------
+
+describe("new-panel success hint (CT-276)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+  });
+
+  it("appends the hint to the success toast when the result lands in another panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Crop to region applied. Closing the original panel frees its memory.",
+      expect.anything(),
+    );
+  });
+
+  it("toasts the plain message when the duplicate path replaces the source panel itself", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalledWith("Crop to region applied", expect.anything());
+  });
+
+  it("toasts the plain message for an in-place apply", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    applyActionInPlaceAtSourceIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Crop to region applied", expect.anything()),
+    );
+  });
+});
+
+function buildCropLikeActionWithNewPanelHint(): RegisteredViewportAction {
+  return {
+    id: "crop-like",
+    label: "Crop to Region",
+    icon: () => null,
+    successMessage: "Crop to region applied",
+    successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
+    appliedLabel: "Crop to region",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+  } as unknown as RegisteredViewportAction;
+}
+
 void EMPTY_OPERATION_HISTORY;

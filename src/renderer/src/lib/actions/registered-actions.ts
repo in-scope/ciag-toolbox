@@ -151,6 +151,12 @@ export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 export interface RegisteredViewportAction extends ViewportAction {
   readonly icon: RegisteredActionIcon;
   readonly successMessage: string;
+  /**
+   * CT-276: extra sentence appended to the success toast when the result
+   * landed in a DIFFERENT panel than the source (so the source panel still
+   * holds its memory). An in-place apply never shows it.
+   */
+  readonly successHintWhenResultOpensNewPanel?: string;
   readonly appliedLabel: string;
   /**
    * CT-106: operation-specific message shown in the result panel's loading
@@ -279,6 +285,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   label: "Crop to Region",
   icon: Crop,
   successMessage: "Crop to region applied",
+  successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
   appliedLabel: "Crop to region",
   requiresOperationRegion: true,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
