@@ -232,9 +232,12 @@ interface ViewportHeaderStripProps {
   showCloseButton: boolean;
 }
 
+// The header sits ABOVE the cell's busy overlay (z-20 over its z-10): while an
+// operation runs, the CT-269 close-the-target-cancels-the-run interaction needs
+// the close button to stay clickable instead of being swallowed by the overlay.
 function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2 text-xs">
+    <div className="relative z-20 flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2 text-xs">
       {typeof props.viewportNumber === "number" ? (
         <ViewportNumberBadge viewportNumber={props.viewportNumber} />
       ) : null}
