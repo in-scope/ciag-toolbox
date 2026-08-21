@@ -16,6 +16,18 @@ import {
   type ChunkedOpenedImageReadFinishResult,
 } from "../shared/chunked-opened-image-read-protocol";
 import {
+  PNG16_DECODE_ABORT_CHANNEL,
+  PNG16_DECODE_BEGIN_CHANNEL,
+  PNG16_DECODE_CHUNK_CHANNEL,
+  PNG16_DECODE_FINISH_CHANNEL,
+  type ChunkedPng16DecodeAbortRequest,
+  type ChunkedPng16DecodeBeginRequest,
+  type ChunkedPng16DecodeBeginResult,
+  type ChunkedPng16DecodeChunkRequest,
+  type ChunkedPng16DecodeChunkResult,
+  type ChunkedPng16DecodeFinishRequest,
+} from "../shared/chunked-png16-decode-protocol";
+import {
   SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
   SAVE_BUNDLE_BEGIN_CHANNEL,
   SAVE_BUNDLE_FINISH_CHANNEL,
@@ -210,6 +222,39 @@ function abortOpenedImageChunkedReadInMainProcess(
     OPENED_IMAGE_READ_ABORT_CHANNEL,
     request,
   ) as Promise<void>;
+}
+
+// CT-272: the renderer drives the chunked 16-bit PNG decode protocol; main
+// re-reads the file from disk and streams back the DECODED big-endian
+// samples, since Chromium's own PNG decoder downscales 16-bit data to 8 bits.
+function beginPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeBeginRequest,
+): Promise<ChunkedPng16DecodeBeginResult> {
+  return ipcRenderer.invoke(
+    PNG16_DECODE_BEGIN_CHANNEL,
+    request,
+  ) as Promise<ChunkedPng16DecodeBeginResult>;
+}
+
+function readPng16DecodedChunkFromMainProcess(
+  request: ChunkedPng16DecodeChunkRequest,
+): Promise<ChunkedPng16DecodeChunkResult> {
+  return ipcRenderer.invoke(
+    PNG16_DECODE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<ChunkedPng16DecodeChunkResult>;
+}
+
+function finishPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeFinishRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(PNG16_DECODE_FINISH_CHANNEL, request) as Promise<void>;
+}
+
+function abortPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeAbortRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(PNG16_DECODE_ABORT_CHANNEL, request) as Promise<void>;
 }
 
 // Chunked save-image protocol (CT-237, see
@@ -486,6 +531,10 @@ const apiBridge = {
   readOpenedImageChunk: readOpenedImageChunkFromMainProcess,
   finishOpenedImageChunkedRead: finishOpenedImageChunkedReadInMainProcess,
   abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
+  beginPng16Decode: beginPng16DecodeInMainProcess,
+  readPng16DecodedChunk: readPng16DecodedChunkFromMainProcess,
+  finishPng16Decode: finishPng16DecodeInMainProcess,
+  abortPng16Decode: abortPng16DecodeInMainProcess,
   beginSaveImage: beginSaveImageThroughMainProcess,
   sendSaveImageChunk: sendSaveImageChunkToMainProcess,
   finishSaveImage: finishSaveImageInMainProcess,

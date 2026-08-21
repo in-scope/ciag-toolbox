@@ -72,6 +72,36 @@ interface ToolboxOpenedImageChunkedReadAbortRequest {
   token: string;
 }
 
+// CT-272 chunked 16-bit PNG decode protocol (mirrors
+// src/shared/chunked-png16-decode-protocol.ts; keep in sync).
+interface ToolboxPng16DecodeBeginRequest {
+  filePath: string;
+}
+
+interface ToolboxPng16DecodeBeginResult {
+  token: string;
+  width: number;
+  height: number;
+  channelCount: number;
+}
+
+interface ToolboxPng16DecodeChunkRequest {
+  token: string;
+}
+
+interface ToolboxPng16DecodeChunkResult {
+  done: boolean;
+  bytes: Uint8Array;
+}
+
+interface ToolboxPng16DecodeFinishRequest {
+  token: string;
+}
+
+interface ToolboxPng16DecodeAbortRequest {
+  token: string;
+}
+
 interface ToolboxSaveImageFileFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -353,6 +383,14 @@ interface ToolboxApi {
   abortOpenedImageChunkedRead: (
     request: ToolboxOpenedImageChunkedReadAbortRequest,
   ) => Promise<void>;
+  beginPng16Decode: (
+    request: ToolboxPng16DecodeBeginRequest,
+  ) => Promise<ToolboxPng16DecodeBeginResult>;
+  readPng16DecodedChunk: (
+    request: ToolboxPng16DecodeChunkRequest,
+  ) => Promise<ToolboxPng16DecodeChunkResult>;
+  finishPng16Decode: (request: ToolboxPng16DecodeFinishRequest) => Promise<void>;
+  abortPng16Decode: (request: ToolboxPng16DecodeAbortRequest) => Promise<void>;
   beginSaveImage: (
     request: ToolboxSaveImageBeginRequest,
   ) => Promise<ToolboxSaveImageBeginResult>;

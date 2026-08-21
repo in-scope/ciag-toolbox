@@ -20,6 +20,7 @@ import {
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
+import { registerChunkedPng16DecodeIpcHandlers } from "./chunked-png16-decode-ipc";
 import { registerOpenImagesDialogIpcHandlers } from "./open-images-dialog";
 import { registerSaveBundleDialogIpcHandlers } from "./save-bundle-dialog";
 import { registerSaveImageDialogIpcHandlers } from "./save-image-dialog";
@@ -198,6 +199,7 @@ app.whenReady().then(() => {
   registerOpenImageDialogIpcHandler();
   registerOpenImagesDialogIpcHandlers();
   registerChunkedOpenedImageReadIpcHandlers();
+  registerChunkedPng16DecodeIpcHandlers();
   registerSaveImageDialogIpcHandlers();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandlers();

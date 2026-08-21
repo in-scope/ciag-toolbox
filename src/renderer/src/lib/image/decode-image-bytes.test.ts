@@ -1,10 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { INTERLACED_PNG_REFUSAL_MESSAGE } from "@shared/png-header";
+
 import { decodeImageBytesToViewportSource } from "@/lib/image/decode-image-bytes";
+import { loadPng16RasterThroughChunkedDecode } from "@/lib/image/load-png16";
 
 vi.mock("@/lib/image/load-raw", () => ({
   loadRawAsRaster: vi.fn(async () => {
     throw new Error("raw loader stub invoked");
+  }),
+}));
+
+vi.mock("@/lib/image/load-png16", () => ({
+  loadPng16RasterThroughChunkedDecode: vi.fn(async () => {
+    throw new Error("png16 loader stub invoked");
   }),
 }));
 
@@ -50,6 +59,72 @@ describe("decodeImageBytesToViewportSource (ENVI detection)", () => {
     await expect(
       decodeImageBytesToViewportSource({ fileName: "scene.hdr", bytes: headerBytes }),
     ).rejects.toThrow(/sibling binary file/);
+  });
+});
+
+interface SixteenBitPngHeaderFields {
+  readonly bitDepth?: number;
+  readonly colorType?: number;
+  readonly interlaceMethod?: number;
+}
+
+function buildPngFilePrefix(fields: SixteenBitPngHeaderFields = {}): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 13);
+  bytes.set([73, 72, 68, 82], 12);
+  view.setUint32(16, 5);
+  view.setUint32(20, 4);
+  bytes[24] = fields.bitDepth ?? 16;
+  bytes[25] = fields.colorType ?? 0;
+  bytes[28] = fields.interlaceMethod ?? 0;
+  return bytes;
+}
+
+// CT-272: a 16-bit PNG must NEVER reach the browser decode path (Chromium
+// silently downscales it to 8 bits); it routes to the main-process chunked
+// decoder, which needs the file's on-disk path.
+describe("decodeImageBytesToViewportSource (16-bit PNG routing)", () => {
+  it("routes a 16-bit grayscale PNG with a path to the main-process decoder", async () => {
+    await expect(
+      decodeImageBytesToViewportSource({
+        fileName: "depth.png",
+        bytes: buildPngFilePrefix(),
+        filePath: "C:/pictures/depth.png",
+      }),
+    ).rejects.toThrow(/png16 loader stub invoked/);
+    expect(vi.mocked(loadPng16RasterThroughChunkedDecode)).toHaveBeenCalledWith(
+      expect.anything(),
+      "C:/pictures/depth.png",
+      undefined,
+    );
+  });
+
+  it("rejects a 16-bit PNG whose open path carried no file path", async () => {
+    await expect(
+      decodeImageBytesToViewportSource({ fileName: "depth.png", bytes: buildPngFilePrefix() }),
+    ).rejects.toThrow(/needs the file's path/);
+  });
+
+  it("refuses an interlaced 16-bit PNG with the locked re-export message", async () => {
+    await expect(
+      decodeImageBytesToViewportSource({
+        fileName: "depth.png",
+        bytes: buildPngFilePrefix({ interlaceMethod: 1 }),
+        filePath: "C:/pictures/depth.png",
+      }),
+    ).rejects.toThrow(INTERLACED_PNG_REFUSAL_MESSAGE);
+  });
+
+  it("keeps an 8-bit PNG away from the 16-bit decoder", async () => {
+    vi.mocked(loadPng16RasterThroughChunkedDecode).mockClear();
+    await decodeImageBytesToViewportSource({
+      fileName: "photo.png",
+      bytes: buildPngFilePrefix({ bitDepth: 8 }),
+      filePath: "C:/pictures/photo.png",
+    }).catch(() => undefined);
+    expect(vi.mocked(loadPng16RasterThroughChunkedDecode)).not.toHaveBeenCalled();
   });
 });
 

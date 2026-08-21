@@ -1,5 +1,16 @@
+import {
+  assertSixteenBitPngHeaderIsDecodable,
+  isSixteenBitPngFileHeader,
+  parsePngFileHeaderOrNull,
+  type PngFileHeaderSummary,
+} from "@shared/png-header";
+
 import { type UnitProgressCallback } from "@/lib/image/unit-progress";
 import { loadEnviAsRasterReportingPerBandProgress } from "@/lib/image/load-envi";
+import {
+  loadPng16RasterThroughChunkedDecode,
+  type Png16DecodeApi,
+} from "@/lib/image/load-png16";
 import { loadRawAsRaster } from "@/lib/image/load-raw";
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
 import { promoteBrowserSourceToRaster } from "@/lib/image/promote-source-to-raster";
@@ -9,6 +20,9 @@ export interface OpenedImageBundle {
   readonly fileName: string;
   readonly bytes: Uint8Array;
   readonly sidecarBytes?: Uint8Array;
+  // CT-272: 16-bit PNGs decode in MAIN from the file on disk (Chromium's own
+  // decoder downscales them to 8 bits), so the open flows pass the path along.
+  readonly filePath?: string;
 }
 
 const RAW_CAMERA_FILE_EXTENSIONS: ReadonlyArray<string> = [
@@ -35,7 +49,40 @@ export async function decodeImageBytesToViewportSource(
   if (looksLikeTiffFileName(bundle.fileName) || looksLikeTiffByteHeader(bundle.bytes)) {
     return decodeTiffBytesAsRasterSource(bundle.bytes, onDecodeProgress);
   }
+  const pngHeader = parsePngFileHeaderOrNull(bundle.bytes);
+  if (isSixteenBitPngFileHeader(pngHeader)) {
+    return decodeSixteenBitPngThroughMainProcess(bundle, pngHeader, onDecodeProgress);
+  }
   return decodeBrowserImageBytesAsPromotedRasterSource(bundle.bytes);
+}
+
+// CT-272: a 16-bit PNG never goes near createImageBitmap (which silently
+// downscales it to 8 bits); main decodes it with Node zlib and streams the
+// real uint16 samples back through the chunked protocol.
+async function decodeSixteenBitPngThroughMainProcess(
+  bundle: OpenedImageBundle,
+  pngHeader: PngFileHeaderSummary,
+  onDecodeProgress?: UnitProgressCallback,
+): Promise<ViewportImageSource> {
+  assertSixteenBitPngHeaderIsDecodable(pngHeader);
+  if (bundle.filePath === undefined) {
+    throw new Error(`Cannot decode ${bundle.fileName}: 16-bit PNG decoding needs the file's path`);
+  }
+  const raster = await loadPng16RasterThroughChunkedDecode(
+    buildPng16DecodeApiFromToolboxBridge(),
+    bundle.filePath,
+    onDecodeProgress,
+  );
+  return { kind: "raster", raster };
+}
+
+function buildPng16DecodeApiFromToolboxBridge(): Png16DecodeApi {
+  return {
+    begin: (request) => window.toolboxApi.beginPng16Decode(request),
+    readChunk: (request) => window.toolboxApi.readPng16DecodedChunk(request),
+    finish: (request) => window.toolboxApi.finishPng16Decode(request),
+    abort: (request) => window.toolboxApi.abortPng16Decode(request),
+  };
 }
 
 async function decodeEnviHeaderAndBinaryAsRasterSource(
