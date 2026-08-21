@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import { OperationStoppedError } from "./operation-stop";
 import {
   computeArrayReportingPerUnitProgress,
+  createMacrotaskYieldChannelIfSupported,
   runInChunksReportingProgress,
   scaleProgressToWindow,
   throttleProgressToMinimumStep,
+  yieldOnceSoTheBusyIndicatorCanPaint,
 } from "./unit-progress";
 
 describe("throttleProgressToMinimumStep (CT-225)", () => {
@@ -118,5 +120,35 @@ describe("chunk boundaries double as stop checkpoints (CT-268)", () => {
       controller.signal,
     );
     expect(results).toEqual([0, 2, 4]);
+  });
+});
+
+// CT-270: the paint yield is a MessageChannel macrotask (no Chromium nested-
+// timer clamp); the shared channel resolves concurrent waiters in FIFO order.
+describe("yieldOnceSoTheBusyIndicatorCanPaint (CT-270)", () => {
+  it("resolves as a macrotask", async () => {
+    let resolved = false;
+    const yielded = yieldOnceSoTheBusyIndicatorCanPaint().then(() => {
+      resolved = true;
+    });
+    expect(resolved).toBe(false);
+    await yielded;
+    expect(resolved).toBe(true);
+  });
+
+  it("the macrotask channel resolves concurrent waiters in the order they yielded", async () => {
+    const channel = createMacrotaskYieldChannelIfSupported();
+    expect(channel).not.toBeNull();
+    const order: number[] = [];
+    const waitFor = (id: number) =>
+      new Promise<void>((resolve) => {
+        channel!.waitingResolvers.push(() => {
+          order.push(id);
+          resolve();
+        });
+        channel!.postWakeMessage();
+      });
+    await Promise.all([waitFor(1), waitFor(2), waitFor(3)]);
+    expect(order).toEqual([1, 2, 3]);
   });
 });

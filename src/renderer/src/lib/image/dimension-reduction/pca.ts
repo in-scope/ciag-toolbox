@@ -1,11 +1,11 @@
 import {
+  computeBandCovarianceMatrixFromMeans,
+  computeBandCovarianceMatrixFromMeansReportingProgress,
   computePerBandMeans,
   computePerBandMeansReportingProgress,
-  covarianceBetweenCentredBands,
 } from "@/lib/image/dimension-reduction/band-statistics";
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
-import { buildSymmetricMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/unit-progress";
@@ -27,14 +27,14 @@ export interface PcaFit {
 
 export function fitPca(samples: CubeSampleMatrix, bandCount: number): PcaFit {
   const means = computePerBandMeans(samples, bandCount);
-  const covariance = computeBandCovarianceMatrix(samples, means, bandCount);
+  const covariance = computeBandCovarianceMatrixFromMeans(samples, means);
   return decomposeCovarianceIntoPcaFit(means, covariance);
 }
 
-// CT-227: the async twin of fitPca. Identical per-pair covariance math; the
-// means sweep ticks per band and the covariance sweep ticks per band pair (the
-// CT-240 symmetric builder computes each unordered pair once and mirrors it,
-// which is bit-identical to the full square), with paint yields throughout.
+// CT-227: the async twin of fitPca. Identical covariance math; the means sweep
+// ticks per band and the CT-270 blocked covariance build (each unordered pair
+// computed once and mirrored, bit-identical to the full square) ticks per row
+// band, with paint yields throughout.
 const PCA_MEANS_END_FRACTION = 0.08;
 
 export async function fitPcaReportingProgress(
@@ -49,9 +49,9 @@ export async function fitPcaReportingProgress(
     scaleProgressToWindow(onProgress, 0, PCA_MEANS_END_FRACTION),
     abortSignal,
   );
-  const covariance = await buildSymmetricMatrixInPairChunksReportingProgress(
-    bandCount,
-    (row, column) => covarianceBetweenBands(samples, means, row, column),
+  const covariance = await computeBandCovarianceMatrixFromMeansReportingProgress(
+    samples,
+    means,
     scaleProgressToWindow(onProgress, PCA_MEANS_END_FRACTION, 1),
     abortSignal,
   );
@@ -80,29 +80,3 @@ export function varianceExplained(eigenvalues: ReadonlyArray<number>): number[] 
   return eigenvalues.map((value) => value / total);
 }
 
-function computeBandCovarianceMatrix(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  bandCount: number,
-): number[][] {
-  return Array.from({ length: bandCount }, (_unused, row) =>
-    Array.from({ length: bandCount }, (_unused2, column) =>
-      covarianceBetweenBands(samples, means, row, column),
-    ),
-  );
-}
-
-function covarianceBetweenBands(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  rowBand: number,
-  columnBand: number,
-): number {
-  return covarianceBetweenCentredBands(
-    samples.bandValues[rowBand]!,
-    samples.bandValues[columnBand]!,
-    means[rowBand]!,
-    means[columnBand]!,
-    samples.sampleCount,
-  );
-}

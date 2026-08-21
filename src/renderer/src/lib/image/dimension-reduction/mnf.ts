@@ -1,11 +1,11 @@
 import {
+  computeBandCovarianceMatrixFromMeans,
+  computeBandCovarianceMatrixFromMeansReportingProgress,
   computePerBandMeans,
   computePerBandMeansReportingProgress,
-  covarianceBetweenCentredBands,
 } from "@/lib/image/dimension-reduction/band-statistics";
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
-import { buildSymmetricMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
 import type { RasterTypedArray } from "@/lib/image/raster-image";
@@ -51,7 +51,7 @@ const NOISE_EIGENVALUE_FLOOR_FRACTION = 1e-6;
 export function fitMnf(samples: CubeSampleMatrix, bandCount: number): MnfFit {
   const means = computePerBandMeans(samples, bandCount);
   const whitening = buildNoiseWhiteningMatrix(estimateShiftDifferenceNoiseCovariance(samples, bandCount));
-  const dataCovariance = computeCovarianceFromMeans(samples, means, bandCount);
+  const dataCovariance = computeBandCovarianceMatrixFromMeans(samples, means);
   return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, whitening, bandCount);
 }
 
@@ -81,29 +81,13 @@ export async function fitMnfReportingProgress(
     scaleProgressToWindow(onProgress, MNF_MEANS_END_FRACTION, MNF_NOISE_COVARIANCE_PASS_END_FRACTION),
     abortSignal,
   );
-  const dataCovariance = await computeDataCovarianceInPairChunks(
+  const dataCovariance = await computeBandCovarianceMatrixFromMeansReportingProgress(
     samples,
     means,
-    bandCount,
     scaleProgressToWindow(onProgress, MNF_NOISE_COVARIANCE_PASS_END_FRACTION, 1),
     abortSignal,
   );
   return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, buildNoiseWhiteningMatrix(noiseCovariance), bandCount);
-}
-
-function computeDataCovarianceInPairChunks(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  bandCount: number,
-  onProgress?: UnitProgressCallback,
-  abortSignal?: AbortSignal,
-): Promise<number[][]> {
-  return buildSymmetricMatrixInPairChunksReportingProgress(
-    bandCount,
-    (row, col) => covarianceOfBandPair(samples, means, row, col),
-    onProgress,
-    abortSignal,
-  );
 }
 
 function decomposeWhitenedCovarianceIntoMnfFit(
@@ -128,29 +112,6 @@ export function noiseFractionPerComponent(eigenvalues: ReadonlyArray<number>): n
 function toNoiseFraction(eigenvalue: number): number {
   if (!(eigenvalue > 0)) return 1;
   return Math.min(1, 1 / eigenvalue);
-}
-
-function computeCovarianceFromMeans(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  bandCount: number,
-): number[][] {
-  return buildSquareMatrix(bandCount, (row, col) => covarianceOfBandPair(samples, means, row, col));
-}
-
-function covarianceOfBandPair(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  row: number,
-  col: number,
-): number {
-  return covarianceBetweenCentredBands(
-    samples.bandValues[row]!,
-    samples.bandValues[col]!,
-    means[row]!,
-    means[col]!,
-    samples.sampleCount,
-  );
 }
 
 // CT-195: the noise covariance is accumulated by STREAMING over neighbour pairs
