@@ -1,14 +1,19 @@
 import { test, expect } from "@playwright/test";
 import type { Locator } from "@playwright/test";
+import { join } from "node:path";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
   applicationToolbar,
+  createTemporaryProjectBundleDirectory,
+  enqueueOpenDialogPaths,
   loadFixtureAsStack,
+  saveProjectBundleThroughSaveDialog,
   selectPanel,
 } from "./support/page-objects";
+import { runAsStoryboardStep } from "./support/storyboard-step";
 
 // Manual test script section 4 (CT-004): the toolbar strip, its controls,
 // accessible names, and the disabled-until-a-panel-is-loaded affordance.
@@ -21,6 +26,7 @@ const FRESHLY_LOADED_PANEL = 1;
 // menu-only, so this is the EXACT expected button set, in order.
 const EXPECTED_TOOLBAR_BUTTON_LABELS = [
   "Open image",
+  "Open project",
   "Grid layout",
   "Select Region",
   "Subset Bands",
@@ -47,8 +53,9 @@ test("the toolbar strip spans the window and is exposed as a toolbar", async () 
   await expect(applicationToolbar(launched.window)).toBeVisible();
 });
 
-test("exposes the Open Images, Grid Layout, and operation-apply controls", async () => {
+test("exposes the Open Images, Open Project, Grid Layout, and operation-apply controls", async () => {
   await expect(openImagesControl(launched)).toBeVisible();
+  await expect(openProjectControl(launched)).toBeVisible();
   await expect(gridLayoutDropdown(launched)).toBeVisible();
   await expect(operationApplyAffordance(launched)).toBeVisible();
 });
@@ -64,6 +71,25 @@ test("every toolbar button exposes an accessible name", async () => {
     name: /\S/,
   });
   expect(await namedButtons.count()).toBe(await allButtons.count());
+});
+
+test("the Open project button routes through the project-open dialog (CT-274)", async () => {
+  const fresh = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(fresh.window, multiBandTiff.fileName);
+    const bundlePath = join(
+      await createTemporaryProjectBundleDirectory(),
+      "toolbar-open-project.ctbundle",
+    );
+    await saveProjectBundleThroughSaveDialog({
+      app: fresh.app,
+      page: fresh.window,
+      destinationPath: bundlePath,
+    });
+    await openProjectBundleThroughToolbarButton(fresh, bundlePath);
+  } finally {
+    await closeToolboxApp(fresh);
+  }
 });
 
 test("operation-apply controls disable on a fresh launch and enable once a panel loads", async () => {
@@ -90,6 +116,30 @@ async function readToolbarButtonBaseNames(app: LaunchedApp): Promise<string[]> {
 
 function openImagesControl(app: LaunchedApp): Locator {
   return applicationToolbar(app.window).getByRole("button", { name: "Open image" });
+}
+
+function openProjectControl(app: LaunchedApp): Locator {
+  return applicationToolbar(app.window).getByRole("button", { name: "Open project" });
+}
+
+// The button shares the File menu's open-project handler, so the CT-113 dialog
+// stub serves the queued bundle path when the click invokes the project-open
+// dialog IPC; the "Opened project" toast proves the round trip.
+async function openProjectBundleThroughToolbarButton(
+  app: LaunchedApp,
+  bundlePath: string,
+): Promise<void> {
+  await runAsStoryboardStep(
+    app.window,
+    "Open the project bundle through the toolbar button",
+    async () => {
+      await enqueueOpenDialogPaths(app.window, [bundlePath]);
+      await openProjectControl(app).click();
+      await expect(
+        app.window.getByText("Opened project", { exact: false }).first(),
+      ).toBeVisible();
+    },
+  );
 }
 
 function gridLayoutDropdown(app: LaunchedApp): Locator {

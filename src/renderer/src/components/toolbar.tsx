@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { FolderOpen, Grid2x2 } from "lucide-react";
+import { FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ export interface BandSubsetToolbarToggleState {
 
 interface ToolbarProps {
   onOpenImage: () => void;
+  onOpenProject: () => void;
   gridLayout: GridLayout;
   onGridLayoutChange: (layout: GridLayout) => void;
   operationGroups: ReadonlyArray<ToolbarOperationGroup>;
@@ -48,6 +49,7 @@ export function Toolbar(props: ToolbarProps): JSX.Element {
     <TooltipProvider delayDuration={300}>
       <div role="toolbar" aria-label="Application toolbar" className={TOOLBAR_CLASSES}>
         <OpenImageButton onOpenImage={props.onOpenImage} />
+        <OpenProjectButton onOpenProject={props.onOpenProject} />
         <GridLayoutDropdown
           gridLayout={props.gridLayout}
           onGridLayoutChange={props.onGridLayoutChange}
@@ -141,6 +143,14 @@ function OpenImageButton({ onOpenImage }: { onOpenImage: () => void }): JSX.Elem
   return (
     <IconButtonWithTooltip label="Open image" onClick={onOpenImage}>
       <FolderOpen className="size-5" />
+    </IconButtonWithTooltip>
+  );
+}
+
+function OpenProjectButton({ onOpenProject }: { onOpenProject: () => void }): JSX.Element {
+  return (
+    <IconButtonWithTooltip label="Open project" onClick={onOpenProject}>
+      <FolderInput className="size-5" />
     </IconButtonWithTooltip>
   );
 }

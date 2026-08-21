@@ -528,6 +528,7 @@ function ApplicationShell(): JSX.Element {
     <div className="flex h-full flex-col">
       <Toolbar
         onOpenImage={handleOpenImagesRequested}
+        onOpenProject={handleOpenProjectRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
         operationGroups={operationGroups}
