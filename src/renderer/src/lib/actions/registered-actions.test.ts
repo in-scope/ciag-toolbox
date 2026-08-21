@@ -26,6 +26,7 @@ function readEnumParameterOptionValues(action: RegisteredViewportAction): string
   return parameter.options.map((option) => option.value);
 }
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { RasterImage } from "@/lib/image/raster-image";
 
 describe("REGISTERED_VIEWPORT_ACTIONS", () => {
@@ -788,6 +789,15 @@ describe("FALSE_COLOR_ACTION", () => {
         { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 4 },
       ),
     ).toThrow(/out of range/i);
+  });
+
+  it("outputs a raster that renders as an rgb composite", () => {
+    const result = FALSE_COLOR_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([10], [20], [30]) },
+      { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 3 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(shouldRenderRasterAsRgbComposite(raster)).toBe(true);
   });
 
   it("resets the selected band after the band count changes", () => {

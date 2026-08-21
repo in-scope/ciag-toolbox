@@ -37,6 +37,7 @@ import { expect, test } from "@playwright/test";
 
 import { selectFullImageScope, selectWholeStackScope } from "./support/apply-scope-control";
 import { nonClearPixelFraction, summarizeCanvasPixels } from "./support/canvas-pixels";
+import { toggleChannelView } from "./support/channel-view";
 import { selectBandWiseScopeForBands, selectFullStackScope } from "./support/cube-scope-control";
 import { chooseFlatFieldReferenceFileThroughDialog, FLAT_FIELD_LIGHT_FIELD_LABEL } from "./support/flat-field-operation";
 import { readHistoryEntries } from "./support/history-panel";
@@ -624,11 +625,12 @@ test("false-color composite aliases the assigned bands into the channels", async
   await recordSweepVerdict(`operation: False-color Composite (bands ${OPS_TOP_BAND_NUMBER}/25/1)`, async () => {
     await openOperationScaleStackViaGroupedFiles();
     const applied = await openConfigureAndApplyFromSourcePanel("False-color Composite", configureFalseColorBands);
-    const redChannel = await verifyResultBandAgainstOracle(1, (x, y) => scale10Value(OPS_TOP_BAND_INDEX, x, y), exactly());
-    // Sample the canvas while the BRIGHT channel (band 45 data) is displayed:
-    // navigating to the blue channel first would leave band-1 data on screen,
-    // which renders near-black by the locked CT-148 display convention.
+    // CT-278: the committed composite renders as one colour image (band 45
+    // data in the bright red channel), so sample the canvas FIRST, then flip
+    // to the CT-248 channel view to navigate the bands for the readouts.
     await expectResultCanvasShowsContent();
+    await toggleChannelView(launched.window, RESULT_PANEL);
+    const redChannel = await verifyResultBandAgainstOracle(1, (x, y) => scale10Value(OPS_TOP_BAND_INDEX, x, y), exactly());
     const blueChannel = await verifyResultBandAgainstOracle(3, (x, y) => scale10Value(0, x, y), exactly());
     return { ...applied, oracle: `R ${redChannel}; B ${blueChannel}` };
   });

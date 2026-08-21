@@ -15,6 +15,7 @@ import {
   openOperation,
   operationPanel,
   panelCanvas,
+  panelCell,
   selectActiveBandNumber,
   setOperationNumberParameter,
   summarizeCanvasPixels,
@@ -22,13 +23,16 @@ import {
   type CanvasAverageColor,
   type PixelDimensions,
 } from "./support/page-objects";
+import { expectChannelViewEnabled, toggleChannelView } from "./support/channel-view";
 
 // CT-145 / manual section 12 / CT-086: False-color Composite maps three chosen source
 // bands to the R, G, B output display channels. Three labelled inputs (Band R/G/B)
 // preview the composite LIVE before Apply; the mapping is ORDER-SENSITIVE (swapping two
 // assignments changes the composite). An out-of-range band shows inline validation,
 // suppresses the preview, and the Apply is rejected with a clear message. A valid combo
-// commits a 3-band composite and records the assignments in History.
+// commits a 3-band composite and records the assignments in History. Since CT-278 the
+// committed composite is a true-colour rgb raster: it renders in colour with no band
+// navigator, and per-band inspection goes through the CT-248 channel view.
 //
 // FIXTURE: the committed multiband-12bit.tif has three identically shaped gradient bands,
 // so every assignment stretches to the same preview bytes and a swap would be invisible.
@@ -81,6 +85,8 @@ test("a valid combination commits a 3-band composite and records the assignments
   await applyOperationInPlace(launched.window, FALSE_COLOR_LABEL);
 
   await expectThreeBandUint16Result();
+  await expectCommittedCompositePresentation();
+  await toggleChannelView(launched.window, PANEL);
   await expectBandReadout(1, 0, 0, TOP_LEFT_DARK_BAND[0]!);
   await expectBandReadout(3, 0, 0, TOP_LEFT_BRIGHT_BAND[0]!);
   await expectHistoryToRecordOperation(launched.window, {
@@ -151,6 +157,14 @@ async function assignBands(assignment: { red: number; green: number; blue: numbe
 
 async function expectThreeBandUint16Result(): Promise<void> {
   await expectMetadataDataTypeAndDimensions(launched.window, { dataType: UINT16, width: SIDE, height: SIDE });
+}
+
+// CT-278: the committed composite is a true-colour rgb raster, so the band
+// navigator is gone and the CT-248 channel-view toggle is offered instead;
+// per-band readouts below go through that channel view.
+async function expectCommittedCompositePresentation(): Promise<void> {
+  await expect(panelCell(launched.window, PANEL).getByTestId("viewport-band-navigator")).toHaveCount(0);
+  await expectChannelViewEnabled(launched.window, PANEL, false);
 }
 
 async function expectBandReadout(band: number, imageX: number, imageY: number, expected: number): Promise<void> {
