@@ -165,6 +165,7 @@ export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: injectSourceBandCountIntoSpatialFilterParameters,
   apply: (state) => state,
   assertCanApplyToSource: assertSpatialFilterSourceFitsWorkingGrid,
+  supportsStopDuringApply: true,
   transformSourceAsync: transformSourceThroughSpatialFilter,
 };
 
@@ -227,6 +228,7 @@ async function transformSourceThroughSpatialFilter(
   rawSource: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ViewportImageSource> {
   const source = coerceViewportSourceToRasterSource(rawSource);
   const settings = readSpatialFilterSettings(parameterValues);
@@ -235,7 +237,7 @@ async function transformSourceThroughSpatialFilter(
     parameterValues,
     source.raster.bandCount,
   );
-  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings, onProgress);
+  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings, onProgress, abortSignal);
   return { kind: "raster", raster };
 }
 
@@ -244,28 +246,31 @@ async function filterBandsOfRaster(
   filteredBandIndexes: ReadonlySet<number>,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
-  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings, onProgress);
+  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings, onProgress, abortSignal);
   return makeFloatRasterReusingUnchangedSourceBands(raster, filteredBandIndexes, (_band, index) =>
     readFilteredBandOrThrow(filteredByIndex, index),
   );
 }
 
 // CT-221: the progress fraction counts FILTERED bands (bands completed / bands to
-// filter), one tick as each band returns from the worker.
+// filter), one tick as each band returns from the worker. CT-268: an abort
+// terminates the dedicated worker mid-band (its grid memory releases with it).
 function filterScopedBands(
   raster: RasterImage,
   filteredBandIndexes: ReadonlySet<number>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const bands = listScopedBandInputs(raster, filteredBandIndexes);
   if (isSpatialFilterWorkerAvailable()) {
-    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings, onProgress);
+    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings, onProgress, abortSignal);
   }
-  return filterBandsOnThisThread(bands, shape, settings, onProgress);
+  return filterBandsOnThisThread(bands, shape, settings, onProgress, abortSignal);
 }
 
 function listScopedBandInputs(
@@ -285,6 +290,7 @@ async function filterBandsOnThisThread(
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const reusableGrid = createReusableSpatialFilterGrid();
   const filteredByBandIndex = new Map<number, Float32Array>();
@@ -296,7 +302,7 @@ async function filterBandsOnThisThread(
       band.bandIndex,
       reusableGrid.filterBand(band.pixels, shape, settings, onWithinBandProgress),
     );
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length, abortSignal);
   }
   return filteredByBandIndex;
 }

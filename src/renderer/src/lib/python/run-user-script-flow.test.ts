@@ -51,6 +51,7 @@ function buildFakeApi(begin: ToolboxUserScriptRunBeginResult): UserScriptRunChun
     executeUserScriptRun: () => Promise.resolve({ status: "completed", value: [1] }),
     readUserScriptRunResultChunk: () => Promise.reject(new Error("unused")),
     releaseUserScriptRun: () => Promise.resolve(),
+    cancelUserScriptRun: () => Promise.resolve(),
   };
 }
 

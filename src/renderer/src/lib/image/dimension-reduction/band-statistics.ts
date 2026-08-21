@@ -1,4 +1,5 @@
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
+import { throwIfOperationStopped } from "@/lib/image/operation-stop";
 import {
   computeArrayReportingPerUnitProgress,
   yieldOnceSoTheBusyIndicatorCanPaint,
@@ -31,11 +32,13 @@ export function computePerBandMeansReportingProgress(
   samples: CubeSampleMatrix,
   bandCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[]> {
   return computeArrayReportingPerUnitProgress(
     bandCount,
     (band) => meanOfBandValues(samples.bandValues[band]!, samples.sampleCount),
     onProgress,
+    abortSignal,
   );
 }
 
@@ -60,15 +63,18 @@ export function covarianceBetweenCentredBands(
 // Runs range-based work over the sample axis in bounded chunks with a paint
 // yield between chunks but NO progress reporting - for sweeps whose progress
 // unit is coarser than a chunk (one FastICA iteration, one projected axis).
+// CT-268: each yield doubles as a stop checkpoint when a signal is given.
 export async function runOverSampleRangesYielding(
   sampleCount: number,
   samplesPerChunk: number,
   processRange: (startSample: number, endSample: number) => void,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const chunkSize = Math.max(1, Math.floor(samplesPerChunk));
   for (let start = 0; start < sampleCount; start += chunkSize) {
     processRange(start, Math.min(sampleCount, start + chunkSize));
     await yieldOnceSoTheBusyIndicatorCanPaint();
+    throwIfOperationStopped(abortSignal);
   }
 }
 

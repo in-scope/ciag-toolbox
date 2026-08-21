@@ -18,7 +18,9 @@ import {
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import { clearOperationRegionAtViewportIndex } from "@/lib/actions/operation-region";
+import { isOperationStoppedError, OPERATION_STOPPED_MESSAGE } from "@/lib/image/operation-stop";
 import { notifyError, notifySuccess } from "@/lib/notifications/notify";
+import { toast } from "sonner";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
@@ -120,6 +122,33 @@ function reportApplyFailedWithToast(
   bindings.reportApplyOutcome?.({ succeeded: false });
 }
 
+// CT-268: a user-stopped apply is not a failure. It shows the transient
+// "Operation stopped" toast, keeps the source's operation region (the user may
+// re-apply), and reports a non-success so keepsPanelOpenUntilApplySucceeds
+// panels stay open. Nothing was placed and no History was written, because the
+// transform threw before any result landed.
+function reportApplyEndedWithoutResult(
+  action: RegisteredViewportAction,
+  sourceIndex: number,
+  bindings: ApplyActionFlowBindings,
+  error: unknown,
+): void {
+  if (isOperationStoppedError(error)) {
+    toast.info(OPERATION_STOPPED_MESSAGE);
+    bindings.reportApplyOutcome?.({ succeeded: false });
+    return;
+  }
+  reportApplyFailedWithToast(action, sourceIndex, bindings, error);
+}
+
+// CT-268: one AbortController per stoppable apply run; its signal threads into
+// the transform and its abort is offered as the busy overlay's Stop button.
+function createStopControllerForStoppableApply(
+  action: RegisteredViewportAction,
+): AbortController | null {
+  return action.supportsStopDuringApply ? new AbortController() : null;
+}
+
 function listSourcesAcrossViewports(imagesByIndex: ViewportContentMap): ViewportImageSource[] {
   return [...imagesByIndex.values()].map((content) => content.source);
 }
@@ -153,13 +182,15 @@ async function runApplyActionInPlaceWithBusyIndicator(
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
+  const stopController = createStopControllerForStoppableApply(action);
   const handle = bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex: sourceIndex,
     label: describeOperationLoadingMessage(action),
+    requestStop: stopController ? () => stopController.abort() : undefined,
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
-    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings, handle);
+    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings, handle, stopController?.signal);
     writeAppliedRenderingStateInheritingFromSource(
       action,
       parameterValues,
@@ -170,7 +201,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
     placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
+    reportApplyEndedWithoutResult(action, sourceIndex, bindings, error);
   } finally {
     handle.clear();
   }
@@ -186,6 +217,7 @@ async function replaceSourceAtIndexWithTransformedSource(
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   if (!actionTransformsSource(action)) return;
   const content = bindings.imagesByIndex.get(sourceIndex);
@@ -195,6 +227,7 @@ async function replaceSourceAtIndexWithTransformedSource(
     content.source,
     parameterValues,
     forwardTransformProgressToBusyEntry(busyHandle),
+    abortSignal,
   );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
@@ -403,8 +436,9 @@ export async function runDuplicateAndApplyAtTargetIndex(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
+  const stopController = createStopControllerForStoppableApply(action);
   const handle = actionTransformsSource(action)
-    ? registerResultPanelBusyEntry(action, targetIndex, bindings)
+    ? registerResultPanelBusyEntry(action, targetIndex, bindings, stopController)
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
@@ -416,6 +450,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
         targetIndex,
         bindings,
         handle,
+        stopController?.signal,
       );
     } else {
       await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
@@ -432,7 +467,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
     selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyFailedWithToast(action, sourceIndex, bindings, error);
+    reportApplyEndedWithoutResult(action, sourceIndex, bindings, error);
   } finally {
     handle?.clear();
   }
@@ -452,12 +487,14 @@ function registerResultPanelBusyEntry(
   action: RegisteredViewportAction,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
+  stopController: AbortController | null,
 ): BusyEntryHandle {
   const opensInNewEmptyPanel = !bindings.imagesByIndex.has(targetIndex);
   return bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex: targetIndex,
     label: describeOperationLoadingMessage(action),
     immediate: shouldShowOperationLoadingImmediately({ opensInNewEmptyPanel }),
+    requestStop: stopController ? () => stopController.abort() : undefined,
   });
 }
 
@@ -483,12 +520,14 @@ async function placeTransformedDuplicateAtTargetIndex(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const transformedContent = await transformImmutableSourceContent(
     sourceContent,
     action,
     parameterValues,
     busyHandle,
+    abortSignal,
   );
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, targetIndex, transformedContent),
@@ -504,12 +543,14 @@ async function transformImmutableSourceContent(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   busyHandle: BusyEntryHandle,
+  abortSignal?: AbortSignal,
 ): Promise<ViewportCellContent> {
   const transformedSource = await runActionSourceTransform(
     action,
     sourceContent.source,
     parameterValues,
     forwardTransformProgressToBusyEntry(busyHandle),
+    abortSignal,
   );
   return {
     fileName: sourceContent.fileName,

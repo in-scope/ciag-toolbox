@@ -32,9 +32,13 @@ export interface PythonWorkerRunRequest {
   // explicitly-trusted own-environment mode (CT-208e). The wall-clock kill applies either way.
   sandbox: boolean;
   timeoutMs: number;
+  // CT-268: called with the run's cancel trigger once observation starts. The
+  // caller invokes it (from the cancel IPC) to SIGKILL the subprocess; the run
+  // then settles as a "canceled" failure instead of hanging to the timeout.
+  registerCancel?: (cancelRun: () => void) => void;
 }
 
-export type PythonWorkerFailureReason = "script-error" | "timeout" | "worker-crashed";
+export type PythonWorkerFailureReason = "script-error" | "timeout" | "worker-crashed" | "canceled";
 
 export type PythonWorkerOutcome =
   | { kind: "completed"; value: JsonValue }
@@ -50,7 +54,9 @@ export async function runUserScriptInPythonSubprocess(
   const worker = spawnPythonWorkerProcess(request.interpreterPath);
   sendRunUserScriptRequestToWorker(worker, request);
   return new Promise((resolveOutcome) => {
-    new PythonWorkerRunObserver(worker, request.timeoutMs, spoolPath, resolveOutcome).beginObserving();
+    const observer = new PythonWorkerRunObserver(worker, request.timeoutMs, spoolPath, resolveOutcome);
+    observer.beginObserving();
+    request.registerCancel?.(() => observer.cancelBecauseUserStopped());
   });
 }
 
@@ -209,6 +215,17 @@ class PythonWorkerRunObserver {
       kind: "failed",
       reason: "timeout",
       userFacingMessage: `The script exceeded the ${seconds}-second limit and was stopped.`,
+    });
+  }
+
+  // CT-268: a user Stop settles the run and SIGKILLs the subprocess (settle's
+  // killWorkerIfStillRunning). The message is rarely user-visible - the
+  // renderer converts a stopped run into its own "Operation stopped" toast.
+  cancelBecauseUserStopped(): void {
+    this.settle({
+      kind: "failed",
+      reason: "canceled",
+      userFacingMessage: "The script run was stopped.",
     });
   }
 

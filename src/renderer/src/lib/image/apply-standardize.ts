@@ -45,6 +45,7 @@ export async function applyStandardizeToRasterReportingProgress(
   selection: StandardizeScopeSelection,
   target: StandardizeTargetDistribution,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   if (selection.scope === "full-cube") {
     const cubeStatistics = computeCubeWideMeanAndStandardDeviation(raster);
@@ -52,6 +53,7 @@ export async function applyStandardizeToRasterReportingProgress(
       raster,
       (bandPixels) => standardizePixelsWithStatistics(bandPixels, cubeStatistics, target),
       onProgress,
+      abortSignal,
     );
   }
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
@@ -59,6 +61,7 @@ export async function applyStandardizeToRasterReportingProgress(
     new Set(selection.bandIndexes),
     (bandPixels) => standardizeSingleBandToTarget(bandPixels, target),
     onProgress,
+    abortSignal,
   );
 }
 

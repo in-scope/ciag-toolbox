@@ -209,6 +209,25 @@ describe("chunked user-script run session store", () => {
       /Unknown user-script run token/,
     );
   });
+
+  // CT-268: cancel kills only a registered executing worker; a token without
+  // one (never executed, already cleared, unknown) cancels nothing.
+  it("cancelExecutingRun invokes the registered worker kill exactly while registered", async () => {
+    const store = buildStore();
+    const token = await store.begin(buildBeginRequest());
+    let killCount = 0;
+    store.cancelExecutingRun(token);
+    expect(killCount).toBe(0);
+    store.registerExecutingWorkerKill(token, () => {
+      killCount += 1;
+    });
+    store.cancelExecutingRun(token);
+    expect(killCount).toBe(1);
+    store.clearExecutingWorkerKill(token);
+    store.cancelExecutingRun(token);
+    expect(killCount).toBe(1);
+    expect(() => store.cancelExecutingRun("no-such-token")).not.toThrow();
+  });
 });
 
 function reassembleFloats(chunks: Uint8Array[]): number[] {

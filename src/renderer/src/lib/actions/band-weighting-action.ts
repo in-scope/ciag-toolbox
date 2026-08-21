@@ -40,6 +40,7 @@ export const BAND_WEIGHTING_ACTION: RegisteredViewportAction = {
   prepareParameterValuesForApply: injectBandWeightsForApply,
   apply: resetStateForWeightedSumOutput,
   clearConsumedSourceStateAfterApply: clearBandWeightingEditingState,
+  supportsStopDuringApply: true,
   transformSourceAsync: createBandWeightingSourceTransform(),
 };
 
@@ -75,10 +76,10 @@ function resetStateForWeightedSumOutput(state: ViewportRenderingState): Viewport
 // scale it runs as an async transform - chunked with paint yields and a
 // determinate progress fraction - instead of blocking the renderer.
 function createBandWeightingSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const weights = readBandWeightsOrThrow(parameterValues);
-    return { kind: "raster", raster: await buildWeightedSumStack(source.raster, weights, onProgress) };
+    return { kind: "raster", raster: await buildWeightedSumStack(source.raster, weights, onProgress, abortSignal) };
   };
 }
 
@@ -86,8 +87,9 @@ async function buildWeightedSumStack(
   raster: RasterImage,
   weights: ReadonlyArray<number>,
   onProgress?: (fraction: number) => void,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
-  const band = await computeWeightedSumReportingProgress(raster.bandPixels, weights, onProgress);
+  const band = await computeWeightedSumReportingProgress(raster.bandPixels, weights, onProgress, abortSignal);
   return makeFloat32RasterFromBands(
     { width: raster.width, height: raster.height, bandLabels: [WEIGHTED_SUM_BAND_LABEL] },
     [band],

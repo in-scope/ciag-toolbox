@@ -100,18 +100,21 @@ export async function fitIcaReportingProgress(
   samples: CubeSampleMatrix,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<IcaFit> {
   const means = await computePerBandMeansReportingProgress(
     samples,
     samples.bandCount,
     scaleProgressToWindow(onProgress, 0, ICA_MEANS_END_FRACTION),
+    abortSignal,
   );
-  const { whitening, whitened } = await whitenCubeReportingProgress(samples, means, components, onProgress);
+  const { whitening, whitened } = await whitenCubeReportingProgress(samples, means, components, onProgress, abortSignal);
   const unmixing = await estimateUnmixingMatrixReportingProgress(
     whitened,
     scaleProgressToWindow(onProgress, ICA_WHITENED_SAMPLES_END_FRACTION, 1),
+    abortSignal,
   );
-  const ordered = await orderUnmixingByRecoveredSourceVarianceYielding(unmixing, whitened);
+  const ordered = await orderUnmixingByRecoveredSourceVarianceYielding(unmixing, whitened, abortSignal);
   return { means, componentVectors: multiplyMatrices(ordered, whitening) };
 }
 
@@ -125,18 +128,21 @@ async function whitenCubeReportingProgress(
   means: ReadonlyArray<number>,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<WhitenedCube> {
   const whitening = await buildWhiteningMatrixReportingProgress(
     samples,
     means,
     components,
     scaleProgressToWindow(onProgress, ICA_MEANS_END_FRACTION, ICA_WHITENING_MATRIX_END_FRACTION),
+    abortSignal,
   );
   const whitened = await projectWhitenedAxesInSampleChunks(
     samples,
     means,
     whitening,
     scaleProgressToWindow(onProgress, ICA_WHITENING_MATRIX_END_FRACTION, ICA_WHITENED_SAMPLES_END_FRACTION),
+    abortSignal,
   );
   return { whitening, whitened };
 }
@@ -148,13 +154,14 @@ async function projectWhitenedAxesInSampleChunks(
   means: ReadonlyArray<number>,
   whitening: ReadonlyArray<ReadonlyArray<number>>,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array[]> {
   reportMultiUnitWorkStarting(onProgress, whitening.length);
   const sampling = describeFastIcaFitSampling(samples.sampleCount);
   const whitened: Float32Array[] = [];
   for (let axis = 0; axis < whitening.length; axis += 1) {
-    whitened.push(await projectSampledCentredPixelsOntoVectorYielding(samples, means, whitening[axis]!, sampling));
-    await reportProgressFractionAndYield(onProgress, (axis + 1) / whitening.length);
+    whitened.push(await projectSampledCentredPixelsOntoVectorYielding(samples, means, whitening[axis]!, sampling, abortSignal));
+    await reportProgressFractionAndYield(onProgress, (axis + 1) / whitening.length, abortSignal);
   }
   return whitened;
 }
@@ -164,12 +171,14 @@ async function projectSampledCentredPixelsOntoVectorYielding(
   means: ReadonlyArray<number>,
   vector: ReadonlyArray<number>,
   sampling: FastIcaFitSampling,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array> {
   const projected = allocateFloat32ArrayOrThrow(sampling.sampledCount);
   await runOverSampleRangesYielding(
     sampling.sampledCount,
     samplesPerChunkForPerBandSweep(samples.bandCount),
     (start, end) => fillWhitenedAxisSampleRange(samples, means, vector, projected, sampling.stride, start, end),
+    abortSignal,
   );
   return projected;
 }
@@ -194,10 +203,11 @@ function orderUnmixingByRecoveredSourceVariance(
 async function orderUnmixingByRecoveredSourceVarianceYielding(
   unmixing: ReadonlyArray<ReadonlyArray<number>>,
   whitened: ReadonlyArray<Float32Array>,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const entries: VarianceTaggedRow[] = [];
   for (const row of unmixing) {
-    entries.push({ row: [...row], variance: await recoveredSourceVarianceYielding(row, whitened) });
+    entries.push({ row: [...row], variance: await recoveredSourceVarianceYielding(row, whitened, abortSignal) });
   }
   return sortUnmixingRowsByDescendingVariance(entries);
 }
@@ -224,11 +234,15 @@ function recoveredSourceVariance(
 async function recoveredSourceVarianceYielding(
   row: ReadonlyArray<number>,
   whitened: ReadonlyArray<Float32Array>,
+  abortSignal?: AbortSignal,
 ): Promise<number> {
   const sampleCount = whitened[0]?.length ?? 0;
   const accumulator = { sumOfSquares: 0 };
-  await runOverSampleRangesYielding(sampleCount, samplesPerChunkForPerBandSweep(whitened.length), (start, end) =>
-    accumulateRecoveredSourceSquares(row, whitened, start, end, accumulator),
+  await runOverSampleRangesYielding(
+    sampleCount,
+    samplesPerChunkForPerBandSweep(whitened.length),
+    (start, end) => accumulateRecoveredSourceSquares(row, whitened, start, end, accumulator),
+    abortSignal,
   );
   return accumulator.sumOfSquares / Math.max(1, sampleCount);
 }
@@ -272,11 +286,13 @@ async function buildWhiteningMatrixReportingProgress(
   means: ReadonlyArray<number>,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const covariance = await buildSymmetricMatrixInPairChunksReportingProgress(
     samples.bandCount,
     (row, column) => covarianceBetweenBands(samples, means, row, column),
     onProgress,
+    abortSignal,
   );
   return whiteningRowsFromCovariance(covariance, samples.bandCount, components);
 }
@@ -395,11 +411,12 @@ function estimateUnmixingMatrix(whitened: ReadonlyArray<Float32Array>): number[]
 async function estimateUnmixingMatrixReportingProgress(
   whitened: ReadonlyArray<Float32Array>,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const found: number[][] = [];
   for (let index = 0; index < whitened.length; index += 1) {
     const componentWindow = scaleProgressToWindow(onProgress, index / whitened.length, (index + 1) / whitened.length);
-    found.push(await extractSingleIndependentComponentReportingProgress(whitened, found, index, componentWindow));
+    found.push(await extractSingleIndependentComponentReportingProgress(whitened, found, index, componentWindow, abortSignal));
   }
   return found;
 }
@@ -423,11 +440,12 @@ async function extractSingleIndependentComponentReportingProgress(
   alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
   index: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[]> {
   let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.length, index), alreadyFound);
   for (let iteration = 0; iteration < MAX_FAST_ICA_ITERATIONS; iteration += 1) {
-    const next = decorrelateAndNormalize(await fastIcaFixedPointUpdateYielding(whitened, vector), alreadyFound);
-    await reportProgressFractionAndYield(onProgress, (iteration + 1) / MAX_FAST_ICA_ITERATIONS);
+    const next = decorrelateAndNormalize(await fastIcaFixedPointUpdateYielding(whitened, vector, abortSignal), alreadyFound);
+    await reportProgressFractionAndYield(onProgress, (iteration + 1) / MAX_FAST_ICA_ITERATIONS, abortSignal);
     if (hasFastIcaConverged(next, vector)) return finishComponentReportingCompletion(next, onProgress);
     vector = next;
   }
@@ -468,11 +486,15 @@ function fastIcaFixedPointUpdate(whitened: ReadonlyArray<Float32Array>, vector: 
 async function fastIcaFixedPointUpdateYielding(
   whitened: ReadonlyArray<Float32Array>,
   vector: ReadonlyArray<number>,
+  abortSignal?: AbortSignal,
 ): Promise<number[]> {
   const sampleCount = whitened[0]?.length ?? 0;
   const accumulators = makeFastIcaSweepAccumulators(whitened.length);
-  await runOverSampleRangesYielding(sampleCount, fastIcaSamplesPerChunk(whitened.length), (start, end) =>
-    accumulateFastIcaSampleRange(whitened, vector, start, end, accumulators),
+  await runOverSampleRangesYielding(
+    sampleCount,
+    fastIcaSamplesPerChunk(whitened.length),
+    (start, end) => accumulateFastIcaSampleRange(whitened, vector, start, end, accumulators),
+    abortSignal,
   );
   return combineFastIcaUpdate(accumulators, vector, sampleCount);
 }

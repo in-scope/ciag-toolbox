@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
+import { OPERATION_STOPPED_MESSAGE } from "@/lib/image/operation-stop";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
+import { reportCompletedUnitAndYieldSoProgressCanPaint } from "@/lib/image/unit-progress";
 import { buildErrorToastOptions } from "@/lib/notifications/toast-options";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -31,7 +33,7 @@ import {
 } from "./viewport-action";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 describe("runDuplicateAndApplyAtTargetIndex", () => {
   it("inherits the source viewport's operation history when duplicating to a new viewport", async () => {
@@ -791,6 +793,177 @@ function buildActionThatThrowsOnApply(): RegisteredViewportAction {
     appliedLabel: "Throws",
     apply: () => {
       throw new Error("boom");
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
+// --- CT-268: Stop button / abort token -------------------------------------
+
+describe("stoppable applies (CT-268)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.info).mockClear();
+  });
+
+  it("offers the busy entry a requestStop for a stoppable action and none otherwise", async () => {
+    const stopHarness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(3),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      stopHarness.bindings,
+    );
+    expect(stopHarness.capturedRequestStops).toHaveLength(1);
+    expect(stopHarness.capturedRequestStops[0]).toBeTypeOf("function");
+
+    const plainHarness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      plainHarness.bindings,
+    );
+    expect(plainHarness.capturedRequestStops).toEqual([undefined]);
+  });
+
+  it("a stop mid-run cancels the chunked sweep, opens no panel, writes no History, and toasts 'Operation stopped'", async () => {
+    const harness = buildStopFlowHarness({ clickStopAfterFirstProgressTick: true });
+    const completedUnits: number[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(5, completedUnits),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(completedUnits.length).toBeLessThan(5);
+    expect(toast.info).toHaveBeenCalledWith(OPERATION_STOPPED_MESSAGE);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
+    expect(harness.clearedBusyEntryCount()).toBe(1);
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: false }]);
+  });
+
+  it("a stopped in-place apply keeps the source untouched and reports no success", async () => {
+    const harness = buildStopFlowHarness({ clickStopAfterFirstProgressTick: true });
+    applyActionInPlaceAtSourceIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(5),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(harness.clearedBusyEntryCount()).toBe(1));
+    expect(toast.info).toHaveBeenCalledWith(OPERATION_STOPPED_MESSAGE);
+    expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: false }]);
+  });
+
+  it("a stoppable action that finishes without a stop still lands its result normally", async () => {
+    const harness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(3),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(harness.bindings.setImagesByIndex).toHaveBeenCalled();
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: true }]);
+  });
+});
+
+interface StopFlowHarness {
+  readonly bindings: ApplyActionFlowBindings;
+  readonly capturedRequestStops: Array<(() => void) | undefined>;
+  readonly clearedBusyEntryCount: () => number;
+  readonly reportedOutcomes: Array<{ succeeded: boolean }>;
+}
+
+interface StopFlowHarnessOptions {
+  readonly clickStopAfterFirstProgressTick?: boolean;
+}
+
+// The registrar records each entry's requestStop; with the click option it
+// "presses Stop" as soon as the first progress update arrives, so the abort
+// lands while the chunked sweep is mid-run.
+function buildStopFlowHarness(options: StopFlowHarnessOptions = {}): StopFlowHarness {
+  const capturedRequestStops: Array<(() => void) | undefined> = [];
+  const reportedOutcomes: Array<{ succeeded: boolean }> = [];
+  let clearedCount = 0;
+  const renderingByIndex = new Map<number, ViewportRenderingState>([
+    [SOURCE_INDEX, buildRenderingStateWithHistory([])],
+  ]);
+  const bindings: ApplyActionFlowBindings = {
+    ...buildBindingsBackedByMaps(renderingByIndex, vi.fn()),
+    setImagesByIndex: vi.fn(),
+    busyRegistrar: {
+      registerAppBusyEntry: () => ({ id: "app", update: () => undefined, clear: () => undefined }),
+      registerViewportBusyEntry: (input) => {
+        capturedRequestStops.push(input.requestStop);
+        return buildStopClickingBusyHandle(input.requestStop, options, () => {
+          clearedCount += 1;
+        });
+      },
+    },
+    reportApplyOutcome: (outcome) => reportedOutcomes.push(outcome),
+  };
+  return { bindings, capturedRequestStops, clearedBusyEntryCount: () => clearedCount, reportedOutcomes };
+}
+
+function buildStopClickingBusyHandle(
+  requestStop: (() => void) | undefined,
+  options: StopFlowHarnessOptions,
+  recordClear: () => void,
+): { id: string; update: () => void; clear: () => void } {
+  let hasClickedStop = false;
+  return {
+    id: "viewport",
+    update: () => {
+      if (!options.clickStopAfterFirstProgressTick || hasClickedStop) return;
+      hasClickedStop = true;
+      requestStop?.();
+    },
+    clear: recordClear,
+  };
+}
+
+// The transform sweeps its units through the shared chunk-boundary helper, so
+// the abort check runs exactly where every real chunked operation checks it.
+function buildStoppableActionCheckingTheSignalEachUnit(
+  totalUnits: number,
+  completedUnits: number[] = [],
+): RegisteredViewportAction {
+  return {
+    id: "stoppable",
+    label: "Stoppable",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Stoppable",
+    apply: (state: ViewportRenderingState) => state,
+    supportsStopDuringApply: true,
+    transformSourceAsync: async (
+      _source: ViewportImageSource,
+      _parameterValues: unknown,
+      onProgress?: (fraction: number) => void,
+      abortSignal?: AbortSignal,
+    ) => {
+      for (let unit = 1; unit <= totalUnits; unit += 1) {
+        completedUnits.push(unit);
+        await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, unit, totalUnits, abortSignal);
+      }
+      return buildSinglePixelSource();
     },
   } as unknown as RegisteredViewportAction;
 }

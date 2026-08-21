@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { formatBusyProgressPercentText } from "@/state/busy-progress-percent";
 import {
   useMostRecentAppBusyEntry,
@@ -50,7 +51,18 @@ function BusyIndicatorCard({ entry }: { entry: BusyEntry }): JSX.Element {
       <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
       <p className="text-center text-sm text-foreground">{entry.label}</p>
       {entry.progress !== null ? <BusyProgressRow progress={entry.progress} /> : null}
+      {entry.requestStop ? <StopOperationButton requestStop={entry.requestStop} /> : null}
     </div>
+  );
+}
+
+// CT-268: stoppable operations offer a Stop button; clicking it aborts the run
+// at its next chunk boundary (the apply flow then shows "Operation stopped").
+function StopOperationButton({ requestStop }: { requestStop: () => void }): JSX.Element {
+  return (
+    <Button variant="outline" size="sm" onClick={requestStop}>
+      Stop
+    </Button>
   );
 }
 

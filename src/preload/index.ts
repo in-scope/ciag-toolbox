@@ -42,6 +42,7 @@ import {
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
+  USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
@@ -49,6 +50,7 @@ import {
   type UserScriptPickScriptResult,
   type UserScriptRunBeginRequest,
   type UserScriptRunBeginResult,
+  type UserScriptRunCancelRequest,
   type UserScriptRunCubeChunkRequest,
   type UserScriptRunExecuteRequest,
   type UserScriptRunExecuteResult,
@@ -435,6 +437,16 @@ function releaseUserScriptRunInMainProcess(
   ) as Promise<void>;
 }
 
+// CT-268: kills an executing run's Python worker subprocess (Stop button).
+function cancelUserScriptRunInMainProcess(
+  request: UserScriptRunCancelRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_CANCEL_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -502,6 +514,7 @@ const apiBridge = {
   executeUserScriptRun: executeUserScriptRunInMainProcess,
   readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
   releaseUserScriptRun: releaseUserScriptRunInMainProcess,
+  cancelUserScriptRun: cancelUserScriptRunInMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

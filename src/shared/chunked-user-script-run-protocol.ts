@@ -24,6 +24,10 @@ export const USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL = "user-script:run-cube-chunk";
 export const USER_SCRIPT_RUN_EXECUTE_CHANNEL = "user-script:run-execute";
 export const USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL = "user-script:run-result-chunk";
 export const USER_SCRIPT_RUN_RELEASE_CHANNEL = "user-script:run-release";
+// CT-268: cancels an EXECUTING run by killing its Python worker subprocess; the
+// pending execute invoke then settles with a failed result. A token with no
+// executing worker (not begun, already settled) cancels nothing.
+export const USER_SCRIPT_RUN_CANCEL_CHANNEL = "user-script:run-cancel";
 
 export const USER_SCRIPT_RUN_CHUNK_BYTES = 64 * 1024 * 1024;
 
@@ -91,5 +95,9 @@ export interface UserScriptRunResultChunkResult {
 }
 
 export interface UserScriptRunReleaseRequest {
+  readonly token: string;
+}
+
+export interface UserScriptRunCancelRequest {
   readonly token: string;
 }

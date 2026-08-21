@@ -41,12 +41,13 @@ export async function projectMeanCentredSamplesOntoComponentVectorsReportingProg
   componentVectors: ReadonlyArray<ReadonlyArray<number>>,
   keptCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ComponentProjection> {
   reportMultiUnitWorkStarting(onProgress, keptCount);
   const projected: Float32Array[] = [];
   for (let component = 0; component < keptCount; component += 1) {
-    projected.push(await projectComponentInSampleChunks(samples, means, componentVectors[component]!));
-    await reportProgressFractionAndYield(onProgress, (component + 1) / keptCount);
+    projected.push(await projectComponentInSampleChunks(samples, means, componentVectors[component]!, abortSignal));
+    await reportProgressFractionAndYield(onProgress, (component + 1) / keptCount, abortSignal);
   }
   return projected;
 }
@@ -55,12 +56,14 @@ async function projectComponentInSampleChunks(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
   componentVector: ReadonlyArray<number>,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array> {
   const projected = allocateFloat32ArrayOrThrow(samples.sampleCount);
   await runOverSampleRangesYielding(
     samples.sampleCount,
     samplesPerChunkForPerBandSweep(samples.bandCount),
     (start, end) => fillProjectedSampleRange(samples, means, componentVector, projected, start, end),
+    abortSignal,
   );
   return projected;
 }

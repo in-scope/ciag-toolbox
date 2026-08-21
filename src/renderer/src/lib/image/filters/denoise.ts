@@ -45,12 +45,13 @@ export async function applyDenoiseToBandInChunksReportingProgress(
   shape: BandSpatialShape,
   settings: DenoiseSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
   pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
 ): Promise<Float32Array> {
   if (settings.method === "median") {
-    return applyMedianDenoiseInChunksReportingProgress(band, shape, settings.radius, onProgress, pixelsPerChunk);
+    return applyMedianDenoiseInChunksReportingProgress(band, shape, settings.radius, onProgress, abortSignal, pixelsPerChunk);
   }
-  return applyGaussianDenoiseInChunksReportingProgress(band, shape, settings.sigma, onProgress, pixelsPerChunk);
+  return applyGaussianDenoiseInChunksReportingProgress(band, shape, settings.sigma, onProgress, abortSignal, pixelsPerChunk);
 }
 
 export function applyGaussianDenoise(
@@ -71,6 +72,7 @@ export async function applyGaussianDenoiseInChunksReportingProgress(
   shape: BandSpatialShape,
   sigma: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
   pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
 ): Promise<Float32Array> {
   assertBandLengthMatchesShape(band, shape);
@@ -81,8 +83,9 @@ export async function applyGaussianDenoiseInChunksReportingProgress(
     denoiseRowsPerChunk(shape, pixelsPerChunk),
     (yStart, yEnd) => convolveRowRangeWithKernel(band, shape, kernel, rowsSmoothed, yStart, yEnd),
     scaleProgressToWindow(onProgress, 0, 0.5),
+    abortSignal,
   );
-  return convolveColumnsInChunksReportingProgress(rowsSmoothed, shape, kernel, onProgress, pixelsPerChunk);
+  return convolveColumnsInChunksReportingProgress(rowsSmoothed, shape, kernel, onProgress, abortSignal, pixelsPerChunk);
 }
 
 async function convolveColumnsInChunksReportingProgress(
@@ -90,6 +93,7 @@ async function convolveColumnsInChunksReportingProgress(
   shape: BandSpatialShape,
   kernel: Float64Array,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
   pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
 ): Promise<Float32Array> {
   const out = allocateFloat32ArrayOrThrow(shape.width * shape.height);
@@ -98,6 +102,7 @@ async function convolveColumnsInChunksReportingProgress(
     denoiseRowsPerChunk(shape, pixelsPerChunk),
     (yStart, yEnd) => convolveColumnRangeWithKernel(rowsSmoothed, shape, kernel, out, yStart, yEnd),
     scaleProgressToWindow(onProgress, 0.5, 1),
+    abortSignal,
   );
   return out;
 }
@@ -120,6 +125,7 @@ export async function applyMedianDenoiseInChunksReportingProgress(
   shape: BandSpatialShape,
   radius: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
   pixelsPerChunk: number = DENOISE_PIXELS_PER_CHUNK,
 ): Promise<Float32Array> {
   assertMedianRadiusIsUsable(radius);
@@ -131,6 +137,7 @@ export async function applyMedianDenoiseInChunksReportingProgress(
     denoiseRowsPerChunk(shape, pixelsPerChunk),
     (yStart, yEnd) => medianDenoiseRowRange(band, shape, radius, out, window, yStart, yEnd),
     onProgress,
+    abortSignal,
   );
   return out;
 }

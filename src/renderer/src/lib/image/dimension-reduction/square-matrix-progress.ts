@@ -16,6 +16,7 @@ export async function buildSymmetricMatrixInPairChunksReportingProgress(
   size: number,
   computeEntry: (row: number, column: number) => number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const matrix: number[][] = Array.from({ length: size }, () => new Array<number>(size));
   const pairs = listUpperTrianglePairs(size);
@@ -24,6 +25,7 @@ export async function buildSymmetricMatrixInPairChunksReportingProgress(
     1,
     (startPair, endPair) => fillMirroredEntriesForPairRange(matrix, pairs, startPair, endPair, computeEntry),
     onProgress,
+    abortSignal,
   );
   return matrix;
 }

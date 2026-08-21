@@ -41,16 +41,19 @@ export async function fitPcaReportingProgress(
   samples: CubeSampleMatrix,
   bandCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<PcaFit> {
   const means = await computePerBandMeansReportingProgress(
     samples,
     bandCount,
     scaleProgressToWindow(onProgress, 0, PCA_MEANS_END_FRACTION),
+    abortSignal,
   );
   const covariance = await buildSymmetricMatrixInPairChunksReportingProgress(
     bandCount,
     (row, column) => covarianceBetweenBands(samples, means, row, column),
     scaleProgressToWindow(onProgress, PCA_MEANS_END_FRACTION, 1),
+    abortSignal,
   );
   return decomposeCovarianceIntoPcaFit(means, covariance);
 }

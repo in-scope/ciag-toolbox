@@ -67,22 +67,26 @@ export async function fitMnfReportingProgress(
   samples: CubeSampleMatrix,
   bandCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<MnfFit> {
   const means = await computePerBandMeansReportingProgress(
     samples,
     bandCount,
     scaleProgressToWindow(onProgress, 0, MNF_MEANS_END_FRACTION),
+    abortSignal,
   );
   const noiseCovariance = await estimateShiftDifferenceNoiseCovarianceReportingProgress(
     samples,
     bandCount,
     scaleProgressToWindow(onProgress, MNF_MEANS_END_FRACTION, MNF_NOISE_COVARIANCE_PASS_END_FRACTION),
+    abortSignal,
   );
   const dataCovariance = await computeDataCovarianceInPairChunks(
     samples,
     means,
     bandCount,
     scaleProgressToWindow(onProgress, MNF_NOISE_COVARIANCE_PASS_END_FRACTION, 1),
+    abortSignal,
   );
   return decomposeWhitenedCovarianceIntoMnfFit(means, dataCovariance, buildNoiseWhiteningMatrix(noiseCovariance), bandCount);
 }
@@ -92,11 +96,13 @@ function computeDataCovarianceInPairChunks(
   means: ReadonlyArray<number>,
   bandCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   return buildSymmetricMatrixInPairChunksReportingProgress(
     bandCount,
     (row, col) => covarianceOfBandPair(samples, means, row, col),
     onProgress,
+    abortSignal,
   );
 }
 
@@ -171,18 +177,21 @@ export async function estimateShiftDifferenceNoiseCovarianceReportingProgress(
   samples: CubeSampleMatrix,
   bandCount: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const horizontal = await accumulateDirectionCentredCrossSumInRowChunks(
     samples,
     bandCount,
     horizontalNeighbourDirection(samples),
     scaleProgressToWindow(onProgress, 0, 0.5),
+    abortSignal,
   );
   const vertical = await accumulateDirectionCentredCrossSumInRowChunks(
     samples,
     bandCount,
     verticalNeighbourDirection(samples),
     scaleProgressToWindow(onProgress, 0.5, 1),
+    abortSignal,
   );
   return poolDirectionsIntoNoiseCovariance(horizontal, vertical);
 }
@@ -241,6 +250,7 @@ async function accumulateDirectionCentredCrossSumInRowChunks(
   bandCount: number,
   direction: NeighbourDirection,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<DirectionCrossSum> {
   const accumulators = makeDirectionAccumulators(bandCount);
   let pairCount = 0;
@@ -251,6 +261,7 @@ async function accumulateDirectionCentredCrossSumInRowChunks(
       pairCount += streamRowRangeOfNeighbourDifferences(samples, bandCount, direction, startRow, endRow, accumulators);
     },
     onProgress,
+    abortSignal,
   );
   return { centredCrossSum: centreCrossSums(accumulators.rawCrossSums, accumulators.differenceSums, pairCount, bandCount), pairCount };
 }

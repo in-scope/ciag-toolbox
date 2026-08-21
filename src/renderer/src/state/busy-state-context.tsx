@@ -35,6 +35,9 @@ export interface RegisterAppBusyEntryInput {
   // CT-106: when true the indicator paints immediately, skipping the anti-flash
   // delay (used for empty result panels that have nothing else to show).
   readonly immediate?: boolean;
+  // CT-268: stoppable operations pass their abort trigger; the indicator card
+  // shows a Stop button that invokes it.
+  readonly requestStop?: () => void;
 }
 
 export interface RegisterViewportBusyEntryInput extends RegisterAppBusyEntryInput {
@@ -80,6 +83,7 @@ function useStableBusyEntryRegistrar(
         label: input.label,
         progress: input.progress ?? null,
         immediate: input.immediate ?? false,
+        requestStop: input.requestStop ?? null,
       }),
     [setEntries, nextIdRef],
   );
@@ -91,6 +95,7 @@ function useStableBusyEntryRegistrar(
         label: input.label,
         progress: input.progress ?? null,
         immediate: input.immediate ?? false,
+        requestStop: input.requestStop ?? null,
       }),
     [setEntries, nextIdRef],
   );
@@ -106,6 +111,7 @@ interface RegisterBusyEntryArgs {
   readonly label: string;
   readonly progress: number | null;
   readonly immediate: boolean;
+  readonly requestStop: (() => void) | null;
 }
 
 function registerBusyEntryWithScope(
@@ -122,6 +128,7 @@ function registerBusyEntryWithScope(
     progress: args.progress,
     registeredAtMs: performance.now(),
     immediate: args.immediate,
+    requestStop: args.requestStop,
   };
   setEntries((previous) => addBusyEntryToMap(previous, entry));
   return {

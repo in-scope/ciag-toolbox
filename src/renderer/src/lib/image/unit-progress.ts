@@ -1,3 +1,5 @@
+import { throwIfOperationStopped } from "@/lib/image/operation-stop";
+
 // CT-220/CT-221: determinate progress for multi-unit work on the renderer thread.
 // A unit is one page of a multi-page TIFF, one band of an ENVI cube, or one band of
 // an operation's per-band loop; the fraction is completed units / total units. The
@@ -15,14 +17,20 @@ export function reportMultiUnitWorkStarting(
   onProgress(0);
 }
 
+// CT-268: every chunk boundary doubles as a stop checkpoint. The optional abort
+// signal comes from the apply flow's Stop button; a stopped run throws
+// OperationStoppedError out of the compute loop at the next boundary.
 export async function reportCompletedUnitAndYieldSoProgressCanPaint(
   onProgress: UnitProgressCallback | undefined,
   completedUnits: number,
   totalUnits: number,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
+  throwIfOperationStopped(abortSignal);
   if (!onProgress) return;
   onProgress(completedUnits / Math.max(1, totalUnits));
   await yieldOnceSoTheBusyIndicatorCanPaint();
+  throwIfOperationStopped(abortSignal);
 }
 
 // CT-223: phase-structured work (sample extraction, fit, projection) reports each
@@ -30,10 +38,13 @@ export async function reportCompletedUnitAndYieldSoProgressCanPaint(
 export async function reportProgressFractionAndYield(
   onProgress: UnitProgressCallback | undefined,
   fraction: number,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
+  throwIfOperationStopped(abortSignal);
   if (!onProgress) return;
   onProgress(fraction);
   await yieldOnceSoTheBusyIndicatorCanPaint();
+  throwIfOperationStopped(abortSignal);
 }
 
 // CT-222: multi-phase work (e.g. brightness then contrast, normalize then invert)
@@ -72,12 +83,13 @@ export async function runInChunksReportingProgress(
   unitsPerChunk: number,
   processChunk: (startUnit: number, endUnit: number) => void,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const chunkSize = Math.max(1, Math.floor(unitsPerChunk));
   for (let start = 0; start < totalUnits; start += chunkSize) {
     const end = Math.min(totalUnits, start + chunkSize);
     processChunk(start, end);
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, end, totalUnits);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, end, totalUnits, abortSignal);
   }
 }
 
@@ -85,12 +97,13 @@ export async function computeArrayReportingPerUnitProgress<T>(
   totalUnits: number,
   computeUnit: (index: number) => T,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal?: AbortSignal,
 ): Promise<T[]> {
   reportMultiUnitWorkStarting(onProgress, totalUnits);
   const results: T[] = [];
   for (let index = 0; index < totalUnits; index += 1) {
     results.push(computeUnit(index));
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalUnits);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalUnits, abortSignal);
   }
   return results;
 }

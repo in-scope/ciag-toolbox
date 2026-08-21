@@ -43,6 +43,7 @@ export async function computeSpectralDerivativeReportingProgress(
   cube: RasterImage,
   order: SpectralDerivativeOrder = DEFAULT_SPECTRAL_DERIVATIVE_ORDER,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   assertCubeHasEnoughBandsForSpectralDerivativeOrder(cube, order);
   const shape = {
@@ -54,6 +55,7 @@ export async function computeSpectralDerivativeReportingProgress(
     cube.bandCount - order,
     (bandIndex) => computeSingleDerivativeBand(cube, order, bandIndex),
     onProgress,
+    abortSignal,
   );
   return makeFloat32RasterFromBands(shape, bands);
 }

@@ -159,6 +159,14 @@ export interface RegisteredViewportAction extends ViewportAction {
    */
   readonly loadingMessage?: string;
   /**
+   * CT-268: the operation's transform checks the apply flow's abort signal at
+   * its chunk boundaries, so the busy overlay offers a Stop button. Only set
+   * this on actions whose transformSourceAsync actually consults the signal;
+   * a flagged transform that never checks it would show a Stop button that
+   * does nothing.
+   */
+  readonly supportsStopDuringApply?: boolean;
+  /**
    * The operation always needs an area; the operation flow makes the user select
    * one (CT-095) and Apply stays disabled until they do.
    */
@@ -1188,6 +1196,7 @@ export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatNormalizeAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountForNormalize,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createNormalizeSourceTransform(),
 };
 
@@ -1203,11 +1212,11 @@ function injectSourceBandCountForNormalize(
 }
 
 function createNormalizeSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveNormalizeScopeSelection(parameterValues, source.raster.bandCount);
     const method = resolveNormalizeRangeMethod(parameterValues);
-    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress);
+    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -1338,6 +1347,7 @@ export const STANDARDIZE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatStandardizeAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountForStandardize,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createStandardizeSourceTransform(),
 };
 
@@ -1353,11 +1363,11 @@ function injectSourceBandCountForStandardize(
 }
 
 function createStandardizeSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveStandardizeScopeSelection(parameterValues, source.raster.bandCount);
     const target = readStandardizeTargetDistribution(parameterValues);
-    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress);
+    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -1615,6 +1625,7 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  supportsStopDuringApply: true,
   transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
@@ -1628,6 +1639,7 @@ export const REFLECT_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  supportsStopDuringApply: true,
   transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
@@ -1642,10 +1654,10 @@ function clearRegionAfterGeometricTransform(state: ViewportRenderingState): View
 }
 
 function createGeometricTransformSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const transform = readGeometricTransformChoice(parameterValues);
-    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress);
+    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }

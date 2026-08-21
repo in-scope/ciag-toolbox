@@ -69,6 +69,7 @@ export async function applyNormalizeToRasterReportingProgress(
   selection: NormalizeScopeSelection,
   method: NormalizeRangeMethod = MIN_MAX_NORMALIZE_METHOD,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   if (method.kind === "clip-absolute") {
     return mapSelectedRasterBandsPreservingTypeReportingProgress(
@@ -76,9 +77,10 @@ export async function applyNormalizeToRasterReportingProgress(
       resolveClippedBandIndexes(raster, selection),
       (band) => clipBandValuesToAbsoluteBounds(band, method.bounds),
       onProgress,
+      abortSignal,
     );
   }
-  return normalizeRasterToUnitRangeReportingProgress(raster, selection, method, onProgress);
+  return normalizeRasterToUnitRangeReportingProgress(raster, selection, method, onProgress, abortSignal);
 }
 
 async function normalizeRasterToUnitRangeReportingProgress(
@@ -86,6 +88,7 @@ async function normalizeRasterToUnitRangeReportingProgress(
   selection: NormalizeScopeSelection,
   method: NormalizeRangeMethod,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const shouldClip = shouldClipScaledValuesToUnitRange(method);
   if (selection.scope === "full-cube") {
@@ -94,6 +97,7 @@ async function normalizeRasterToUnitRangeReportingProgress(
       raster,
       (bandPixels) => mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange, shouldClip)),
       onProgress,
+      abortSignal,
     );
   }
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
@@ -101,6 +105,7 @@ async function normalizeRasterToUnitRangeReportingProgress(
     new Set(selection.bandIndexes),
     (bandPixels) => normalizeSingleBandToUnitRange(bandPixels, method),
     onProgress,
+    abortSignal,
   );
 }
 

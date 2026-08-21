@@ -297,6 +297,10 @@ interface ToolboxUserScriptRunReleaseRequest {
   token: string;
 }
 
+interface ToolboxUserScriptRunCancelRequest {
+  token: string;
+}
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
@@ -412,6 +416,9 @@ interface ToolboxApi {
   ) => Promise<ToolboxUserScriptRunResultChunkResult>;
   releaseUserScriptRun: (
     request: ToolboxUserScriptRunReleaseRequest,
+  ) => Promise<void>;
+  cancelUserScriptRun: (
+    request: ToolboxUserScriptRunCancelRequest,
   ) => Promise<void>;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (

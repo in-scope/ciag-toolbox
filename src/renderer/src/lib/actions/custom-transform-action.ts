@@ -12,6 +12,7 @@ import {
   type CubeTransformEditingState,
 } from "@/lib/image/band-ops/cube-transform-editing";
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
+import { throwIfOperationStopped } from "@/lib/image/operation-stop";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
@@ -54,6 +55,7 @@ export type CubeTransformScriptRunner = (
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ) => Promise<ToolboxRunUserScriptResult>;
 
 export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
@@ -67,6 +69,7 @@ export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatCustomTransformAppliedLabel,
   prepareParameterValuesForApply: injectConfiguredCubeTransformForApply,
   apply: resetStateForTransformedStackOutput,
+  supportsStopDuringApply: true,
   transformSourceAsync: createCustomTransformSourceTransform(),
 };
 
@@ -111,10 +114,13 @@ function resetStateForTransformedStackOutput(
 export function createCustomTransformSourceTransform(
   runScript: CubeTransformScriptRunner = runCubeTransformScriptThroughWorker,
 ): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const scriptSource = readConfiguredScriptSource(parameterValues);
-    const result = await runScript(source.raster, scriptSource, onProgress);
+    const result = await runScript(source.raster, scriptSource, onProgress, abortSignal);
+    // A stopped run may still settle with SOME outcome (the killed worker
+    // reports a failure); the signal, not the outcome, decides "stopped".
+    throwIfOperationStopped(abortSignal);
     return { kind: "raster", raster: buildStackFromRunResult(source.raster, result) };
   };
 }
@@ -123,13 +129,17 @@ function runCubeTransformScriptThroughWorker(
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ToolboxRunUserScriptResult> {
   return runUserScriptOverCubeInChunks(
     window.toolboxApi,
     buildUserScriptRunCubeInputFromRaster(raster),
     source,
     "cube",
-    { onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress) },
+    {
+      onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress),
+      abortSignal,
+    },
   );
 }
 

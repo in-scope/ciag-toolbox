@@ -24,8 +24,8 @@ export const MNF_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   loadingMessage: "Computing minimum-noise-fraction components...",
   componentLabelPrefix: MNF_COMPONENT_LABEL_PREFIX,
   fit: fitMnfReportingProgress,
-  project: (samples, fit, keptCount, onProgress) =>
-    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress),
+  project: (samples, fit, keptCount, onProgress, abortSignal) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress, abortSignal),
   describeKeptComponentLabels: describeKeptMnfComponentLabels,
 });
 

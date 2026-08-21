@@ -12,6 +12,7 @@ interface FakeApiRecord {
   uploadedChunks: Uint8Array[];
   executedTokens: string[];
   releasedTokens: string[];
+  canceledTokens: string[];
 }
 
 interface FakeApiBehavior {
@@ -22,7 +23,7 @@ interface FakeApiBehavior {
 }
 
 function buildFakeApi(behavior: FakeApiBehavior = {}): { api: UserScriptRunChunkedApi; record: FakeApiRecord } {
-  const record: FakeApiRecord = { begins: [], uploadedChunks: [], executedTokens: [], releasedTokens: [] };
+  const record: FakeApiRecord = { begins: [], uploadedChunks: [], executedTokens: [], releasedTokens: [], canceledTokens: [] };
   const resultChunks = [...(behavior.resultChunks ?? [])];
   const api: UserScriptRunChunkedApi = {
     beginUserScriptRun: (request) => {
@@ -45,6 +46,10 @@ function buildFakeApi(behavior: FakeApiBehavior = {}): { api: UserScriptRunChunk
     },
     releaseUserScriptRun: (request) => {
       record.releasedTokens.push(request.token);
+      return Promise.resolve();
+    },
+    cancelUserScriptRun: (request) => {
+      record.canceledTokens.push(request.token);
       return Promise.resolve();
     },
   };

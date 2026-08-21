@@ -160,10 +160,16 @@ export type TransformProgressCallback = (fraction: number) => void;
 // thread). An action defines transformSource OR transformSourceAsync; the apply
 // flow gates and runs both kinds only through actionTransformsSource /
 // runActionSourceTransform below.
+// CT-268: the optional abort signal is the apply flow's stop token. A stoppable
+// transform checks it at its chunk boundaries (the unit-progress helpers accept
+// it) and throws OperationStoppedError when the user clicked Stop; worker-based
+// transforms (spatial filter, custom Python) additionally use it to terminate
+// their worker.
 export type ViewportActionAsyncSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ) => Promise<ViewportImageSource>;
 
 // CT-097: an operation may emit additional outputs beyond the primary in-place /
@@ -228,9 +234,10 @@ export async function runActionSourceTransform(
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ViewportImageSource> {
   if (action.transformSourceAsync) {
-    return action.transformSourceAsync(source, parameterValues, onProgress);
+    return action.transformSourceAsync(source, parameterValues, onProgress, abortSignal);
   }
   if (action.transformSource) return action.transformSource(source, parameterValues);
   return source;

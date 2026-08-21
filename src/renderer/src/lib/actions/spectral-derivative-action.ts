@@ -59,6 +59,7 @@ export const SPECTRAL_DERIVATIVE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatSpectralDerivativeAppliedLabel,
   assertCanApplyToSource: assertSourceStackHasEnoughBandsForChosenOrder,
   apply: resetBandDependentStateForDerivativeOutput,
+  supportsStopDuringApply: true,
   transformSourceAsync: createSpectralDerivativeSourceTransform(),
 };
 
@@ -82,10 +83,10 @@ function assertSourceStackHasEnoughBandsForChosenOrder(
 }
 
 function createSpectralDerivativeSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const order = readSpectralDerivativeOrder(parameterValues);
-    const raster = await computeSpectralDerivativeReportingProgress(source.raster, order, onProgress);
+    const raster = await computeSpectralDerivativeReportingProgress(source.raster, order, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }

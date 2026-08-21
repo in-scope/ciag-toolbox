@@ -71,11 +71,13 @@ export interface DimensionReductionTransformConfig<Fit> {
   readonly componentLabelPrefix: string;
   // CT-227: the fit reports its own 0..1 progress (PCA/MNF per covariance band
   // pair, ICA whitening then per FastICA iteration), windowed into the 0.2..0.4
-  // stretch of the phase bar by runDimensionReductionTransform.
+  // stretch of the phase bar by runDimensionReductionTransform. CT-268: the
+  // abort signal is checked at the same chunk boundaries, so Stop lands mid-fit.
   readonly fit: (
     samples: CubeSampleMatrix,
     bandCount: number,
     onProgress?: UnitProgressCallback,
+    abortSignal?: AbortSignal,
   ) => Promise<Fit>;
   // CT-223: projection reports one progress tick per projected component (the last
   // phase of the transform's phase-based progress). PCA/MNF/ICA all delegate to
@@ -85,6 +87,7 @@ export interface DimensionReductionTransformConfig<Fit> {
     fit: Fit,
     keptCount: number,
     onProgress?: UnitProgressCallback,
+    abortSignal?: AbortSignal,
   ) => Promise<ComponentProjection>;
   readonly describeKeptComponentLabels?: (fit: Fit, keptCount: number) => ReadonlyArray<string>;
 }
@@ -105,6 +108,7 @@ export function registerDimensionReductionAction<Fit>(
     prepareParameterValuesForApply: buildDimensionReductionPrepareParameterValues(config.label),
     apply: clearOperationRegionFromState,
     clearConsumedSourceStateAfterApply: clearOperationRegionFromState,
+    supportsStopDuringApply: true,
     transformSourceAsync: buildDimensionReductionSourceTransform(config),
   };
 }
@@ -161,9 +165,9 @@ function injectResolvedComponentCountForApply(
 function buildDimensionReductionSourceTransform<Fit>(
   config: DimensionReductionTransformConfig<Fit>,
 ): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
-    const raster = await runDimensionReductionTransform(config, source.raster, parameterValues, onProgress);
+    const raster = await runDimensionReductionTransform(config, source.raster, parameterValues, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -181,24 +185,27 @@ async function runDimensionReductionTransform<Fit>(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const keptCount = resolveComponentCount(readComponentCountInput(parameterValues), raster.bandCount);
-  await reportProgressFractionAndYield(onProgress, 0);
+  await reportProgressFractionAndYield(onProgress, 0, abortSignal);
   const fitSamples = extractFitSamples(raster, parameterValues);
-  await reportProgressFractionAndYield(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION);
+  await reportProgressFractionAndYield(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION, abortSignal);
   const fit = await config.fit(
     fitSamples,
     raster.bandCount,
     scaleProgressToWindow(onProgress, FIT_SAMPLES_EXTRACTED_FRACTION, FIT_COMPLETE_FRACTION),
+    abortSignal,
   );
-  await reportProgressFractionAndYield(onProgress, FIT_COMPLETE_FRACTION);
+  await reportProgressFractionAndYield(onProgress, FIT_COMPLETE_FRACTION, abortSignal);
   const projectionSamples = extractCubeSampleMatrixFromRaster(raster);
-  await reportProgressFractionAndYield(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION);
+  await reportProgressFractionAndYield(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION, abortSignal);
   const projection = await config.project(
     projectionSamples,
     fit,
     keptCount,
     scaleProgressToWindow(onProgress, PROJECTION_SAMPLES_EXTRACTED_FRACTION, 1),
+    abortSignal,
   );
   return makeComponentStackFromProjection(projection, buildStackMeta(config, fit, raster, keptCount));
 }

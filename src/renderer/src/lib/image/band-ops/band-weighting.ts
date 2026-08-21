@@ -32,6 +32,7 @@ export async function computeWeightedSumReportingProgress(
   bands: ReadonlyArray<RasterTypedArray>,
   weights: ReadonlyArray<number>,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array> {
   const { output, normalizer } = prepareWeightedSumOutput(bands, weights);
   if (normalizer === 0) return output;
@@ -40,6 +41,7 @@ export async function computeWeightedSumReportingProgress(
     weightedSumPixelsPerChunk(bands.length),
     (start, end) => fillNormalizedWeightedSumRange(output, bands, weights, normalizer, start, end),
     onProgress,
+    abortSignal,
   );
   return output;
 }

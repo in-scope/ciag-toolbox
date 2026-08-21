@@ -99,6 +99,7 @@ export async function applyGeometricTransformToRasterImageReportingProgress(
   raster: RasterImage,
   transform: GeometricTransform,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const definition = GEOMETRIC_TRANSFORM_DEFINITIONS[transform];
   const destinationWidth = definition.swapsDimensions ? raster.height : raster.width;
@@ -107,6 +108,7 @@ export async function applyGeometricTransformToRasterImageReportingProgress(
     raster.bandPixels.length,
     (index) => remapBandToDestination(raster.bandPixels[index]!, raster.width, raster.height, definition),
     onProgress,
+    abortSignal,
   );
   return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
 }

@@ -140,6 +140,7 @@ describe("applyDenoiseToBandInChunksReportingProgress (CT-226)", () => {
       SHAPE,
       { method: "median", radius: 1 },
       undefined,
+      undefined,
       ONE_ROW_PER_CHUNK,
     );
     expect(Array.from(chunked)).toEqual(
@@ -152,6 +153,7 @@ describe("applyDenoiseToBandInChunksReportingProgress (CT-226)", () => {
       makeRampBand(),
       SHAPE,
       { method: "gaussian", sigma: 1 },
+      undefined,
       undefined,
       ONE_ROW_PER_CHUNK,
     );
@@ -167,6 +169,7 @@ describe("applyDenoiseToBandInChunksReportingProgress (CT-226)", () => {
       SHAPE,
       { method: "median", radius: 1 },
       (fraction) => ticks.push(fraction),
+      undefined,
       ONE_ROW_PER_CHUNK,
     );
     expect(ticks).toEqual([1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]);
@@ -179,6 +182,7 @@ describe("applyDenoiseToBandInChunksReportingProgress (CT-226)", () => {
       SHAPE,
       { method: "gaussian", sigma: 1 },
       (fraction) => ticks.push(fraction),
+      undefined,
       ONE_ROW_PER_CHUNK,
     );
     expect(ticks.length).toBe(12);
