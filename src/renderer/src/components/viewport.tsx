@@ -30,6 +30,9 @@ import {
   type CanvasCursorPositionPx,
 } from "@/lib/webgl/pointer-readout-input";
 import {
+  attachRoiBoxEditEventHandlers,
+} from "@/lib/webgl/roi-box-edit-input";
+import {
   attachRoiDrawEventHandlers,
   type RoiDrawAttachment,
   type RoiDrawCanvasRect,
@@ -66,6 +69,9 @@ interface ViewportProps {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   onCommitRoi: (roi: ViewportRoi) => void;
+  canEditCommittedRoi: boolean;
+  onPreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  onCommitRoiEdit: (roi: ViewportRoi) => void;
   onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
@@ -86,6 +92,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
+  const [inProgressEditRoi, setInProgressEditRoi] = useState<ViewportRoi | null>(null);
 
   const panelLink = usePanelLink();
   const linkGroupIndex = panelLinkGroupIndexOrNull(props.viewportNumber);
@@ -98,6 +105,17 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useToneCurvePreviewLutEffect(rendererRef, props.toneCurvePreviewLookupTable ?? null);
   useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
+  // CT-275: registered BEFORE the pan-zoom and draw attachments so a pointer-down
+  // on the committed box claims the gesture ahead of both.
+  useViewportRoiBoxEditing(canvasRef, {
+    canEditCommittedRoi: props.canEditCommittedRoi,
+    committedRoi: props.roi,
+    imageSource,
+    rendererRef,
+    onPreviewRoiEdit: props.onPreviewRoiEdit,
+    onCommitRoiEdit: props.onCommitRoiEdit,
+    setInProgressEditRoi,
+  });
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
   useViewportPixelReadoutPublisher(readoutContainerRef, canvasRef, rendererRef, {
     viewportNumber: props.viewportNumber ?? null,
@@ -156,7 +174,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
         />
         <ViewportRoiOverlay
           renderer={rendererRef.current}
-          committedRoi={props.roi}
+          committedRoi={inProgressEditRoi ?? props.roi}
           inProgressDragRect={inProgressDragRect}
           transformVersion={transformVersion}
         />
@@ -725,6 +743,63 @@ function buildPixelReadoutSnapshotForCursorOrNull(
 function countSourceBandsForReadout(source: ViewportImageSource): number {
   if (source.kind === "raster") return source.raster.bandCount;
   return 0;
+}
+
+// CT-275: attach the committed-box move/resize handlers. The local preview state
+// drives the overlay while the drag is in flight; the preview callback also feeds
+// the region-edit-preview context so coordinate readouts track the box live.
+interface ViewportRoiBoxEditInputs {
+  readonly canEditCommittedRoi: boolean;
+  readonly committedRoi: ViewportRoi | null;
+  readonly imageSource: ViewportImageSource | null;
+  readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
+  readonly onPreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  readonly onCommitRoiEdit: (roi: ViewportRoi) => void;
+  readonly setInProgressEditRoi: (roi: ViewportRoi | null) => void;
+}
+
+function useViewportRoiBoxEditing(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  inputs: ViewportRoiBoxEditInputs,
+): void {
+  const inputsRef = useLatestValueRef(inputs);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const attachment = attachRoiBoxEditEventHandlers(
+      canvas,
+      buildRoiBoxEditCallbacksFromInputsRef(inputsRef),
+    );
+    return () => attachment.detach();
+    // canvasRef is stable; latest-value ref holds dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function buildRoiBoxEditCallbacksFromInputsRef(
+  inputsRef: MutableRefObject<ViewportRoiBoxEditInputs>,
+): Parameters<typeof attachRoiBoxEditEventHandlers>[1] {
+  return {
+    isRoiBoxEditingEnabled: () =>
+      inputsRef.current.canEditCommittedRoi &&
+      inputsRef.current.committedRoi !== null &&
+      inputsRef.current.imageSource !== null,
+    getCommittedRoi: () => inputsRef.current.committedRoi,
+    getRenderer: () => inputsRef.current.rendererRef.current,
+    getImageExtents: () => readImageExtentsFromSourceOrNull(inputsRef.current.imageSource),
+    onPreviewRoiEdit: (roi) => {
+      inputsRef.current.setInProgressEditRoi(roi);
+      inputsRef.current.onPreviewRoiEdit(roi);
+    },
+    onCommitRoiEdit: (roi) => inputsRef.current.onCommitRoiEdit(roi),
+  };
+}
+
+function readImageExtentsFromSourceOrNull(
+  source: ViewportImageSource | null,
+): { width: number; height: number } | null {
+  if (!source) return null;
+  return getImageSourceDimensions(source);
 }
 
 interface ViewportRoiDrawInputs {

@@ -43,6 +43,10 @@ import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
 import { useToneCurvePreview } from "@/state/tone-curve-preview-context";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
+import {
+  useRegionEditPreviewPublisher,
+  type RegionEditTarget,
+} from "@/state/region-edit-preview-context";
 import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
@@ -155,6 +159,9 @@ function renderViewportCellViewport(
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
       onCommitRoi={settings.handleCommitRoi}
+      canEditCommittedRoi={settings.canEditCommittedRoi}
+      onPreviewRoiEdit={settings.handlePreviewRoiEdit}
+      onCommitRoiEdit={settings.handleCommitRoiEdit}
       onRegionToolPlainClick={settings.handleRegionToolPlainClick}
       onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
@@ -195,6 +202,9 @@ interface ViewportCellInteractionSettings {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   handleCommitRoi: (roi: ViewportRoi) => void;
+  canEditCommittedRoi: boolean;
+  handlePreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  handleCommitRoiEdit: (roi: ViewportRoi) => void;
   handleRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
 }
@@ -257,6 +267,33 @@ function useViewportCellInteractionSettings(
   const handleCommitRoi = isOperationRegionRequestActive
     ? handleCommitOperationRegion
     : handleCommitInspectionRoi;
+  // CT-275: edits target whichever committed box is displayed (operationRegion
+  // wins, matching the `operationRegion ?? roi` display rule below). Moving or
+  // resizing the operation region only rewrites the region; moving the
+  // inspection ROI re-commits through the same path as a fresh draw so the
+  // pinned ROI mean spectrum tracks the box. While an explicit "Select region"
+  // request is active the user is redrawing, so body drags must not move the
+  // stale box out from under the new draw.
+  const editedRoiTarget: RegionEditTarget = renderingState.operationRegion
+    ? "operation-region"
+    : "inspection-roi";
+  const publishRegionEditPreview = useRegionEditPreviewPublisher();
+  const viewportNumber = getViewportNumberFromIndex(cellIndex);
+  const handlePreviewRoiEdit = useCallback(
+    (roi: ViewportRoi | null) =>
+      publishRegionEditPreview(roi ? { viewportNumber, target: editedRoiTarget, roi } : null),
+    [publishRegionEditPreview, viewportNumber, editedRoiTarget],
+  );
+  const handleCommitRoiEdit = useCallback(
+    (roi: ViewportRoi) => {
+      if (renderingState.operationRegion) {
+        setRenderingState(cellIndex, { ...renderingState, operationRegion: roi });
+        return;
+      }
+      handleCommitInspectionRoi(roi);
+    },
+    [cellIndex, renderingState, setRenderingState, handleCommitInspectionRoi],
+  );
   const handlePinPixelSpectrum = useCallback(
     (imageX: number, imageY: number) => {
       const next = buildPinnedPixelSpectrumFromImagePoint(content, imageX, imageY);
@@ -327,6 +364,9 @@ function useViewportCellInteractionSettings(
     isRegionToolActive: isRegionToolActive || isOperationRegionRequestActive,
     roi: renderingState.operationRegion ?? renderingState.roi,
     handleCommitRoi,
+    canEditCommittedRoi: !isOperationRegionRequestActive,
+    handlePreviewRoiEdit,
+    handleCommitRoiEdit,
     handleRegionToolPlainClick,
     handlePinPixelSpectrum,
   };

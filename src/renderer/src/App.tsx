@@ -209,6 +209,7 @@ import {
   type BusyEntryRegistrar,
 } from "@/state/busy-state-context";
 import { PixelReadoutProvider } from "@/state/pixel-readout-context";
+import { RegionEditPreviewProvider } from "@/state/region-edit-preview-context";
 import { RightPanelCollapsedStateProvider } from "@/state/right-panel-collapsed-state";
 import {
   RegionToolProvider,
@@ -308,6 +309,7 @@ export function App(): JSX.Element {
             <FalseColorPreviewProvider>
               <ToneCurvePreviewProvider>
                 <PixelReadoutProvider>
+                  <RegionEditPreviewProvider>
                   <BusyStateProvider>
                     <RightPanelCollapsedStateProvider>
                       <ApplicationShell />
@@ -317,6 +319,7 @@ export function App(): JSX.Element {
                       <Toaster />
                     </RightPanelCollapsedStateProvider>
                   </BusyStateProvider>
+                  </RegionEditPreviewProvider>
                 </PixelReadoutProvider>
               </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>

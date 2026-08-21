@@ -58,6 +58,10 @@ import {
   useCurrentPixelReadoutSnapshot,
   type ViewportPixelReadoutSnapshot,
 } from "@/state/pixel-readout-context";
+import {
+  useCurrentRegionEditPreview,
+  type RegionEditPreviewSnapshot,
+} from "@/state/region-edit-preview-context";
 
 export type ViewportRightPanelImageSourceKind = "raster" | "browser-source";
 
@@ -409,7 +413,12 @@ interface RegionSectionProps {
 }
 
 function RegionSection(props: RegionSectionProps): JSX.Element | null {
-  const roi = props.activeSource.roi;
+  const editPreview = useCurrentRegionEditPreview();
+  const roi = pickLiveInspectionRoiForRegionSection(
+    editPreview,
+    props.activeSource.viewportNumber,
+    props.activeSource.roi,
+  );
   if (!roi) return null;
   return (
     <section aria-label="Region" className={RIGHT_PANEL_SECTION_CLASSES}>
@@ -420,6 +429,21 @@ function RegionSection(props: RegionSectionProps): JSX.Element | null {
       <RegionCoordinatesList roi={roi} />
     </section>
   );
+}
+
+// CT-275: while the inspection box is being dragged or resized, mirror the
+// in-progress geometry so the coordinates track the mouse live; the committed
+// roi only updates (and the ROI mean spectrum only recomputes) on release.
+function pickLiveInspectionRoiForRegionSection(
+  editPreview: RegionEditPreviewSnapshot | null,
+  viewportNumber: number,
+  committedRoi: ViewportRoi | null,
+): ViewportRoi | null {
+  const isPreviewForThisSection =
+    editPreview !== null &&
+    editPreview.target === "inspection-roi" &&
+    editPreview.viewportNumber === viewportNumber;
+  return isPreviewForThisSection ? editPreview.roi : committedRoi;
 }
 
 interface RegionSectionHeaderProps {
