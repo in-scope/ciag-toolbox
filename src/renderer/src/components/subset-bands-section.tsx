@@ -4,7 +4,7 @@ import { BandIndexBadge } from "@/components/band-index-badge";
 import { BandThumbnail } from "@/components/band-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
+import { OpenInNewPanelSwitchRow } from "@/components/open-in-new-panel-switch-row";
 import {
   buildInitialKeptBandSetFromRemoved,
   listRemovedBandIndexesFromKeptSet,
@@ -232,7 +232,8 @@ interface SubsetBandsApplyControlsProps {
 function SubsetBandsApplyControls(props: SubsetBandsApplyControlsProps): JSX.Element {
   return (
     <div className="flex flex-col gap-2 border-t pt-2">
-      <OpenInNewViewportSwitchRow
+      <OpenInNewPanelSwitchRow
+        switchId="subset-bands-open-in-new-viewport"
         checked={props.openInNewViewport}
         onCheckedChange={props.onChangeOpenInNewViewport}
       />
@@ -242,21 +243,6 @@ function SubsetBandsApplyControls(props: SubsetBandsApplyControlsProps): JSX.Ele
         onApply={props.onApply}
       />
     </div>
-  );
-}
-
-interface OpenInNewViewportSwitchRowProps {
-  readonly checked: boolean;
-  readonly onCheckedChange: (next: boolean) => void;
-}
-
-function OpenInNewViewportSwitchRow(props: OpenInNewViewportSwitchRowProps): JSX.Element {
-  const id = "subset-bands-open-in-new-viewport";
-  return (
-    <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-3 text-sm">
-      <span>Open in a new panel</span>
-      <Switch id={id} checked={props.checked} onCheckedChange={props.onCheckedChange} />
-    </label>
   );
 }
 
