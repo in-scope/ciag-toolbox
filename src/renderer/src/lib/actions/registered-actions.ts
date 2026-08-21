@@ -871,7 +871,7 @@ const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
-  description: "Off applies to the selected band only; on applies to every band in the stack.",
+  description: "Applies band-wise: every band is adjusted around its own mean.",
   defaultValue: false,
   hiddenForTrueColorComposite: true,
 };

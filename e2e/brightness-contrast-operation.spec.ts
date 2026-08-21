@@ -115,6 +115,12 @@ test("Contrast reaches 20x at the slider's End key and clips around the band mea
 
 test("with Apply to all bands off, only the displayed band changes", async () => {
   await openOperation(launched.window, BRIGHTNESS_CONTRAST_LABEL);
+  // CT-286: the switch explains that all-bands mode stretches each band around its own mean.
+  await expect(
+    launched.window.getByText("Applies band-wise: every band is adjusted around its own mean.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await setApplyToAllBands(launched.window, false);
   await setBrightnessContrastSlider(launched.window, BRIGHTNESS_SLIDER_LABEL, 20);
   await applyOperationInPlace(launched.window, BRIGHTNESS_CONTRAST_LABEL);
