@@ -12,9 +12,11 @@ import {
   listRemovedBandIndexesFromKeptSet,
   toggleBandIndexInKeptSet,
 } from "@/lib/image/kept-band-set";
-import { BAND_RANGE_SYNTAX_EXAMPLES } from "@/lib/image/parse-band-range";
 import {
-  SUBSET_BANDS_RANGE_FIELD_HINT,
+  BAND_RANGE_FIELD_SYNTAX_HINT,
+  BAND_RANGE_SYNTAX_EXAMPLES,
+} from "@/lib/image/parse-band-range";
+import {
   deriveKeptBandSelectionFromTypedRangeText,
   describeTypedRangeFieldErrorOrNull,
 } from "@/lib/image/subset-band-range-field";
@@ -246,7 +248,7 @@ function SubsetBandsTypedRangeField(props: SubsetBandsTypedRangeFieldProps): JSX
         className={cn("h-8", props.error !== null && "border-destructive focus-visible:ring-destructive")}
       />
       <span id={hintId} className="text-xs text-muted-foreground">
-        {SUBSET_BANDS_RANGE_FIELD_HINT}
+        {BAND_RANGE_FIELD_SYNTAX_HINT}
       </span>
       {props.error !== null ? <span className="text-xs text-destructive">{props.error}</span> : null}
     </div>

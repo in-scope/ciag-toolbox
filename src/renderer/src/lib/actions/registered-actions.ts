@@ -17,6 +17,7 @@ import {
   applyToneCurveToWholeStackPerBandMinMaxReportingProgress,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
   colorBandIndexForToneCurveChannel,
@@ -1117,8 +1118,7 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -1196,8 +1196,7 @@ const CLIP_BY_VALUE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: CLIP_BY_VALUE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack clips every band; band-wise clips only the entered bands. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: CLIP_BY_VALUE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -1294,8 +1293,7 @@ const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: STANDARDIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes each entered band by its own mean and std. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: STANDARDIZE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,

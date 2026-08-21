@@ -36,9 +36,9 @@ import {
 const PANEL = 1;
 const NORMALIZE = "Normalize";
 
-// CT-250: the Normalize panel copy is Anna's wording; the exact strings are pinned here.
+// CT-287: every band-wise scope field shows the one shared description; pinned here.
 const SCOPE_DESCRIPTION =
-  "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.";
+  "Use commas to list bands and dashes for ranges (e.g. 1,3,5 or 1-5,10); empty field processes every band.";
 const FLOAT32 = "float32";
 const ALL_BANDS_RANGE = "1-3";
 const FULL_STACK_HISTORY_DETAIL = "full stack";

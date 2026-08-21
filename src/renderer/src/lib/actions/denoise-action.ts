@@ -6,6 +6,7 @@ import {
   type DenoiseSettings,
 } from "@/lib/image/filters/denoise";
 import { makeFloatRasterReusingUnchangedSourceBandsReportingProgress } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { UnitProgressCallback } from "@/lib/image/unit-progress";
@@ -103,10 +104,7 @@ const DENOISE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: DENOISE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack denoises every band's picture. Band-wise denoises only the entered bands " +
-    "and carries the other bands through unchanged. Leave the band field empty to process " +
-    "every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: DENOISE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,

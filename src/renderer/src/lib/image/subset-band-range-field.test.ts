@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  SUBSET_BANDS_RANGE_FIELD_HINT,
   deriveKeptBandSelectionFromTypedRangeText,
   describeTypedRangeFieldErrorOrNull,
 } from "./subset-band-range-field";
@@ -62,10 +61,3 @@ describe("describeTypedRangeFieldErrorOrNull", () => {
   });
 });
 
-describe("SUBSET_BANDS_RANGE_FIELD_HINT", () => {
-  it("reads the locked CT-283 description", () => {
-    expect(SUBSET_BANDS_RANGE_FIELD_HINT).toBe(
-      "Use commas to list bands and dashes for ranges (e.g. 1,3,5 or 1-5,10)",
-    );
-  });
-});

@@ -6,7 +6,13 @@ export type BandRangeParseResult =
 // every band-wise tool's input placeholder, help text, and the empty-input error so
 // the accepted syntax (comma lists + dash ranges, never colons) can never drift apart.
 export const BAND_RANGE_SYNTAX_EXAMPLES = "1,3,5 or 1-5,10";
-export const BAND_RANGE_SYNTAX_HINT = `Use commas to list bands and dashes for ranges (e.g. ${BAND_RANGE_SYNTAX_EXAMPLES}); ranges use dashes, not colons.`;
+
+// CT-287: the one syntax sentence every band-list field shows. Fields that
+// REQUIRE a value (Subset Bands' typed list, Threshold's band field) show it
+// alone; the band-wise scope fields whose empty field means every band append
+// the empty-field clause.
+export const BAND_RANGE_FIELD_SYNTAX_HINT = `Use commas to list bands and dashes for ranges (e.g. ${BAND_RANGE_SYNTAX_EXAMPLES})`;
+export const BAND_WISE_SCOPE_FIELD_DESCRIPTION = `${BAND_RANGE_FIELD_SYNTAX_HINT}; empty field processes every band.`;
 
 interface BandRangeSpanEndpoints {
   readonly start: number;

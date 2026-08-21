@@ -11,6 +11,7 @@ import {
   makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
 } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/unit-progress";
@@ -80,10 +81,7 @@ const PERCENTILE_CLIP_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: PERCENTILE_CLIP_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack computes one pair of cut points over every band together and clips the " +
-    "whole stack to it. Band-wise computes each entered band's own cut points and carries " +
-    "the other bands through unchanged. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: PERCENTILE_CLIP_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,

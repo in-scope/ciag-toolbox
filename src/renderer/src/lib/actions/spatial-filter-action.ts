@@ -13,6 +13,7 @@ import {
   type SpatialFilterBandInput,
 } from "@/lib/image/filters/spatial-filter-worker-client";
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { getRasterBandPixelsOrThrow, type RasterImage } from "@/lib/image/raster-image";
 import {
@@ -138,10 +139,7 @@ const SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: SPATIAL_FILTER_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack filters every band's picture. Band-wise filters only the entered bands " +
-    "and carries the other bands through unchanged. Leave the band field empty to process " +
-    "every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,

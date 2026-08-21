@@ -5,6 +5,7 @@ import {
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
 import {
+  BAND_RANGE_FIELD_SYNTAX_HINT,
   formatBandNumbersAsRangeText,
   parseBandRangeText,
 } from "@/lib/image/parse-band-range";
@@ -85,9 +86,10 @@ const THRESHOLD_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: THRESHOLD_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Band-wise turns each entered band into its own black/white band. Full stack applies " +
-    "the bounds to every band, keeping the stack's band count.",
+  // CT-287 removed the inline syntax hint under the band input, so the syntax
+  // sentence lives here; no empty-field clause because this field requires a
+  // value (an empty field blocks Apply).
+  description: `${BAND_RANGE_FIELD_SYNTAX_HINT}. Band-wise turns each entered band into its own black/white band; full stack applies the bounds to every band.`,
   defaultValue: BAND_WISE_SCOPE,
   bandRangeParameterId: THRESHOLD_BAND_RANGE_PARAMETER_ID,
   visibleWhen: {
