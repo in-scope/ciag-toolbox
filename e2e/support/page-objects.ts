@@ -101,7 +101,9 @@ export {
 } from "./fixed-unit-float-view";
 export {
   goToBandNumberInput,
+  goToBandNumberInputInPanel,
   selectActiveBandNumber,
+  selectActiveBandNumberInPanel,
   bandNavigatorStrip,
   expectNoOriginalBandAnnotationBesideBandSlider,
   previousBandButton,

@@ -220,6 +220,7 @@ export interface Float32RasterShape {
   readonly width: number;
   readonly height: number;
   readonly bandLabels?: ReadonlyArray<string>;
+  readonly bandWavelengths?: ReadonlyArray<number>;
 }
 
 // CT-180: an operation whose output band count DIFFERS from its source (e.g. a
@@ -239,5 +240,6 @@ export function makeFloat32RasterFromBands(
     sampleFormat: "float",
     bitsPerSample: FLOAT32_BITS_PER_SAMPLE,
     bandLabels: shape.bandLabels ? [...shape.bandLabels] : undefined,
+    bandWavelengths: shape.bandWavelengths ? [...shape.bandWavelengths] : undefined,
   };
 }

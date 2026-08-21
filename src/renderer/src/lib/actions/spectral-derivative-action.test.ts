@@ -10,8 +10,10 @@ import {
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
 
 // Mirrors the committed multiband-12bit.tif oracle: three collinear bands whose
-// adjacent differences are 700 and 800 at every pixel, so the first-order
-// derivative reads [700, 800] and the second-order reads [100].
+// adjacent differences are 700 and 800 at every pixel. CT-285 keeps the source
+// band count: the first-order derivative reads [700, 800, 800] (the last band
+// takes the one-sided backward difference) and the second-order reads
+// [100, 100, 100] (both edges take the one-sided second difference).
 function makeThreeBandCollinearStack(): RasterImage {
   return {
     bandPixels: [
@@ -41,9 +43,10 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
     );
     const raster = (result as { raster: RasterImage }).raster;
     expect(raster.sampleFormat).toBe("float");
-    expect(raster.bandCount).toBe(2);
+    expect(raster.bandCount).toBe(3);
     expect(Array.from(raster.bandPixels[0]!)).toEqual([700, 700]);
     expect(Array.from(raster.bandPixels[1]!)).toEqual([800, 800]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([800, 800]);
   });
 
   it("emits the difference of differences for the second order", async () => {
@@ -52,8 +55,10 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
       { order: "2" },
     );
     const raster = (result as { raster: RasterImage }).raster;
-    expect(raster.bandCount).toBe(1);
-    expect(Array.from(raster.bandPixels[0]!)).toEqual([100, 100]);
+    expect(raster.bandCount).toBe(3);
+    for (const band of raster.bandPixels) {
+      expect(Array.from(band)).toEqual([100, 100]);
+    }
   });
 
   it("rejects a stack too small for the chosen order before a panel is reserved", () => {
@@ -79,7 +84,7 @@ describe("SPECTRAL_DERIVATIVE_ACTION", () => {
     );
   });
 
-  it("resets band-dependent viewer state because the output band count changes", () => {
+  it("resets band-dependent viewer state because the output measures a different quantity", () => {
     const pinnedSpectrum: PinnedPixelSpectrum = {
       kind: "pixel",
       id: "pin-1",
@@ -110,6 +115,6 @@ describe("SPECTRAL_DERIVATIVE_ACTION progress (CT-222)", () => {
       { order: "1" },
       (fraction) => ticks.push(fraction),
     );
-    expect(ticks).toEqual([0, 1 / 2, 1]);
+    expect(ticks).toEqual([0, 1 / 3, 2 / 3, 1]);
   });
 });

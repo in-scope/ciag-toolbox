@@ -23,10 +23,11 @@ import {
   type ViewportRenderingState,
 } from "./viewport-action";
 
-// CT-202: spectral derivative along the wavelength axis. The order selector is
-// the only parameter; the output is a NEW float32 stack (N - order bands) that
-// defaults to "Open in a new panel" like every other operation, and the audit
-// trail records the chosen order via the applied label.
+// CT-202 / CT-285: spectral derivative along the wavelength axis. The order
+// selector is the only parameter; the output is a NEW float32 stack with the
+// SOURCE band count (one-sided differences fill the edge bands) that defaults
+// to "Open in a new panel" like every other operation, and the audit trail
+// records the chosen order via the applied label.
 
 export const SPECTRAL_DERIVATIVE_ACTION_ID = "spectral-derivative";
 export const SPECTRAL_DERIVATIVE_ORDER_PARAMETER_ID = "order";
@@ -91,8 +92,9 @@ function createSpectralDerivativeSourceTransform(): ViewportActionAsyncSourceTra
   };
 }
 
-// The derivative stack has its own (smaller) band count, so band-dependent
-// viewer state resets like the other band-count-changing operations.
+// The derivative stack measures a different quantity than the source, so
+// band-dependent viewer state (pinned spectra of source values, band subset
+// edits) resets like the other stack-replacing operations.
 function resetBandDependentStateForDerivativeOutput(
   state: ViewportRenderingState,
 ): ViewportRenderingState {

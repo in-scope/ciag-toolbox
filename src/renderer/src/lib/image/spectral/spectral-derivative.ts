@@ -1,22 +1,27 @@
-import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
+import {
+  makeFloat32RasterFromBands,
+  type Float32RasterShape,
+} from "@/lib/image/make-float-raster";
 import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
   computeArrayReportingPerUnitProgress,
   type UnitProgressCallback,
 } from "@/lib/image/unit-progress";
 import {
-  getRasterBandLabelOrDefault,
   getRasterBandPixelsOrThrow,
   type RasterImage,
   type RasterTypedArray,
 } from "@/lib/image/raster-image";
 
-// CT-202: the spectral derivative differences the cube along the band /
-// wavelength axis. First order is the forward difference between adjacent
-// bands (band k+1 minus band k), second order is the difference of those
-// differences, so an N-band stack yields N - order derivative bands. The
-// output is float32 via the Stage 3 float path (CT-077) and keeps the
-// source's spatial dimensions.
+// CT-202 / CT-285: the spectral derivative differences the cube along the band /
+// wavelength axis and KEEPS the source band count, so output band k stays
+// aligned with input band k's wavelength (chemical peaks are found at known
+// wavelengths). The locked edge scheme: first order is the forward difference
+// (band k+1 minus band k) with a one-sided backward difference for the last
+// band; second order is the centered second difference for interior bands with
+// one-sided second-order differences at both edges. Wavelengths and band labels
+// carry through one-to-one. The output is float32 via the Stage 3 float path
+// (CT-077) and keeps the source's spatial dimensions.
 
 export type SpectralDerivativeOrder = 1 | 2;
 
@@ -29,16 +34,14 @@ export function computeSpectralDerivative(
   order: SpectralDerivativeOrder = DEFAULT_SPECTRAL_DERIVATIVE_ORDER,
 ): RasterImage {
   assertCubeHasEnoughBandsForSpectralDerivativeOrder(cube, order);
-  const shape = {
-    width: cube.width,
-    height: cube.height,
-    bandLabels: buildSpectralDerivativeBandLabels(cube, order),
-  };
-  return makeFloat32RasterFromBands(shape, computeDerivativeBandsForOrder(cube, order));
+  const bands = Array.from({ length: cube.bandCount }, (_unused, bandIndex) =>
+    computeSingleDerivativeBand(cube, order, bandIndex),
+  );
+  return makeFloat32RasterFromBands(buildOutputShapeCarryingSourceBandMetadata(cube), bands);
 }
 
 // CT-222: the async twin of computeSpectralDerivative. Identical per-band math,
-// one progress tick per OUTPUT derivative band.
+// one progress tick per output band.
 export async function computeSpectralDerivativeReportingProgress(
   cube: RasterImage,
   order: SpectralDerivativeOrder = DEFAULT_SPECTRAL_DERIVATIVE_ORDER,
@@ -46,18 +49,13 @@ export async function computeSpectralDerivativeReportingProgress(
   abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   assertCubeHasEnoughBandsForSpectralDerivativeOrder(cube, order);
-  const shape = {
-    width: cube.width,
-    height: cube.height,
-    bandLabels: buildSpectralDerivativeBandLabels(cube, order),
-  };
   const bands = await computeArrayReportingPerUnitProgress(
-    cube.bandCount - order,
+    cube.bandCount,
     (bandIndex) => computeSingleDerivativeBand(cube, order, bandIndex),
     onProgress,
     abortSignal,
   );
-  return makeFloat32RasterFromBands(shape, bands);
+  return makeFloat32RasterFromBands(buildOutputShapeCarryingSourceBandMetadata(cube), bands);
 }
 
 function computeSingleDerivativeBand(
@@ -66,16 +64,35 @@ function computeSingleDerivativeBand(
   bandIndex: number,
 ): Float32Array {
   if (order === SECOND_ORDER_SPECTRAL_DERIVATIVE) {
-    return secondDifferenceAroundCenterBand(
-      getRasterBandPixelsOrThrow(cube, bandIndex),
-      getRasterBandPixelsOrThrow(cube, bandIndex + 1),
-      getRasterBandPixelsOrThrow(cube, bandIndex + 2),
-    );
+    return computeSecondOrderDerivativeBand(cube, bandIndex);
   }
+  return computeFirstOrderDerivativeBand(cube, bandIndex);
+}
+
+// Forward difference for every band except the last, which takes the one-sided
+// backward difference (band N-1 minus band N-2) so the output keeps N bands.
+function computeFirstOrderDerivativeBand(cube: RasterImage, bandIndex: number): Float32Array {
+  const differencedIndex = Math.min(bandIndex, cube.bandCount - 2);
   return subtractAdjacentBands(
-    getRasterBandPixelsOrThrow(cube, bandIndex + 1),
-    getRasterBandPixelsOrThrow(cube, bandIndex),
+    getRasterBandPixelsOrThrow(cube, differencedIndex + 1),
+    getRasterBandPixelsOrThrow(cube, differencedIndex),
   );
+}
+
+// Centered second difference around the band; both edge bands take the
+// one-sided second-order difference, which equals the centered difference
+// around their nearest interior neighbour.
+function computeSecondOrderDerivativeBand(cube: RasterImage, bandIndex: number): Float32Array {
+  const centerIndex = clampToInteriorBandIndex(bandIndex, cube.bandCount);
+  return secondDifferenceAroundCenterBand(
+    getRasterBandPixelsOrThrow(cube, centerIndex - 1),
+    getRasterBandPixelsOrThrow(cube, centerIndex),
+    getRasterBandPixelsOrThrow(cube, centerIndex + 1),
+  );
+}
+
+function clampToInteriorBandIndex(bandIndex: number, bandCount: number): number {
+  return Math.min(Math.max(bandIndex, 1), bandCount - 2);
 }
 
 export function assertCubeHasEnoughBandsForSpectralDerivativeOrder(
@@ -92,33 +109,6 @@ export function assertCubeHasEnoughBandsForSpectralDerivativeOrder(
 
 export function describeSpectralDerivativeOrder(order: SpectralDerivativeOrder): string {
   return order === SECOND_ORDER_SPECTRAL_DERIVATIVE ? "2nd order" : "1st order";
-}
-
-function computeDerivativeBandsForOrder(
-  cube: RasterImage,
-  order: SpectralDerivativeOrder,
-): Float32Array[] {
-  if (order === SECOND_ORDER_SPECTRAL_DERIVATIVE) return computeSecondOrderDifferenceBands(cube);
-  return computeFirstOrderDifferenceBands(cube);
-}
-
-function computeFirstOrderDifferenceBands(cube: RasterImage): Float32Array[] {
-  return Array.from({ length: cube.bandCount - 1 }, (_unused, bandIndex) =>
-    subtractAdjacentBands(
-      getRasterBandPixelsOrThrow(cube, bandIndex + 1),
-      getRasterBandPixelsOrThrow(cube, bandIndex),
-    ),
-  );
-}
-
-function computeSecondOrderDifferenceBands(cube: RasterImage): Float32Array[] {
-  return Array.from({ length: cube.bandCount - 2 }, (_unused, bandIndex) =>
-    secondDifferenceAroundCenterBand(
-      getRasterBandPixelsOrThrow(cube, bandIndex),
-      getRasterBandPixelsOrThrow(cube, bandIndex + 1),
-      getRasterBandPixelsOrThrow(cube, bandIndex + 2),
-    ),
-  );
 }
 
 function subtractAdjacentBands(
@@ -144,25 +134,11 @@ function secondDifferenceAroundCenterBand(
   return out;
 }
 
-function buildSpectralDerivativeBandLabels(
-  cube: RasterImage,
-  order: SpectralDerivativeOrder,
-): string[] {
-  if (order === SECOND_ORDER_SPECTRAL_DERIVATIVE) return buildSecondOrderBandLabels(cube);
-  return buildFirstOrderBandLabels(cube);
-}
-
-function buildFirstOrderBandLabels(cube: RasterImage): string[] {
-  return Array.from({ length: cube.bandCount - 1 }, (_unused, bandIndex) => {
-    const next = getRasterBandLabelOrDefault(cube, bandIndex + 1);
-    const current = getRasterBandLabelOrDefault(cube, bandIndex);
-    return `d(${next} - ${current})`;
-  });
-}
-
-function buildSecondOrderBandLabels(cube: RasterImage): string[] {
-  return Array.from(
-    { length: cube.bandCount - 2 },
-    (_unused, bandIndex) => `d2(${getRasterBandLabelOrDefault(cube, bandIndex + 1)})`,
-  );
+function buildOutputShapeCarryingSourceBandMetadata(cube: RasterImage): Float32RasterShape {
+  return {
+    width: cube.width,
+    height: cube.height,
+    bandLabels: cube.bandLabels,
+    bandWavelengths: cube.bandWavelengths,
+  };
 }
