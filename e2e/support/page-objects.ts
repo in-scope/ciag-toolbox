@@ -430,11 +430,14 @@ export {
 } from "./band-weighting";
 export {
   BAND_SELECTION_OPERATION_LABEL,
+  applyBandSelectionFunction,
   expectBandSelectionEditorReady,
   clickBandSelectionPreset,
+  openBandSelectionFunctionEditor,
   runBandSelectionFormula,
   clickImportBandSelectionScript,
   expectBandSelectionFunction,
+  subsetBandsModeSelect,
 } from "./band-selection";
 export {
   applyCustomTransformAwaitingRun,

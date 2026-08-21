@@ -16,6 +16,7 @@ import {
 import {
   SubsetBandsSection,
   type SubsetBandsApplyOptions,
+  type SubsetBandsFunctionApplyOptions,
 } from "@/components/subset-bands-section";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,6 +79,7 @@ export interface ViewportRightPanelActiveSource {
   readonly onEnterBandSubsetEditMode: () => void;
   readonly onExitBandSubsetEditMode: () => void;
   readonly onApplyBandSubset: (options: SubsetBandsApplyOptions) => void;
+  readonly onApplyFunctionDerivedBand: (options: SubsetBandsFunctionApplyOptions) => void;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
@@ -196,11 +198,13 @@ function SubsetBandsSectionForActiveSource(
   return (
     <SubsetBandsSection
       raster={props.raster}
+      viewportIndex={props.activeSource.viewportIndex}
       viewportNumber={props.activeSource.viewportNumber}
       activeBandIndex={displayedBandIndex}
       initialRemovedBandIndexes={props.activeSource.removedBandIndexes}
       onCancel={props.activeSource.onExitBandSubsetEditMode}
       onApply={props.activeSource.onApplyBandSubset}
+      onApplyFunctionDerivedBand={props.activeSource.onApplyFunctionDerivedBand}
     />
   );
 }

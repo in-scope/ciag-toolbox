@@ -6,31 +6,34 @@ import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
-  applyOperation,
+  applyBandSelectionFunction,
   BAND_SELECTION_OPERATION_LABEL,
   clickBandSelectionPreset,
   clickImportBandSelectionScript,
   countPanels,
   enqueueOpenDialogPaths,
-  expectBandSelectionEditorReady,
   expectBandSelectionFunction,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
   expectPixelReadoutToEqual,
   loadFixtureAsStack,
-  openOperation,
+  openBandSelectionFunctionEditor,
   readMetadata,
   runBandSelectionFormula,
   selectPanel,
+  subsetBandsKeepCheckboxes,
   type PixelDimensions,
 } from "./support/page-objects";
 
-// CT-210: band selection reduces every band into ONE summary band opened in a
-// fresh float32 panel. multiband-12bit.tif (3 bands; at pixel (0,0) band 1 = 100,
-// band 2 = 800, band 3 = 1600) is the oracle: the average preset reads the mean
-// 833.333 at (0,0); an inline formula returning band 2 reads 800; an imported .py
-// returning the last band reads 1600. Each asserts the single-band float32 result
-// and its (0,0) readout via the pixel-readout oracle.
+// CT-210/CT-284: deriving a band by a function lives in the Subset Bands
+// editor's "By function" mode (Band Selection has no menu entry anymore). It
+// reduces every band into ONE summary band opened in a fresh float32 panel.
+// multiband-12bit.tif (3 bands; at pixel (0,0) band 1 = 100, band 2 = 800,
+// band 3 = 1600) is the oracle: the average preset reads the mean 833.333 at
+// (0,0); an inline formula returning band 2 reads 800; an imported .py
+// returning the last band reads 1600. Each asserts the single-band float32
+// result and its (0,0) readout via the pixel-readout oracle, and History keeps
+// the pre-merge "Band Selection" vocabulary.
 
 const RESULT_PANEL = 2;
 const FLOAT32 = "float32";
@@ -55,38 +58,38 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
+test("the By function mode replaces the keep-bands controls inside the editor", async () => {
+  await openBandSelectionFunctionEditor(launched.window);
+  await expect(subsetBandsKeepCheckboxes(launched.window)).toHaveCount(0);
+});
+
 test("the average preset reduces the stack to the per-pixel mean band", async () => {
-  await openBandSelectionEditor();
+  await openBandSelectionFunctionEditor(launched.window);
   await clickBandSelectionPreset(launched.window, "Average");
   await expectBandSelectionFunction(launched.window, "Average");
   await applyAndExpectSingleBandOutput(AVERAGE_VALUE, "average");
 });
 
 test("an inline formula returning a band applies as that band", async () => {
-  await openBandSelectionEditor();
+  await openBandSelectionFunctionEditor(launched.window);
   await runBandSelectionFormula(launched.window, "cube[1]");
   await expectBandSelectionFunction(launched.window, "Formula");
   await applyAndExpectSingleBandOutput(BAND_TWO_VALUE, "Formula");
 });
 
 test("an imported .py tool returning a band applies as that band", async () => {
-  await openBandSelectionEditor();
+  await openBandSelectionFunctionEditor(launched.window);
   await enqueueOpenDialogPaths(launched.window, [IMPORTED_BAND_TOOL_PATH]);
   await clickImportBandSelectionScript(launched.window);
   await expectBandSelectionFunction(launched.window, "Imported tool: band-tool.py");
   await applyAndExpectSingleBandOutput(BAND_THREE_VALUE, "Imported tool: band-tool.py");
 });
 
-async function openBandSelectionEditor(): Promise<void> {
-  await openOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
-  await expectBandSelectionEditorReady(launched.window);
-}
-
 async function applyAndExpectSingleBandOutput(
   expectedTopLeftValue: number,
   historyFunctionSubstring: string,
 ): Promise<void> {
-  await applyOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
+  await applyBandSelectionFunction(launched.window);
   expect(await countPanels(launched.window)).toBe(RESULT_PANEL);
   await selectPanel(launched.window, RESULT_PANEL);
   await expectResultIsSingleBandFloat32();

@@ -72,7 +72,6 @@ describe("operation menu structure", () => {
 
   it("puts band-dimension and whole-cube operations under Spectral", () => {
     expect(listMenuItemLabels(findMenuByLabel("Spectral"))).toEqual([
-      "Band Selection",
       "Band Weighting",
       "Custom Transform",
       "ICA",

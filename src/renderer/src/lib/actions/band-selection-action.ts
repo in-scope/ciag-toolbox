@@ -17,6 +17,7 @@ import type { ParameterValuesById } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
 import {
   clearBandSelectionEditingState,
+  closeBandSubsetEditorAndClearFunctionChoice,
   EMPTY_REMOVED_BAND_INDEXES,
   type ViewportActionSourceTransform,
   type ViewportRenderingState,
@@ -29,6 +30,11 @@ import {
 // The current choice rides in ViewportRenderingState (written by the embedded
 // editor), and Apply injects it into the parameter values for the audit trail.
 // The output is a NEW single-band float32 stack.
+//
+// CT-284: this action has NO menu entry anymore. Its editor lives inside the
+// Subset Bands editor's "By function" mode (band-selection-function-editor.tsx),
+// which applies through this same action so History keeps the "Band selection"
+// vocabulary and old projects render as saved.
 
 export const BAND_SELECTION_ACTION_ID = "band-selection";
 const BAND_SELECTION_PRESET_PARAMETER_ID = "preset";
@@ -51,7 +57,7 @@ export const BAND_SELECTION_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatBandSelectionAppliedLabel,
   prepareParameterValuesForApply: injectBandSelectionChoiceForApply,
   apply: resetStateForSelectedBandOutput,
-  clearConsumedSourceStateAfterApply: clearBandSelectionEditingState,
+  clearConsumedSourceStateAfterApply: closeBandSubsetEditorAndClearFunctionChoice,
   transformSource: createBandSelectionSourceTransform(),
 };
 

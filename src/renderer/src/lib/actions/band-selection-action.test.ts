@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { BAND_SELECTION_ACTION } from "./band-selection-action";
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
+import { reduceCubeToSelectedBand } from "@/lib/image/band-ops/band-selection";
 import {
   forgetAllBandSelectionResults,
   rememberBandSelectionResult,
@@ -78,6 +79,31 @@ describe("BAND_SELECTION_ACTION", () => {
         prepared,
       ),
     ).toThrow(/no longer available/i);
+  });
+
+  // CT-284: the Subset Bands "By function" mode applies through this action with
+  // no extra parameters; its output must equal the old Band Selection presets.
+  it("produces preset output identical to the standalone preset math for the merged Subset Bands path", () => {
+    const raster = makeThreeBandUint16Raster([100, 40], [800, 90], [1600, 20]);
+    for (const preset of ["average", "variance"] as const) {
+      const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, bandSelection: { kind: "preset", preset } as const };
+      const prepared = BAND_SELECTION_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
+      const result = BAND_SELECTION_ACTION.transformSource!({ kind: "raster", raster }, prepared) as {
+        raster: RasterImage;
+      };
+      expect(result.raster.bandPixels[0]).toEqual(reduceCubeToSelectedBand(raster.bandPixels, preset));
+    }
+  });
+
+  it("closes the Subset Bands editor and drops the staged choice on the source after applying", () => {
+    const sourceState = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      isBandSubsetEditModeActive: true,
+      bandSelection: { kind: "preset", preset: "average" } as const,
+    };
+    const cleared = BAND_SELECTION_ACTION.clearConsumedSourceStateAfterApply!(sourceState);
+    expect(cleared.isBandSubsetEditModeActive).toBe(false);
+    expect(cleared.bandSelection).toBeNull();
   });
 
   it("resets the selected band to the single produced band after applying", () => {

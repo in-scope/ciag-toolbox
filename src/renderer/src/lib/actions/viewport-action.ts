@@ -124,6 +124,15 @@ export function clearBandSelectionEditingState(state: ViewportRenderingState): V
   return { ...state, bandSelection: null };
 }
 
+// CT-284: the band-selection function editor lives inside the Subset Bands
+// editor's "By function" mode, so leaving that editor (cancel, toggle off, or a
+// consumed function apply) closes the editor AND drops the staged choice.
+export function closeBandSubsetEditorAndClearFunctionChoice(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return { ...clearBandSelectionEditingState(state), isBandSubsetEditModeActive: false };
+}
+
 // CT-216: the Custom transform popup's ready transform (a result-store token plus
 // display strings, never band data) lives in rendering state, the same
 // editor-owned pattern as the band selection choice. Opening or closing the

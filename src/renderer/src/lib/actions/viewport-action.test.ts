@@ -12,6 +12,7 @@ import {
   applyActionToSelectedViewports,
   clearThresholdEditingState,
   clearToneCurveEditingState,
+  closeBandSubsetEditorAndClearFunctionChoice,
   hasThresholdEditingState,
   hasToneCurveEditingState,
   type ApplyActionCallbacks,
@@ -133,6 +134,21 @@ describe("tone-curve editing state helpers", () => {
     const cleared = clearToneCurveEditingState(dirty);
     expect(hasToneCurveEditingState(cleared)).toBe(false);
     expect(cleared.toneCurveActiveChannel).toBe("rgb");
+  });
+});
+
+describe("band-subset editor close helper (CT-284)", () => {
+  it("closes the editor and drops a staged function choice, leaving other state alone", () => {
+    const editing = {
+      ...DEFAULT_VIEWPORT_RENDERING_STATE,
+      isBandSubsetEditModeActive: true,
+      bandSelection: { kind: "preset", preset: "average" } as const,
+      selectedBandIndex: 4,
+    };
+    const closed = closeBandSubsetEditorAndClearFunctionChoice(editing);
+    expect(closed.isBandSubsetEditModeActive).toBe(false);
+    expect(closed.bandSelection).toBeNull();
+    expect(closed.selectedBandIndex).toBe(4);
   });
 });
 

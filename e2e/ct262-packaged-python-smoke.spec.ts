@@ -4,14 +4,12 @@ import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
-  applyOperation,
-  BAND_SELECTION_OPERATION_LABEL,
+  applyBandSelectionFunction,
   countPanels,
-  expectBandSelectionEditorReady,
   expectBandSelectionFunction,
   expectPixelReadoutToEqual,
   loadFixtureAsStack,
-  openOperation,
+  openBandSelectionFunctionEditor,
   runBandSelectionFormula,
   selectPanel,
 } from "./support/page-objects";
@@ -51,11 +49,10 @@ test.afterEach(async () => {
 });
 
 test("the installed build runs a band-selection formula through its bundled Python runtime", async () => {
-  await openOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
-  await expectBandSelectionEditorReady(launched.window);
+  await openBandSelectionFunctionEditor(launched.window);
   await runBandSelectionFormula(launched.window, "cube[1]");
   await expectBandSelectionFunction(launched.window, "Formula");
-  await applyOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
+  await applyBandSelectionFunction(launched.window);
   expect(await countPanels(launched.window)).toBe(RESULT_PANEL);
   await selectPanel(launched.window, RESULT_PANEL);
   await expectPixelReadoutToEqual(launched.window, {

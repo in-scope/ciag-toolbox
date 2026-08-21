@@ -31,7 +31,6 @@ import {
 } from "@/components/tool-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
-import { ToolOptionsBandSelectionEditor } from "@/components/tool-options-band-selection-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
@@ -62,6 +61,7 @@ import {
   type InFlightApplyRunStore,
 } from "@/lib/actions/in-flight-apply-run-store";
 import { formatCloseRefusedWhileOperationReadsPanel } from "@/lib/actions/in-flight-apply-runs";
+import { BAND_SELECTION_ACTION } from "@/lib/actions/band-selection-action";
 import {
   BAND_SUBSET_ACTION,
   GEOMETRIC_TRANSFORM_PARAMETER_ID,
@@ -89,7 +89,6 @@ import {
   readThresholdMethodChoice,
 } from "@/lib/actions/threshold-action";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
-import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
 import { shouldEmbedCustomTransformEditorInOperationPanel } from "@/lib/actions/custom-transform-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
@@ -258,6 +257,7 @@ import {
 } from "@/state/viewport-rendering-context";
 import {
   clearBandSelectionEditingState,
+  closeBandSubsetEditorAndClearFunctionChoice,
   clearBandWeightingEditingState,
   clearCubeTransformEditingState,
   clearThresholdEditingState,
@@ -710,7 +710,6 @@ function buildActiveOperationEmbeddedEditorOrNull(
       activeActionParameterValues,
     ) ??
     buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveCustomTransformEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
   );
 }
@@ -768,24 +767,6 @@ function buildActiveBandWeightingEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsBandWeightingEditor
-      viewportIndex={singleSelectedSource.index}
-      raster={content.source.raster}
-    />
-  );
-}
-
-function buildActiveBandSelectionEditorElementOrNull(
-  activeAction: RegisteredViewportAction | null,
-  singleSelectedSource: SingleSelectedSource | null,
-  imagesByIndex: ImagesByIndexMap,
-): ReactNode {
-  if (!singleSelectedSource) return null;
-  const content = imagesByIndex.get(singleSelectedSource.index);
-  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
-  if (!shouldEmbedBandSelectionEditorInOperationPanel(placement)) return null;
-  if (content?.source.kind !== "raster") return null;
-  return (
-    <ToolOptionsBandSelectionEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -2429,6 +2410,13 @@ function buildRightPanelActiveSource(
         openInNewViewport: options.openInNewViewport,
         applyActionFlowBindings: inputs.applyActionFlowBindings,
       }),
+    onApplyFunctionDerivedBand: (options) =>
+      runApplyFunctionDerivedBandForViewport(
+        viewportIndex,
+        raster,
+        options.openInNewViewport,
+        inputs.applyActionFlowBindings,
+      ),
     operationHistory: renderingState.operationHistory,
     roi: renderingState.roi,
     onClearRoi: () =>
@@ -2502,6 +2490,35 @@ function invokeBandSubsetActionOnSourceViewport(
   applyActionInPlaceAtSourceIndex(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
 }
 
+// CT-284: the Subset Bands editor's "By function" mode applies through the
+// band-selection action unchanged: the staged choice rides in the source's
+// rendering state and merges into the audit parameters at Apply time, exactly
+// as the old Band Selection panel applied.
+function runApplyFunctionDerivedBandForViewport(
+  sourceIndex: number,
+  raster: RasterImage | null,
+  openInNewViewport: boolean,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!raster) {
+    notifyError("Subset Bands requires a raster source.");
+    return;
+  }
+  const merged = mergeParameterValuesWithSourceRenderingState(
+    BAND_SELECTION_ACTION,
+    NO_PARAMETER_VALUES,
+    bindings.getRenderingState(sourceIndex),
+    "whole-image",
+    raster,
+  );
+  if (merged === null) return;
+  if (openInNewViewport) {
+    applyActionToDuplicateOfSource(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceAtSourceIndex(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
+}
+
 function useViewportBandRemovalApi(
   bindingsRef: MutableRefObject<ApplyActionFlowBindings>,
 ): ViewportBandRemovalApi {
@@ -2547,10 +2564,11 @@ function setBandSubsetEditModeActiveAtViewport(
 ): void {
   const previous = renderingApi.getRenderingState(viewportIndex);
   if (previous.isBandSubsetEditModeActive === isActive) return;
-  renderingApi.setRenderingState(viewportIndex, {
-    ...previous,
-    isBandSubsetEditModeActive: isActive,
-  });
+  // Leaving the editor also drops any staged "By function" choice (CT-284).
+  const next = isActive
+    ? { ...previous, isBandSubsetEditModeActive: true }
+    : closeBandSubsetEditorAndClearFunctionChoice(previous);
+  renderingApi.setRenderingState(viewportIndex, next);
 }
 
 function deriveBandSubsetToggleStateForToolbar(

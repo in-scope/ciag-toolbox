@@ -27,8 +27,10 @@ import {
 import { useBusyEntryRegistrar } from "@/state/busy-state-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
 
-// CT-210: the band-selection controls embedded in the Band Selection operation
-// panel. The current choice rides in ViewportRenderingState.bandSelection (the
+// CT-210: the band-selection controls (preset picker, formula field, import
+// button). CT-284 rehoused them from the Band Selection operation panel into the
+// Subset Bands editor's "By function" mode; the machinery is unchanged. The
+// current choice rides in ViewportRenderingState.bandSelection (the
 // editor-owned pattern shared with CT-209): a ready-made preset computed at Apply,
 // or a custom formula/imported-tool band already computed by the CT-208 scripting
 // worker and remembered under a token. The status line names the active function,
@@ -36,13 +38,13 @@ import { useViewportRendering } from "@/state/viewport-rendering-context";
 
 const PRESETS: ReadonlyArray<BandSelectionPreset> = ["average", "variance"];
 
-interface ToolOptionsBandSelectionEditorProps {
+interface BandSelectionFunctionEditorProps {
   viewportIndex: number;
   raster: RasterImage;
 }
 
-export function ToolOptionsBandSelectionEditor(
-  props: ToolOptionsBandSelectionEditorProps,
+export function BandSelectionFunctionEditor(
+  props: BandSelectionFunctionEditorProps,
 ): JSX.Element {
   const binding = useBandSelectionBinding(props.viewportIndex);
   const runner = useRunUserScriptForBand(props.viewportIndex, props.raster, binding.setCustomResult);

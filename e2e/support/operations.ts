@@ -79,14 +79,20 @@ export async function applyOperation(page: Page, operationLabel: string): Promis
     page,
     `Apply ${operationLabel} and wait for the result panel to settle`,
     async () => {
-      const panel = operationPanel(page, operationLabel);
-      await panel.getByRole("button", { name: "Apply", exact: true }).click();
-      await expect(panel).toBeHidden();
-      await expect(operationBusyOverlays(page)).toHaveCount(0, {
-        timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
-      });
+      await clickApplyInPanelAndAwaitResult(page, operationPanel(page, operationLabel));
     },
   );
+}
+
+// Shared by the tool-options panels and the Subset Bands editor (CT-284): click
+// Apply inside the given container, wait for it to close, then wait for any
+// async-transform busy overlay to clear.
+export async function clickApplyInPanelAndAwaitResult(page: Page, panel: Locator): Promise<void> {
+  await panel.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(panel).toBeHidden();
+  await expect(operationBusyOverlays(page)).toHaveCount(0, {
+    timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
+  });
 }
 
 function operationBusyOverlays(page: Page): Locator {

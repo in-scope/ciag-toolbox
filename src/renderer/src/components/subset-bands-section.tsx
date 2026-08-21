@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 
 import { BandIndexBadge } from "@/components/band-index-badge";
+import { BandSelectionFunctionEditor } from "@/components/band-selection-function-editor";
 import { BandThumbnail } from "@/components/band-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -28,32 +29,51 @@ export interface SubsetBandsApplyOptions {
   readonly openInNewViewport: boolean;
 }
 
+export interface SubsetBandsFunctionApplyOptions {
+  readonly openInNewViewport: boolean;
+}
+
+// CT-284: the editor's two ways to make a band tool of the stack. "Keep bands"
+// is the CT-091 index selection; "By function" houses the former Band Selection
+// capabilities (presets, formula, imported tool) and applies through that action.
+export type SubsetBandsEditorMode = "keep-bands" | "by-function";
+
 export interface SubsetBandsSectionProps {
   readonly raster: RasterImage;
+  readonly viewportIndex: number;
   readonly viewportNumber: number;
   readonly activeBandIndex: number;
   readonly initialRemovedBandIndexes: ReadonlyArray<number>;
   readonly onCancel: () => void;
   readonly onApply: (options: SubsetBandsApplyOptions) => void;
+  readonly onApplyFunctionDerivedBand: (options: SubsetBandsFunctionApplyOptions) => void;
 }
 
 export function SubsetBandsSection(props: SubsetBandsSectionProps): JSX.Element {
+  const [mode, setMode] = useState<SubsetBandsEditorMode>("keep-bands");
   return (
     <section
       aria-label="Subset bands"
       className={SUBSET_BANDS_SECTION_CLASSES}
     >
-      <SubsetBandsSectionHeader
-        viewportNumber={props.viewportNumber}
-        onCancel={props.onCancel}
-      />
-      <SubsetBandsSectionBody
-        raster={props.raster}
-        activeBandIndex={props.activeBandIndex}
-        initialRemovedBandIndexes={props.initialRemovedBandIndexes}
-        onApply={props.onApply}
-        onCancel={props.onCancel}
-      />
+      <SubsetBandsSectionHeader viewportNumber={props.viewportNumber} mode={mode} />
+      <SubsetBandsModeSelect mode={mode} onChangeMode={setMode} />
+      {mode === "keep-bands" ? (
+        <SubsetBandsKeepBandsBody
+          raster={props.raster}
+          activeBandIndex={props.activeBandIndex}
+          initialRemovedBandIndexes={props.initialRemovedBandIndexes}
+          onApply={props.onApply}
+          onCancel={props.onCancel}
+        />
+      ) : (
+        <SubsetBandsByFunctionBody
+          raster={props.raster}
+          viewportIndex={props.viewportIndex}
+          onApply={props.onApplyFunctionDerivedBand}
+          onCancel={props.onCancel}
+        />
+      )}
     </section>
   );
 }
@@ -63,8 +83,13 @@ const SUBSET_BANDS_SECTION_CLASSES =
 
 interface SubsetBandsSectionHeaderProps {
   readonly viewportNumber: number;
-  readonly onCancel: () => void;
+  readonly mode: SubsetBandsEditorMode;
 }
+
+const MODE_DESCRIPTIONS: Record<SubsetBandsEditorMode, string> = {
+  "keep-bands": "Choose which bands to keep. Apply to create a new stack with just those bands.",
+  "by-function": "Derive one band from the whole stack with a function.",
+};
 
 function SubsetBandsSectionHeader(props: SubsetBandsSectionHeaderProps): JSX.Element {
   return (
@@ -73,14 +98,38 @@ function SubsetBandsSectionHeader(props: SubsetBandsSectionHeaderProps): JSX.Ele
         <h2 className="text-sm font-medium text-foreground">Subset Bands</h2>
         <span className="text-xs text-muted-foreground">Panel {props.viewportNumber}</span>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Choose which bands to keep. Apply to create a new stack with just those bands.
-      </p>
+      <p className="text-xs text-muted-foreground">{MODE_DESCRIPTIONS[props.mode]}</p>
     </header>
   );
 }
 
-interface SubsetBandsSectionBodyProps {
+interface SubsetBandsModeSelectProps {
+  readonly mode: SubsetBandsEditorMode;
+  readonly onChangeMode: (nextMode: SubsetBandsEditorMode) => void;
+}
+
+function SubsetBandsModeSelect(props: SubsetBandsModeSelectProps): JSX.Element {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm">
+      <span className="text-foreground">Mode</span>
+      <select
+        id={id}
+        value={props.mode}
+        onChange={(event) => props.onChangeMode(event.target.value as SubsetBandsEditorMode)}
+        className={MODE_SELECT_CLASSES}
+      >
+        <option value="keep-bands">Keep bands</option>
+        <option value="by-function">By function</option>
+      </select>
+    </label>
+  );
+}
+
+const MODE_SELECT_CLASSES =
+  "h-8 rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+
+interface SubsetBandsKeepBandsBodyProps {
   readonly raster: RasterImage;
   readonly activeBandIndex: number;
   readonly initialRemovedBandIndexes: ReadonlyArray<number>;
@@ -88,7 +137,7 @@ interface SubsetBandsSectionBodyProps {
   readonly onCancel: () => void;
 }
 
-function SubsetBandsSectionBody(props: SubsetBandsSectionBodyProps): JSX.Element {
+function SubsetBandsKeepBandsBody(props: SubsetBandsKeepBandsBodyProps): JSX.Element {
   const selection = useKeptBandSelectionDrivenByTypedRange(
     props.raster.bandCount,
     props.initialRemovedBandIndexes,
@@ -119,6 +168,29 @@ function SubsetBandsSectionBody(props: SubsetBandsSectionBodyProps): JSX.Element
         disabledReason={describeApplyDisabledReasonForKeptSet(props.raster.bandCount, selection.keptBandIndexes)}
         onCancel={props.onCancel}
         onApply={onApply}
+      />
+    </>
+  );
+}
+
+interface SubsetBandsByFunctionBodyProps {
+  readonly raster: RasterImage;
+  readonly viewportIndex: number;
+  readonly onApply: (options: SubsetBandsFunctionApplyOptions) => void;
+  readonly onCancel: () => void;
+}
+
+function SubsetBandsByFunctionBody(props: SubsetBandsByFunctionBodyProps): JSX.Element {
+  const [openInNewViewport, setOpenInNewViewport] = useState(true);
+  return (
+    <>
+      <BandSelectionFunctionEditor viewportIndex={props.viewportIndex} raster={props.raster} />
+      <SubsetBandsApplyControls
+        openInNewViewport={openInNewViewport}
+        onChangeOpenInNewViewport={setOpenInNewViewport}
+        disabledReason={null}
+        onCancel={props.onCancel}
+        onApply={() => props.onApply({ openInNewViewport })}
       />
     </>
   );

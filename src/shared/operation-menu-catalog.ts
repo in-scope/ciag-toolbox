@@ -175,13 +175,13 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
 };
 
 // Stage 5 band-combining operations gated behind the scripting worker
-// (CT-209, CT-210).
+// (CT-209, CT-210). CT-284: Band Selection has no menu entry anymore; its
+// derive-a-band-by-function capabilities live in the Subset Bands editor's
+// "By function" mode (the band-selection action stays registered so the merged
+// editor applies through it and old History labels keep their vocabulary).
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
-  commands: [
-    buildMenuOnlyActionCommand("band-weighting", "Band Weighting"),
-    buildMenuOnlyActionCommand("band-selection", "Band Selection"),
-  ],
+  commands: [buildMenuOnlyActionCommand("band-weighting", "Band Weighting")],
 };
 
 // Whole-cube user scripting (CT-216).
