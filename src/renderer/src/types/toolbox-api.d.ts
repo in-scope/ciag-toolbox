@@ -87,10 +87,18 @@ interface ToolboxSaveImageSidecarDescriptor {
   byteLength: number;
 }
 
+// CT-271: 16-bit PNG encodes in MAIN from raw big-endian uint16 sample chunks.
+interface ToolboxSaveImagePngSixteenBitGrayscaleEncoding {
+  kind: "png-16-bit-grayscale";
+  width: number;
+  height: number;
+}
+
 interface ToolboxSaveImageBeginRequest {
   suggestedFileName: string;
   fileFilter: ToolboxSaveImageFileFilter;
   primaryByteLength: number;
+  primaryEncoding?: ToolboxSaveImagePngSixteenBitGrayscaleEncoding;
   sidecar?: ToolboxSaveImageSidecarDescriptor;
 }
 

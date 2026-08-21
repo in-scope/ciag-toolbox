@@ -5,6 +5,7 @@ export type SaveImageFormatId =
   | "tiff-8-bit"
   | "tiff-float-32"
   | "png-8-bit"
+  | "png-16-bit"
   | "jpeg-8-bit"
   | "envi"
   | "envi-float";
@@ -43,6 +44,13 @@ export const SAVE_IMAGE_FORMAT_OPTIONS: ReadonlyArray<SaveImageFormatOption> = [
     id: "png-8-bit",
     label: "PNG (8-bit)",
     description: "Lossless, broadly compatible. 8-bit per channel.",
+    extension: "png",
+    fileFilter: { name: "PNG Image", extensions: ["png"] },
+  },
+  {
+    id: "png-16-bit",
+    label: "PNG (16-bit)",
+    description: "Lossless 16-bit grayscale. Keeps full precision for integer data.",
     extension: "png",
     fileFilter: { name: "PNG Image", extensions: ["png"] },
   },
@@ -91,6 +99,8 @@ export function readSaveImageFormatTechnicalDetails(
       return { kind: "tiff", targetBitDepth: 16, targetSampleFormat: "float" };
     case "png-8-bit":
       return { kind: "png", targetBitDepth: 8, targetSampleFormat: "uint" };
+    case "png-16-bit":
+      return { kind: "png", targetBitDepth: 16, targetSampleFormat: "uint" };
     case "jpeg-8-bit":
       return { kind: "jpeg", targetBitDepth: 8, targetSampleFormat: "uint" };
     case "envi":
@@ -104,24 +114,44 @@ const ENVI_NEEDS_RASTER_REASON =
   "ENVI is for raster/scientific stacks; not available for photo (PNG/JPG) sources.";
 const FLOAT_NEEDS_RASTER_REASON =
   "Float export needs raster data; an 8-bit photo has none.";
+export const SIXTEEN_BIT_PNG_NEEDS_INTEGER_REASON =
+  "16-bit PNG stores integers. Use ENVI float for float data.";
+const SIXTEEN_BIT_PNG_NEEDS_GRAYSCALE_REASON =
+  "Color photos are 8-bit; PNG (8-bit) already keeps every value.";
+
+export interface SaveImageFormatGatingSource {
+  readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
+}
 
 // CT-173: a true-colour photo (a PNG/JPG promoted to an RGB composite) is presented as one
 // 8-bit colour image, so the scientific-only export formats - ENVI, ENVI float and 32-bit
 // float TIFF - do not apply to it. Every other raster, including a single-band grayscale photo
 // promoted to a raster and a scientific stack, can use every format (null = enabled). The
 // "is this a photo?" decision is the colour flag, NOT the source kind (photos are rasters now).
+// CT-271: 16-bit PNG is a single grayscale integer band, so it disables for a colour photo
+// AND for a float source (the CT-162 gating pattern: disable with a reason, never
+// offer-then-reject).
 export function describeSaveImageFormatDisabledReason(
   formatId: SaveImageFormatId,
-  isTrueColorPhoto: boolean,
+  source: SaveImageFormatGatingSource,
 ): string | null {
-  if (!isTrueColorPhoto) return null;
+  if (formatId === "png-16-bit") return describeSixteenBitPngDisabledReason(source);
+  if (!source.isTrueColorPhoto) return null;
   if (formatId === "envi" || formatId === "envi-float") return ENVI_NEEDS_RASTER_REASON;
   if (formatId === "tiff-float-32") return FLOAT_NEEDS_RASTER_REASON;
   return null;
 }
 
-export interface SaveImageSourceBandInfo {
-  readonly isTrueColorPhoto: boolean;
+function describeSixteenBitPngDisabledReason(
+  source: SaveImageFormatGatingSource,
+): string | null {
+  if (source.isTrueColorPhoto) return SIXTEEN_BIT_PNG_NEEDS_GRAYSCALE_REASON;
+  if (source.isFloatSource) return SIXTEEN_BIT_PNG_NEEDS_INTEGER_REASON;
+  return null;
+}
+
+export interface SaveImageSourceBandInfo extends SaveImageFormatGatingSource {
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }

@@ -41,10 +41,25 @@ export interface SaveImageSidecarDescriptor {
   readonly byteLength: number;
 }
 
+// CT-271: a 16-bit PNG is encoded IN MAIN (Node zlib) because the renderer has
+// no lossless 16-bit PNG encoder (canvas encodes are 8-bit). The renderer
+// streams the RAW row-major big-endian uint16 samples as ordinary chunks;
+// primaryByteLength describes that raw payload (width x height x 2), and the
+// session deflates the filtered scanlines into the destination file as the
+// chunks arrive, so neither process ever holds the encoded export whole.
+export interface SaveImagePngSixteenBitGrayscaleEncoding {
+  readonly kind: "png-16-bit-grayscale";
+  readonly width: number;
+  readonly height: number;
+}
+
+export type SaveImagePartEncoding = SaveImagePngSixteenBitGrayscaleEncoding;
+
 export interface SaveImageBeginRequest {
   readonly suggestedFileName: string;
   readonly fileFilter: SaveImageFileFilter;
   readonly primaryByteLength: number;
+  readonly primaryEncoding?: SaveImagePartEncoding;
   readonly sidecar?: SaveImageSidecarDescriptor;
 }
 

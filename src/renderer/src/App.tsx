@@ -291,6 +291,7 @@ interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
   readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
@@ -905,6 +906,7 @@ function buildPendingSaveImageRequest(
     fileName: candidate.fileName,
     viewportIndex: candidate.index,
     isTrueColorPhoto: candidate.isTrueColorPhoto,
+    isFloatSource: candidate.isFloatSource,
     bandCount: candidate.bandCount,
     selectedBandNumber: selectedBandIndex + 1,
   };
@@ -914,6 +916,7 @@ interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
   readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
   readonly bandCount: number;
 }
 
@@ -930,6 +933,7 @@ function pickSingleSelectedSourceWithContent(
     index: onlyIndex,
     fileName: content.fileName,
     isTrueColorPhoto: readIsTrueColorPhotoFromContent(content),
+    isFloatSource: readIsFloatSourceFromContent(content),
     bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
   };
 }
@@ -937,6 +941,10 @@ function pickSingleSelectedSourceWithContent(
 function readIsTrueColorPhotoFromContent(content: ViewportCellContent): boolean {
   if (content.source.kind !== "raster") return false;
   return shouldRenderRasterAsRgbComposite(content.source.raster);
+}
+
+function readIsFloatSourceFromContent(content: ViewportCellContent): boolean {
+  return content.source.kind === "raster" && content.source.raster.sampleFormat === "float";
 }
 
 function confirmSaveImageFormatChoice(

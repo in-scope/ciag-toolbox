@@ -8,12 +8,18 @@ import {
   readSaveImageFormatTechnicalDetails,
 } from "@/lib/image/save-image-formats";
 
-const MULTI_BAND_STACK = { isTrueColorPhoto: false, bandCount: 3, selectedBandNumber: 1 };
+const MULTI_BAND_STACK = {
+  isTrueColorPhoto: false,
+  isFloatSource: false,
+  bandCount: 3,
+  selectedBandNumber: 1,
+};
 const SINGLE_BAND_FORMAT_IDS = [
   "tiff-16-bit",
   "tiff-8-bit",
   "tiff-float-32",
   "png-8-bit",
+  "png-16-bit",
   "jpeg-8-bit",
 ] as const;
 
@@ -50,6 +56,14 @@ describe("readSaveImageFormatTechnicalDetails", () => {
     });
   });
 
+  it("maps png-16-bit to a 16-bit PNG descriptor", () => {
+    expect(readSaveImageFormatTechnicalDetails("png-16-bit")).toEqual({
+      kind: "png",
+      targetBitDepth: 16,
+      targetSampleFormat: "uint",
+    });
+  });
+
   it("maps jpeg-8-bit to an 8-bit JPEG descriptor", () => {
     expect(readSaveImageFormatTechnicalDetails("jpeg-8-bit")).toEqual({
       kind: "jpeg",
@@ -77,8 +91,9 @@ describe("readSaveImageFormatTechnicalDetails", () => {
 
 describe("describeSaveImageFormatDisabledReason", () => {
   // CT-173: photos are rasters now, so the gate is the true-colour flag, NOT source.kind.
-  const TRUE_COLOR_PHOTO = true;
-  const SCIENTIFIC_OR_SINGLE_BAND_RASTER = false;
+  const TRUE_COLOR_PHOTO = { isTrueColorPhoto: true, isFloatSource: false };
+  const INTEGER_SCIENTIFIC_RASTER = { isTrueColorPhoto: false, isFloatSource: false };
+  const FLOAT_SCIENTIFIC_RASTER = { isTrueColorPhoto: false, isFloatSource: true };
 
   it("disables ENVI and ENVI float for a true-colour photo with a raster/scientific reason", () => {
     expect(describeSaveImageFormatDisabledReason("envi", TRUE_COLOR_PHOTO)).toMatch(/ENVI is for raster/);
@@ -89,22 +104,43 @@ describe("describeSaveImageFormatDisabledReason", () => {
     expect(describeSaveImageFormatDisabledReason("tiff-float-32", TRUE_COLOR_PHOTO)).toMatch(/Float export needs raster/);
   });
 
-  it("keeps TIFF 16/8-bit, PNG and JPEG enabled for a true-colour photo", () => {
+  it("keeps TIFF 16/8-bit, 8-bit PNG and JPEG enabled for a true-colour photo", () => {
     expect(describeSaveImageFormatDisabledReason("tiff-16-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("tiff-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("png-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
   });
 
-  it("enables every format for a scientific stack (it is not a photo)", () => {
+  // CT-271: a true-colour photo keeps 8-bit PNG only.
+  it("disables 16-bit PNG for a true-colour photo pointing at PNG (8-bit)", () => {
+    expect(describeSaveImageFormatDisabledReason("png-16-bit", TRUE_COLOR_PHOTO)).toBe(
+      "Color photos are 8-bit; PNG (8-bit) already keeps every value.",
+    );
+  });
+
+  // CT-271: the locked disabled-reason copy for float sources.
+  it("disables 16-bit PNG for a float source with the ENVI-float hint", () => {
+    expect(describeSaveImageFormatDisabledReason("png-16-bit", FLOAT_SCIENTIFIC_RASTER)).toBe(
+      "16-bit PNG stores integers. Use ENVI float for float data.",
+    );
+  });
+
+  it("keeps every other format enabled for a float scientific raster", () => {
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
+      if (option.id === "png-16-bit") continue;
+      expect(describeSaveImageFormatDisabledReason(option.id, FLOAT_SCIENTIFIC_RASTER)).toBeNull();
     }
   });
 
-  it("enables every format for a single-band raster, including a promoted grayscale photo", () => {
+  it("enables every format for an integer scientific stack (it is not a photo)", () => {
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
+      expect(describeSaveImageFormatDisabledReason(option.id, INTEGER_SCIENTIFIC_RASTER)).toBeNull();
+    }
+  });
+
+  it("enables every format for a single-band integer raster, including a promoted grayscale photo", () => {
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      expect(describeSaveImageFormatDisabledReason(option.id, INTEGER_SCIENTIFIC_RASTER)).toBeNull();
     }
   });
 });
@@ -132,7 +168,12 @@ describe("describeSaveImageFormatBandCoverageNote", () => {
   });
 
   it("discloses nothing for a single-band stack (no bands are lost)", () => {
-    const singleBandStack = { isTrueColorPhoto: false, bandCount: 1, selectedBandNumber: 1 };
+    const singleBandStack = {
+      isTrueColorPhoto: false,
+      isFloatSource: false,
+      bandCount: 1,
+      selectedBandNumber: 1,
+    };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
       expect(describeSaveImageFormatBandCoverageNote(option.id, singleBandStack)).toBeNull();
     }
@@ -141,7 +182,12 @@ describe("describeSaveImageFormatBandCoverageNote", () => {
   // CT-173: a true-colour photo is a 3-band raster, but it is shown as one colour image, not a
   // browsable band stack, so it must not warn about "saving band 1 of 3" like a scientific stack.
   it("discloses nothing for a true-colour photo even though it has three bands", () => {
-    const trueColorPhoto = { isTrueColorPhoto: true, bandCount: 3, selectedBandNumber: 1 };
+    const trueColorPhoto = {
+      isTrueColorPhoto: true,
+      isFloatSource: false,
+      bandCount: 3,
+      selectedBandNumber: 1,
+    };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
       expect(describeSaveImageFormatBandCoverageNote(option.id, trueColorPhoto)).toBeNull();
     }
@@ -157,13 +203,14 @@ describe("findSaveImageFormatOptionOrThrow", () => {
 });
 
 describe("SAVE_IMAGE_FORMAT_OPTIONS", () => {
-  it("offers TIFF (16/8-bit/float), PNG, JPEG, and ENVI (uint/float) save formats", () => {
+  it("offers TIFF (16/8-bit/float), PNG (8/16-bit), JPEG, and ENVI (uint/float) save formats", () => {
     const ids = SAVE_IMAGE_FORMAT_OPTIONS.map((option) => option.id);
     expect(ids).toEqual([
       "tiff-16-bit",
       "tiff-8-bit",
       "tiff-float-32",
       "png-8-bit",
+      "png-16-bit",
       "jpeg-8-bit",
       "envi",
       "envi-float",

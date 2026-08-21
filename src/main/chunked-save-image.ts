@@ -5,7 +5,15 @@ import {
   rethrowDescribingDiskFullFailure,
   writeExactLengthAtOffset,
 } from "./chunked-save-bundle";
-import type { SaveImagePart } from "../shared/chunked-save-image-protocol";
+import {
+  createStreamingPng16GrayscaleEncoder,
+  rawPng16SampleByteLengthForDimensions,
+  type StreamingPng16GrayscaleEncoder,
+} from "./png16-encode";
+import type {
+  SaveImagePart,
+  SaveImagePartEncoding,
+} from "../shared/chunked-save-image-protocol";
 
 // CT-237: electron-free session bookkeeping for the chunked save-image
 // protocol (see src/shared/chunked-save-image-protocol.ts for why the old
@@ -15,10 +23,15 @@ import type { SaveImagePart } from "../shared/chunked-save-image-protocol";
 // arrived, and release deletes the partials so a failed or abandoned export
 // never leaves an invalid file behind. The IPC layer (save-image-dialog.ts)
 // owns the save dialog; this module owns only the transfer state.
+//
+// CT-271: a part may carry an ENCODING descriptor, in which case its chunks
+// are RAW payload bytes (the described byteLength counts those), and the
+// session encodes them on the way to disk (16-bit PNG via png16-encode.ts).
 
 export interface SaveImagePartTarget {
   readonly filePath: string;
   readonly byteLength: number;
+  readonly encoding?: SaveImagePartEncoding;
 }
 
 export interface SaveImageWriteRequest {
@@ -40,6 +53,8 @@ interface WritablePart {
   readonly target: SaveImagePartTarget;
   handle: FileHandle | null;
   receivedBytes: number;
+  writtenFileBytes: number;
+  encoder: StreamingPng16GrayscaleEncoder | null;
 }
 
 interface SaveImageSession {
@@ -89,11 +104,46 @@ function assertValidPartTarget(target: SaveImagePartTarget): SaveImagePartTarget
   if (!Number.isInteger(target.byteLength) || target.byteLength <= 0) {
     throw new Error("The export described an invalid encoded size.");
   }
+  assertEncodingMatchesDescribedRawByteLength(target);
   return target;
 }
 
+// An encoded part's byteLength describes the RAW payload the encoder expects,
+// so the two descriptions must agree before any file is opened.
+function assertEncodingMatchesDescribedRawByteLength(target: SaveImagePartTarget): void {
+  if (!target.encoding) return;
+  if (target.byteLength !== rawPng16SampleByteLengthForDimensions(target.encoding)) {
+    throw new Error("The export described an invalid encoded size.");
+  }
+}
+
 async function openOneDestinationFile(target: SaveImagePartTarget): Promise<WritablePart> {
-  return { target, handle: await open(target.filePath, "w"), receivedBytes: 0 };
+  const part: WritablePart = {
+    target,
+    handle: await open(target.filePath, "w"),
+    receivedBytes: 0,
+    writtenFileBytes: 0,
+    encoder: null,
+  };
+  part.encoder = createPartEncoderOrNull(part);
+  return part;
+}
+
+function createPartEncoderOrNull(part: WritablePart): StreamingPng16GrayscaleEncoder | null {
+  if (!part.target.encoding) return null;
+  return createStreamingPng16GrayscaleEncoder(part.target.encoding, (bytes) =>
+    writeBytesToPartFileAtCurrentEnd(part, bytes),
+  );
+}
+
+async function writeBytesToPartFileAtCurrentEnd(
+  part: WritablePart,
+  bytes: Uint8Array,
+): Promise<void> {
+  await writeExactLengthAtOffset(part.handle!, bytes, part.writtenFileBytes).catch(
+    (error) => rethrowDescribingDiskFullFailure(error, NOT_ENOUGH_DISK_SPACE_MESSAGE),
+  );
+  part.writtenFileBytes += bytes.byteLength;
 }
 
 function requireSession(
@@ -114,10 +164,19 @@ async function appendChunkToDestinationFile(
   if (bytes.byteLength === 0 || writable.receivedBytes + bytes.byteLength > writable.target.byteLength) {
     throw new Error("The exported image bytes did not match the described size.");
   }
-  await writeExactLengthAtOffset(writable.handle!, bytes, writable.receivedBytes).catch(
-    (error) => rethrowDescribingDiskFullFailure(error, NOT_ENOUGH_DISK_SPACE_MESSAGE),
-  );
+  await deliverChunkToPartDestination(writable, bytes);
   writable.receivedBytes += bytes.byteLength;
+}
+
+async function deliverChunkToPartDestination(
+  writable: WritablePart,
+  bytes: Uint8Array,
+): Promise<void> {
+  if (writable.encoder) {
+    await writable.encoder.consumeRawBigEndianSampleBytes(bytes);
+    return;
+  }
+  await writeBytesToPartFileAtCurrentEnd(writable, bytes);
 }
 
 function requireWritablePart(session: SaveImageSession, part: SaveImagePart): WritablePart {
@@ -134,9 +193,16 @@ async function finishSessionKeepingFiles(
 ): Promise<string> {
   const session = requireSession(sessions, token);
   assertEveryPartFullyReceived(session);
+  await finishEncodersWritingTrailers(session);
   await closeAllDestinationHandles(session);
   sessions.delete(token);
   return session.partsByName.get("primary")!.target.filePath;
+}
+
+async function finishEncodersWritingTrailers(session: SaveImageSession): Promise<void> {
+  for (const writable of session.partsByName.values()) {
+    if (writable.encoder) await writable.encoder.finishWritingPngTrailer();
+  }
 }
 
 function assertEveryPartFullyReceived(session: SaveImageSession): void {
@@ -149,6 +215,8 @@ function assertEveryPartFullyReceived(session: SaveImageSession): void {
 
 async function closeAllDestinationHandles(session: SaveImageSession): Promise<void> {
   for (const writable of session.partsByName.values()) {
+    writable.encoder?.disposeAbandoningEncode();
+    writable.encoder = null;
     await writable.handle?.close().catch(() => undefined);
     writable.handle = null;
   }

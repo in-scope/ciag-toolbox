@@ -41,6 +41,7 @@ const EXPECTED_SAVE_FORMAT_LABELS: ReadonlyArray<string> = [
   "TIFF (8-bit)",
   "TIFF (32-bit float)",
   "PNG (8-bit)",
+  "PNG (16-bit)",
   "JPEG (8-bit)",
   "ENVI (.hdr + .bin)",
   "ENVI (32-bit float)",

@@ -97,6 +97,7 @@ function buildSaveImageBeginRequest(
     suggestedFileName: buildSuggestedSavedFileName(input.originalFileName, formatOption.extension),
     fileFilter: formatOption.fileFilter,
     primaryByteLength: upload.primary.byteLength,
+    ...(upload.primaryEncoding ? { primaryEncoding: upload.primaryEncoding } : {}),
     ...(upload.sidecar
       ? { sidecar: { extension: upload.sidecar.extension, byteLength: upload.sidecar.plan.byteLength } }
       : {}),

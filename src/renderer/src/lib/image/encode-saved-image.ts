@@ -14,6 +14,7 @@ import {
   type EnviChunkedEncoding,
   type EnviEncodedFiles,
 } from "@/lib/image/encode-envi";
+import { planRasterBandAsRawPng16SampleUpload } from "@/lib/image/encode-png16-raw-samples";
 import {
   encodeRasterBandAsFloat32TiffBytesReportingProgress,
   encodeRasterBandAsSingleChannelTiffBytesReportingProgress,
@@ -28,7 +29,9 @@ import {
   type SaveImageSampleFormat,
 } from "@/lib/image/save-image-formats";
 import type { UnitProgressCallback } from "@/lib/image/unit-progress";
+import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
+import type { SaveImagePartEncoding } from "@shared/chunked-save-image-protocol";
 
 export interface EncodeSavedImageInput {
   readonly source: ViewportImageSource;
@@ -52,6 +55,9 @@ export interface EncodedSavedImage {
 export async function encodeViewportSourceForSaving(
   input: EncodeSavedImageInput,
 ): Promise<EncodedSavedImage> {
+  if (input.formatId === "png-16-bit") {
+    throw new Error("16-bit PNG encodes in the main process; use planViewportSourceSaveUpload.");
+  }
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
   return dispatchEncodingByFormatKind(input, details.kind, details.targetBitDepth, details.targetSampleFormat);
 }
@@ -76,12 +82,18 @@ export interface SaveImageUploadSidecarPlan {
 
 export interface SaveImageUploadPlan {
   readonly primary: SaveImageUploadPartPlan;
+  // CT-271: when set, the primary part's chunks are RAW payload bytes that the
+  // MAIN process encodes on the way to disk (16-bit PNG via Node zlib).
+  readonly primaryEncoding?: SaveImagePartEncoding;
   readonly sidecar?: SaveImageUploadSidecarPlan;
 }
 
 export async function planViewportSourceSaveUpload(
   input: EncodeSavedImageInput,
 ): Promise<SaveImageUploadPlan> {
+  if (input.formatId === "png-16-bit") {
+    return planSixteenBitPngSaveUploadFromRawSamples(input);
+  }
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
   if (details.kind === "envi") {
     return planEnviSaveUploadWithoutMaterializingBinary(input, details.targetSampleFormat);
@@ -93,6 +105,36 @@ export async function planViewportSourceSaveUpload(
     details.targetSampleFormat,
   );
   return { primary: wrapEncodedBytesAsUploadPartPlan(encoded.bytes) };
+}
+
+function planSixteenBitPngSaveUploadFromRawSamples(
+  input: EncodeSavedImageInput,
+): SaveImageUploadPlan {
+  const raster = requireIntegerGrayscaleRasterForSixteenBitPng(input.source);
+  return {
+    primary: planRasterBandAsRawPng16SampleUpload(raster, input.selectedBandIndex),
+    primaryEncoding: {
+      kind: "png-16-bit-grayscale",
+      width: raster.width,
+      height: raster.height,
+    },
+  };
+}
+
+// Safety net behind the picker's CT-271 disabled-reason gating.
+function requireIntegerGrayscaleRasterForSixteenBitPng(
+  source: ViewportImageSource,
+): RasterImage {
+  if (source.kind !== "raster") {
+    throw new Error("16-bit PNG export needs raster data.");
+  }
+  if (source.raster.sampleFormat === "float") {
+    throw new Error("16-bit PNG stores integers. Use ENVI float for float data.");
+  }
+  if (shouldRenderRasterAsRgbComposite(source.raster)) {
+    throw new Error("Color photos are 8-bit; use PNG (8-bit) instead.");
+  }
+  return source.raster;
 }
 
 function planEnviSaveUploadWithoutMaterializingBinary(

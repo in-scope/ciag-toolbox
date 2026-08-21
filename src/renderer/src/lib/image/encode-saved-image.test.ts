@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeViewportSourceForSaving } from "@/lib/image/encode-saved-image";
+import {
+  encodeViewportSourceForSaving,
+  planViewportSourceSaveUpload,
+} from "@/lib/image/encode-saved-image";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
@@ -64,3 +67,65 @@ function buildRasterSource(): ViewportImageSource {
   };
   return { kind: "raster", raster };
 }
+
+// CT-271: the 16-bit PNG plan streams RAW big-endian samples and asks MAIN to
+// encode; it is never encoded renderer-side.
+describe("planViewportSourceSaveUpload for 16-bit PNG", () => {
+  it("plans the raw sample payload with the main-process encoding descriptor", async () => {
+    const upload = await planViewportSourceSaveUpload({
+      source: buildRasterSource(),
+      selectedBandIndex: 1,
+      formatId: "png-16-bit",
+    });
+    expect(upload.primary.byteLength).toBe(12);
+    expect(upload.primaryEncoding).toEqual({ kind: "png-16-bit-grayscale", width: 3, height: 2 });
+    expect(upload.sidecar).toBeUndefined();
+  });
+
+  it("refuses a float source with the locked ENVI-float hint (picker safety net)", async () => {
+    const floatRaster: RasterImage = {
+      width: 1,
+      height: 1,
+      bandCount: 1,
+      bitsPerSample: 32,
+      sampleFormat: "float",
+      bandPixels: [new Float32Array([0.5])],
+    };
+    await expect(
+      planViewportSourceSaveUpload({
+        source: { kind: "raster", raster: floatRaster },
+        selectedBandIndex: 0,
+        formatId: "png-16-bit",
+      }),
+    ).rejects.toThrow("16-bit PNG stores integers. Use ENVI float for float data.");
+  });
+
+  it("refuses a true-colour composite (colour photos keep 8-bit PNG)", async () => {
+    const composite: RasterImage = {
+      width: 1,
+      height: 1,
+      bandCount: 3,
+      bitsPerSample: 8,
+      sampleFormat: "uint",
+      colorInterpretation: "rgb",
+      bandPixels: [new Uint8Array([1]), new Uint8Array([2]), new Uint8Array([3])],
+    };
+    await expect(
+      planViewportSourceSaveUpload({
+        source: { kind: "raster", raster: composite },
+        selectedBandIndex: 0,
+        formatId: "png-16-bit",
+      }),
+    ).rejects.toThrow(/8-bit/);
+  });
+
+  it("is not encodable through the renderer-side whole-buffer encoder", async () => {
+    await expect(
+      encodeViewportSourceForSaving({
+        source: buildRasterSource(),
+        selectedBandIndex: 0,
+        formatId: "png-16-bit",
+      }),
+    ).rejects.toThrow(/main process/);
+  });
+});

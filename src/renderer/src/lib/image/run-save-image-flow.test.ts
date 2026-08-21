@@ -149,6 +149,27 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     expect(api.beginRequests[0]!.sidecar).toBeUndefined();
   });
 
+  // CT-271: 16-bit PNG uploads RAW big-endian samples; MAIN encodes on write.
+  it("streams a 16-bit PNG export as raw big-endian samples with the encoding descriptor", async () => {
+    const api = buildRecordingApi();
+    await runSaveImageFlowThroughMainProcess(
+      { source: buildRasterSource(), selectedBandIndex: 1, originalFileName: "cube.tif", formatId: "png-16-bit" },
+      api,
+      TINY_CHUNK_BYTES,
+    );
+    expect(api.beginRequests[0]).toEqual({
+      suggestedFileName: "cube.png",
+      fileFilter: { name: "PNG Image", extensions: ["png"] },
+      primaryByteLength: 12,
+      primaryEncoding: { kind: "png-16-bit-grayscale", width: 3, height: 2 },
+    });
+    expect(concatChunks(api.chunksByPart.primary)).toEqual(
+      Uint8Array.from([0, 110, 0, 120, 0, 130, 0, 140, 0, 150, 0, 160]),
+    );
+    expect(api.chunksByPart.primary.length).toBeGreaterThan(1);
+    expect(api.chunksByPart.sidecar).toEqual([]);
+  });
+
   it("uploads nothing when the save dialog is canceled", async () => {
     const api = buildRecordingApi({ status: "canceled" });
     const result = await runSaveImageFlowThroughMainProcess(

@@ -61,7 +61,11 @@ async function beginWriteSession(
   request: SaveImageBeginRequest,
 ): Promise<string> {
   return saveImageSessions.begin({
-    primary: { filePath: primaryFilePath, byteLength: request.primaryByteLength },
+    primary: {
+      filePath: primaryFilePath,
+      byteLength: request.primaryByteLength,
+      ...(request.primaryEncoding ? { encoding: request.primaryEncoding } : {}),
+    },
     ...(request.sidecar
       ? {
           sidecar: {
