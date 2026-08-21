@@ -11,6 +11,7 @@ import {
   type OperationCommandHandlers,
   type ToolbarOperationGroupContext,
 } from "./operation-command-bindings";
+import { REGISTERED_VIEWPORT_ACTIONS } from "./registered-actions";
 
 function buildHandlerSpies(): OperationCommandHandlers & {
   calls: Record<string, number>;
@@ -38,7 +39,25 @@ function buildToolbarContext(handlers: OperationCommandHandlers): ToolbarOperati
   };
 }
 
+// CT-284: band-selection deliberately has no menu entry; it is reachable
+// through the Subset Bands editor's "By function" mode.
+const ACTION_IDS_REACHABLE_OUTSIDE_THE_MENUS = new Set(["band-selection"]);
+
 describe("operation menu catalog wiring", () => {
+  // CT-289 catalog completeness: the menu reorg must leave every registered
+  // operation reachable from the catalog (menu or toolbar).
+  it("keeps every registered action reachable from the catalog", () => {
+    const reachableCommandIds = new Set(
+      listAllOperationCommands()
+        .filter((command) => command.showInMenu || command.showInToolbar)
+        .map((command) => command.id),
+    );
+    for (const action of REGISTERED_VIEWPORT_ACTIONS) {
+      if (ACTION_IDS_REACHABLE_OUTSIDE_THE_MENUS.has(action.id)) continue;
+      expect(reachableCommandIds.has(action.id), `no catalog entry for "${action.id}"`).toBe(true);
+    }
+  });
+
   it("maps every open-action-panel command to a registered action with a matching label", () => {
     for (const command of listAllOperationCommands()) {
       if (command.behavior !== "open-action-panel") continue;

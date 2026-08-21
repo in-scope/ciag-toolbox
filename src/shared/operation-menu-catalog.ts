@@ -1,5 +1,5 @@
-// Single source of truth for the operation menus (Edit, Image, Adjust,
-// Process, Spectral).
+// Single source of truth for the operation menus (Tools, Basic-Processing,
+// Multi-band; CT-289 reorg from the Jul 30 meeting list).
 //
 // Both the native application menu (main process) and the React toolbar
 // (renderer) derive their structure from this catalog so the two surfaces stay
@@ -108,12 +108,19 @@ const CLIP_GROUP: OperationGroup = {
   ],
 };
 
-const COLOR_GROUP: OperationGroup = {
-  key: "color",
+// CT-289: RGB to Grayscale is a preparation tool; False-color Composite is a
+// cross-band operation, so the two live in different menus now.
+const STACK_PREPARATION_GROUP: OperationGroup = {
+  key: "stack-preparation",
   commands: [
+    buildMenuOnlyActionCommand("bit-shift", "Bit Shift"),
     buildMenuOnlyActionCommand("rgb-to-grayscale", "RGB to Grayscale"),
-    buildMenuOnlyActionCommand("false-color", "False-color Composite"),
   ],
+};
+
+const COMPOSITE_GROUP: OperationGroup = {
+  key: "composite",
+  commands: [buildMenuOnlyActionCommand("false-color", "False-color Composite")],
 };
 
 const TRANSFORM_GROUP: OperationGroup = {
@@ -143,7 +150,6 @@ const CALIBRATE_GROUP: OperationGroup = {
 const DATA_GROUP: OperationGroup = {
   key: "data",
   commands: [
-    buildMenuOnlyActionCommand("bit-shift", "Bit Shift"),
     buildMenuOnlyActionCommand("normalize-data", "Normalize"),
     buildMenuOnlyActionCommand("standardize", "Standardize"),
   ],
@@ -179,9 +185,11 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
 // derive-a-band-by-function capabilities live in the Subset Bands editor's
 // "By function" mode (the band-selection action stays registered so the merged
 // editor applies through it and old History labels keep their vocabulary).
+// CT-289: user-facing "Band Weighting" is renamed "Weighted Sum"; the internal
+// id stays "band-weighting".
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
-  commands: [buildMenuOnlyActionCommand("band-weighting", "Band Weighting")],
+  commands: [buildMenuOnlyActionCommand("band-weighting", "Weighted Sum")],
 };
 
 // Whole-cube user scripting (CT-216).
@@ -190,47 +198,41 @@ const SCRIPTS_GROUP: OperationGroup = {
   commands: [buildMenuOnlyActionCommand("custom-transform", "Custom Transform")],
 };
 
-export const EDIT_MENU: OperationMenu = {
-  menuLabel: "Edit",
-  groups: [SELECTION_GROUP, EDIT_REGION_GROUP],
+// Selecting, reshaping, and preparing a stack: what the image IS, not its
+// values. Group order matters for the toolbar projection (selection,
+// edit-region, transform carry the toolbar buttons, in this sequence).
+export const TOOLS_MENU: OperationMenu = {
+  menuLabel: "Tools",
+  groups: [
+    SELECTION_GROUP,
+    EDIT_REGION_GROUP,
+    TRANSFORM_GROUP,
+    STACK_PREPARATION_GROUP,
+    CALIBRATE_GROUP,
+  ],
 };
 
-// Geometry and color representation: changes what the image IS, not its values.
-export const IMAGE_MENU: OperationMenu = {
-  menuLabel: "Image",
-  groups: [TRANSFORM_GROUP, COLOR_GROUP],
-};
-
-// Per-pixel intensity mapping.
-export const ADJUST_MENU: OperationMenu = {
-  menuLabel: "Adjust",
-  groups: [ADJUST_GROUP, CLIP_GROUP],
-};
-
-// Correcting and conditioning data values: calibration, numeric conditioning,
-// neighborhood filtering.
-export const PROCESS_MENU: OperationMenu = {
-  menuLabel: "Process",
-  groups: [CALIBRATE_GROUP, DATA_GROUP, FILTERS_GROUP],
+// Per-pixel and per-band value processing on the current stack.
+export const BASIC_PROCESSING_MENU: OperationMenu = {
+  menuLabel: "Basic-Processing",
+  groups: [ADJUST_GROUP, CLIP_GROUP, DATA_GROUP, FILTERS_GROUP, SCRIPTS_GROUP],
 };
 
 // Operations across the band dimension or the whole cube.
-export const SPECTRAL_MENU: OperationMenu = {
-  menuLabel: "Spectral",
+export const MULTI_BAND_MENU: OperationMenu = {
+  menuLabel: "Multi-band",
   groups: [
+    COMPOSITE_GROUP,
     SPECTRAL_DERIVATIVE_GROUP,
     DIMENSION_REDUCTION_GROUP,
     BAND_OPS_GROUP,
-    SCRIPTS_GROUP,
   ],
 };
 
 export const OPERATION_MENUS: ReadonlyArray<OperationMenu> = [
-  EDIT_MENU,
-  IMAGE_MENU,
-  ADJUST_MENU,
-  PROCESS_MENU,
-  SPECTRAL_MENU,
+  TOOLS_MENU,
+  BASIC_PROCESSING_MENU,
+  MULTI_BAND_MENU,
 ];
 
 export function listAllOperationCommands(): ReadonlyArray<OperationCommand> {

@@ -358,6 +358,7 @@ interface ToolboxUserScriptRunCancelRequest {
 
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
+type ToolboxMenuGridLayoutListener = (layout: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
 type ToolboxThemeChangeListener = (snapshot: ToolboxThemeSnapshot) => void;
 type ToolboxUnsubscribeThemeListener = () => void;
@@ -455,6 +456,9 @@ interface ToolboxApi {
   ) => ToolboxUnsubscribeMenuListener;
   onMenuInvokeCommand: (
     listener: ToolboxMenuCommandListener,
+  ) => ToolboxUnsubscribeMenuListener;
+  onMenuSelectGridLayout: (
+    listener: ToolboxMenuGridLayoutListener,
   ) => ToolboxUnsubscribeMenuListener;
   onWindowCloseRequested: (
     listener: ToolboxMenuEventListener,

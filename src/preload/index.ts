@@ -134,6 +134,7 @@ export interface PythonEnvironmentSnapshot {
 
 export type MenuEventListener = () => void;
 export type MenuCommandListener = (commandId: string) => void;
+export type MenuGridLayoutListener = (layout: string) => void;
 export type UnsubscribeMenuListener = () => void;
 export type ThemeChangeListener = (snapshot: ThemeSnapshot) => void;
 export type UnsubscribeThemeListener = () => void;
@@ -151,6 +152,7 @@ const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
+const MENU_SELECT_GRID_LAYOUT_CHANNEL = "menu:select-grid-layout";
 const MENU_CLOSE_REQUESTED_CHANNEL = "menu:close-requested";
 const APP_CONFIRM_CLOSE_CHANNEL = "app:confirm-close";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
@@ -501,6 +503,16 @@ function subscribeToInvokeCommandMenuEvent(
   return () => ipcRenderer.removeListener(MENU_INVOKE_COMMAND_CHANNEL, handler);
 }
 
+// CT-289: the File > Grid submenu sends the chosen layout token ("1x2", ...).
+function subscribeToSelectGridLayoutMenuEvent(
+  listener: MenuGridLayoutListener,
+): UnsubscribeMenuListener {
+  const handler = (_event: IpcRendererEvent, layout: string): void =>
+    listener(layout);
+  ipcRenderer.on(MENU_SELECT_GRID_LAYOUT_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(MENU_SELECT_GRID_LAYOUT_CHANNEL, handler);
+}
+
 function readInitialThemeSnapshotSynchronously(): ThemeSnapshot {
   return ipcRenderer.sendSync(THEME_GET_INITIAL_SYNC_CHANNEL) as ThemeSnapshot;
 }
@@ -553,6 +565,7 @@ const apiBridge = {
   onMenuAbout: subscribeToAboutMenuEvent,
   onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
+  onMenuSelectGridLayout: subscribeToSelectGridLayoutMenuEvent,
   onWindowCloseRequested: subscribeToWindowCloseRequestedEvent,
   confirmWindowClose: confirmWindowCloseThroughMainProcess,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,

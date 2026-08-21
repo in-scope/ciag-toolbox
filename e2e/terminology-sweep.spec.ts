@@ -10,6 +10,7 @@ import {
   clickGridBackgroundToClearSelection,
   drawInspectionRoiBetweenPixels,
   enqueueAndTriggerOpenImages,
+  expectNoUserFacingBandWeightingWording,
   expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
   expectPanelHoldsFile,
@@ -83,6 +84,19 @@ test("the frequency-domain tool is named Frequency Filters, never Spatial Filter
     await loadFixtureAsStack(app.window, multiBandTiff.fileName);
     await openOperation(app.window, "Frequency Filters");
     await expectNoUserFacingSpatialFilterWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-289: the band-combining tool is user-facing "Weighted Sum"; the old
+// "Band Weighting" name must not surface anywhere, including with its own panel open.
+test("the band-combining tool is named Weighted Sum, never Band Weighting", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Weighted Sum");
+    await expectNoUserFacingBandWeightingWording(app.window);
   } finally {
     await closeToolboxApp(app);
   }

@@ -12,6 +12,7 @@ import {
   listMenuCommandsAlphabetically,
   OPERATION_MENUS,
 } from "../src/shared/operation-menu-catalog";
+import { SELECTABLE_GRID_LAYOUTS } from "../src/shared/grid-layouts";
 import {
   describeApplicationMenu,
   readAppNameAndVersion,
@@ -19,9 +20,11 @@ import {
   readUserDataDirectory,
   resizeAndMoveMainWindow,
   triggerAboutMenuItem,
+  triggerFileGridLayoutMenuItem,
   type MenuItemSummary,
   type WindowOuterBounds,
 } from "./support/main-process";
+import { gridLayoutDropdownTrigger } from "./support/grid-layout-controls";
 
 // Manual test script section 3 (CT-003): main window shell, menus, About dialog.
 
@@ -65,6 +68,29 @@ test("File menu exposes Open Images and the app can be quit", async () => {
   const fileMenu = findTopLevelMenu(menu, "File");
   expect(submenuLabelsOf(fileMenu)).toContain("Open Images...");
   expect(menuTreeHasQuitItem(menu)).toBe(true);
+});
+
+// CT-289: the File menu gains a Grid submenu mirroring the toolbar's layouts,
+// placed after the project items.
+test("File menu carries a Grid submenu of the selectable layouts after the project items", async () => {
+  const menu = await describeApplicationMenu(launched.app);
+  const fileMenu = findTopLevelMenu(menu, "File");
+  const labels = submenuLabelsOf(fileMenu);
+  expect(labels).toContain("Grid");
+  expect(labels.indexOf("Grid")).toBeGreaterThan(labels.indexOf("Save Project As..."));
+  const gridSubmenu = fileMenu?.submenu.find((item) => item.label === "Grid");
+  expect(submenuLabelsOf(gridSubmenu)).toEqual([...SELECTABLE_GRID_LAYOUTS]);
+});
+
+test("File > Grid selects a layout exactly like the toolbar dropdown", async () => {
+  await triggerFileGridLayoutMenuItem(launched.app, "1x2");
+  await expect(gridLayoutDropdownTrigger(launched.window)).toHaveAccessibleName(
+    "Grid layout (currently 1x2)",
+  );
+  await triggerFileGridLayoutMenuItem(launched.app, "1x1");
+  await expect(gridLayoutDropdownTrigger(launched.window)).toHaveAccessibleName(
+    "Grid layout (currently 1x1)",
+  );
 });
 
 test("every operation menu mirrors the shared catalog, alphabetically and without separators", async () => {

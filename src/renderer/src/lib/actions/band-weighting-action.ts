@@ -29,12 +29,15 @@ export const BAND_WEIGHTING_ACTION_ID = "band-weighting";
 const BAND_WEIGHTING_WEIGHTS_PARAMETER_ID = "weightsJson";
 const WEIGHTED_SUM_BAND_LABEL = "Weighted sum";
 
+// CT-289: user-facing "Band Weighting" is renamed "Weighted Sum"; the internal
+// id and file names keep the band-weighting vocabulary (CT-245 pattern), and
+// stored History strings in old projects render as saved.
 export const BAND_WEIGHTING_ACTION: RegisteredViewportAction = {
   id: BAND_WEIGHTING_ACTION_ID,
-  label: "Band Weighting",
+  label: "Weighted Sum",
   icon: Scale,
-  successMessage: "Band weighting applied",
-  appliedLabel: "Band weighting",
+  successMessage: "Weighted sum applied",
+  appliedLabel: "Weighted sum",
   loadingMessage: "Computing weighted sum...",
   formatAppliedLabel: formatBandWeightingAppliedLabel,
   prepareParameterValuesForApply: injectBandWeightsForApply,
@@ -50,7 +53,7 @@ function injectBandWeightsForApply(
 ): ParameterValuesById {
   const weights = sourceRenderingState.bandWeights;
   if (!weights) {
-    throw new Error("Band weighting needs a weight for each band. Set the weights first.");
+    throw new Error("Weighted sum needs a weight for each band. Set the weights first.");
   }
   return Object.freeze({
     ...rawParameterValues,
@@ -99,7 +102,7 @@ async function buildWeightedSumStack(
 export function readBandWeightsOrThrow(parameterValues: ParameterValuesById): number[] {
   const raw = parameterValues[BAND_WEIGHTING_WEIGHTS_PARAMETER_ID];
   if (typeof raw !== "string") {
-    throw new Error("Band weighting needs a weight for each band. Set the weights first.");
+    throw new Error("Weighted sum needs a weight for each band. Set the weights first.");
   }
   return parseBandWeightsJson(raw);
 }
@@ -107,7 +110,7 @@ export function readBandWeightsOrThrow(parameterValues: ParameterValuesById): nu
 function parseBandWeightsJson(raw: string): number[] {
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed) || !parsed.every(isFiniteNumber)) {
-    throw new Error("Band weighting received malformed weights.");
+    throw new Error("Weighted sum received malformed weights.");
   }
   return parsed;
 }
@@ -120,8 +123,8 @@ function readBandWeightsForLabelOrNull(parameterValues: ParameterValuesById): nu
 
 function formatBandWeightingAppliedLabel(parameterValues: ParameterValuesById): string {
   const weights = readBandWeightsForLabelOrNull(parameterValues);
-  if (!weights) return "Band weighting";
-  return `Band weighting (weights: ${weights.map(formatWeightForLabel).join(", ")})`;
+  if (!weights) return "Weighted sum";
+  return `Weighted sum (weights: ${weights.map(formatWeightForLabel).join(", ")})`;
 }
 
 function formatWeightForLabel(weight: number): string {

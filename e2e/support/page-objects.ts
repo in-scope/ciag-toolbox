@@ -175,6 +175,7 @@ export {
   readUserFacingTextAndAccessibleNames,
   expectNoUserFacingViewportWording,
   expectNoUserFacingSpatialFilterWording,
+  expectNoUserFacingBandWeightingWording,
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,

@@ -127,6 +127,7 @@ import {
   type ReferencePickerOption,
 } from "@/lib/image/reference-token";
 import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
+import { isSelectableGridLayout } from "@shared/grid-layouts";
 import {
   getGridLayoutCellCount,
   getNextLargerGridLayout,
@@ -382,6 +383,7 @@ function ApplicationShell(): JSX.Element {
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
     pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
   });
+  useMenuSelectGridLayoutTriggersHandler(handleGridLayoutChange);
   const gridLayoutRef = useLatestRef(gridLayout);
   const handleOpenImagesRequested = useOpenImagesThroughDialogHandler({
     imagesByIndexRef,
@@ -826,6 +828,20 @@ function useMenuInvokeCommandHandler(handlers: OperationCommandHandlers): void {
         dispatchOperationCommand(commandId, handlers),
       ),
     [handlers],
+  );
+}
+
+// CT-289: the File > Grid submenu mirrors the toolbar's layout dropdown; both
+// funnel into the same layout-change handler.
+function useMenuSelectGridLayoutTriggersHandler(
+  handler: (layout: GridLayout) => void,
+): void {
+  useEffect(
+    () =>
+      window.toolboxApi.onMenuSelectGridLayout((layout) => {
+        if (isSelectableGridLayout(layout)) handler(layout);
+      }),
+    [handler],
   );
 }
 

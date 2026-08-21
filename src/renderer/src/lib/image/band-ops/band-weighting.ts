@@ -102,6 +102,6 @@ function sumOfAbsoluteWeights(weights: ReadonlyArray<number>): number {
 function assertWeightCountMatchesBandCount(bandCount: number, weightCount: number): void {
   if (bandCount === weightCount) return;
   throw new Error(
-    `Band weighting needs one weight per band (expected ${bandCount}, got ${weightCount}).`,
+    `Weighted sum needs one weight per band (expected ${bandCount}, got ${weightCount}).`,
   );
 }

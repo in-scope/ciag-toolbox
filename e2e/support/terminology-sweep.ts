@@ -32,3 +32,10 @@ export async function expectNoUserFacingSpatialFilterWording(page: Page): Promis
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/spatial filter/i);
 }
+
+// CT-289: the band-combining tool is named "Weighted Sum"; the old
+// "Band Weighting" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingBandWeightingWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/band weighting/i);
+}
