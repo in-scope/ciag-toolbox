@@ -30,6 +30,9 @@ function buildAllFixtures() {
     rgbPng: buildKnownRgbPngFixture(),
     multiBandTiff: buildMultiBandTwelveBitTiffFixture(),
     flatFieldReferenceTiff: buildSingleBandReferenceTiffFixture(),
+    rgbaTiff: buildRgbaAlphaTiffFixture(),
+    paletteColorTiff: buildPaletteColorTiffFixture(),
+    untaggedRgbTiff: buildUntaggedRgbTiffFixture(),
     enviStack: buildEnviStackFixture(),
     enviFloatStack: buildEnviFloatStackFixture(),
   };
@@ -42,6 +45,9 @@ function writeAllFixtureFiles(fixtures) {
   writeFixtureFile(fixtures.rgbPng.fileName, fixtures.rgbPng.bytes);
   writeFixtureFile(fixtures.multiBandTiff.fileName, fixtures.multiBandTiff.bytes);
   writeFixtureFile(fixtures.flatFieldReferenceTiff.fileName, fixtures.flatFieldReferenceTiff.bytes);
+  writeFixtureFile(fixtures.rgbaTiff.fileName, fixtures.rgbaTiff.bytes);
+  writeFixtureFile(fixtures.paletteColorTiff.fileName, fixtures.paletteColorTiff.bytes);
+  writeFixtureFile(fixtures.untaggedRgbTiff.fileName, fixtures.untaggedRgbTiff.bytes);
   writeFixtureFile(fixtures.enviStack.headerFileName, fixtures.enviStack.headerBytes);
   writeFixtureFile(fixtures.enviStack.binaryFileName, fixtures.enviStack.binaryBytes);
   writeFixtureFile(fixtures.enviFloatStack.headerFileName, fixtures.enviFloatStack.headerBytes);
@@ -307,6 +313,203 @@ function buildSingleBandReferenceTiffFixture() {
     bands: [band],
     bytes: encodeMultiPageUint16TiffBytes(STACK_WIDTH, STACK_HEIGHT, [band]),
   };
+}
+
+// --- Colour TIFF variants (CT-288) ------------------------------------------
+// Three synthetic single-page TIFFs exercising the broadened colour detection in
+// load-tiff.ts. All reuse the rgb.png pixel colours ((0,0)=(200,100,50) etc.) so
+// the same documented RGB numbers hold across every colour fixture:
+//   rgba.tif         - photometric RGB, 4 samples per pixel, ExtraSamples marks
+//                      the 4th as unassociated alpha; the loader drops alpha.
+//   palette-color.tif - photometric Palette, uint8 indices 0..3 with a 256-entry
+//                      colormap holding value*257 per channel, so the loader's
+//                      top-byte expansion (>> 8) recovers the exact 8-bit colours.
+//   rgb-untagged.tif  - 3 samples per pixel with NO photometric tag; treated as RGB.
+
+const COLOR_VARIANT_WIDTH = 2;
+const COLOR_VARIANT_HEIGHT = 2;
+const COLOR_VARIANT_ALPHAS = [255, 128, 64, 0];
+const PALETTE_ENTRY_COUNT = 256;
+const PALETTE_CHANNEL_SCALE = 257;
+const TIFF_EXTRA_SAMPLE_UNASSOCIATED_ALPHA = 2;
+
+function buildRgbaAlphaTiffFixture() {
+  return {
+    fileName: "rgba.tif",
+    width: COLOR_VARIANT_WIDTH,
+    height: COLOR_VARIANT_HEIGHT,
+    pixels: RGB_FIXTURE_PIXELS,
+    bytes: encodeSinglePageUint8TiffBytes(buildRgbaTiffEntries(), buildInterleavedRgbaStrip()),
+  };
+}
+
+function buildRgbaTiffEntries() {
+  return [
+    { tag: 256, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_WIDTH] },
+    { tag: 257, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 258, type: TIFF_TYPE_SHORT, values: [8, 8, 8, 8] },
+    { tag: 259, type: TIFF_TYPE_SHORT, values: [1] },
+    { tag: 262, type: TIFF_TYPE_SHORT, values: [2] },
+    { tag: 273, type: TIFF_TYPE_LONG, values: [0] },
+    { tag: 277, type: TIFF_TYPE_SHORT, values: [4] },
+    { tag: 278, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 279, type: TIFF_TYPE_LONG, values: [COLOR_VARIANT_WIDTH * COLOR_VARIANT_HEIGHT * 4] },
+    { tag: 338, type: TIFF_TYPE_SHORT, values: [TIFF_EXTRA_SAMPLE_UNASSOCIATED_ALPHA] },
+  ];
+}
+
+function buildInterleavedRgbaStrip() {
+  const strip = new Uint8Array(COLOR_VARIANT_WIDTH * COLOR_VARIANT_HEIGHT * 4);
+  RGB_FIXTURE_PIXELS.forEach((pixel, pixelIndex) => {
+    const base = (pixel.y * COLOR_VARIANT_WIDTH + pixel.x) * 4;
+    strip[base] = pixel.r;
+    strip[base + 1] = pixel.g;
+    strip[base + 2] = pixel.b;
+    strip[base + 3] = COLOR_VARIANT_ALPHAS[pixelIndex];
+  });
+  return strip;
+}
+
+function buildPaletteColorTiffFixture() {
+  return {
+    fileName: "palette-color.tif",
+    width: COLOR_VARIANT_WIDTH,
+    height: COLOR_VARIANT_HEIGHT,
+    pixels: RGB_FIXTURE_PIXELS,
+    bytes: encodeSinglePageUint8TiffBytes(buildPaletteTiffEntries(), buildPaletteIndexStrip()),
+  };
+}
+
+function buildPaletteTiffEntries() {
+  return [
+    { tag: 256, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_WIDTH] },
+    { tag: 257, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 258, type: TIFF_TYPE_SHORT, values: [8] },
+    { tag: 259, type: TIFF_TYPE_SHORT, values: [1] },
+    { tag: 262, type: TIFF_TYPE_SHORT, values: [3] },
+    { tag: 273, type: TIFF_TYPE_LONG, values: [0] },
+    { tag: 277, type: TIFF_TYPE_SHORT, values: [1] },
+    { tag: 278, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 279, type: TIFF_TYPE_LONG, values: [COLOR_VARIANT_WIDTH * COLOR_VARIANT_HEIGHT] },
+    { tag: 320, type: TIFF_TYPE_SHORT, values: buildPaletteColorMapValues() },
+  ];
+}
+
+// Pixel (x, y) uses palette index y*width + x, whose colormap entry holds that
+// pixel's rgb.png colour scaled by 257 (so value >> 8 gives the colour back).
+function buildPaletteIndexStrip() {
+  const strip = new Uint8Array(COLOR_VARIANT_WIDTH * COLOR_VARIANT_HEIGHT);
+  for (let index = 0; index < strip.length; index += 1) strip[index] = index;
+  return strip;
+}
+
+function buildPaletteColorMapValues() {
+  const values = new Array(PALETTE_ENTRY_COUNT * 3).fill(0);
+  RGB_FIXTURE_PIXELS.forEach((pixel, entryIndex) => {
+    values[entryIndex] = pixel.r * PALETTE_CHANNEL_SCALE;
+    values[PALETTE_ENTRY_COUNT + entryIndex] = pixel.g * PALETTE_CHANNEL_SCALE;
+    values[PALETTE_ENTRY_COUNT * 2 + entryIndex] = pixel.b * PALETTE_CHANNEL_SCALE;
+  });
+  return values;
+}
+
+function buildUntaggedRgbTiffFixture() {
+  return {
+    fileName: "rgb-untagged.tif",
+    width: COLOR_VARIANT_WIDTH,
+    height: COLOR_VARIANT_HEIGHT,
+    pixels: RGB_FIXTURE_PIXELS,
+    bytes: encodeSinglePageUint8TiffBytes(buildUntaggedRgbTiffEntries(), buildKnownRgbSamples()),
+  };
+}
+
+function buildUntaggedRgbTiffEntries() {
+  return [
+    { tag: 256, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_WIDTH] },
+    { tag: 257, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 258, type: TIFF_TYPE_SHORT, values: [8, 8, 8] },
+    { tag: 259, type: TIFF_TYPE_SHORT, values: [1] },
+    { tag: 273, type: TIFF_TYPE_LONG, values: [0] },
+    { tag: 277, type: TIFF_TYPE_SHORT, values: [3] },
+    { tag: 278, type: TIFF_TYPE_SHORT, values: [COLOR_VARIANT_HEIGHT] },
+    { tag: 279, type: TIFF_TYPE_LONG, values: [COLOR_VARIANT_WIDTH * COLOR_VARIANT_HEIGHT * 3] },
+  ];
+}
+
+// --- Single-page TIFF encoder with multi-value tag support -------------------
+// Unlike the multi-page uint16 encoder below, these variants need tag values
+// that exceed the 4 inline bytes (BitsPerSample per channel, the colormap), so
+// oversized values are stored after the IFD and referenced by offset. The
+// StripOffsets entry (tag 273) is patched to the computed strip position.
+
+function encodeSinglePageUint8TiffBytes(entries, stripBytes) {
+  const layout = computeSinglePageTiffLayout(entries, stripBytes.length);
+  const view = new DataView(new ArrayBuffer(layout.totalSize));
+  writeLittleEndianTiffHeader(view);
+  writeSinglePageIfd(view, entries, layout);
+  writeExternalEntryValues(view, entries, layout);
+  new Uint8Array(view.buffer).set(stripBytes, layout.stripOffset);
+  return new Uint8Array(view.buffer);
+}
+
+function computeSinglePageTiffLayout(entries, stripByteCount) {
+  const ifdByteSize = 2 + entries.length * 12 + 4;
+  let externalCursor = TIFF_FIRST_IFD_OFFSET + ifdByteSize;
+  const externalOffsets = new Map();
+  for (const entry of entries) {
+    if (entryValueByteSize(entry) <= 4) continue;
+    externalOffsets.set(entry.tag, externalCursor);
+    externalCursor += entryValueByteSize(entry);
+  }
+  return { externalOffsets, stripOffset: externalCursor, totalSize: externalCursor + stripByteCount };
+}
+
+function entryValueByteSize(entry) {
+  const bytesPerValue = entry.type === TIFF_TYPE_SHORT ? 2 : 4;
+  return entry.values.length * bytesPerValue;
+}
+
+function writeSinglePageIfd(view, entries, layout) {
+  view.setUint16(TIFF_FIRST_IFD_OFFSET, entries.length, true);
+  entries.forEach((entry, entryIndex) => {
+    const entryOffset = TIFF_FIRST_IFD_OFFSET + 2 + entryIndex * 12;
+    writeSinglePageIfdEntry(view, entryOffset, resolveEntryForLayout(entry, layout), layout);
+  });
+  view.setUint32(TIFF_FIRST_IFD_OFFSET + 2 + entries.length * 12, 0, true);
+}
+
+function resolveEntryForLayout(entry, layout) {
+  if (entry.tag !== 273) return entry;
+  return { ...entry, values: [layout.stripOffset] };
+}
+
+function writeSinglePageIfdEntry(view, entryOffset, entry, layout) {
+  view.setUint16(entryOffset, entry.tag, true);
+  view.setUint16(entryOffset + 2, entry.type, true);
+  view.setUint32(entryOffset + 4, entry.values.length, true);
+  const externalOffset = layout.externalOffsets.get(entry.tag);
+  if (externalOffset === undefined) {
+    writeInlineEntryValues(view, entryOffset + 8, entry);
+    return;
+  }
+  view.setUint32(entryOffset + 8, externalOffset, true);
+}
+
+function writeInlineEntryValues(view, valueOffset, entry) {
+  entry.values.forEach((value, valueIndex) => {
+    if (entry.type === TIFF_TYPE_SHORT) view.setUint16(valueOffset + valueIndex * 2, value, true);
+    else view.setUint32(valueOffset + valueIndex * 4, value, true);
+  });
+}
+
+function writeExternalEntryValues(view, entries, layout) {
+  for (const entry of entries) {
+    const externalOffset = layout.externalOffsets.get(entry.tag);
+    if (externalOffset === undefined) continue;
+    entry.values.forEach((value, valueIndex) => {
+      view.setUint16(externalOffset + valueIndex * 2, value, true);
+    });
+  }
 }
 
 // --- Single-file ENVI stack (.hdr + binary) with wavelengths ----------------
@@ -620,6 +823,9 @@ function buildFixtureManifest(fixtures) {
     rgbPng: describeRgbFixture(fixtures.rgbPng),
     multiBandTiff: describeStackFixture(fixtures.multiBandTiff, "uint16"),
     flatFieldReferenceTiff: describeStackFixture(fixtures.flatFieldReferenceTiff, "uint16"),
+    rgbaTiff: describeRgbFixture(fixtures.rgbaTiff),
+    paletteColorTiff: describeRgbFixture(fixtures.paletteColorTiff),
+    untaggedRgbTiff: describeRgbFixture(fixtures.untaggedRgbTiff),
     enviStack: describeEnviFixture(fixtures.enviStack),
     enviFloatStack: describeEnviFloatFixture(fixtures.enviFloatStack),
   };

@@ -77,6 +77,9 @@ export const noisyGrayPng = manifestJson.noisyGrayPng as NoisyGrayFixture;
 export const rgbPng = manifestJson.rgbPng as SingleFileFixture;
 export const multiBandTiff = manifestJson.multiBandTiff as SingleFileFixture;
 export const flatFieldReferenceTiff = manifestJson.flatFieldReferenceTiff as SingleFileFixture;
+export const rgbaTiff = manifestJson.rgbaTiff as SingleFileFixture;
+export const paletteColorTiff = manifestJson.paletteColorTiff as SingleFileFixture;
+export const untaggedRgbTiff = manifestJson.untaggedRgbTiff as SingleFileFixture;
 export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 
