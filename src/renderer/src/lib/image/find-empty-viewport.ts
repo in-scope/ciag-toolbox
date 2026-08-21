@@ -1,9 +1,14 @@
+// CT-269: excludedIndexes are cells that LOOK empty but are already reserved
+// as the result target of an in-flight apply; they must never be handed out.
 export function findLowestIndexEmptyViewport<TContent>(
   imagesByIndex: ReadonlyMap<number, TContent>,
   cellCount: number,
+  excludedIndexes?: ReadonlySet<number>,
 ): number | null {
   for (let index = 0; index < cellCount; index++) {
-    if (!imagesByIndex.has(index)) return index;
+    if (imagesByIndex.has(index)) continue;
+    if (excludedIndexes?.has(index)) continue;
+    return index;
   }
   return null;
 }

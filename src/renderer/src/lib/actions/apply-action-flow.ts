@@ -18,7 +18,15 @@ import {
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import { clearOperationRegionAtViewportIndex } from "@/lib/actions/operation-region";
-import { isOperationStoppedError, OPERATION_STOPPED_MESSAGE } from "@/lib/image/operation-stop";
+import type {
+  InFlightApplyRunReservation,
+  InFlightApplyRunStore,
+} from "@/lib/actions/in-flight-apply-run-store";
+import {
+  isOperationStoppedError,
+  OperationStoppedError,
+  OPERATION_STOPPED_MESSAGE,
+} from "@/lib/image/operation-stop";
 import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import { toast } from "sonner";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -49,6 +57,11 @@ export interface ApplyActionFlowBindings {
   // next action targets the result rather than the original source panel.
   selectViewportIndex?: (index: number) => void;
   busyRegistrar: BusyEntryRegistrar;
+  // CT-269: shared bookkeeping of in-flight applies. Every apply reserves its
+  // result panel here so concurrent applies never share a target, a close of
+  // the reserved target cancels the run, and index shifts from unrelated panel
+  // closes reach the run before it places its result.
+  inFlightApplyRuns: InFlightApplyRunStore;
   // Reports how an apply run ended (the run is asynchronous, so this fires
   // after the click returns). App uses it for actions whose panel stays open
   // until a run SUCCEEDS (keepsPanelOpenUntilApplySucceeds): success closes
@@ -149,6 +162,31 @@ function createStopControllerForStoppableApply(
   return action.supportsStopDuringApply ? new AbortController() : null;
 }
 
+// CT-269: every apply registers itself for its whole lifetime, so the close
+// flow can refuse closing its source, cancel it through its stop controller
+// when its target closes, and keep its indexes current across grid compaction.
+function reserveInFlightApplyRun(
+  action: RegisteredViewportAction,
+  sourceIndex: number,
+  targetIndex: number,
+  stopController: AbortController | null,
+  bindings: ApplyActionFlowBindings,
+): InFlightApplyRunReservation {
+  return bindings.inFlightApplyRuns.reserveApplyRun({
+    sourceIndex,
+    targetIndex,
+    operationLabel: action.label,
+    requestStop: stopController ? () => stopController.abort() : null,
+  });
+}
+
+// A run whose target panel was closed mid-flight must discard its result even
+// when the transform could not be aborted (non-stoppable actions, or an abort
+// racing completion); surfacing it as a stop reuses the CT-268 ending.
+function throwStoppedWhenApplyRunIsCancelled(reservation: InFlightApplyRunReservation): void {
+  if (reservation.isCancelled()) throw new OperationStoppedError();
+}
+
 function listSourcesAcrossViewports(imagesByIndex: ViewportContentMap): ViewportImageSource[] {
   return [...imagesByIndex.values()].map((content) => content.source);
 }
@@ -169,7 +207,8 @@ function applyActionInPlaceWithoutBusyIndicator(
       sourceIndex,
       bindings,
     );
-    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
+    const sourceContent = bindings.imagesByIndex.get(sourceIndex) ?? null;
+    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, sourceIndex, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
     reportApplyFailedWithToast(action, sourceIndex, bindings, error);
@@ -183,6 +222,7 @@ async function runApplyActionInPlaceWithBusyIndicator(
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
   const stopController = createStopControllerForStoppableApply(action);
+  const reservation = reserveInFlightApplyRun(action, sourceIndex, sourceIndex, stopController, bindings);
   const handle = bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex: sourceIndex,
     label: describeOperationLoadingMessage(action),
@@ -190,38 +230,47 @@ async function runApplyActionInPlaceWithBusyIndicator(
   });
   try {
     await yieldOnceSoBusyOverlayCanPaint();
-    await replaceSourceAtIndexWithTransformedSource(action, parameterValues, sourceIndex, bindings, handle, stopController?.signal);
-    writeAppliedRenderingStateInheritingFromSource(
-      action,
-      parameterValues,
-      sourceIndex,
-      sourceIndex,
-      bindings,
-    );
-    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, sourceIndex, bindings);
+    await transformSourceInPlaceAndFinishBookkeeping(action, parameterValues, sourceIndex, reservation, bindings, handle, stopController?.signal);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyEndedWithoutResult(action, sourceIndex, bindings, error);
+    reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
   } finally {
+    reservation.release();
     handle.clear();
   }
+}
+
+async function transformSourceInPlaceAndFinishBookkeeping(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  reservation: InFlightApplyRunReservation,
+  bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const content = bindings.imagesByIndex.get(sourceIndex);
+  if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
+  await replaceSourceContentWithTransformedSource(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
+  const currentIndex = reservation.currentSourceIndex();
+  writeAppliedRenderingStateInheritingFromSource(action, parameterValues, currentIndex, currentIndex, bindings);
+  placeSecondaryActionOutputsInFreshViewports(action, parameterValues, content, currentIndex, currentIndex, bindings);
 }
 
 function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function replaceSourceAtIndexWithTransformedSource(
+async function replaceSourceContentWithTransformedSource(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
-  sourceIndex: number,
+  content: ViewportCellContent,
+  reservation: InFlightApplyRunReservation,
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (!actionTransformsSource(action)) return;
-  const content = bindings.imagesByIndex.get(sourceIndex);
-  if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
   const nextSource = await runActionSourceTransform(
     action,
     content.source,
@@ -229,8 +278,10 @@ async function replaceSourceAtIndexWithTransformedSource(
     forwardTransformProgressToBusyEntry(busyHandle),
     abortSignal,
   );
+  throwStoppedWhenApplyRunIsCancelled(reservation);
+  const writeIndex = reservation.currentSourceIndex();
   bindings.setImagesByIndex((previous) =>
-    writeViewportContentAtIndex(previous, sourceIndex, { ...content, source: nextSource }),
+    writeViewportContentAtIndex(previous, writeIndex, { ...content, source: nextSource }),
   );
 }
 
@@ -259,15 +310,18 @@ function writeAppliedRenderingStateInheritingFromSource(
 // CT-097: after the primary result lands, place each secondary output (e.g. the
 // auto-normalized intermediate produced when inverting unbounded data) into its
 // own fresh viewport, expanding the grid if needed. The source is untouched.
+// CT-269: the ORIGINAL source content is passed in (captured before any
+// transform), never re-read from the render-time map, so a mid-run index shift
+// cannot make this derive from the wrong panel.
 function placeSecondaryActionOutputsInFreshViewports(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent | null,
   sourceIndex: number,
   primaryTargetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
   if (!action.transformSourceToSecondaryOutputs) return;
-  const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return;
   const outputs = action.transformSourceToSecondaryOutputs(sourceContent.source, parameterValues);
   placeEachSecondaryOutputInFreshViewport(action, parameterValues, sourceContent, outputs, sourceIndex, primaryTargetIndex, bindings);
@@ -310,8 +364,11 @@ function reserveFreshViewportIndexExcluding(
   bindings: ApplyActionFlowBindings,
   excludedIndexes: ReadonlySet<number>,
 ): number | null {
+  const reservedTargets = bindings.inFlightApplyRuns.listReservedResultTargetIndexes();
   for (let index = 0; index < bindings.cellCount; index += 1) {
-    if (!bindings.imagesByIndex.has(index) && !excludedIndexes.has(index)) return index;
+    if (bindings.imagesByIndex.has(index)) continue;
+    if (excludedIndexes.has(index) || reservedTargets.has(index)) continue;
+    return index;
   }
   return expandGridForOneMoreSecondaryOutput(bindings);
 }
@@ -400,7 +457,11 @@ function tryDuplicateAndApplyInEmptyViewport(
   sourceIndex: number,
   bindings: ApplyActionFlowBindings,
 ): boolean {
-  const empty = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
+  const empty = findLowestIndexEmptyViewport(
+    bindings.imagesByIndex,
+    bindings.cellCount,
+    bindings.inFlightApplyRuns.listReservedResultTargetIndexes(),
+  );
   if (empty === null) return false;
   void runDuplicateAndApplyAtTargetIndex(action, parameterValues, sourceContent, sourceIndex, empty, bindings);
   return true;
@@ -437,40 +498,61 @@ export async function runDuplicateAndApplyAtTargetIndex(
   bindings: ApplyActionFlowBindings,
 ): Promise<void> {
   const stopController = createStopControllerForStoppableApply(action);
+  const reservation = reserveInFlightApplyRun(action, sourceIndex, targetIndex, stopController, bindings);
   const handle = actionTransformsSource(action)
     ? registerResultPanelBusyEntry(action, targetIndex, bindings, stopController)
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
-    if (actionTransformsSource(action) && handle) {
-      await placeTransformedDuplicateAtTargetIndex(
-        action,
-        parameterValues,
-        sourceContent,
-        targetIndex,
-        bindings,
-        handle,
-        stopController?.signal,
-      );
-    } else {
-      await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
-    }
-    writeAppliedRenderingStateInheritingFromSource(
-      action,
-      parameterValues,
-      sourceIndex,
-      targetIndex,
-      bindings,
-    );
-    clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
-    placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceIndex, targetIndex, bindings);
-    selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
+    await placeDuplicateOutputAtReservedTarget(action, parameterValues, sourceContent, reservation, bindings, handle, stopController?.signal);
+    finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, reservation, bindings);
     reportApplySucceededWithToast(action, bindings);
   } catch (error) {
-    reportApplyEndedWithoutResult(action, sourceIndex, bindings, error);
+    reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
   } finally {
+    reservation.release();
     handle?.clear();
   }
+}
+
+async function placeDuplicateOutputAtReservedTarget(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  reservation: InFlightApplyRunReservation,
+  bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle | null,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  if (actionTransformsSource(action) && busyHandle) {
+    await placeTransformedDuplicateAtReservedTarget(
+      action,
+      parameterValues,
+      sourceContent,
+      reservation,
+      bindings,
+      busyHandle,
+      abortSignal,
+    );
+    return;
+  }
+  throwStoppedWhenApplyRunIsCancelled(reservation);
+  await placeClonedSourceContentAtIndex(sourceContent, reservation.currentTargetIndex(), bindings.setImagesByIndex);
+}
+
+function finishDuplicateApplyBookkeeping(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  reservation: InFlightApplyRunReservation,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const sourceIndex = reservation.currentSourceIndex();
+  const targetIndex = reservation.currentTargetIndex();
+  writeAppliedRenderingStateInheritingFromSource(action, parameterValues, sourceIndex, targetIndex, bindings);
+  clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
+  placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, targetIndex, bindings);
+  selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
 }
 
 function selectResultPanelHoldingTheDuplicateOutput(
@@ -513,11 +595,11 @@ function clearConsumedSourceStateAfterDuplicateApply(
   );
 }
 
-async function placeTransformedDuplicateAtTargetIndex(
+async function placeTransformedDuplicateAtReservedTarget(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
-  targetIndex: number,
+  reservation: InFlightApplyRunReservation,
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
   abortSignal?: AbortSignal,
@@ -529,8 +611,10 @@ async function placeTransformedDuplicateAtTargetIndex(
     busyHandle,
     abortSignal,
   );
+  throwStoppedWhenApplyRunIsCancelled(reservation);
+  const writeIndex = reservation.currentTargetIndex();
   bindings.setImagesByIndex((previous) =>
-    writeViewportContentAtIndex(previous, targetIndex, transformedContent),
+    writeViewportContentAtIndex(previous, writeIndex, transformedContent),
   );
 }
 

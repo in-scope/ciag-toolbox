@@ -144,7 +144,9 @@ export function Viewport(props: ViewportProps): JSX.Element {
         channelViewEnabled={isChannelViewActive}
         onToggleChannelView={props.onToggleViewChannelsSeparately}
         onClose={props.onClose ?? null}
-        showCloseButton={imageSource !== null && Boolean(props.onClose)}
+        // CT-269: onClose is only provided for closable panels (content, or an
+        // empty cell reserved by an in-flight apply, whose close cancels it).
+        showCloseButton={Boolean(props.onClose)}
       />
       <div ref={readoutContainerRef} className="relative min-h-0 flex-1">
         <canvas

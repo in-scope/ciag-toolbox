@@ -41,6 +41,16 @@ describe("findLowestIndexEmptyViewport", () => {
   it("returns null when cellCount is zero", () => {
     expect(findLowestIndexEmptyViewport(new Map(), 0)).toBeNull();
   });
+
+  it("skips excluded indexes even when their cells are empty (CT-269)", () => {
+    const occupied = new Map([[0, "a"]]);
+    expect(findLowestIndexEmptyViewport(occupied, 4, new Set([1]))).toBe(2);
+  });
+
+  it("returns null when every empty cell is excluded", () => {
+    const occupied = new Map([[0, "a"]]);
+    expect(findLowestIndexEmptyViewport(occupied, 2, new Set([1]))).toBeNull();
+  });
 });
 
 describe("listOccupiedViewportEntries", () => {

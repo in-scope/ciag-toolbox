@@ -1,7 +1,9 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 export interface ViewportClosingApi {
-  hasContent: (index: number) => boolean;
+  // CT-269: closable = holds an image OR is the reserved (still empty) target
+  // of an in-flight apply, whose close cancels that run.
+  canClose: (index: number) => boolean;
   closeViewport: (index: number) => void;
 }
 

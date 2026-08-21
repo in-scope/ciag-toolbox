@@ -218,7 +218,7 @@ function useViewportCellInteractionSettings(
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
   const handleContextMenuClick = (): void => selectViewportFromContextMenuClick(cellIndex);
-  const handleClose = closing.hasContent(cellIndex)
+  const handleClose = closing.canClose(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
   const handleCommitInspectionRoi = useCallback(

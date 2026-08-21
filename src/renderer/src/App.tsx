@@ -58,6 +58,11 @@ import {
   type ApplyActionFlowBindings,
 } from "@/lib/actions/apply-action-flow";
 import {
+  createInFlightApplyRunStore,
+  type InFlightApplyRunStore,
+} from "@/lib/actions/in-flight-apply-run-store";
+import { formatCloseRefusedWhileOperationReadsPanel } from "@/lib/actions/in-flight-apply-runs";
+import {
   BAND_SUBSET_ACTION,
   GEOMETRIC_TRANSFORM_PARAMETER_ID,
   ROTATE_ACTION,
@@ -330,6 +335,7 @@ function useThemeClassSyncedWithMainProcess(): void {
 
 function ApplicationShell(): JSX.Element {
   const busyRegistrar = useBusyEntryRegistrar();
+  const inFlightApplyRuns = useInFlightApplyRunStore();
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
@@ -424,6 +430,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     replaceSelection,
     busyRegistrar,
+    inFlightApplyRuns,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
   const loadedReferenceCandidates = useLoadedReferenceCandidates(imagesByIndex);
@@ -492,6 +499,7 @@ function ApplicationShell(): JSX.Element {
     setPendingDuplicate,
     getRenderingState: renderingApi.getRenderingState,
     setRenderingState: renderingApi.setRenderingState,
+    inFlightApplyRuns,
   });
   const closingApi = useViewportClosingApi({
     gridLayout,
@@ -506,6 +514,7 @@ function ApplicationShell(): JSX.Element {
     pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
     compactLinkGroupsAfterRemovingIndex: panelLink.compactAfterRemovingIndex,
     replaceSelection,
+    inFlightApplyRuns,
   });
   const reimportApi = useViewportReimportApi({
     imagesByIndexRef,
@@ -1411,6 +1420,7 @@ interface ViewportDuplicationApiBindings {
   setPendingDuplicate: SetPendingDuplicate;
   getRenderingState: ViewportRenderingApi["getRenderingState"];
   setRenderingState: ViewportRenderingApi["setRenderingState"];
+  inFlightApplyRuns: InFlightApplyRunStore;
 }
 
 function useViewportDuplicationApi(
@@ -1425,6 +1435,7 @@ function useViewportDuplicationApi(
     setPendingDuplicate,
     getRenderingState,
     setRenderingState,
+    inFlightApplyRuns,
   } = bindings;
   return useMemo(
     () =>
@@ -1437,6 +1448,7 @@ function useViewportDuplicationApi(
         setPendingDuplicate,
         getRenderingState,
         setRenderingState,
+        inFlightApplyRuns,
       }),
     [
       gridLayout,
@@ -1447,6 +1459,7 @@ function useViewportDuplicationApi(
       setPendingDuplicate,
       getRenderingState,
       setRenderingState,
+      inFlightApplyRuns,
     ],
   );
 }
@@ -1494,7 +1507,11 @@ function placeDuplicateInExistingEmptyViewport(
   sourceContent: ViewportCellContent,
   sourceIndex: number,
 ): boolean {
-  const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
+  const emptyIndex = findLowestIndexEmptyViewport(
+    bindings.imagesByIndex,
+    bindings.cellCount,
+    bindings.inFlightApplyRuns.listReservedResultTargetIndexes(),
+  );
   if (emptyIndex === null) return false;
   void applyDuplicateToTargetIndex(sourceContent, sourceIndex, emptyIndex, bindings);
   return true;
@@ -1598,6 +1615,7 @@ interface ViewportClosingApiBindings {
   pruneLinkGroupsToCellCount: (cellCount: number) => void;
   compactLinkGroupsAfterRemovingIndex: (removedIndex: number) => void;
   replaceSelection: (indices: ReadonlySet<number>) => void;
+  inFlightApplyRuns: InFlightApplyRunStore;
 }
 
 function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
@@ -1614,6 +1632,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
     pruneLinkGroupsToCellCount,
     compactLinkGroupsAfterRemovingIndex,
     replaceSelection,
+    inFlightApplyRuns,
   } = bindings;
   return useMemo(
     () =>
@@ -1630,6 +1649,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
         pruneLinkGroupsToCellCount,
         compactLinkGroupsAfterRemovingIndex,
         replaceSelection,
+        inFlightApplyRuns,
       }),
     [
       gridLayout,
@@ -1644,6 +1664,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
       pruneLinkGroupsToCellCount,
       compactLinkGroupsAfterRemovingIndex,
       replaceSelection,
+      inFlightApplyRuns,
     ],
   );
 }
@@ -1732,9 +1753,38 @@ async function replaceViewportSourceWithReimportedFile(
 
 function buildViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
   return {
-    hasContent: (index) => bindings.imagesByIndex.has(index),
-    closeViewport: (index) => closeViewportAndCompactRemainingIndices(index, bindings),
+    canClose: (index) =>
+      bindings.imagesByIndex.has(index) ||
+      bindings.inFlightApplyRuns.hasApplyRunReservingTargetIndex(index),
+    closeViewport: (index) => closeViewportRespectingInFlightApplies(index, bindings),
   };
+}
+
+// CT-269: closing interacts with in-flight applies in two ways. A panel some
+// running operation READS is refused (closing it would pull the cube out from
+// under the transform). A panel reserved as a running operation's TARGET
+// cancels that operation instead: the run's stop controller aborts it at the
+// next chunk boundary and the cancellation mark discards a result that
+// completes anyway, so the closed panel can never reappear.
+function closeViewportRespectingInFlightApplies(
+  index: number,
+  bindings: ViewportClosingApiBindings,
+): void {
+  if (reportCloseRefusedWhileOperationReadsPanel(index, bindings)) return;
+  bindings.inFlightApplyRuns.cancelAndStopApplyRunsTargetingIndex(index);
+  closeViewportAndCompactRemainingIndices(index, bindings);
+}
+
+function reportCloseRefusedWhileOperationReadsPanel(
+  index: number,
+  bindings: ViewportClosingApiBindings,
+): boolean {
+  const operationLabel = bindings.inFlightApplyRuns.findRunningOperationLabelReadingSourceIndex(index);
+  if (operationLabel === null) return false;
+  notifyError(
+    formatCloseRefusedWhileOperationReadsPanel(getViewportNumberFromIndex(index), operationLabel),
+  );
+  return true;
 }
 
 function closeViewportAndCompactRemainingIndices(
@@ -1748,6 +1798,7 @@ function closeViewportAndCompactRemainingIndices(
   bindings.compactRenderingStateAfterRemovingIndex(index);
   bindings.compactSelectionAfterRemovingIndex(index);
   bindings.compactLinkGroupsAfterRemovingIndex(index);
+  bindings.inFlightApplyRuns.shiftApplyRunIndexesAfterViewportRemoved(index);
   collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
   toast.info(formatClosedSingleViewportMessage(index, content.fileName));
 }
@@ -1770,8 +1821,16 @@ function captureCloseContextBeforeMutation(
       bindings.selectedIndices,
       closedIndex,
     ),
-    populatedCellCountBeforeClose: bindings.imagesByIndex.size,
+    // CT-269: empty cells reserved by in-flight applies count as populated so
+    // the post-close layout collapse can never prune a reserved result panel.
+    populatedCellCountBeforeClose:
+      bindings.imagesByIndex.size + countReservedEmptyTargetCells(bindings),
   };
+}
+
+function countReservedEmptyTargetCells(bindings: ViewportClosingApiBindings): number {
+  const reservedTargets = bindings.inFlightApplyRuns.listReservedResultTargetIndexes();
+  return [...reservedTargets].filter((index) => !bindings.imagesByIndex.has(index)).length;
 }
 
 function isClosedIndexTheOnlySelectedViewport(
@@ -1929,6 +1988,7 @@ interface ApplyActionFlowBindingsInputs {
   renderingApi: ViewportRenderingApi;
   replaceSelection: ViewportSelectionState["replaceSelection"];
   busyRegistrar: BusyEntryRegistrar;
+  inFlightApplyRuns: InFlightApplyRunStore;
 }
 
 function buildApplyActionFlowBindings(
@@ -1945,7 +2005,19 @@ function buildApplyActionFlowBindings(
     setRenderingState: inputs.renderingApi.setRenderingState,
     selectViewportIndex: (index) => inputs.replaceSelection(new Set([index])),
     busyRegistrar: inputs.busyRegistrar,
+    inFlightApplyRuns: inputs.inFlightApplyRuns,
   };
+}
+
+// CT-269: one in-flight apply run store per app session. Mutations bump a
+// version state so close affordances (a reserved target panel's close button)
+// re-render while queries stay synchronous for event handlers.
+function useInFlightApplyRunStore(): InFlightApplyRunStore {
+  const [, bumpRunsVersion] = useState(0);
+  return useMemo(
+    () => createInFlightApplyRunStore(() => bumpRunsVersion((version) => version + 1)),
+    [],
+  );
 }
 
 function deriveSingleSelectedSource(
