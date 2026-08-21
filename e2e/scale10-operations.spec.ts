@@ -376,9 +376,9 @@ test("brightness & contrast at defaults is the identity", async () => {
 
 test("clip by value clamps the whole stack to the absolute bounds", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Clip by value (Normalize clip-absolute, full stack)", async () => {
+  await recordSweepVerdict("operation: Clip by Value (full stack)", async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("Normalize", configureClipByValue);
+    const applied = await openConfigureAndApplyFromSourcePanel("Clip by Value", configureClipByValue);
     const band1 = await verifyResultBandAgainstOracle(
       1,
       (x, y) => clampToRange(scale10Value(0, x, y), CLIP_LOW, CLIP_HIGH),
@@ -390,10 +390,9 @@ test("clip by value clamps the whole stack to the absolute bounds", async () => 
 });
 
 async function configureClipByValue(): Promise<void> {
-  await setOperationEnumParameter(launched.window, "Normalize", "clip-absolute");
-  await selectFullStackScope(launched.window, "Normalize");
-  await setOperationNumberParameter(launched.window, "Normalize", "Clip low", CLIP_LOW);
-  await setOperationNumberParameter(launched.window, "Normalize", "Clip high", CLIP_HIGH);
+  await selectFullStackScope(launched.window, "Clip by Value");
+  await setOperationNumberParameter(launched.window, "Clip by Value", "Clip low", CLIP_LOW);
+  await setOperationNumberParameter(launched.window, "Clip by Value", "Clip high", CLIP_HIGH);
 }
 
 test("normalize min-max scales the whole stack by one cube-wide range", async () => {

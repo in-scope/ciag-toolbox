@@ -13,20 +13,19 @@ import {
   openOperation,
   selectActiveBandNumber,
   selectFullStackScope,
-  setOperationEnumParameter,
   setOperationNumberParameter,
 } from "./support/page-objects";
 
-// CT-194: the Normalize op's "Clip by value" method clips each value to an
-// absolute [lo, hi] range instead of rescaling to [0,1]. It is data-changing but TYPE- and
+// CT-194 / CT-281: Clip by Value (formerly the Normalize op's clip-absolute
+// method, now its own standalone operation) clips each value to an absolute
+// [lo, hi] range instead of rescaling to [0,1]. It is data-changing but TYPE- and
 // in-range-PRESERVING (only the known bad highs/lows move to the bounds), so the output stays
 // uint16. multiband-12bit.tif documents band 2 (0,0)=800 / (3,3)=950 and band 3 (0,0)=1600 /
 // (3,3)=1750. A full-stack clip to [850, 1700] therefore: clamps the band-2 low (800->850),
 // leaves the band-2 (3,3)=950 in-range value untouched, and clamps the band-3 high (1750->1700).
 
 const PANEL = 1;
-const NORMALIZE = "Normalize";
-const CLIP_BY_VALUE = "clip-absolute";
+const CLIP_BY_VALUE = "Clip by Value";
 const CLIP_LOW = "Clip low";
 const CLIP_HIGH = "Clip high";
 const UINT16 = "uint16";
@@ -48,7 +47,7 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("Clip by value clamps out-of-range pixels to the bounds and leaves in-range pixels unchanged", async () => {
+test("Clip by Value clamps out-of-range pixels to the bounds and leaves in-range pixels unchanged", async () => {
   await applyFullStackClip(CLIP_LOW_VALUE, CLIP_HIGH_VALUE);
 
   await expectMetadataDataTypeAndDimensions(launched.window, {
@@ -61,32 +60,30 @@ test("Clip by value clamps out-of-range pixels to the bounds and leaves in-range
   await expectActiveBandReadout(3, BOTTOM_RIGHT, CLIP_HIGH_VALUE); // 1750 clamps down to the high bound
 });
 
-test("Clip by value records the method and the lo/hi bounds in History", async () => {
+test("Clip by Value records the lo/hi bounds in History", async () => {
   await applyFullStackClip(CLIP_LOW_VALUE, CLIP_HIGH_VALUE);
   await expectHistoryToRecordOperation(launched.window, {
-    actionLabel: NORMALIZE,
+    actionLabel: CLIP_BY_VALUE,
     detailSubstrings: [`Clip to [${CLIP_LOW_VALUE}, ${CLIP_HIGH_VALUE}]`, "full stack"],
   });
 });
 
-test("Clip by value disables Apply until the high bound exceeds the low bound", async () => {
-  await openOperation(launched.window, NORMALIZE);
-  await setOperationEnumParameter(launched.window, NORMALIZE, CLIP_BY_VALUE);
-  await setOperationNumberParameter(launched.window, NORMALIZE, CLIP_LOW, 900);
-  await setOperationNumberParameter(launched.window, NORMALIZE, CLIP_HIGH, 800);
-  expect(await isApplyEnabled(launched.window, NORMALIZE)).toBe(false);
+test("Clip by Value disables Apply until the high bound exceeds the low bound", async () => {
+  await openOperation(launched.window, CLIP_BY_VALUE);
+  await setOperationNumberParameter(launched.window, CLIP_BY_VALUE, CLIP_LOW, 900);
+  await setOperationNumberParameter(launched.window, CLIP_BY_VALUE, CLIP_HIGH, 800);
+  expect(await isApplyEnabled(launched.window, CLIP_BY_VALUE)).toBe(false);
 
-  await setOperationNumberParameter(launched.window, NORMALIZE, CLIP_HIGH, 1000);
-  expect(await isApplyEnabled(launched.window, NORMALIZE)).toBe(true);
+  await setOperationNumberParameter(launched.window, CLIP_BY_VALUE, CLIP_HIGH, 1000);
+  expect(await isApplyEnabled(launched.window, CLIP_BY_VALUE)).toBe(true);
 });
 
 async function applyFullStackClip(lo: number, hi: number): Promise<void> {
-  await openOperation(launched.window, NORMALIZE);
-  await setOperationEnumParameter(launched.window, NORMALIZE, CLIP_BY_VALUE);
-  await selectFullStackScope(launched.window, NORMALIZE);
-  await setOperationNumberParameter(launched.window, NORMALIZE, CLIP_LOW, lo);
-  await setOperationNumberParameter(launched.window, NORMALIZE, CLIP_HIGH, hi);
-  await applyOperationInPlace(launched.window, NORMALIZE);
+  await openOperation(launched.window, CLIP_BY_VALUE);
+  await selectFullStackScope(launched.window, CLIP_BY_VALUE);
+  await setOperationNumberParameter(launched.window, CLIP_BY_VALUE, CLIP_LOW, lo);
+  await setOperationNumberParameter(launched.window, CLIP_BY_VALUE, CLIP_HIGH, hi);
+  await applyOperationInPlace(launched.window, CLIP_BY_VALUE);
 }
 
 async function expectActiveBandReadout(

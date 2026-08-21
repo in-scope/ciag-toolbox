@@ -4,14 +4,7 @@ import {
   makeFloatRasterReusingUnchangedSourceBands,
   makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
   mapBandPixelsToFloat32,
-  RasterMemoryAllocationError,
 } from "@/lib/image/make-float-raster";
-import {
-  computePercentileValueRange,
-  computePercentileValueRangeOfOwnedArray,
-  type PercentileBounds,
-  type ValueRange,
-} from "@/lib/image/percentile-value-range";
 import { isFloatTypedArray } from "@/lib/image/data-type-value-range";
 import {
   mapBandValuesPreservingType,
@@ -27,14 +20,13 @@ import type { UnitProgressCallback } from "@/lib/image/unit-progress";
 // float32 [0, 1] raster (CT-077). Constant bands (max === min) map to 0 with no
 // NaN. Non-selected bands in a band-wise pass are copied through unchanged.
 //
-// CT-107: the robust percentile method scales by low/high percentiles instead of
-// absolute min/max so sparse outliers do not flatten the image; values outside
-// the percentile range clip to 0/1. Plain min/max is unchanged (no clip).
-//
-// CT-194: the clip-by-value method clamps each value to an absolute [lo, hi]
-// range instead of rescaling to [0, 1]. It preserves the source data type and
-// the in-range values (only the known bad highs and lows move to the bounds),
-// so its output is NOT a float32 [0, 1] raster like the two scaling methods.
+// CT-194 / CT-281: the clip-absolute method clamps each value to an absolute
+// [lo, hi] range instead of rescaling to [0, 1]. It preserves the source data
+// type and the in-range values (only the known bad highs and lows move to the
+// bounds), so its output is NOT a float32 [0, 1] raster like min-max. Since
+// CT-281 it is driven by the standalone Clip by Value operation; the Normalize
+// panel is min-max only. (The former robust-percentile method was removed with
+// CT-281: percentile clipping lives only in the Percentile Clip operation.)
 
 export type NormalizeScopeSelection =
   | { readonly scope: "full-cube" }
@@ -47,7 +39,6 @@ export interface AbsoluteClipBounds {
 
 export type NormalizeRangeMethod =
   | { readonly kind: "min-max" }
-  | { readonly kind: "percentile"; readonly bounds: PercentileBounds }
   | { readonly kind: "clip-absolute"; readonly bounds: AbsoluteClipBounds };
 
 export const MIN_MAX_NORMALIZE_METHOD: NormalizeRangeMethod = { kind: "min-max" };
@@ -58,8 +49,8 @@ export function applyNormalizeToRaster(
   method: NormalizeRangeMethod = MIN_MAX_NORMALIZE_METHOD,
 ): RasterImage {
   if (method.kind === "clip-absolute") return clipRasterToAbsoluteBounds(raster, selection, method.bounds);
-  if (selection.scope === "full-cube") return normalizeWholeCubeToUnitRange(raster, method);
-  return normalizeSelectedBandsIndependentlyToUnitRange(raster, selection.bandIndexes, method);
+  if (selection.scope === "full-cube") return normalizeWholeCubeToUnitRange(raster);
+  return normalizeSelectedBandsIndependentlyToUnitRange(raster, selection.bandIndexes);
 }
 
 // CT-221: the async twin of applyNormalizeToRaster. Identical per-band math, one
@@ -80,22 +71,20 @@ export async function applyNormalizeToRasterReportingProgress(
       abortSignal,
     );
   }
-  return normalizeRasterToUnitRangeReportingProgress(raster, selection, method, onProgress, abortSignal);
+  return normalizeRasterToUnitRangeReportingProgress(raster, selection, onProgress, abortSignal);
 }
 
 async function normalizeRasterToUnitRangeReportingProgress(
   raster: RasterImage,
   selection: NormalizeScopeSelection,
-  method: NormalizeRangeMethod,
   onProgress?: UnitProgressCallback,
   abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
-  const shouldClip = shouldClipScaledValuesToUnitRange(method);
   if (selection.scope === "full-cube") {
-    const cubeRange = computeCubeWideRangeForMethod(raster, method);
+    const cubeRange = computeCubeWideValueRange(raster);
     return makeFloatRasterFromBandComputationReportingProgress(
       raster,
-      (bandPixels) => mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange, shouldClip)),
+      (bandPixels) => mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange)),
       onProgress,
       abortSignal,
     );
@@ -103,7 +92,7 @@ async function normalizeRasterToUnitRangeReportingProgress(
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
     raster,
     new Set(selection.bandIndexes),
-    (bandPixels) => normalizeSingleBandToUnitRange(bandPixels, method),
+    normalizeSingleBandToUnitRange,
     onProgress,
     abortSignal,
   );
@@ -156,87 +145,38 @@ export function clampValueToAbsoluteBounds(value: number, bounds: AbsoluteClipBo
   return value;
 }
 
-function normalizeWholeCubeToUnitRange(raster: RasterImage, method: NormalizeRangeMethod): RasterImage {
-  const cubeRange = computeCubeWideRangeForMethod(raster, method);
-  const shouldClip = shouldClipScaledValuesToUnitRange(method);
+function normalizeWholeCubeToUnitRange(raster: RasterImage): RasterImage {
+  const cubeRange = computeCubeWideValueRange(raster);
   return makeFloatRasterFromBandComputation(raster, (bandPixels) =>
-    mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange, shouldClip)),
+    mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, cubeRange)),
   );
 }
 
 function normalizeSelectedBandsIndependentlyToUnitRange(
   raster: RasterImage,
   bandIndexes: ReadonlyArray<number>,
-  method: NormalizeRangeMethod,
 ): RasterImage {
-  return makeFloatRasterReusingUnchangedSourceBands(raster, new Set(bandIndexes), (bandPixels) =>
-    normalizeSingleBandToUnitRange(bandPixels, method),
+  return makeFloatRasterReusingUnchangedSourceBands(
+    raster,
+    new Set(bandIndexes),
+    normalizeSingleBandToUnitRange,
   );
 }
 
-function normalizeSingleBandToUnitRange(
-  bandPixels: RasterTypedArray,
-  method: NormalizeRangeMethod,
-): Float32Array {
-  const bandRange = computeBandRangeForMethod(bandPixels, method);
-  const shouldClip = shouldClipScaledValuesToUnitRange(method);
-  return mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, bandRange, shouldClip));
+function normalizeSingleBandToUnitRange(bandPixels: RasterTypedArray): Float32Array {
+  const bandRange = computeValueRangeOverPixels(bandPixels);
+  return mapBandPixelsToFloat32(bandPixels, (value) => scaleValueToUnitRange(value, bandRange));
 }
 
-function shouldClipScaledValuesToUnitRange(method: NormalizeRangeMethod): boolean {
-  return method.kind === "percentile";
+interface ValueRange {
+  readonly min: number;
+  readonly max: number;
 }
 
-function computeBandRangeForMethod(
-  bandPixels: RasterTypedArray,
-  method: NormalizeRangeMethod,
-): ValueRange {
-  if (method.kind === "percentile") return computePercentileValueRange(bandPixels, method.bounds);
-  return computeValueRangeOverPixels(bandPixels);
-}
-
-function computeCubeWideRangeForMethod(raster: RasterImage, method: NormalizeRangeMethod): ValueRange {
-  if (method.kind === "percentile") {
-    return computePercentileValueRangeOfOwnedArray(gatherAllCubeValues(raster), method.bounds);
-  }
-  return computeCubeWideValueRange(raster);
-}
-
-function gatherAllCubeValues(raster: RasterImage): Float64Array {
-  const all = allocateFloat64ArrayOrThrow(countCubePixels(raster));
-  let offset = 0;
-  for (const bandPixels of raster.bandPixels) {
-    all.set(bandPixels as never, offset);
-    offset += bandPixels.length;
-  }
-  return all;
-}
-
-function countCubePixels(raster: RasterImage): number {
-  return raster.bandPixels.reduce((total, bandPixels) => total + bandPixels.length, 0);
-}
-
-function allocateFloat64ArrayOrThrow(length: number): Float64Array {
-  try {
-    return new Float64Array(length);
-  } catch {
-    const megabytes = Math.ceil((length * Float64Array.BYTES_PER_ELEMENT) / (1024 * 1024));
-    throw new RasterMemoryAllocationError(
-      `Not enough memory to allocate ${megabytes} MB for a percentile clip full-stack normalize. ` +
-        `Free memory or normalize band-wise and try again.`,
-    );
-  }
-}
-
-function scaleValueToUnitRange(value: number, range: ValueRange, shouldClipToUnit: boolean): number {
+function scaleValueToUnitRange(value: number, range: ValueRange): number {
   const span = range.max - range.min;
   if (span === 0) return 0;
-  const scaled = (value - range.min) / span;
-  return shouldClipToUnit ? clampToUnitInterval(scaled) : scaled;
-}
-
-function clampToUnitInterval(value: number): number {
-  return Math.min(1, Math.max(0, value));
+  return (value - range.min) / span;
 }
 
 function computeCubeWideValueRange(raster: RasterImage): ValueRange {

@@ -1,7 +1,6 @@
 import { COMPONENT_COUNT_PARAMETER_ID } from "@/lib/actions/dimension-reduction-action";
 import type { ParameterValuesById } from "@/lib/actions/parameter-schema";
 import {
-  normalizeMethodPreservesSourceDataType,
   readInvertApplyToAllBands,
   readRoiFromCropParameterValues,
   type RegisteredViewportAction,
@@ -16,12 +15,12 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 // from dimensions and parameters alone so the memory-budget gate can refuse an
 // over-budget apply BEFORE a result panel is reserved or any band allocates
 // (the CT-190 preflight pattern). Estimates are per operation family:
-// - float ops (normalize scaling, standardize, percentile clip, denoise,
+// - float ops (normalize, standardize, percentile clip, denoise,
 //   spatial filter, spectral derivative, flat-field, spectralon) always build a
 //   full float32 cube - band-wise scopes too, because unchanged integer bands
 //   are CONVERTED to float32, not carried by reference.
-// - type-preserving whole-cube ops (bit shift, rotate, reflect, clip-absolute
-//   normalize, whole-stack tone curve, all-bands invert) re-allocate the
+// - type-preserving whole-cube ops (bit shift, rotate, reflect, clip by
+//   value, whole-stack tone curve, all-bands invert) re-allocate the
 //   source's own byte count.
 // - band-targeted and aliasing ops cost one band or nothing; the default for
 //   unlisted actions is one float band, which never blocks.
@@ -48,6 +47,7 @@ const TYPE_PRESERVING_FULL_CUBE_ACTION_IDS: ReadonlySet<string> = new Set([
   "bit-shift",
   "rotate",
   "reflect",
+  "clip-by-value",
 ]);
 
 // CT-240: dimension reduction outputs keptCount float32 component bands, and
@@ -79,9 +79,6 @@ function estimateAllocationBytesForRasterApply(
   raster: RasterImage,
   parameterValues: ParameterValuesById,
 ): number {
-  if (action.id === "normalize-data" && normalizeMethodPreservesSourceDataType(parameterValues)) {
-    return sumRasterBandBytes(raster);
-  }
   if (DIMENSION_REDUCTION_ACTION_IDS.has(action.id)) {
     return estimateDimensionReductionAllocationBytes(action.id, raster, parameterValues);
   }

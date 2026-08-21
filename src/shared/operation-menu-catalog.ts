@@ -103,6 +103,8 @@ const CLIP_GROUP: OperationGroup = {
   commands: [
     buildMenuOnlyActionCommand("threshold", "Threshold"),
     buildMenuOnlyActionCommand("percentile-clip", "Percentile Clip"),
+    // CT-281: the former Normalize clip-absolute method as its own operation.
+    buildMenuOnlyActionCommand("clip-by-value", "Clip by Value"),
   ],
 };
 
