@@ -117,15 +117,16 @@ const COLOR_GROUP: OperationGroup = {
 const TRANSFORM_GROUP: OperationGroup = {
   key: "transform",
   commands: [
-    // Rotate and Reflect are separate operations: each opens its own panel (Rotate
+    // Rotate and Flip are separate operations: each opens its own panel (Rotate
     // also offers the rotate-180 that has no one-click button). The toolbar carries
     // only the narrow direct-apply variants to avoid redundant duplicate buttons.
+    // CT-279: user-facing "Reflect" is renamed "Flip"; internal ids stay "reflect".
     buildMenuOnlyActionCommand("rotate", "Rotate"),
-    buildMenuOnlyActionCommand("reflect", "Reflect"),
+    buildMenuOnlyActionCommand("reflect", "Flip"),
     buildToolbarOnlyTransformCommand("rotate-90-cw", "Rotate 90° clockwise"),
     buildToolbarOnlyTransformCommand("rotate-270-cw", "Rotate 90° counterclockwise"),
-    buildToolbarOnlyTransformCommand("flip-horizontal", "Reflect horizontally"),
-    buildToolbarOnlyTransformCommand("flip-vertical", "Reflect vertically"),
+    buildToolbarOnlyTransformCommand("flip-horizontal", "Flip horizontally"),
+    buildToolbarOnlyTransformCommand("flip-vertical", "Flip vertically"),
   ],
 };
 

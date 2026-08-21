@@ -122,6 +122,14 @@ async function expectFreshLaunchUsesStackWordingNotImage(app: LaunchedApp): Prom
   await expect(
     applicationToolbar(app.window).getByRole("button", { name: /Tone Curve/i }),
   ).toHaveCount(0);
+  // CT-279: "Flip" is the locked term; the old "Reflect" label must not surface
+  // anywhere in the toolbar (the quick buttons read "Flip horizontally/vertically").
+  await expect(
+    applicationToolbar(app.window).getByRole("button", { name: /Reflect/i }),
+  ).toHaveCount(0);
+  await expect(
+    applicationToolbar(app.window).getByRole("button", { name: "Flip horizontally" }),
+  ).toBeVisible();
 }
 
 async function expectLoadedPanelHeaderAvoidsImageNoun(app: LaunchedApp): Promise<void> {

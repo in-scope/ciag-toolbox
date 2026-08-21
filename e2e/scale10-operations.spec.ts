@@ -650,7 +650,7 @@ async function expectResultCanvasShowsContent(): Promise<void> {
 
 test("rotate 90 clockwise and reflect horizontal remap coordinates exactly", async () => {
   test.setTimeout(TWO_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Rotate (90 cw), then Reflect (horizontal)", async () => {
+  await recordSweepVerdict("operation: Rotate (90 cw), then Flip (horizontal)", async () => {
     await openOperationScaleStackViaGroupedFiles();
     const rotate = await openConfigureAndApplyFromSourcePanel("Rotate");
     const rotateOracle = await verifyResultBandAgainstOracle(1, rotatedNinetyClockwiseValue, exactly(), {
@@ -658,7 +658,7 @@ test("rotate 90 clockwise and reflect horizontal remap coordinates exactly", asy
       dimensions: ROTATED_DIMENSIONS,
     });
     await closeResultPanelAndLetMemorySettle();
-    const reflect = await openConfigureAndApplyFromSourcePanel("Reflect");
+    const reflect = await openConfigureAndApplyFromSourcePanel("Flip");
     const reflectOracle = await verifyResultBandAgainstOracle(
       1,
       (x, y) => scale10Value(0, SCALE10_DIMENSIONS.width - 1 - x, y),

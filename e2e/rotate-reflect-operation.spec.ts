@@ -24,9 +24,10 @@ import {
   type PixelDimensions,
 } from "./support/page-objects";
 
-// CT-146 / manual section 13 (CT-087): the Rotate and Reflect operations move whole pixels
-// without changing their values, applied to the ENTIRE cube at once so every band stays
-// spatially aligned. Rotate offers the three rotations, Reflect the two flips. A
+// CT-146 / manual section 13 (CT-087): the Rotate and Flip (CT-279 rename; internal id
+// "reflect") operations move whole pixels without changing their values, applied to the
+// ENTIRE cube at once so every band stays spatially aligned. Rotate offers the three
+// rotations, Flip the two flips. A
 // pixel at (x, y) in a W x H image lands at (H-1-y, x) under a 90 clockwise rotation, and 90
 // rotations swap the reported width and height. Four 90 rotations, or two identical flips,
 // restore the original exactly. An active inspection region must NOT survive at stale
@@ -72,7 +73,7 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("Rotate offers only the rotation choices and Reflect offers only the reflection choices", async () => {
+test("Rotate offers only the rotation choices and Flip offers only the reflection choices", async () => {
   await loadNonSquareStackIntoPanelOne();
   await openGeometricTransformFromMenu(launched.app, launched.window, "rotate-90-cw");
   expect(await readOfferedGeometricTransformLabels(launched.window, "rotate-90-cw")).toEqual(EXPECTED_ROTATION_LABELS);

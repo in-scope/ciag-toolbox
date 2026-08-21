@@ -1636,13 +1636,14 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
+// CT-279: the user-facing name is "Flip"; the internal id stays "reflect".
 export const REFLECT_ACTION: RegisteredViewportAction = {
   id: "reflect",
-  label: "Reflect",
+  label: "Flip",
   icon: FlipHorizontal2,
   parameters: [REFLECTION_PARAMETER_SCHEMA],
-  successMessage: "Reflection applied",
-  appliedLabel: "Reflect",
+  successMessage: "Flip applied",
+  appliedLabel: "Flip",
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,

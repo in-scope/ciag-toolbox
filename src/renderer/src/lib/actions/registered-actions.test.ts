@@ -850,7 +850,7 @@ describe("REFLECT_ACTION", () => {
 });
 
 describe("findGeometricTransformActionForChoice", () => {
-  it("routes rotations to Rotate and reflections to Reflect", () => {
+  it("routes rotations to Rotate and reflections to Flip", () => {
     expect(findGeometricTransformActionForChoice("rotate-90-cw")).toBe(ROTATE_ACTION);
     expect(findGeometricTransformActionForChoice("rotate-270-cw")).toBe(ROTATE_ACTION);
     expect(findGeometricTransformActionForChoice("flip-horizontal")).toBe(REFLECT_ACTION);

@@ -52,7 +52,7 @@ export async function openOperation(page: Page, operationLabel: string): Promise
   });
 }
 
-// Explicitly menu-driven launch (e.g. the broad "Rotate" and "Reflect", whose toolbar
+// Explicitly menu-driven launch (e.g. the broad "Rotate" and "Flip", whose toolbar
 // slots are occupied by narrow one-click variants).
 export async function openOperationFromMenu(
   app: ElectronApplication,

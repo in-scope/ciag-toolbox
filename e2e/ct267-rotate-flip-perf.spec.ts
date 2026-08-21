@@ -82,7 +82,7 @@ test("rotate 90 and flip horizontal each finish inside the Anna-benchmark bound 
   await verifyRotatedResultPixelAndBandCount();
   await closeGridPanel(launched.window, RESULT_PANEL);
 
-  const flip = await applyGeometricOperationFromSourcePanel("Reflect");
+  const flip = await applyGeometricOperationFromSourcePanel("Flip");
   await verifyFlippedResultPixel();
 
   console.log(
@@ -96,7 +96,7 @@ async function openAnnaBenchmarkIntoSourcePanel(): Promise<void> {
   await selectPanel(launched.window, SOURCE_PANEL);
 }
 
-// Rotate defaults to "Rotate 90 clockwise" and Reflect to "Flip horizontal"
+// Rotate defaults to "Rotate 90 clockwise" and Flip to "Flip horizontal"
 // (the first choice of each enum), so no configuration step is needed.
 async function applyGeometricOperationFromSourcePanel(operationLabel: string): Promise<TimedApply> {
   await selectPanel(launched.window, SOURCE_PANEL);

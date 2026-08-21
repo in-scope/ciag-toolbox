@@ -41,7 +41,7 @@ describe("operation menu structure", () => {
   it("puts geometry and color representation under Image", () => {
     expect(listMenuItemLabels(findMenuByLabel("Image"))).toEqual([
       "False-color Composite",
-      "Reflect",
+      "Flip",
       "RGB to Grayscale",
       "Rotate",
     ]);

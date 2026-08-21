@@ -33,8 +33,8 @@ const EXPECTED_TOOLBAR_BUTTON_LABELS = [
   "Crop to Region",
   "Rotate 90° clockwise",
   "Rotate 90° counterclockwise",
-  "Reflect horizontally",
-  "Reflect vertically",
+  "Flip horizontally",
+  "Flip vertically",
   "Contrast Curve",
   "Brightness & Contrast",
 ];
