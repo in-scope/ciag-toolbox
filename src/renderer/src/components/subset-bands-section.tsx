@@ -4,12 +4,19 @@ import { BandIndexBadge } from "@/components/band-index-badge";
 import { BandThumbnail } from "@/components/band-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { OpenInNewPanelSwitchRow } from "@/components/open-in-new-panel-switch-row";
 import {
   buildInitialKeptBandSetFromRemoved,
   listRemovedBandIndexesFromKeptSet,
   toggleBandIndexInKeptSet,
 } from "@/lib/image/kept-band-set";
+import { BAND_RANGE_SYNTAX_EXAMPLES } from "@/lib/image/parse-band-range";
+import {
+  SUBSET_BANDS_RANGE_FIELD_HINT,
+  deriveKeptBandSelectionFromTypedRangeText,
+  describeTypedRangeFieldErrorOrNull,
+} from "@/lib/image/subset-band-range-field";
 import {
   describeRasterBandDisplayIdentity,
   type RasterImage,
@@ -82,32 +89,95 @@ interface SubsetBandsSectionBodyProps {
 }
 
 function SubsetBandsSectionBody(props: SubsetBandsSectionBodyProps): JSX.Element {
-  const [keptBandIndexes, setKeptBandIndexes] = useState<ReadonlySet<number>>(() =>
-    buildInitialKeptBandSetFromRemoved(props.raster.bandCount, props.initialRemovedBandIndexes),
+  const selection = useKeptBandSelectionDrivenByTypedRange(
+    props.raster.bandCount,
+    props.initialRemovedBandIndexes,
   );
   const [openInNewViewport, setOpenInNewViewport] = useState(true);
   const rowItems = useMemo(() => buildBandRowItemsForRaster(props.raster), [props.raster]);
   const onApply = () =>
     props.onApply(
-      buildSubsetBandsApplyOptions(props.raster.bandCount, keptBandIndexes, openInNewViewport),
+      buildSubsetBandsApplyOptions(props.raster.bandCount, selection.keptBandIndexes, openInNewViewport),
     );
   return (
     <>
+      <SubsetBandsTypedRangeField
+        value={selection.typedRangeText}
+        error={describeTypedRangeFieldErrorOrNull(selection.typedRangeText, props.raster.bandCount)}
+        onChangeValue={selection.onChangeTypedRangeText}
+      />
       <SubsetBandsRowList
         raster={props.raster}
         rowItems={rowItems}
-        keptBandIndexes={keptBandIndexes}
+        keptBandIndexes={selection.keptBandIndexes}
         activeBandIndex={props.activeBandIndex}
-        onToggleKept={(bandIndex) => setKeptBandIndexes(toggleBandIndexInKeptSet(keptBandIndexes, bandIndex))}
+        onToggleKept={selection.onToggleKeptBand}
       />
       <SubsetBandsApplyControls
         openInNewViewport={openInNewViewport}
         onChangeOpenInNewViewport={setOpenInNewViewport}
-        disabledReason={describeApplyDisabledReasonForKeptSet(props.raster.bandCount, keptBandIndexes)}
+        disabledReason={describeApplyDisabledReasonForKeptSet(props.raster.bandCount, selection.keptBandIndexes)}
         onCancel={props.onCancel}
         onApply={onApply}
       />
     </>
+  );
+}
+
+interface KeptBandSelectionDrivenByTypedRange {
+  readonly keptBandIndexes: ReadonlySet<number>;
+  readonly typedRangeText: string;
+  readonly onChangeTypedRangeText: (nextText: string) => void;
+  readonly onToggleKeptBand: (bandIndex: number) => void;
+}
+
+// A valid typed expression REPLACES the checkbox selection; invalid or empty text
+// changes nothing. Checkbox toggles never rewrite the typed text (CT-283).
+function useKeptBandSelectionDrivenByTypedRange(
+  bandCount: number,
+  initialRemovedBandIndexes: ReadonlyArray<number>,
+): KeptBandSelectionDrivenByTypedRange {
+  const [keptBandIndexes, setKeptBandIndexes] = useState<ReadonlySet<number>>(() =>
+    buildInitialKeptBandSetFromRemoved(bandCount, initialRemovedBandIndexes),
+  );
+  const [typedRangeText, setTypedRangeText] = useState("");
+  const onChangeTypedRangeText = (nextText: string) => {
+    setTypedRangeText(nextText);
+    const outcome = deriveKeptBandSelectionFromTypedRangeText(nextText, bandCount);
+    if (outcome.kind === "selection") setKeptBandIndexes(outcome.keptBandIndexes);
+  };
+  const onToggleKeptBand = (bandIndex: number) =>
+    setKeptBandIndexes(toggleBandIndexInKeptSet(keptBandIndexes, bandIndex));
+  return { keptBandIndexes, typedRangeText, onChangeTypedRangeText, onToggleKeptBand };
+}
+
+interface SubsetBandsTypedRangeFieldProps {
+  readonly value: string;
+  readonly error: string | null;
+  readonly onChangeValue: (nextText: string) => void;
+}
+
+function SubsetBandsTypedRangeField(props: SubsetBandsTypedRangeFieldProps): JSX.Element {
+  const inputId = useId();
+  const hintId = `${inputId}-hint`;
+  return (
+    <div className="flex flex-col gap-1">
+      <Input
+        id={inputId}
+        type="text"
+        value={props.value}
+        placeholder={BAND_RANGE_SYNTAX_EXAMPLES}
+        aria-label="Bands to keep"
+        aria-describedby={hintId}
+        aria-invalid={props.error !== null}
+        onChange={(event) => props.onChangeValue(event.target.value)}
+        className={cn("h-8", props.error !== null && "border-destructive focus-visible:ring-destructive")}
+      />
+      <span id={hintId} className="text-xs text-muted-foreground">
+        {SUBSET_BANDS_RANGE_FIELD_HINT}
+      </span>
+      {props.error !== null ? <span className="text-xs text-destructive">{props.error}</span> : null}
+    </div>
   );
 }
 

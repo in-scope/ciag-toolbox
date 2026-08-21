@@ -128,6 +128,8 @@ export {
   subsetBandsEditor,
   openSubsetBandsEditor,
   subsetBandsKeepCheckboxes,
+  subsetBandsTypedRangeField,
+  typeSubsetBandsRange,
   uncheckSubsetBandRow,
   setSubsetBandsOpenInNewPanel,
   applySubsetBands,

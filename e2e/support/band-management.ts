@@ -58,6 +58,16 @@ export async function openSubsetBandsEditor(page: Page): Promise<Locator> {
   return editor;
 }
 
+// CT-283: the typed index list above the checkbox list. A valid expression checks
+// exactly those bands; invalid text shows the parse error and changes no selection.
+export function subsetBandsTypedRangeField(page: Page): Locator {
+  return subsetBandsEditor(page).getByRole("textbox", { name: "Bands to keep" });
+}
+
+export async function typeSubsetBandsRange(page: Page, text: string): Promise<void> {
+  await subsetBandsTypedRangeField(page).fill(text);
+}
+
 export function subsetBandsKeepCheckboxes(page: Page): Locator {
   return subsetBandsEditor(page)
     .getByRole("list", { name: "Bands to keep" })
