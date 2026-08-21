@@ -48,11 +48,7 @@ import { openOperation, operationPanel, setOperationEnumParameter, setOperationN
 import { selectOperationRegionByDrag } from "./support/operation-region-picker";
 import { panelCanvas, selectPanel } from "./support/panels";
 import { runAsStoryboardStep } from "./support/storyboard-step";
-import {
-  clickThresholdOtsuAutoButton,
-  readThresholdBoundFieldValue,
-  setThresholdBoundField,
-} from "./support/threshold-editor";
+import { selectThresholdMethod, setThresholdBoundField } from "./support/threshold-editor";
 import { setToneCurveAnchorField } from "./support/tone-curve-editor";
 import {
   applyOperationWithBudget,
@@ -76,8 +72,6 @@ import {
   scale10Value,
   selectActiveBandNumberInPanel,
   skipUnlessScale10SweepIsEnabled,
-  startUiHeartbeat,
-  stopUiHeartbeatAndReadMaxGapMs,
 } from "./scale10.support";
 
 const SOURCE_PANEL = 1;
@@ -89,7 +83,6 @@ const PROBE_PIXEL = { x: 150, y: 250 };
 // acceptance bar and fail first.
 const ONE_APPLY_TEST_TIMEOUT_MS = 70 * 60_000;
 const TWO_APPLY_TEST_TIMEOUT_MS = 100 * 60_000;
-const OTSU_DERIVE_BUDGET_MS = 20 * 60_000;
 
 // Operation tests run on the first 45 bands (4.5 GB): at-scale evidence put a
 // live session's usable pool near 15.2 GB (texture staging, histograms, and
@@ -465,9 +458,16 @@ async function configureFlatMaxToneCurve(
   await setToneCurveAnchorField(launched.window, "New value", UINT16_MAX);
 }
 
-test("threshold manual bounds and the Otsu auto cutoff both binarize band 1", async () => {
+// CT-282: Otsu is a method run through the normal Apply (the Auto button is
+// gone), and the band-wise default derives each band's own cutoff, so the
+// result keeps all OPS_BAND_COUNT bands. Band 1's values 600..798 land in bins
+// 2 and 3 of the 256-bin uint16 container histogram (bin width 256), so its
+// derived cutoff is exactly 768.
+const SCALE10_OTSU_BAND1_LOWER_CUTOFF = 768;
+
+test("threshold manual bounds and the Otsu method both binarize band 1", async () => {
   test.setTimeout(TWO_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Threshold (manual, then Otsu auto)", async () => {
+  await recordSweepVerdict("operation: Threshold (manual, then Otsu method)", async () => {
     await openOperationScaleStackViaGroupedFiles();
     const manual = await openConfigureAndApplyFromSourcePanel("Threshold", () =>
       setThresholdBoundField(launched.window, "Lower", THRESHOLD_MANUAL_LOWER_BOUND),
@@ -478,56 +478,25 @@ test("threshold manual bounds and the Otsu auto cutoff both binarize band 1", as
       exactly(),
     );
     await closeResultPanelAndLetMemorySettle();
-    const otsu = await deriveOtsuBoundsAndApply();
+    const otsu = await openConfigureAndApplyFromSourcePanel("Threshold", () =>
+      selectThresholdMethod(launched.window, "Otsu threshold"),
+    );
     const otsuOracle = await verifyResultBandAgainstOracle(
       1,
-      (x, y) => thresholdedByBounds(scale10Value(0, x, y), otsu.lowerBound, otsu.upperBound),
+      (x, y) => thresholdedByBounds(scale10Value(0, x, y), SCALE10_OTSU_BAND1_LOWER_CUTOFF, UINT16_MAX),
       exactly(),
     );
     return {
       manualApplyMs: manual.applyMs,
-      otsuDeriveMs: otsu.deriveMs,
-      otsuApplyMs: otsu.applied.applyMs,
-      maxUiGapMs: Math.max(manual.maxUiGapMs, otsu.deriveMaxUiGapMs, otsu.applied.maxUiGapMs),
-      oracle: `manual ${manualOracle}; otsu [${otsu.lowerBound}, ${otsu.upperBound}] ${otsuOracle}`,
+      otsuApplyMs: otsu.applyMs,
+      maxUiGapMs: Math.max(manual.maxUiGapMs, otsu.maxUiGapMs),
+      oracle: `manual ${manualOracle}; otsu [${SCALE10_OTSU_BAND1_LOWER_CUTOFF}, ${UINT16_MAX}] ${otsuOracle}`,
     };
   });
 });
 
 function thresholdedByBounds(value: number, lowerBound: number, upperBound: number): number {
   return value >= lowerBound && value <= upperBound ? THRESHOLD_WHITE : THRESHOLD_BLACK;
-}
-
-interface OtsuApplyOutcome {
-  readonly lowerBound: number;
-  readonly upperBound: number;
-  readonly deriveMs: number;
-  readonly deriveMaxUiGapMs: number;
-  readonly applied: AppliedOperation;
-}
-
-async function deriveOtsuBoundsAndApply(): Promise<OtsuApplyOutcome> {
-  await selectPanel(launched.window, SOURCE_PANEL);
-  await openOperation(launched.window, "Threshold");
-  await startUiHeartbeat(launched.window);
-  const startedAt = Date.now();
-  await clickThresholdOtsuAutoButton(launched.window);
-  await waitForOtsuLowerBoundToPopulate();
-  const deriveMs = Date.now() - startedAt;
-  const deriveMaxUiGapMs = await stopUiHeartbeatAndReadMaxGapMs(launched.window);
-  expect(deriveMaxUiGapMs, "Otsu derive must stay under the UI-gap threshold").toBeLessThanOrEqual(SCALE10_MAX_UI_GAP_MS);
-  const lowerBound = Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Lower"));
-  const upperBound = Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Upper"));
-  const applied = await applyAssertingSweepBudgets("Threshold");
-  return { lowerBound, upperBound, deriveMs, deriveMaxUiGapMs, applied };
-}
-
-async function waitForOtsuLowerBoundToPopulate(): Promise<void> {
-  await expect
-    .poll(async () => Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Lower")), {
-      timeout: OTSU_DERIVE_BUDGET_MS,
-    })
-    .toBeGreaterThan(0);
 }
 
 test("percentile clip band-wise and full-stack clamp to the exact cut points", async () => {

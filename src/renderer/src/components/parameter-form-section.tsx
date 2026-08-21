@@ -110,6 +110,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
     return null;
   }
   if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
+  if (isHiddenSingleBandSourceRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <ParameterFieldInput
@@ -131,6 +132,15 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
 
 function isHiddenCubeScopeRow(schema: ParameterSchema, sourceBandCount: number | null): boolean {
   return schema.kind === "cube-scope" && !shouldShowCubeScopeControl(sourceBandCount);
+}
+
+// CT-282: a field flagged hiddenForSingleBandSource is a scope-style choice that
+// is redundant for one band, so it hides exactly like the cube-scope control.
+function isHiddenSingleBandSourceRow(
+  schema: ParameterSchema,
+  sourceBandCount: number | null,
+): boolean {
+  return Boolean(schema.hiddenForSingleBandSource) && !shouldShowCubeScopeControl(sourceBandCount);
 }
 
 function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {

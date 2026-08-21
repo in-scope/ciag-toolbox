@@ -348,14 +348,16 @@ export {
   THRESHOLD_OPERATION_LABEL,
   thresholdBoundHandle,
   thresholdBoundField,
-  thresholdAutoButton,
-  clickThresholdOtsuAutoButton,
+  thresholdMethodSelect,
+  selectThresholdMethod,
   expectThresholdEditorReady,
+  expectThresholdBoundsEditorAbsent,
   setThresholdBoundField,
   readThresholdBoundFieldValue,
   dragThresholdBoundHandleToFraction,
   releaseThresholdBoundDrag,
   type ThresholdBoundSide,
+  type ThresholdMethodLabel,
 } from "./threshold-editor";
 export {
   readImageTextureUploadCount,

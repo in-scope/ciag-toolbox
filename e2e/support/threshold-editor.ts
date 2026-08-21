@@ -32,16 +32,30 @@ export async function expectThresholdEditorReady(page: Page): Promise<void> {
   await expect(thresholdBoundHandle(page, "Upper")).toBeVisible();
 }
 
-// CT-201: the Auto button derives the Otsu cutoff(s) and sets the bounds.
-export function thresholdAutoButton(page: Page): Locator {
-  return operationPanel(page, THRESHOLD_OPERATION_LABEL).getByRole("button", {
-    name: "Auto",
-    exact: true,
-  });
+// CT-282: the bounds editor belongs to the Manual method; Otsu hides it.
+export async function expectThresholdBoundsEditorAbsent(page: Page): Promise<void> {
+  await expect(thresholdBoundHandle(page, "Lower")).toHaveCount(0);
+  await expect(thresholdBoundField(page, "Lower")).toHaveCount(0);
+  await expect(thresholdBoundField(page, "Upper")).toHaveCount(0);
 }
 
-export async function clickThresholdOtsuAutoButton(page: Page): Promise<void> {
-  await thresholdAutoButton(page).click();
+// CT-282: the method selector replaced the old Auto button. Otsu derives its
+// cutoff(s) inside the normal Apply run. A wrapping <label> does not resolve a
+// <select> reliably via getByLabel (the setOperationEnumParameter gotcha), so
+// the locator targets the select holding the Otsu option directly.
+export type ThresholdMethodLabel = "Manual" | "Otsu threshold";
+
+export function thresholdMethodSelect(page: Page): Locator {
+  return operationPanel(page, THRESHOLD_OPERATION_LABEL)
+    .locator("select")
+    .filter({ has: page.locator('option[value="otsu"]') });
+}
+
+export async function selectThresholdMethod(
+  page: Page,
+  methodLabel: ThresholdMethodLabel,
+): Promise<void> {
+  await thresholdMethodSelect(page).selectOption({ label: methodLabel });
 }
 
 export async function setThresholdBoundField(

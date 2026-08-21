@@ -75,7 +75,6 @@ describe("applyActionToSelectedViewports", () => {
       toneCurveChannelAnchors: {},
       toneCurveActiveChannel: "rgb",
       thresholdBounds: null,
-      thresholdOtsuCutoffs: null,
       bandWeights: null,
       bandSelection: null,
       cubeTransform: null,

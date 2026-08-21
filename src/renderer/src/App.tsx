@@ -84,6 +84,10 @@ import {
   clearOperationRegionOnViewportsLeavingSelection,
 } from "@/lib/actions/operation-region";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
+import {
+  OTSU_THRESHOLD_METHOD,
+  readThresholdMethodChoice,
+} from "@/lib/actions/threshold-action";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
 import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
 import { shouldEmbedCustomTransformEditorInOperationPanel } from "@/lib/actions/custom-transform-editor-placement";
@@ -551,6 +555,7 @@ function ApplicationShell(): JSX.Element {
                   activeAction,
                   singleSelectedSource,
                   imagesByIndex,
+                  activeActionParameterValues,
                 )}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
@@ -694,10 +699,16 @@ function buildActiveOperationEmbeddedEditorOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
   imagesByIndex: ImagesByIndexMap,
+  activeActionParameterValues: ParameterValuesById,
 ): ReactNode {
   return (
     buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveThresholdEditorElementOrNull(
+      activeAction,
+      singleSelectedSource,
+      imagesByIndex,
+      activeActionParameterValues,
+    ) ??
     buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveCustomTransformEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
@@ -726,10 +737,15 @@ function buildActiveThresholdEditorElementOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
   imagesByIndex: ImagesByIndexMap,
+  activeActionParameterValues: ParameterValuesById,
 ): ReactNode {
   if (!singleSelectedSource) return null;
   const content = imagesByIndex.get(singleSelectedSource.index);
-  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  const placement = {
+    activeActionId: activeAction?.id ?? null,
+    sourceKind: content?.source.kind ?? null,
+    activeParameterValues: activeActionParameterValues,
+  };
   if (!shouldEmbedThresholdEditorInOperationPanel(placement)) return null;
   if (content?.source.kind !== "raster") return null;
   return (
@@ -2156,18 +2172,23 @@ function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInp
 
 // CT-200: the manual threshold previews its binary result through the SAME
 // single-band display-LUT slot (only one tool panel is open at a time). It
-// tracks the VIEWED band only and stays display-only until Apply.
+// tracks the VIEWED band only and stays display-only until Apply. CT-282: the
+// preview belongs to the Manual method only - Otsu derives its cutoffs at
+// Apply, so there is nothing to preview while it is selected.
 function useThresholdPreviewLut(
   inputs: PublishActiveToolPreviewInputs,
   state: ViewportRenderingState | null,
 ): ReadonlyArray<number> | null {
   const raster = resolveActiveToolRasterOrNull(inputs, "threshold");
   const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
+  const isOtsuMethod =
+    readThresholdMethodChoice(inputs.parameterValues) === OTSU_THRESHOLD_METHOD;
   const bandIndex = state?.selectedBandIndex ?? 0;
   const bounds = state?.thresholdBounds ?? null;
   return useMemo(
-    () => (isComposite ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds)),
-    [isComposite, raster, bandIndex, bounds],
+    () =>
+      isComposite || isOtsuMethod ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds),
+    [isComposite, isOtsuMethod, raster, bandIndex, bounds],
   );
 }
 

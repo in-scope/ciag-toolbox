@@ -338,7 +338,6 @@ function buildRenderingStateWithHistory(
     toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
     toneCurveActiveChannel: "rgb",
     thresholdBounds: null,
-    thresholdOtsuCutoffs: null,
     bandWeights: null,
     bandSelection: null,
     cubeTransform: null,

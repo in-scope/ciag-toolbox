@@ -17,10 +17,12 @@ import {
   openImagesReplaceTargetPicker,
   openImagesReviewModal,
   openOperation,
+  operationPanel,
   panelCell,
   readReviewModalGroupModeOptionLabels,
   reviewModalNewStackButton,
   selectGridLayout,
+  thresholdMethodSelect,
   writeTemporaryWavelengthStackTiffFixtures,
 } from "./support/page-objects";
 
@@ -81,6 +83,22 @@ test("the frequency-domain tool is named Frequency Filters, never Spatial Filter
     await loadFixtureAsStack(app.window, multiBandTiff.fileName);
     await openOperation(app.window, "Frequency Filters");
     await expectNoUserFacingSpatialFilterWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-282: the Threshold panel offers Otsu through the Method selector; the old
+// "Auto" button (and its wording) must not surface anywhere in the panel.
+test("the Threshold panel offers a Method selector and no Auto button", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Threshold");
+    const panel = operationPanel(app.window, "Threshold");
+    await expect(thresholdMethodSelect(app.window)).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Auto", exact: true })).toHaveCount(0);
+    await expect(panel).not.toContainText(/\bAuto\b/);
   } finally {
     await closeToolboxApp(app);
   }
