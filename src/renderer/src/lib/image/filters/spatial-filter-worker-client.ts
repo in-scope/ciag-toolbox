@@ -93,7 +93,7 @@ function requestSingleBandFilter(
     const settleRemovingStopListener = wrapSettlersToRemoveStopListener(resolve, reject, abortSignal, rejectBecauseStopped);
     worker.onmessage = (event: MessageEvent<SpatialFilterWorkerResponse>) =>
       settleSingleBandFilter(event.data, request.requestId, settleRemovingStopListener.resolve, settleRemovingStopListener.reject, onWithinBandProgress);
-    worker.onerror = (event) => settleRemovingStopListener.reject(new Error(event.message || "Spatial filter worker failed"));
+    worker.onerror = (event) => settleRemovingStopListener.reject(new Error(event.message || "Frequency filter worker failed"));
     worker.postMessage(request);
   });
 }

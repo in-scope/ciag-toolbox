@@ -62,8 +62,8 @@ describe("operation menu structure", () => {
       "Bit Shift",
       "Denoise",
       "Flat-field Correction",
+      "Frequency Filters",
       "Normalize",
-      "Spatial Filter",
       "Spectralon Calibration",
       "Standardize",
     ]);

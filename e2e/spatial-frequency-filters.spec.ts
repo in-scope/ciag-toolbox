@@ -24,7 +24,7 @@ import {
 // (the readout falls far below 100), low-pass pulls the pixel toward the mean.
 // The pixel-readout oracle asserts the output DIFFERS from the source value.
 
-const SPATIAL_FILTER = "Spatial Filter";
+const FREQUENCY_FILTERS = "Frequency Filters";
 const RESULT_PANEL = 2;
 const FLOAT32 = "float32";
 const DIMENSIONS: PixelDimensions = { width: multiBandTiff.width, height: multiBandTiff.height };
@@ -43,40 +43,40 @@ test.afterEach(async () => {
 });
 
 test("low-pass (the default) opens a new float32 stack whose values moved toward the mean", async () => {
-  await openOperation(launched.window, SPATIAL_FILTER);
-  await applyOperation(launched.window, SPATIAL_FILTER);
+  await openOperation(launched.window, FREQUENCY_FILTERS);
+  await applyOperation(launched.window, FREQUENCY_FILTERS);
 
   await expectResultIsFullSizeFloat32Stack();
   await expectOriginPixelDiffersFromSource();
   await expectHistoryToRecordOperation(launched.window, {
-    actionLabel: SPATIAL_FILTER,
-    detailSubstrings: ["Spatial filter (low-pass, cutoff 0.15, full stack)"],
+    actionLabel: FREQUENCY_FILTERS,
+    detailSubstrings: ["Frequency filters (low-pass, cutoff 0.15, full stack)"],
   });
 });
 
 test("high-pass removes the flat background so the readout falls away from the source value", async () => {
-  await openOperation(launched.window, SPATIAL_FILTER);
-  await setOperationEnumParameter(launched.window, SPATIAL_FILTER, "highpass");
-  await applyOperation(launched.window, SPATIAL_FILTER);
+  await openOperation(launched.window, FREQUENCY_FILTERS);
+  await setOperationEnumParameter(launched.window, FREQUENCY_FILTERS, "highpass");
+  await applyOperation(launched.window, FREQUENCY_FILTERS);
 
   await expectResultIsFullSizeFloat32Stack();
   await expectOriginPixelDiffersFromSource();
   await expectHistoryToRecordOperation(launched.window, {
-    actionLabel: SPATIAL_FILTER,
-    detailSubstrings: ["Spatial filter (high-pass, cutoff 0.05, full stack)"],
+    actionLabel: FREQUENCY_FILTERS,
+    detailSubstrings: ["Frequency filters (high-pass, cutoff 0.05, full stack)"],
   });
 });
 
 test("bandpass keeps only mid frequencies and records both cutoffs in History", async () => {
-  await openOperation(launched.window, SPATIAL_FILTER);
-  await setOperationEnumParameter(launched.window, SPATIAL_FILTER, "bandpass");
-  await applyOperation(launched.window, SPATIAL_FILTER);
+  await openOperation(launched.window, FREQUENCY_FILTERS);
+  await setOperationEnumParameter(launched.window, FREQUENCY_FILTERS, "bandpass");
+  await applyOperation(launched.window, FREQUENCY_FILTERS);
 
   await expectResultIsFullSizeFloat32Stack();
   await expectOriginPixelDiffersFromSource();
   await expectHistoryToRecordOperation(launched.window, {
-    actionLabel: SPATIAL_FILTER,
-    detailSubstrings: ["Spatial filter (bandpass 0.05 - 0.25, full stack)"],
+    actionLabel: FREQUENCY_FILTERS,
+    detailSubstrings: ["Frequency filters (bandpass 0.05 - 0.25, full stack)"],
   });
 });
 

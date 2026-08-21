@@ -103,7 +103,7 @@ describe("SPATIAL_FILTER_ACTION", () => {
       makeTwoFlatBandStack(),
     );
     expect(SPATIAL_FILTER_ACTION.formatAppliedLabel!(prepared)).toBe(
-      "Spatial filter (high-pass, cutoff 0.05, band-wise: bands 1-2)",
+      "Frequency filters (high-pass, cutoff 0.05, band-wise: bands 1-2)",
     );
   });
 
@@ -117,7 +117,7 @@ describe("SPATIAL_FILTER_ACTION", () => {
     const hugeRaster = { ...makeTwoFlatBandStack(), width: 20000, height: 20000 };
     expect(() =>
       SPATIAL_FILTER_ACTION.assertCanApplyToSource!({ kind: "raster", raster: hugeRaster }, {}),
-    ).toThrow(/too large for the spatial filter/);
+    ).toThrow(/too large for the frequency filter/);
   });
 
   it("accepts a normal-size stack in the pre-flight check", () => {
@@ -131,7 +131,7 @@ describe("SPATIAL_FILTER_ACTION", () => {
 
   it("records mode, cutoff(s), and scope in the applied label for the audit trail", () => {
     expect(SPATIAL_FILTER_ACTION.formatAppliedLabel!({ mode: "lowpass", lowpassCutoff: 0.15 })).toBe(
-      "Spatial filter (low-pass, cutoff 0.15, full stack)",
+      "Frequency filters (low-pass, cutoff 0.15, full stack)",
     );
     expect(
       SPATIAL_FILTER_ACTION.formatAppliedLabel!({
@@ -140,14 +140,14 @@ describe("SPATIAL_FILTER_ACTION", () => {
         scope: "band-wise",
         bandRange: "1-2",
       }),
-    ).toBe("Spatial filter (high-pass, cutoff 0.05, band-wise: bands 1-2)");
+    ).toBe("Frequency filters (high-pass, cutoff 0.05, band-wise: bands 1-2)");
     expect(
       SPATIAL_FILTER_ACTION.formatAppliedLabel!({
         mode: "bandpass",
         bandpassLowCutoff: 0.05,
         bandpassHighCutoff: 0.25,
       }),
-    ).toBe("Spatial filter (bandpass 0.05 - 0.25, full stack)");
+    ).toBe("Frequency filters (bandpass 0.05 - 0.25, full stack)");
   });
 });
 

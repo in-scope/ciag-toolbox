@@ -148,10 +148,12 @@ const DATA_GROUP: OperationGroup = {
 };
 
 // Neighborhood filters (CT-200..CT-205 landed here).
+// CT-280: user-facing "Spatial Filter" is renamed "Frequency Filters"; the
+// internal id stays "spatial-filter".
 const FILTERS_GROUP: OperationGroup = {
   key: "filters",
   commands: [
-    buildMenuOnlyActionCommand("spatial-filter", "Spatial Filter"),
+    buildMenuOnlyActionCommand("spatial-filter", "Frequency Filters"),
     buildMenuOnlyActionCommand("denoise", "Denoise"),
   ],
 };

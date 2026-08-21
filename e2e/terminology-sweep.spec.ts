@@ -10,6 +10,7 @@ import {
   clickGridBackgroundToClearSelection,
   drawInspectionRoiBetweenPixels,
   enqueueAndTriggerOpenImages,
+  expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
   expectPanelHoldsFile,
   loadFixtureAsStack,
@@ -67,6 +68,19 @@ test("a single-band source is labelled a stack and never an image for one band",
     await loadFixtureAsStack(app.window, lowContrastGrayPng.fileName);
     await expectPanelHoldsFile(app.window, 1, lowContrastGrayPng.fileName);
     await expectLoadedPanelHeaderAvoidsImageNoun(app);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-280: the FFT/Butterworth tool is user-facing "Frequency Filters"; the old
+// "Spatial Filter" name must not surface anywhere, including with its own panel open.
+test("the frequency-domain tool is named Frequency Filters, never Spatial Filter", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Frequency Filters");
+    await expectNoUserFacingSpatialFilterWording(app.window);
   } finally {
     await closeToolboxApp(app);
   }

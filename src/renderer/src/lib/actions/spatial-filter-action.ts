@@ -149,7 +149,9 @@ const SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
 
 export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   id: SPATIAL_FILTER_ACTION_ID,
-  label: "Spatial Filter",
+  // CT-280: user-facing "Spatial Filter" is renamed "Frequency Filters"; the
+  // internal id, file names, and parameter ids stay "spatial-filter".
+  label: "Frequency Filters",
   icon: Grid3x3,
   parameters: [
     SPATIAL_FILTER_MODE_PARAMETER_SCHEMA,
@@ -158,8 +160,8 @@ export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
     SPATIAL_FILTER_BANDPASS_CUTOFFS_PARAMETER_SCHEMA,
     SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA,
   ],
-  successMessage: "Spatial filter applied",
-  appliedLabel: "Spatial filter",
+  successMessage: "Frequency filters applied",
+  appliedLabel: "Frequency filters",
   loadingMessage: "Filtering spatial frequencies...",
   formatAppliedLabel: formatSpatialFilterAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountIntoSpatialFilterParameters,
@@ -313,13 +315,13 @@ function readFilteredBandOrThrow(
 ): Float32Array {
   const filtered = filteredByIndex.get(bandIndex);
   if (filtered) return filtered;
-  throw new Error(`Spatial filter produced no result for band ${bandIndex + 1}`);
+  throw new Error(`Frequency filter produced no result for band ${bandIndex + 1}`);
 }
 
 function formatSpatialFilterAppliedLabel(parameterValues: ParameterValuesById): string {
   const settings = readSpatialFilterSettings(parameterValues);
   const scopeText = describeCubeScopeForAppliedLabel(SPATIAL_FILTER_SCOPE_IDS, parameterValues);
-  return `Spatial filter (${describeSettingsForLabel(settings)}, ${scopeText})`;
+  return `Frequency filters (${describeSettingsForLabel(settings)}, ${scopeText})`;
 }
 
 function describeSettingsForLabel(settings: SpatialFrequencyFilterSettings): string {

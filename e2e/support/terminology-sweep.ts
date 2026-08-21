@@ -25,3 +25,10 @@ export async function expectNoUserFacingViewportWording(page: Page): Promise<voi
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/\bviewport\b/i);
 }
+
+// CT-280: the FFT/Butterworth tool is named "Frequency Filters"; the old
+// "Spatial Filter" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingSpatialFilterWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/spatial filter/i);
+}

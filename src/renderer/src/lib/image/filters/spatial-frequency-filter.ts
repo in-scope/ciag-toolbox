@@ -73,7 +73,7 @@ function buildStackTooLargeForSpatialFilterMessage(
   const neededMegabytes = Math.ceil(gridBytes / (1024 * 1024));
   const limitMegabytes = SPATIAL_FILTER_GRID_BYTE_LIMIT / (1024 * 1024);
   return (
-    `This stack is too large for the spatial filter: each ${shape.width} x ${shape.height} ` +
+    `This stack is too large for the frequency filter: each ${shape.width} x ${shape.height} ` +
     `band needs a ${neededMegabytes} MB working grid and the limit is ${limitMegabytes} MB. ` +
     `Crop the stack to a smaller region and try again.`
   );
@@ -168,7 +168,7 @@ function allocateComplexGridOrThrowOutOfMemory(width: number, height: number): C
 function buildSpatialFilterOutOfMemoryError(width: number, height: number): Error {
   const megabytes = Math.ceil((width * height * COMPLEX_GRID_BYTES_PER_PADDED_PIXEL) / (1024 * 1024));
   return new Error(
-    `Not enough memory for the spatial filter's ${megabytes} MB working grid. ` +
+    `Not enough memory for the frequency filter's ${megabytes} MB working grid. ` +
       `Close other panels or crop the stack to a smaller region and try again.`,
   );
 }
@@ -199,7 +199,7 @@ function assertGainIsComputableForSettings(settings: SpatialFrequencyFilterSetti
 function assertBandLengthMatchesShape(band: RasterTypedArray, shape: BandSpatialShape): void {
   if (band.length === shape.width * shape.height) return;
   throw new Error(
-    `Spatial filter band has ${band.length} values but the stack shape is ` +
+    `Frequency filter band has ${band.length} values but the stack shape is ` +
       `${shape.width} x ${shape.height}`,
   );
 }

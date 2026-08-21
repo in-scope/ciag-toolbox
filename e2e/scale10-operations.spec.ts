@@ -600,10 +600,10 @@ test("denoise gaussian and median preserve the locally-linear ramp interior", as
 
 test("spatial filter lowpass runs the worker at full spatial scale on band 1", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Spatial Filter (lowpass, band-wise band 1)", async () => {
+  await recordSweepVerdict("operation: Frequency Filters (lowpass, band-wise band 1)", async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("Spatial Filter", () =>
-      selectBandWiseScopeForBands(launched.window, "Spatial Filter", "1"),
+    const applied = await openConfigureAndApplyFromSourcePanel("Frequency Filters", () =>
+      selectBandWiseScopeForBands(launched.window, "Frequency Filters", "1"),
     );
     const oracle = await verifySmoothInteriorResultReadout(SPATIAL_FILTER_TOLERANCE, "lowpass on the linear ramp");
     return { ...applied, oracle };
