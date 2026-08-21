@@ -19,9 +19,14 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 // chunks must concatenate byte-identically to the sync encoders.
 const TINY_CHUNK_BYTES = 7;
 
+interface RecordedChunksByPart extends Record<string, Uint8Array[] | undefined> {
+  primary: Uint8Array[];
+  sidecar: Uint8Array[];
+}
+
 interface RecordingApi extends SaveImageFlowApi {
   readonly beginRequests: ToolboxSaveImageBeginRequest[];
-  readonly chunksByPart: Record<ToolboxSaveImagePart, Uint8Array[]>;
+  readonly chunksByPart: RecordedChunksByPart;
   readonly callOrder: string[];
 }
 
@@ -41,7 +46,7 @@ function buildRecordingApi(
     sendSaveImageChunk: async (request) => {
       if (chunkFailure) throw chunkFailure;
       api.callOrder.push(`chunk:${request.part}`);
-      api.chunksByPart[request.part].push(request.bytes);
+      (api.chunksByPart[request.part] ??= []).push(request.bytes);
       return undefined;
     },
     finishSaveImage: async () => {
@@ -146,7 +151,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
       encodeRasterBandAsSingleChannelTiffBytes(raster, 1, 16),
     );
     expect(api.chunksByPart.sidecar).toEqual([]);
-    expect(api.beginRequests[0]!.sidecar).toBeUndefined();
+    expect(api.beginRequests[0]).not.toHaveProperty("sidecar");
   });
 
   // CT-271: 16-bit PNG uploads RAW big-endian samples; MAIN encodes on write.
@@ -168,6 +173,75 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     );
     expect(api.chunksByPart.primary.length).toBeGreaterThan(1);
     expect(api.chunksByPart.sidecar).toEqual([]);
+  });
+
+  // CT-273: a PNG stack begins a folder session, then streams one part per
+  // band file (raw big-endian samples for the 16-bit variant; MAIN encodes).
+  it("streams a 16-bit PNG stack as one raw-sample file per band into a folder", async () => {
+    const api = buildRecordingApi();
+    const result = await runSaveImageFlowThroughMainProcess(
+      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+      api,
+      TINY_CHUNK_BYTES,
+    );
+    const encoding = { kind: "png-16-bit-grayscale", width: 3, height: 2 };
+    expect(api.beginRequests[0]).toEqual({
+      destination: "folder",
+      files: [
+        { fileName: "cube_band_001.png", byteLength: 12, encoding },
+        { fileName: "cube_band_002.png", byteLength: 12, encoding },
+      ],
+    });
+    expect(concatChunks(api.chunksByPart["file-0"]!)).toEqual(
+      Uint8Array.from([0, 10, 0, 20, 0, 30, 0, 40, 0, 50, 0, 60]),
+    );
+    expect(concatChunks(api.chunksByPart["file-1"]!)).toEqual(
+      Uint8Array.from([0, 110, 0, 120, 0, 130, 0, 140, 0, 150, 0, 160]),
+    );
+    expect(result).toEqual({ canceled: false, filePath: "C:\\exports\\saved.out" });
+  });
+
+  it("uploads no stack file when the folder pick is canceled", async () => {
+    const api = buildRecordingApi({ status: "canceled" });
+    const result = await runSaveImageFlowThroughMainProcess(
+      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+      api,
+      TINY_CHUNK_BYTES,
+    );
+    expect(result).toEqual({ canceled: true });
+    expect(api.callOrder).toEqual(["begin"]);
+  });
+
+  it("releases the folder session when a stack chunk upload fails, then rethrows", async () => {
+    const api = buildRecordingApi(undefined, new Error("boom"));
+    await expect(
+      runSaveImageFlowThroughMainProcess(
+        { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+        api,
+        TINY_CHUNK_BYTES,
+      ),
+    ).rejects.toThrow("boom");
+    expect(api.callOrder).toContain("release");
+    expect(api.callOrder).not.toContain("finish");
+  });
+
+  it("reports monotonic per-band progress for a PNG stack, ending at exactly 1", async () => {
+    const fractions: number[] = [];
+    const api = buildRecordingApi();
+    await runSaveImageFlowThroughMainProcess(
+      {
+        source: buildRasterSource(),
+        selectedBandIndex: 0,
+        originalFileName: "cube.tif",
+        formatId: "png-stack-16-bit",
+        onProgress: (fraction) => fractions.push(fraction),
+      },
+      api,
+      TINY_CHUNK_BYTES,
+    );
+    expect(fractions.length).toBeGreaterThan(2);
+    expect(fractions).toEqual([...fractions].sort((a, b) => a - b));
+    expect(fractions.at(-1)).toBe(1);
   });
 
   it("uploads nothing when the save dialog is canceled", async () => {

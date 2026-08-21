@@ -109,8 +109,8 @@ interface ToolboxSaveImageFileFilter {
 
 // CT-237: the save-image export streams through the chunked protocol
 // (src/shared/chunked-save-image-protocol.ts); no invoke carries the encoded
-// payload whole.
-type ToolboxSaveImagePart = "primary" | "sidecar";
+// payload whole. CT-273: folder exports address one part per band file.
+type ToolboxSaveImagePart = "primary" | "sidecar" | `file-${number}`;
 
 interface ToolboxSaveImageSidecarDescriptor {
   extension: string;
@@ -124,13 +124,30 @@ interface ToolboxSaveImagePngSixteenBitGrayscaleEncoding {
   height: number;
 }
 
-interface ToolboxSaveImageBeginRequest {
+interface ToolboxSaveImageSingleFileBeginRequest {
   suggestedFileName: string;
   fileFilter: ToolboxSaveImageFileFilter;
   primaryByteLength: number;
   primaryEncoding?: ToolboxSaveImagePngSixteenBitGrayscaleEncoding;
   sidecar?: ToolboxSaveImageSidecarDescriptor;
 }
+
+// CT-273: a folder export (PNG stack) begins with a directory pick; each
+// file's chunks arrive under the part name "file-<index>".
+interface ToolboxSaveImageFolderFileDescriptor {
+  fileName: string;
+  byteLength: number;
+  encoding?: ToolboxSaveImagePngSixteenBitGrayscaleEncoding;
+}
+
+interface ToolboxSaveImageFolderBeginRequest {
+  destination: "folder";
+  files: ReadonlyArray<ToolboxSaveImageFolderFileDescriptor>;
+}
+
+type ToolboxSaveImageBeginRequest =
+  | ToolboxSaveImageSingleFileBeginRequest
+  | ToolboxSaveImageFolderBeginRequest;
 
 type ToolboxSaveImageBeginResult =
   | { status: "canceled" }

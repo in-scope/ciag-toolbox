@@ -6,6 +6,8 @@ export type SaveImageFormatId =
   | "tiff-float-32"
   | "png-8-bit"
   | "png-16-bit"
+  | "png-stack-8-bit"
+  | "png-stack-16-bit"
   | "jpeg-8-bit"
   | "envi"
   | "envi-float";
@@ -55,6 +57,20 @@ export const SAVE_IMAGE_FORMAT_OPTIONS: ReadonlyArray<SaveImageFormatOption> = [
     fileFilter: { name: "PNG Image", extensions: ["png"] },
   },
   {
+    id: "png-stack-8-bit",
+    label: "PNG stack (8-bit, one file per band)",
+    description: "Saves each band as its own 8-bit PNG file in a chosen folder.",
+    extension: "png",
+    fileFilter: { name: "PNG Image", extensions: ["png"] },
+  },
+  {
+    id: "png-stack-16-bit",
+    label: "PNG stack (16-bit, one file per band)",
+    description: "Saves each band as its own lossless 16-bit PNG file in a chosen folder.",
+    extension: "png",
+    fileFilter: { name: "PNG Image", extensions: ["png"] },
+  },
+  {
     id: "jpeg-8-bit",
     label: "JPEG (8-bit)",
     description: "Lossy compression. Smallest files; suited to display copies.",
@@ -77,7 +93,12 @@ export const SAVE_IMAGE_FORMAT_OPTIONS: ReadonlyArray<SaveImageFormatOption> = [
   },
 ];
 
-export type SaveImageFormatKind = "tiff" | "png" | "jpeg" | "envi";
+export type SaveImageFormatKind = "tiff" | "png" | "png-stack" | "jpeg" | "envi";
+
+// CT-273: a PNG stack exports every band as its own file into a chosen folder.
+export function isPngStackSaveFormat(formatId: SaveImageFormatId): boolean {
+  return readSaveImageFormatTechnicalDetails(formatId).kind === "png-stack";
+}
 
 export type SaveImageSampleFormat = "uint" | "float";
 
@@ -101,6 +122,10 @@ export function readSaveImageFormatTechnicalDetails(
       return { kind: "png", targetBitDepth: 8, targetSampleFormat: "uint" };
     case "png-16-bit":
       return { kind: "png", targetBitDepth: 16, targetSampleFormat: "uint" };
+    case "png-stack-8-bit":
+      return { kind: "png-stack", targetBitDepth: 8, targetSampleFormat: "uint" };
+    case "png-stack-16-bit":
+      return { kind: "png-stack", targetBitDepth: 16, targetSampleFormat: "uint" };
     case "jpeg-8-bit":
       return { kind: "jpeg", targetBitDepth: 8, targetSampleFormat: "uint" };
     case "envi":
@@ -118,10 +143,15 @@ export const SIXTEEN_BIT_PNG_NEEDS_INTEGER_REASON =
   "16-bit PNG stores integers. Use ENVI float for float data.";
 const SIXTEEN_BIT_PNG_NEEDS_GRAYSCALE_REASON =
   "Color photos are 8-bit; PNG (8-bit) already keeps every value.";
+const PNG_STACK_NEEDS_MULTI_BAND_REASON =
+  "PNG stack saves one file per band; a single-band image saves as one PNG.";
+const PNG_STACK_NEEDS_STACK_REASON =
+  "Color photos are one image; PNG stack is for multi-band stacks.";
 
 export interface SaveImageFormatGatingSource {
   readonly isTrueColorPhoto: boolean;
   readonly isFloatSource: boolean;
+  readonly bandCount: number;
 }
 
 // CT-173: a true-colour photo (a PNG/JPG promoted to an RGB composite) is presented as one
@@ -137,6 +167,7 @@ export function describeSaveImageFormatDisabledReason(
   source: SaveImageFormatGatingSource,
 ): string | null {
   if (formatId === "png-16-bit") return describeSixteenBitPngDisabledReason(source);
+  if (isPngStackSaveFormat(formatId)) return describePngStackDisabledReason(formatId, source);
   if (!source.isTrueColorPhoto) return null;
   if (formatId === "envi" || formatId === "envi-float") return ENVI_NEEDS_RASTER_REASON;
   if (formatId === "tiff-float-32") return FLOAT_NEEDS_RASTER_REASON;
@@ -151,8 +182,21 @@ function describeSixteenBitPngDisabledReason(
   return null;
 }
 
+// CT-273: a PNG stack only applies to a multi-band scientific stack; the
+// 16-bit variant keeps the CT-271 integer gate with the same locked copy.
+function describePngStackDisabledReason(
+  formatId: SaveImageFormatId,
+  source: SaveImageFormatGatingSource,
+): string | null {
+  if (source.isTrueColorPhoto) return PNG_STACK_NEEDS_STACK_REASON;
+  if (source.bandCount < 2) return PNG_STACK_NEEDS_MULTI_BAND_REASON;
+  if (formatId === "png-stack-16-bit" && source.isFloatSource) {
+    return SIXTEEN_BIT_PNG_NEEDS_INTEGER_REASON;
+  }
+  return null;
+}
+
 export interface SaveImageSourceBandInfo extends SaveImageFormatGatingSource {
-  readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
 
@@ -165,6 +209,7 @@ export function describeSaveImageFormatBandCoverageNote(
   source: SaveImageSourceBandInfo,
 ): string | null {
   if (!sourceIsMultiBandStack(source)) return null;
+  if (isPngStackSaveFormat(formatId)) return describeSeparateFilesPerBandNote(source.bandCount);
   if (formatSavesEveryBand(formatId)) return describeSavesAllBandsNote(source.bandCount);
   return describeCurrentBandOnlyWarning(source.selectedBandNumber, source.bandCount);
 }
@@ -183,6 +228,10 @@ function describeCurrentBandOnlyWarning(bandNumber: number, bandCount: number): 
 
 function describeSavesAllBandsNote(bandCount: number): string {
   return `Saves all ${bandCount} bands.`;
+}
+
+function describeSeparateFilesPerBandNote(bandCount: number): string {
+  return `Saves all ${bandCount} bands as separate files.`;
 }
 
 export function findSaveImageFormatOptionOrThrow(

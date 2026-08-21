@@ -1,4 +1,7 @@
-import { SAVE_IMAGE_CHUNK_BYTES } from "@shared/chunked-save-image-protocol";
+import {
+  SAVE_IMAGE_CHUNK_BYTES,
+  saveImageFolderFilePartName,
+} from "@shared/chunked-save-image-protocol";
 
 import { describeElectronInvokeFailure } from "@/lib/ipc/electron-invoke-error";
 
@@ -8,7 +11,12 @@ import {
   type SaveImageUploadPlan,
 } from "@/lib/image/encode-saved-image";
 import {
+  planPngStackExportUpload,
+  type PngStackFileUploadPlan,
+} from "@/lib/image/plan-png-stack-export";
+import {
   findSaveImageFormatOptionOrThrow,
+  isPngStackSaveFormat,
   type SaveImageFormatId,
 } from "@/lib/image/save-image-formats";
 import {
@@ -56,6 +64,9 @@ export async function runSaveImageFlowThroughMainProcess(
   api: SaveImageFlowApi = window.toolboxApi,
   chunkBytes: number = SAVE_IMAGE_CHUNK_BYTES,
 ): Promise<SaveImageFlowResult> {
+  if (isPngStackSaveFormat(input.formatId)) {
+    return runPngStackFolderSaveFlow(input, api, chunkBytes);
+  }
   refuseTiffExportBeyondClassicTiffLimit(input.source, input.formatId);
   const upload = await planViewportSourceSaveUpload({
     source: input.source,
@@ -66,6 +77,73 @@ export async function runSaveImageFlowThroughMainProcess(
   const begun = await api.beginSaveImage(buildSaveImageBeginRequest(input, upload));
   if (begun.status === "canceled") return { canceled: true };
   return uploadPartsAndFinishSave(api, begun.token, upload, chunkBytes, input.onProgress);
+}
+
+// CT-273: the PNG stack export writes one file per band into a folder the
+// user picks at begin time. Chunks upload per band file (determinate per-band
+// progress by bytes), and finish reports the destination folder.
+async function runPngStackFolderSaveFlow(
+  input: SaveImageFlowInput,
+  api: SaveImageFlowApi,
+  chunkBytes: number,
+): Promise<SaveImageFlowResult> {
+  const files = await planPngStackExportUpload({
+    source: input.source,
+    originalFileName: input.originalFileName,
+    formatId: input.formatId,
+    onProgress: scaleProgressToWindow(input.onProgress, 0, ENCODE_PROGRESS_WINDOW_END),
+  });
+  const begun = await api.beginSaveImage(buildPngStackFolderBeginRequest(files));
+  if (begun.status === "canceled") return { canceled: true };
+  return uploadFolderFilesAndFinishSave(api, begun.token, files, chunkBytes, input.onProgress);
+}
+
+function buildPngStackFolderBeginRequest(
+  files: ReadonlyArray<PngStackFileUploadPlan>,
+): ToolboxSaveImageBeginRequest {
+  return {
+    destination: "folder",
+    files: files.map((file) => ({
+      fileName: file.fileName,
+      byteLength: file.plan.byteLength,
+      ...(file.encoding ? { encoding: file.encoding } : {}),
+    })),
+  };
+}
+
+async function uploadFolderFilesAndFinishSave(
+  api: SaveImageFlowApi,
+  token: string,
+  files: ReadonlyArray<PngStackFileUploadPlan>,
+  chunkBytes: number,
+  onProgress: UnitProgressCallback | undefined,
+): Promise<SaveImageFlowResult> {
+  try {
+    await uploadFolderFilesInChunks(api, token, files, chunkBytes, onProgress);
+    const finished = await api.finishSaveImage({ token });
+    onProgress?.(1);
+    return { canceled: false, filePath: finished.filePath };
+  } catch (error) {
+    await api.releaseSaveImage({ token }).catch(() => undefined);
+    throw new Error(describeElectronInvokeFailure(error));
+  }
+}
+
+async function uploadFolderFilesInChunks(
+  api: SaveImageFlowApi,
+  token: string,
+  files: ReadonlyArray<PngStackFileUploadPlan>,
+  chunkBytes: number,
+  onProgress: UnitProgressCallback | undefined,
+): Promise<void> {
+  const totalBytes = files.reduce((sum, file) => sum + file.plan.byteLength, 0);
+  let sentBytes = 0;
+  for (let index = 0; index < files.length; index += 1) {
+    sentBytes = await uploadOnePartInChunks(
+      api, token, saveImageFolderFilePartName(index), files[index]!.plan,
+      chunkBytes, sentBytes, totalBytes, onProgress,
+    );
+  }
 }
 
 // The refusal happens before any encoding starts and before the save dialog

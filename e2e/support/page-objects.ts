@@ -215,9 +215,11 @@ export {
   confirmSaveImageFormat,
   cancelSaveImageFormatPicker,
   exportSelectedStackThroughSaveDialog,
+  exportSelectedStackAsPngStackToFolder,
   loadImageFromAbsolutePath,
   createTemporaryExportDirectory,
   type SaveImageExportRequest,
+  type SaveImageFolderExportRequest,
 } from "./save-image-flow";
 export {
   saveProjectBundleThroughSaveDialog,

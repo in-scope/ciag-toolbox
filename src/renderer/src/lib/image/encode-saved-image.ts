@@ -59,6 +59,9 @@ export async function encodeViewportSourceForSaving(
     throw new Error("16-bit PNG encodes in the main process; use planViewportSourceSaveUpload.");
   }
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
+  if (details.kind === "png-stack") {
+    throw new Error("PNG stack exports through the folder flow; use planPngStackExportUpload.");
+  }
   return dispatchEncodingByFormatKind(input, details.kind, details.targetBitDepth, details.targetSampleFormat);
 }
 
@@ -95,6 +98,9 @@ export async function planViewportSourceSaveUpload(
     return planSixteenBitPngSaveUploadFromRawSamples(input);
   }
   const details = readSaveImageFormatTechnicalDetails(input.formatId);
+  if (details.kind === "png-stack") {
+    throw new Error("PNG stack exports through the folder flow; use planPngStackExportUpload.");
+  }
   if (details.kind === "envi") {
     return planEnviSaveUploadWithoutMaterializingBinary(input, details.targetSampleFormat);
   }

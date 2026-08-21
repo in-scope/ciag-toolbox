@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -208,5 +208,100 @@ describe("createSaveImageSessionStore png-16-bit-grayscale encoding", () => {
     await store.appendChunk(token, "primary", new Uint8Array(6));
     await store.releaseDeletingPartialFiles(token);
     expect(await fileExists(filePath)).toBe(false);
+  });
+});
+
+// CT-273: a folder export (PNG stack) opens one writable part per described
+// file inside the chosen folder, finish reports the FOLDER, and release
+// deletes every partial file.
+describe("createSaveImageSessionStore folder export", () => {
+  let folderCounter = 0;
+
+  async function nextExportFolder(): Promise<string> {
+    folderCounter += 1;
+    const folderPath = join(outputDir, `stack-folder-${folderCounter}`);
+    await mkdir(folderPath, { recursive: true });
+    return folderPath;
+  }
+
+  function bigEndianSampleBytes(samples: ReadonlyArray<number>): Uint8Array {
+    const bytes = new Uint8Array(samples.length * 2);
+    samples.forEach((value, index) => {
+      bytes[index * 2] = value >>> 8;
+      bytes[index * 2 + 1] = value & 0xff;
+    });
+    return bytes;
+  }
+
+  it("writes every described file into the folder and finish reports the folder path", async () => {
+    const store = createSaveImageSessionStore();
+    const folderPath = await nextExportFolder();
+    const rawBytes = bytesOfLength(9, 4);
+    const samples = [300, 800, 4095, 250, 950, 65535];
+    const encodedRaw = bigEndianSampleBytes(samples);
+    const token = await store.beginFilesInFolder(folderPath, [
+      { fileName: "cube_band_001.png", byteLength: rawBytes.byteLength },
+      {
+        fileName: "cube_band_002.png",
+        byteLength: encodedRaw.byteLength,
+        encoding: { kind: "png-16-bit-grayscale", width: 3, height: 2 },
+      },
+    ]);
+    await store.appendChunk(token, "file-0", rawBytes);
+    for (let offset = 0; offset < encodedRaw.byteLength; offset += 5) {
+      await store.appendChunk(token, "file-1", encodedRaw.slice(offset, offset + 5));
+    }
+    expect(await store.finishKeepingWrittenFiles(token)).toBe(folderPath);
+    expect(new Uint8Array(await readFile(join(folderPath, "cube_band_001.png")))).toEqual(rawBytes);
+    const decoded = await sharp(join(folderPath, "cube_band_002.png"))
+      .toColourspace("grey16")
+      .raw({ depth: "ushort" })
+      .toBuffer({ resolveWithObject: true });
+    expect(
+      Array.from(new Uint16Array(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength / 2)),
+    ).toEqual(samples);
+  });
+
+  it("release deletes every partially written folder file", async () => {
+    const store = createSaveImageSessionStore();
+    const folderPath = await nextExportFolder();
+    const token = await store.beginFilesInFolder(folderPath, [
+      { fileName: "a_band_001.png", byteLength: 8 },
+      { fileName: "a_band_002.png", byteLength: 8 },
+    ]);
+    await store.appendChunk(token, "file-0", bytesOfLength(8, 2));
+    await store.appendChunk(token, "file-1", bytesOfLength(4, 3));
+    await store.releaseDeletingPartialFiles(token);
+    expect(await fileExists(join(folderPath, "a_band_001.png"))).toBe(false);
+    expect(await fileExists(join(folderPath, "a_band_002.png"))).toBe(false);
+  });
+
+  it("refuses to finish while any folder file is missing bytes", async () => {
+    const store = createSaveImageSessionStore();
+    const token = await store.beginFilesInFolder(await nextExportFolder(), [
+      { fileName: "a_band_001.png", byteLength: 8 },
+      { fileName: "a_band_002.png", byteLength: 8 },
+    ]);
+    await store.appendChunk(token, "file-0", bytesOfLength(8, 2));
+    await expect(store.finishKeepingWrittenFiles(token)).rejects.toThrow(
+      /did not match the described size/,
+    );
+  });
+
+  it("refuses file names that could escape the chosen folder", async () => {
+    const store = createSaveImageSessionStore();
+    const folderPath = await nextExportFolder();
+    for (const fileName of ["../escape.png", "a/b.png", "a\\\\b.png", ""]) {
+      await expect(
+        store.beginFilesInFolder(folderPath, [{ fileName, byteLength: 8 }]),
+      ).rejects.toThrow(/invalid file name/);
+    }
+  });
+
+  it("refuses a folder export describing no files", async () => {
+    const store = createSaveImageSessionStore();
+    await expect(store.beginFilesInFolder(await nextExportFolder(), [])).rejects.toThrow(
+      /described no files/,
+    );
   });
 });

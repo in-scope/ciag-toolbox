@@ -130,6 +130,32 @@ async function expectSaveSucceededToast(page: Page): Promise<void> {
   await expect(page.getByText("Saved to", { exact: false }).first()).toBeVisible();
 }
 
+export interface SaveImageFolderExportRequest {
+  readonly app: ElectronApplication;
+  readonly page: Page;
+  readonly formatLabel: string;
+  readonly destinationFolder: string;
+}
+
+// CT-273: a PNG stack export picks a destination FOLDER, so the stubbed
+// dialog is the OPEN dialog (directory pick), not the save dialog.
+export async function exportSelectedStackAsPngStackToFolder(
+  request: SaveImageFolderExportRequest,
+): Promise<void> {
+  await runAsStoryboardStep(
+    request.page,
+    `Save the selected stack as ${request.formatLabel} into a folder`,
+    async () => {
+      await enqueueOpenDialogPaths(request.page, [request.destinationFolder]);
+      await triggerSaveImageMenuItem(request.app);
+      await expect(saveImageFormatPicker(request.page)).toBeVisible();
+      await chooseSaveImageFormat(request.page, request.formatLabel);
+      await confirmSaveImageFormat(request.page);
+      await expectSaveSucceededToast(request.page);
+    },
+  );
+}
+
 export async function loadImageFromAbsolutePath(page: Page, absolutePath: string): Promise<void> {
   await runAsStoryboardStep(page, `Open ${basename(absolutePath)} as a stack`, async () => {
     await enqueueOpenDialogPaths(page, [absolutePath]);
