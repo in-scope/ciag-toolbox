@@ -55,3 +55,10 @@ export async function expectNoUserFacingBasicProcessingHyphenWording(
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/Basic-Processing/);
 }
+
+// CT-298: the app is named "CHARM Toolbox"; the old "MSI Toolbox"
+// wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingMsiToolboxWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/MSI Toolbox/);
+}

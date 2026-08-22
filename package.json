@@ -1,6 +1,6 @@
 {
   "name": "ciag-toolbox",
-  "productName": "MSI Toolbox",
+  "productName": "CHARM Toolbox",
   "version": "0.5.0",
   "description": "MSI Toolbox v3 - cross-platform desktop application for multispectral image analysis",
   "author": {

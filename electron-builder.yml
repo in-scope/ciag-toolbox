@@ -1,5 +1,5 @@
 appId: sh.inscope.ciag.toolbox
-productName: MSI Toolbox
+productName: CHARM Toolbox
 copyright: Copyright (c) 2026 Cambridge Image Analysis Group (CIAG)
 directories:
   buildResources: build
@@ -40,8 +40,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: MSI Toolbox
-  uninstallDisplayName: MSI Toolbox ${version}
+  shortcutName: CHARM Toolbox
+  uninstallDisplayName: CHARM Toolbox ${version}
 mac:
   target:
     - target: dmg

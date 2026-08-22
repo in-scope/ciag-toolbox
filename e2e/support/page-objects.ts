@@ -178,6 +178,7 @@ export {
   expectNoUserFacingBandWeightingWording,
   expectNoUserFacingFalseColorWording,
   expectNoUserFacingBasicProcessingHyphenWording,
+  expectNoUserFacingMsiToolboxWording,
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,

@@ -57,6 +57,10 @@ test("opens exactly one main application window", () => {
   expect(countMainApplicationWindows(launched.app)).toBe(1);
 });
 
+test("window title is CHARM Toolbox", async () => {
+  expect(await launched.window.title()).toBe("CHARM Toolbox");
+});
+
 test("main window opens at a sensible size", async () => {
   const bounds = await readMainWindowOuterBounds(launched.app);
   expect(bounds.width).toBeGreaterThanOrEqual(1024);

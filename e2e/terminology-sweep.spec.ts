@@ -13,6 +13,7 @@ import {
   expectNoUserFacingBandWeightingWording,
   expectNoUserFacingBasicProcessingHyphenWording,
   expectNoUserFacingFalseColorWording,
+  expectNoUserFacingMsiToolboxWording,
   expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
   expectPanelHoldsFile,
@@ -143,6 +144,13 @@ test("the composite tool is named RGB Color Composite, never False-color Composi
 test("the menu is Basic Processing, never Basic-Processing", async () => {
   await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
   await expectNoUserFacingBasicProcessingHyphenWording(launched.window);
+});
+
+// CT-298: the app is named "CHARM Toolbox"; the old "MSI Toolbox"
+// wording must not surface anywhere in the app.
+test("the app is named CHARM Toolbox, never MSI Toolbox", async () => {
+  await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
+  await expectNoUserFacingMsiToolboxWording(launched.window);
 });
 
 async function openWavelengthStackReviewModal(app: LaunchedApp): Promise<void> {
