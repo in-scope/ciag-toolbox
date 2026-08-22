@@ -34,6 +34,7 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
       "Crop to Region",
       "Flat-field Correction",
       "Flip",
+      "Masks",
       "RGB to Grayscale",
       "Rotate",
       "Select Region",
@@ -90,6 +91,7 @@ describe("toolbar allowlist", () => {
     expect(toolbarIds).toEqual([
       "toggle-region-tool",
       "toggle-subset-bands",
+      "toggle-masks",
       "crop-to-region",
       "rotate-90-cw",
       "rotate-270-cw",

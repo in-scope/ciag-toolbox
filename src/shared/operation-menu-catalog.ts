@@ -23,6 +23,7 @@
 
 export type OperationCommandBehavior =
   | "toggle-region-tool"
+  | "toggle-masks"
   | "toggle-subset-bands"
   | "open-action-panel"
   | "apply-geometric-transform";
@@ -79,6 +80,9 @@ const SELECTION_GROUP: OperationGroup = {
   commands: [
     buildMenuAndToolbarCommand("toggle-region-tool", "Select Region", "toggle-region-tool"),
     buildMenuAndToolbarCommand("toggle-subset-bands", "Subset Bands", "toggle-subset-bands"),
+    // CT-302: mask layers annotate the active panel; the toggle opens the Masks
+    // options aside, the same mode-toggle shape as Select Region.
+    buildMenuAndToolbarCommand("toggle-masks", "Masks", "toggle-masks"),
   ],
 };
 

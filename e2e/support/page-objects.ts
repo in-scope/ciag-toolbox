@@ -467,5 +467,23 @@ export {
   loadedToolStatusText,
   setCustomTransformFormula,
 } from "./custom-transform";
+export {
+  addMaskCategoriesUntilTheControlDisables,
+  addMaskCategoryButton,
+  closeMasksOptions,
+  createMaskLayer,
+  maskCategoryNameField,
+  maskCategoryNameFields,
+  maskLayerNameField,
+  maskLayerOpacitySlider,
+  maskLayerOptions,
+  masksOptionsPanel,
+  masksRemovedToast,
+  MASKS_REMOVED_TOAST_TEXT,
+  MASKS_TOOL_LABEL,
+  MAX_MASK_CATEGORIES,
+  openMasksOptions,
+  renameMaskCategory,
+} from "./masks-panel";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";

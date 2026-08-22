@@ -181,6 +181,13 @@ export interface RegisteredViewportAction extends ViewportAction {
    */
   readonly requiresOperationRegion?: boolean;
   /**
+   * CT-302: the operation moves or resizes the stack's spatial grid (crop,
+   * rotate, flip), so an in-place apply drops the panel's mask layers. Set it
+   * even when width and height survive the operation (a flip, or rotating a
+   * square stack) - the pixels still move under the masks.
+   */
+  readonly changesStackGeometry?: boolean;
+  /**
    * The operation can optionally be limited to an area; the user opts in via the
    * "Apply to" scope selector and then selects the region (CT-095).
    */
@@ -291,6 +298,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
   appliedLabel: "Crop to region",
   requiresOperationRegion: true,
+  changesStackGeometry: true,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
   prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
   apply: clearRegionAndStaleInspectionRoiAfterCrop,
@@ -1614,6 +1622,7 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   parameters: [ROTATION_PARAMETER_SCHEMA],
   successMessage: "Rotation applied",
   appliedLabel: "Rotate",
+  changesStackGeometry: true,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
@@ -1629,6 +1638,7 @@ export const REFLECT_ACTION: RegisteredViewportAction = {
   parameters: [REFLECTION_PARAMETER_SCHEMA],
   successMessage: "Flip applied",
   appliedLabel: "Flip",
+  changesStackGeometry: true,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,

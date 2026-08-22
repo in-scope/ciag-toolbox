@@ -18,6 +18,7 @@ import {
   type ApplyActionCallbacks,
   type ViewportAction,
 } from "./viewport-action";
+import { EMPTY_MASK_PANEL_STATE } from "@/lib/masks/mask-panel";
 
 function buildSampleEnableFlagAction(): ViewportAction {
   return {
@@ -83,6 +84,7 @@ describe("applyActionToSelectedViewports", () => {
       pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
       removedBandIndexes: [],
       isBandSubsetEditModeActive: false,
+      masks: EMPTY_MASK_PANEL_STATE,
     });
   });
 

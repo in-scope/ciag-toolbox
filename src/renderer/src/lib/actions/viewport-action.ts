@@ -14,6 +14,7 @@ import type { BandSelectionEditingState } from "@/lib/image/band-ops/band-select
 import type { CubeTransformEditingState } from "@/lib/image/band-ops/cube-transform-editing";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
+import { EMPTY_MASK_PANEL_STATE, type MaskPanelState } from "@/lib/masks/mask-panel";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { EMPTY_OPERATION_HISTORY, type ViewportOperationHistory } from "./operation-history";
@@ -43,6 +44,10 @@ export interface ViewportRenderingState {
   readonly pinnedRoiSpectra: PinnedRoiSpectraList;
   readonly removedBandIndexes: ReadonlyArray<number>;
   readonly isBandSubsetEditModeActive: boolean;
+  // CT-302: the panel's mask layers (0 = unlabeled, 1..5 = category index over
+  // the stack's spatial grid). A result delivered to a NEW panel never carries
+  // them, and a geometry change drops them.
+  readonly masks: MaskPanelState;
 }
 
 export const EMPTY_REMOVED_BAND_INDEXES: ReadonlyArray<number> = Object.freeze([]);
@@ -69,6 +74,7 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   pinnedRoiSpectra: EMPTY_PINNED_ROI_SPECTRA,
   removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
   isBandSubsetEditModeActive: false,
+  masks: EMPTY_MASK_PANEL_STATE,
 };
 
 export function hasToneCurveEditingState(state: ViewportRenderingState): boolean {

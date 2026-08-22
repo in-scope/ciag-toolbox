@@ -30,6 +30,10 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import {
+  MasksOptionsPanel,
+  type MasksOptionsTarget,
+} from "@/components/masks-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
@@ -234,6 +238,7 @@ import {
   RegionToolProvider,
   useRegionTool,
 } from "@/state/region-tool-context";
+import { MasksToolProvider, useMasksTool } from "@/state/masks-tool-context";
 import {
   RegionRequestProvider,
   useRegionRequest,
@@ -289,6 +294,8 @@ import {
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
+import { getImageSourceDimensions } from "@/lib/webgl/texture";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -325,6 +332,7 @@ export function App(): JSX.Element {
         <PanelLinkProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
+            <MasksToolProvider>
             <RegionRequestProvider>
             <FalseColorPreviewProvider>
               <ToneCurvePreviewProvider>
@@ -344,6 +352,7 @@ export function App(): JSX.Element {
               </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>
             </RegionRequestProvider>
+            </MasksToolProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
         </PanelLinkProvider>
@@ -381,6 +390,7 @@ function ApplicationShell(): JSX.Element {
   const renderingApi = useViewportRendering();
   const panelLink = usePanelLink();
   const regionTool = useRegionTool();
+  const masksTool = useMasksTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
   const toneCurvePreview = useToneCurvePreview();
@@ -497,6 +507,7 @@ function ApplicationShell(): JSX.Element {
   };
   const operationCommandHandlers = buildOperationCommandHandlers({
     regionTool,
+    masksTool,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     openActionPanel: regionRequestHandlers.openActionPanel,
     singleSelectedSource,
@@ -507,6 +518,7 @@ function ApplicationShell(): JSX.Element {
     getActionAvailability: (action) =>
       deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi),
     regionToolActive: regionTool.isRegionToolActive,
+    masksToolActive: masksTool.isMasksToolActive,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     isQuickTransformAvailable: deriveActionAvailabilityForActiveViewport(
       ROTATE_ACTION,
@@ -574,6 +586,12 @@ function ApplicationShell(): JSX.Element {
                   imagesByIndex,
                   activeActionParameterValues,
                 )}
+                isMasksToolActive={masksTool.isMasksToolActive}
+                masksTarget={deriveMasksOptionsTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onChangeMasks={(next) =>
+                  writeMaskPanelStateAtViewport(singleSelectedSource?.index ?? null, next, renderingApi)
+                }
+                onCloseMasks={() => masksTool.setMasksToolActive(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
@@ -666,6 +684,10 @@ interface ApplicationStageContentProps {
   sourceViewport: ToolOptionsSourceViewport | null;
   loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
   toolOptionsEmbeddedEditor: ReactNode;
+  isMasksToolActive: boolean;
+  masksTarget: MasksOptionsTarget | null;
+  onChangeMasks: (next: MaskPanelState) => void;
+  onCloseMasks: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
@@ -709,7 +731,45 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       />
     );
   }
+  if (props.isMasksToolActive) {
+    return (
+      <MasksOptionsPanel
+        target={props.masksTarget}
+        onChangeMasks={props.onChangeMasks}
+        onClose={props.onCloseMasks}
+      />
+    );
+  }
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
+}
+
+// CT-302: the Masks aside always edits the ACTIVE panel: its spatial size fixes
+// the size of every new layer, and its rendering state holds the layers.
+function deriveMasksOptionsTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): MasksOptionsTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content) return null;
+  const dimensions = getImageSourceDimensions(content.source);
+  return {
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    width: dimensions.width,
+    height: dimensions.height,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+function writeMaskPanelStateAtViewport(
+  viewportIndex: number | null,
+  masks: MaskPanelState,
+  renderingApi: ViewportRenderingApi,
+): void {
+  if (viewportIndex === null) return;
+  const previous = renderingApi.getRenderingState(viewportIndex);
+  renderingApi.setRenderingState(viewportIndex, { ...previous, masks });
 }
 
 function buildActiveOperationEmbeddedEditorOrNull(
@@ -862,6 +922,7 @@ function useMenuSelectGridLayoutTriggersHandler(
 
 interface OperationCommandHandlerBindings {
   readonly regionTool: { readonly toggleRegionTool: () => void };
+  readonly masksTool: { readonly toggleMasksTool: () => void };
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
   readonly singleSelectedSource: SingleSelectedSource | null;
@@ -873,6 +934,7 @@ function buildOperationCommandHandlers(
 ): OperationCommandHandlers {
   return {
     toggleRegionTool: bindings.regionTool.toggleRegionTool,
+    toggleMasks: bindings.masksTool.toggleMasksTool,
     toggleBandSubset: bindings.bandSubsetToggle.onToggle,
     openActionPanel: bindings.openActionPanel,
     applyGeometricTransform: (transform) =>

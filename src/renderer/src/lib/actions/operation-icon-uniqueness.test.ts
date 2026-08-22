@@ -3,6 +3,7 @@ import { BoxSelect, FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 
 import {
   buildToolbarOperationGroups,
+  MASKS_TOGGLE_ICON,
   QUICK_TRANSFORM_ICONS,
   type ToolbarOperationGroupContext,
 } from "./operation-command-bindings";
@@ -26,6 +27,7 @@ const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIc
   ["open-project", FolderInput],
   ["grid-layout", Grid2x2],
   ["toggle-region-tool", BoxSelect],
+  ["toggle-masks", MASKS_TOGGLE_ICON],
 ];
 
 function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
@@ -52,12 +54,14 @@ function buildIdleToolbarContext(): ToolbarOperationGroupContext {
   return {
     handlers: {
       toggleRegionTool: () => {},
+      toggleMasks: () => {},
       toggleBandSubset: () => {},
       openActionPanel: () => {},
       applyGeometricTransform: () => {},
     },
     getActionAvailability: () => ({ isAvailable: true }),
     regionToolActive: false,
+    masksToolActive: false,
     bandSubsetToggle: { isAvailable: true, isActive: false, onToggle: () => {} },
     isQuickTransformAvailable: true,
   };

@@ -23,6 +23,7 @@ function buildHandlerSpies(): OperationCommandHandlers & {
   return {
     calls,
     toggleRegionTool: bump("toggleRegionTool"),
+    toggleMasks: bump("toggleMasks"),
     toggleBandSubset: bump("toggleBandSubset"),
     openActionPanel: bump("openActionPanel"),
     applyGeometricTransform: bump("applyGeometricTransform"),
@@ -34,6 +35,7 @@ function buildToolbarContext(handlers: OperationCommandHandlers): ToolbarOperati
     handlers,
     getActionAvailability: () => ({ isAvailable: true }),
     regionToolActive: false,
+    masksToolActive: false,
     bandSubsetToggle: { isAvailable: true, isActive: false, onToggle: () => {} },
     isQuickTransformAvailable: true,
   };
@@ -78,8 +80,10 @@ describe("operation menu catalog wiring", () => {
     const handlers = buildHandlerSpies();
     dispatchOperationCommand("toggle-region-tool", handlers);
     dispatchOperationCommand("toggle-subset-bands", handlers);
+    dispatchOperationCommand("toggle-masks", handlers);
     expect(handlers.calls.toggleRegionTool).toBe(1);
     expect(handlers.calls.toggleBandSubset).toBe(1);
+    expect(handlers.calls.toggleMasks).toBe(1);
   });
 
   it("applies a geometric transform directly for a quick command", () => {
