@@ -21,6 +21,7 @@ import {
   encodeRgbaBytesAsRgbTiffBytesReportingProgress,
   encodeRgbRasterAsRgbTiffBytesReportingProgress,
 } from "@/lib/image/encode-tiff";
+import type { ViewportDisplayMappingState } from "@/lib/image/as-viewed-display-mapping";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
   readSaveImageFormatTechnicalDetails,
@@ -37,6 +38,9 @@ export interface EncodeSavedImageInput {
   readonly source: ViewportImageSource;
   readonly selectedBandIndex: number;
   readonly formatId: SaveImageFormatId;
+  // CT-296: PNG and JPEG save the image AS VIEWED, so they need the panel's
+  // display state. The data formats ignore it and keep writing raw data.
+  readonly displayMapping: ViewportDisplayMappingState;
   // CT-219f: TIFF and ENVI encodes report determinate 0..1 progress; the canvas
   // formats (PNG, JPEG) are single-shot and keep the indeterminate spinner.
   readonly onProgress?: UnitProgressCallback;
@@ -194,6 +198,7 @@ async function encodeViewportSourceAsCanvasBlob(
 ): Promise<EncodedSavedImage> {
   const bytes = await encodeViewportSourceAsCanvasBlobBytes(input.source, input.selectedBandIndex, {
     mimeType: kind === "png" ? "image/png" : "image/jpeg",
+    displayMapping: input.displayMapping,
   });
   return { bytes };
 }

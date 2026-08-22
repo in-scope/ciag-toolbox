@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE } from "@/lib/image/as-viewed-display-mapping";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -47,6 +48,7 @@ describe("planPngStackExportUpload", () => {
       source: asSource(buildTwoBandRaster()),
       originalFileName: "cube.tif",
       formatId: "png-stack-16-bit",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
     });
     expect(files.map((file) => file.fileName)).toEqual(["cube_band_001.png", "cube_band_002.png"]);
     for (const file of files) {
@@ -69,6 +71,7 @@ describe("planPngStackExportUpload", () => {
       source: asSource(buildTwoBandRaster()),
       originalFileName: "cube.tif",
       formatId: "png-stack-8-bit",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       onProgress: (fraction) => fractions.push(fraction),
       encodeBandAsPng8Bytes: async (_raster, bandIndex) => {
         encodedIndexes.push(bandIndex);

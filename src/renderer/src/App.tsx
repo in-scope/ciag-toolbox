@@ -99,6 +99,7 @@ import {
   listKeptBandIndexesFromRemoved,
   listKeptBandOriginalNumbersAfterRemovingBand,
 } from "@/lib/image/apply-band-keep";
+import type { ViewportDisplayMappingState } from "@/lib/image/as-viewed-display-mapping";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
@@ -991,9 +992,21 @@ function confirmSaveImageFormatChoice(
       selectedBandIndex: renderingState.selectedBandIndex,
       originalFileName: content.fileName,
       formatId,
+      displayMapping: readDisplayMappingStateForSaving(renderingState),
     },
     bindings.busyRegistrar,
   );
+}
+
+// CT-296: PNG and JPEG save the image AS VIEWED, so the save flow carries the
+// panel's display-only toggles alongside the pixels.
+function readDisplayMappingStateForSaving(
+  renderingState: ViewportRenderingState,
+): ViewportDisplayMappingState {
+  return {
+    normalizationEnabled: renderingState.normalizationEnabled,
+    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
+  };
 }
 
 interface SaveImageFlowToastInput {
@@ -1001,6 +1014,7 @@ interface SaveImageFlowToastInput {
   selectedBandIndex: number;
   originalFileName: string;
   formatId: SaveImageFormatId;
+  displayMapping: ViewportDisplayMappingState;
 }
 
 async function runSaveImageFlowAndShowToast(

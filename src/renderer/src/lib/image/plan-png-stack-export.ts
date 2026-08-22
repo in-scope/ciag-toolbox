@@ -1,3 +1,4 @@
+import type { ViewportDisplayMappingState } from "@/lib/image/as-viewed-display-mapping";
 import { encodeViewportSourceAsCanvasBlobBytes } from "@/lib/image/encode-canvas";
 import { planRasterBandAsRawPng16SampleUpload } from "@/lib/image/encode-png16-raw-samples";
 import type { SaveImageUploadPartPlan } from "@/lib/image/encode-saved-image";
@@ -27,12 +28,16 @@ export interface PngStackFileUploadPlan {
 export type EncodeBandAsPng8Bytes = (
   raster: RasterImage,
   bandIndex: number,
+  displayMapping: ViewportDisplayMappingState,
 ) => Promise<Uint8Array>;
 
 export interface PlanPngStackExportInput {
   readonly source: ViewportImageSource;
   readonly originalFileName: string;
   readonly formatId: SaveImageFormatId;
+  // CT-296: each 8-bit band file is byte-identical to saving that band alone,
+  // so the stack export carries the same as-viewed display state.
+  readonly displayMapping: ViewportDisplayMappingState;
   readonly onProgress?: UnitProgressCallback;
   readonly encodeBandAsPng8Bytes?: EncodeBandAsPng8Bytes;
 }
@@ -84,7 +89,7 @@ async function planEightBitPngStackFiles(
   const encodeBand = input.encodeBandAsPng8Bytes ?? encodeBandThroughCanvasPngEncoder;
   const files: PngStackFileUploadPlan[] = [];
   for (let bandIndex = 0; bandIndex < fileNames.length; bandIndex += 1) {
-    const bytes = await encodeBand(raster, bandIndex);
+    const bytes = await encodeBand(raster, bandIndex, input.displayMapping);
     files.push({ fileName: fileNames[bandIndex]!, plan: wrapEncodedPngBytesAsPlan(bytes) });
     input.onProgress?.((bandIndex + 1) / fileNames.length);
   }
@@ -94,9 +99,11 @@ async function planEightBitPngStackFiles(
 async function encodeBandThroughCanvasPngEncoder(
   raster: RasterImage,
   bandIndex: number,
+  displayMapping: ViewportDisplayMappingState,
 ): Promise<Uint8Array> {
   return encodeViewportSourceAsCanvasBlobBytes({ kind: "raster", raster }, bandIndex, {
     mimeType: "image/png",
+    displayMapping,
   });
 }
 

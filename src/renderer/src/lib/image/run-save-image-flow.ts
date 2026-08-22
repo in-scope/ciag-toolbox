@@ -5,6 +5,7 @@ import {
 
 import { describeElectronInvokeFailure } from "@/lib/ipc/electron-invoke-error";
 
+import type { ViewportDisplayMappingState } from "@/lib/image/as-viewed-display-mapping";
 import {
   planViewportSourceSaveUpload,
   type SaveImageUploadPartPlan,
@@ -45,6 +46,9 @@ export interface SaveImageFlowInput {
   readonly selectedBandIndex: number;
   readonly originalFileName: string;
   readonly formatId: SaveImageFormatId;
+  // CT-296: the panel's display state at save time, so PNG and JPEG carry the
+  // image the user was looking at.
+  readonly displayMapping: ViewportDisplayMappingState;
   // CT-219f: drives the save busy entry's determinate bar.
   readonly onProgress?: UnitProgressCallback;
 }
@@ -88,6 +92,7 @@ async function runSaveImageFlowWhileSourceIsHeld(
     source: input.source,
     selectedBandIndex: input.selectedBandIndex,
     formatId: input.formatId,
+    displayMapping: input.displayMapping,
     onProgress: scaleProgressToWindow(input.onProgress, 0, ENCODE_PROGRESS_WINDOW_END),
   });
   const begun = await api.beginSaveImage(buildSaveImageBeginRequest(input, upload));
@@ -107,6 +112,7 @@ async function runPngStackFolderSaveFlow(
     source: input.source,
     originalFileName: input.originalFileName,
     formatId: input.formatId,
+    displayMapping: input.displayMapping,
     onProgress: scaleProgressToWindow(input.onProgress, 0, ENCODE_PROGRESS_WINDOW_END),
   });
   const begun = await api.beginSaveImage(buildPngStackFolderBeginRequest(files));

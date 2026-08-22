@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE } from "@/lib/image/as-viewed-display-mapping";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +17,7 @@ describe("encodeViewportSourceForSaving progress reporting", () => {
       source: buildRasterSource(),
       selectedBandIndex: 0,
       formatId: "tiff-16-bit",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       onProgress: (fraction) => fractions.push(fraction),
     });
     expect(encoded.bytes.length).toBeGreaterThan(0);
@@ -28,6 +30,7 @@ describe("encodeViewportSourceForSaving progress reporting", () => {
       source: buildRasterSource(),
       selectedBandIndex: 0,
       formatId: "envi",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       onProgress: (fraction) => fractions.push(fraction),
     });
     expect(encoded.sidecar?.bytes.length).toBeGreaterThan(0);
@@ -40,6 +43,7 @@ describe("encodeViewportSourceForSaving progress reporting", () => {
       source: buildRasterSource(),
       selectedBandIndex: 0,
       formatId: "envi-float",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       onProgress: (fraction) => fractions.push(fraction),
     });
     expectMonotonicFractionsEndingAtOne(fractions);
@@ -76,6 +80,7 @@ describe("planViewportSourceSaveUpload for 16-bit PNG", () => {
       source: buildRasterSource(),
       selectedBandIndex: 1,
       formatId: "png-16-bit",
+      displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
     });
     expect(upload.primary.byteLength).toBe(12);
     expect(upload.primaryEncoding).toEqual({ kind: "png-16-bit-grayscale", width: 3, height: 2 });
@@ -96,6 +101,7 @@ describe("planViewportSourceSaveUpload for 16-bit PNG", () => {
         source: { kind: "raster", raster: floatRaster },
         selectedBandIndex: 0,
         formatId: "png-16-bit",
+        displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       }),
     ).rejects.toThrow("16-bit PNG stores integers. Use ENVI float for float data.");
   });
@@ -115,6 +121,7 @@ describe("planViewportSourceSaveUpload for 16-bit PNG", () => {
         source: { kind: "raster", raster: composite },
         selectedBandIndex: 0,
         formatId: "png-16-bit",
+        displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       }),
     ).rejects.toThrow(/8-bit/);
   });
@@ -125,6 +132,7 @@ describe("planViewportSourceSaveUpload for 16-bit PNG", () => {
         source: buildRasterSource(),
         selectedBandIndex: 0,
         formatId: "png-16-bit",
+        displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
       }),
     ).rejects.toThrow(/main process/);
   });

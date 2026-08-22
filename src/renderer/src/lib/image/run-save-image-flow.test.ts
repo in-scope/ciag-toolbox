@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE } from "@/lib/image/as-viewed-display-mapping";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -96,7 +97,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const raster = buildRasterFixture();
     const api = buildRecordingApi();
     const result = await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi" },
+      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -111,7 +112,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const raster = buildRasterFixture();
     const api = buildRecordingApi();
     await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi" },
+      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -130,7 +131,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const raster = buildRasterFixture();
     const api = buildRecordingApi();
     await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi-float" },
+      { source: buildRasterSource(raster), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi-float", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -143,7 +144,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const raster = buildRasterFixture();
     const api = buildRecordingApi();
     await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(raster), selectedBandIndex: 1, originalFileName: "cube.tif", formatId: "tiff-16-bit" },
+      { source: buildRasterSource(raster), selectedBandIndex: 1, originalFileName: "cube.tif", formatId: "tiff-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -158,7 +159,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
   it("streams a 16-bit PNG export as raw big-endian samples with the encoding descriptor", async () => {
     const api = buildRecordingApi();
     await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(), selectedBandIndex: 1, originalFileName: "cube.tif", formatId: "png-16-bit" },
+      { source: buildRasterSource(), selectedBandIndex: 1, originalFileName: "cube.tif", formatId: "png-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -180,7 +181,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
   it("streams a 16-bit PNG stack as one raw-sample file per band into a folder", async () => {
     const api = buildRecordingApi();
     const result = await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -204,7 +205,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
   it("uploads no stack file when the folder pick is canceled", async () => {
     const api = buildRecordingApi({ status: "canceled" });
     const result = await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -216,7 +217,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const api = buildRecordingApi(undefined, new Error("boom"));
     await expect(
       runSaveImageFlowThroughMainProcess(
-        { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit" },
+        { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "png-stack-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
         api,
         TINY_CHUNK_BYTES,
       ),
@@ -234,6 +235,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
         selectedBandIndex: 0,
         originalFileName: "cube.tif",
         formatId: "png-stack-16-bit",
+        displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
         onProgress: (fraction) => fractions.push(fraction),
       },
       api,
@@ -247,7 +249,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
   it("uploads nothing when the save dialog is canceled", async () => {
     const api = buildRecordingApi({ status: "canceled" });
     const result = await runSaveImageFlowThroughMainProcess(
-      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi" },
+      { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
       api,
       TINY_CHUNK_BYTES,
     );
@@ -267,7 +269,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const api = buildRecordingApi();
     await expect(
       runSaveImageFlowThroughMainProcess(
-        { source: buildRasterSource(oversized), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "tiff-16-bit" },
+        { source: buildRasterSource(oversized), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "tiff-16-bit", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
         api,
         TINY_CHUNK_BYTES,
       ),
@@ -279,7 +281,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
     const api = buildRecordingApi(undefined, new Error("boom"));
     await expect(
       runSaveImageFlowThroughMainProcess(
-        { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi" },
+        { source: buildRasterSource(), selectedBandIndex: 0, originalFileName: "cube.tif", formatId: "envi", displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE },
         api,
         TINY_CHUNK_BYTES,
       ),
@@ -297,6 +299,7 @@ describe("runSaveImageFlowThroughMainProcess", () => {
         selectedBandIndex: 0,
         originalFileName: "cube.tif",
         formatId: "envi",
+        displayMapping: DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE,
         onProgress: (fraction) => fractions.push(fraction),
       },
       api,
