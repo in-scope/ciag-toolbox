@@ -1,5 +1,59 @@
 # Changelog
 
+## [5.1.0](https://github.com/in-scope/ciag-toolbox/compare/v0.5.0...v5.1.0) (2026-08-22)
+
+
+### Features
+
+* **CT-260:** error toasts persist until dismissed ([a2939a9](https://github.com/in-scope/ciag-toolbox/commit/a2939a95bb9ebfaf15daf98d80feae5457a4dd42))
+* **CT-263:** grayscale png/jpg images combine into one stack ([ece8532](https://github.com/in-scope/ciag-toolbox/commit/ece8532353d3c8434462cb47e3e16a2179a1d20c))
+* **CT-264:** recombine split groups into one stack in the review modal ([9c131b8](https://github.com/in-scope/ciag-toolbox/commit/9c131b8e7cc74eaa71af9992b9941fd1e53a4cd1))
+* **CT-265:** right-click selects the panel under the cursor and the link entry explains multi-select ([acdfa23](https://github.com/in-scope/ciag-toolbox/commit/acdfa2380cc80658e5433bf65f305264166c24a7))
+* **CT-266:** metadata shows the current data size instead of file size ([1a9ff0b](https://github.com/in-scope/ciag-toolbox/commit/1a9ff0b6bcea796d08bb64457c4e13a51fa0604a))
+* **CT-268:** every long operation has a stop button ([dbe9e08](https://github.com/in-scope/ciag-toolbox/commit/dbe9e08af2d86aa2303ce344bf6c703ff2884f4b))
+* **CT-269:** applies stay isolated while another operation runs ([47ed54b](https://github.com/in-scope/ciag-toolbox/commit/47ed54b48776513033f2b5179ca042a4fb775d44))
+* **CT-271:** 16-bit png export encodes in main through the chunked save protocol ([80f01ca](https://github.com/in-scope/ciag-toolbox/commit/80f01cafb384651fd323ac6c1055e964d1f69d72))
+* **CT-272:** 16-bit pngs decode in main to real uint16 samples ([aae629d](https://github.com/in-scope/ciag-toolbox/commit/aae629d7d4980173cc4ca52e23bda22a8cb8b1b8))
+* **CT-273:** a stack saves as a folder of pngs, one file per band ([a1feeb1](https://github.com/in-scope/ciag-toolbox/commit/a1feeb1be05a21272aba92bff4cbde42ed0d26c9))
+* **CT-274:** open project button in the toolbar ([07cd961](https://github.com/in-scope/ciag-toolbox/commit/07cd96131efe63460515fc1fc535d69dd9aeb3f8))
+* **CT-275:** the committed region box drags and resizes ([393a5a6](https://github.com/in-scope/ciag-toolbox/commit/393a5a6e130e848fdc47854d469280cf29d25214))
+* **CT-276:** crop to a new panel hints that closing the original frees memory ([d71c4ff](https://github.com/in-scope/ciag-toolbox/commit/d71c4ffd19ca2a4995bfbc6ff6f50c627a502286))
+* **CT-277:** the panel toggle names its off state ([af22764](https://github.com/in-scope/ciag-toolbox/commit/af22764c7ab9e6b1509f1e96130c398f0891c519))
+* **CT-278:** false-color composite renders in color ([e9fd0dc](https://github.com/in-scope/ciag-toolbox/commit/e9fd0dc052c6c2842b32eb8fbb79cb80c9b6796e))
+* **CT-279:** rename reflect to flip in all user-facing labels ([7075839](https://github.com/in-scope/ciag-toolbox/commit/707583988d29af1889bfc2123c2c674d4cb28907))
+* **CT-280:** rename spatial filter to frequency filters in user-facing labels ([0ab2bf8](https://github.com/in-scope/ciag-toolbox/commit/0ab2bf839f0210f488dded2a038b2537ff23f966))
+* **CT-281:** normalize is min-max only and clip by value stands alone ([a64e935](https://github.com/in-scope/ciag-toolbox/commit/a64e93592f2728bfa9556d620b73a662745cb626))
+* **CT-282:** threshold keeps bands and otsu runs as a method through apply ([cbd4963](https://github.com/in-scope/ciag-toolbox/commit/cbd4963d164c1deee338e26b55c2b17a647181f2))
+* **CT-283:** subset bands accepts a typed index list ([de39db4](https://github.com/in-scope/ciag-toolbox/commit/de39db4f5125d22eb4cab1046250d7547e1e89b8))
+* **CT-284:** band selection folds into subset bands as a by-function mode ([36818e2](https://github.com/in-scope/ciag-toolbox/commit/36818e251c0a10aa3abceb1446f4d57fe85d748b))
+* **CT-285:** spectral derivative keeps band count and wavelengths ([3653563](https://github.com/in-scope/ciag-toolbox/commit/3653563f14a662dd0f01e6ca15ab7724aceafbbd))
+* **CT-286:** brightness & contrast all-bands description says it works band-wise ([a53cd36](https://github.com/in-scope/ciag-toolbox/commit/a53cd3635d857d69047f8ae3c2a5cd4d2df64b91))
+* **CT-287:** one shared band-wise scope field description across tools ([934ea67](https://github.com/in-scope/ciag-toolbox/commit/934ea67ea32d5e5a9855e312f15b86f82e044da8))
+* **CT-288:** color tiff variants open in color ([31883d0](https://github.com/in-scope/ciag-toolbox/commit/31883d01cec6ab6500b31bc8dfff5a32a8ba30a4))
+* **CT-289:** menus become file, tools, basic-processing, multi-band ([06e204b](https://github.com/in-scope/ciag-toolbox/commit/06e204be5b8e7ceacdeb920ec18762796b25e25c))
+* **CT-291:** result destination is a segmented control ([9c8a08f](https://github.com/in-scope/ciag-toolbox/commit/9c8a08fcfb3e889819349764a3599d43ac163317))
+* **CT-292:** rename false-color composite to rgb color composite with a venn icon ([791650d](https://github.com/in-scope/ciag-toolbox/commit/791650d9ac64cecb7adb9b640a32406a7411e0eb))
+* **CT-293:** by-function modes are exclusive and run on apply ([1eefa7f](https://github.com/in-scope/ciag-toolbox/commit/1eefa7f1e20740a84cdf2e7c4997d32c3dab21a5))
+* **CT-295:** channel-view toggle is the rgb color composite toggle ([60507cf](https://github.com/in-scope/ciag-toolbox/commit/60507cf7773e478f08d5100ecd78156c2a66bc5d))
+* **CT-298:** rename the app to charm toolbox ([f5355c7](https://github.com/in-scope/ciag-toolbox/commit/f5355c76da6a6330f3eb1a47e8785da187f305d5))
+* **CT-299:** custom transform may return any spatial size ([cca3cdf](https://github.com/in-scope/ciag-toolbox/commit/cca3cdfae1d55f0ab94e046026be7c1c7da52640))
+
+
+### Bug Fixes
+
+* **CT-261:** clear the operation region on apply failure, panel switch, and cancel ([51dd6e9](https://github.com/in-scope/ciag-toolbox/commit/51dd6e9d27ab7945b19a37705a4ba55de6d01399))
+* **CT-262:** guarantee the bundled python runtime ships in packaged builds ([3261757](https://github.com/in-scope/ciag-toolbox/commit/32617574925b84102da5c6ceae0738f070de539d))
+* **CT-269:** panel close button stays clickable above the busy overlay ([de0ae49](https://github.com/in-scope/ciag-toolbox/commit/de0ae49c18e5c4cc85ead219f0e8350079b0aba0))
+* **CT-290:** repeated large applies never exhaust memory ([96eae86](https://github.com/in-scope/ciag-toolbox/commit/96eae861ac3131904ac84f8f39f68b1e25403c81))
+* **CT-296:** png and jpeg exports save the image as viewed ([63e7636](https://github.com/in-scope/ciag-toolbox/commit/63e763648e6cf91cb18b4ede70cc001fb0d23b9b))
+* **CT-297:** contrast centres on the middle of the data range ([cae7037](https://github.com/in-scope/ciag-toolbox/commit/cae70374bad0013e7bb791715fdc6158cbae4e69))
+
+
+### Performance Improvements
+
+* **CT-267:** rotate and flip run tight per-band loops and finish in seconds at the anna benchmark ([5d2131e](https://github.com/in-scope/ciag-toolbox/commit/5d2131ef493c70c557de65dd0d7e86fcb5e127a9))
+* **CT-270:** pca, mnf and ica meet wall-clock targets at the anna benchmark ([973dd94](https://github.com/in-scope/ciag-toolbox/commit/973dd9427df9133ac2c7ba7c3ff49f53c8a20058))
+
 ## [0.5.0](https://github.com/in-scope/ciag-toolbox/compare/v0.4.3...v0.5.0) (2026-07-27)
 
 
