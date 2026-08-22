@@ -94,6 +94,9 @@ export interface BuiltinScriptCubeReference extends BuiltinScriptReferenceBase {
 export interface BuiltinScriptReferences {
   readonly ropSeed: number;
   readonly npc: BuiltinScriptValueReference;
+  // CT-308: the same fixture scored with a coarse binning, where the two mask
+  // classes share bins, so the pinned value is not the trivially separable 1.
+  readonly npcCoarseBins: BuiltinScriptValueReference;
   readonly rop: BuiltinScriptCubeReference;
   readonly l2Minimization: BuiltinScriptCubeReference;
   readonly localPca: BuiltinScriptCubeReference;

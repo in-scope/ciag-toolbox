@@ -502,6 +502,18 @@ export {
   importMaskFromPath,
   maskToastContaining,
 } from "./mask-file-transfer";
+export {
+  computeNpcScore,
+  expectScoreWithinRelativeTolerance,
+  npcBinsField,
+  npcComputeButton,
+  npcMaskLayerPicker,
+  npcOptionsPanel,
+  npcScoreReadout,
+  NPC_NOT_COMPUTED_TEXT,
+  NPC_PANEL_LABEL,
+  setNpcBinCount,
+} from "./npc-panel";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";
 export {

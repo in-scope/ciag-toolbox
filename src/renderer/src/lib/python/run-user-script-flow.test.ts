@@ -95,3 +95,84 @@ describe("describeUserScriptRunBusyLabel", () => {
     expect(describeUserScriptRunBusyLabel({ mode: "import" })).toBe("Running imported tool...");
   });
 });
+
+// CT-308: a built-in algorithm run adds per-run extras and a stop controller.
+describe("runUserScriptOnRasterShowingViewportBusy with CT-308 bindings", () => {
+  it("offers the stop controller as the busy card's Stop and forwards extras to the run", async () => {
+    const recorded: RecordedBuiltinRun = { canceled: false };
+    const api = buildRecordingBuiltinApi(recorded);
+    const stopController = new AbortController();
+    const result = await runUserScriptOnRasterShowingViewportBusy(
+      {
+        busyRegistrar: buildStopCapturingBusyRegistrar(recorded),
+        viewportIndex: 1,
+        stopController,
+        extras: { masks: [Uint8Array.from([1, 0])], params: { bins: 8 } },
+      },
+      buildTinyRaster(),
+      { mode: "builtin", scriptName: "npc" },
+      "value",
+      api,
+    );
+    expect(result).toEqual({ status: "completed", value: 0.5 });
+    expect(recorded.begin?.masks).toEqual({ count: 1 });
+    expect(recorded.executeParams).toEqual({ bins: 8 });
+    expect(recorded.requestStop).toBeTypeOf("function");
+  });
+
+  it("kills the worker when the busy card's Stop is pressed mid-run", async () => {
+    const recorded: RecordedBuiltinRun = { canceled: false };
+    const stopController = new AbortController();
+    const api = buildRecordingBuiltinApi(recorded, () => recorded.requestStop?.());
+    await runUserScriptOnRasterShowingViewportBusy(
+      { busyRegistrar: buildStopCapturingBusyRegistrar(recorded), viewportIndex: 1, stopController },
+      buildTinyRaster(),
+      { mode: "builtin", scriptName: "npc" },
+      "value",
+      api,
+    ).catch(() => undefined);
+    expect(recorded.canceled).toBe(true);
+  });
+});
+
+interface RecordedBuiltinRun {
+  requestStop?: (() => void) | undefined;
+  canceled: boolean;
+  begin?: ToolboxUserScriptRunBeginRequest;
+  executeParams?: unknown;
+}
+
+function buildStopCapturingBusyRegistrar(recorded: RecordedBuiltinRun): BusyEntryRegistrar {
+  const handle: BusyEntryHandle = { id: "busy-1", update: () => {}, clear: () => {} };
+  return {
+    registerAppBusyEntry: () => handle,
+    registerViewportBusyEntry: (input) => {
+      recorded.requestStop = input.requestStop;
+      return handle;
+    },
+  };
+}
+
+function buildRecordingBuiltinApi(
+  recorded: RecordedBuiltinRun,
+  beforeExecute: () => void = () => undefined,
+): UserScriptRunChunkedApi {
+  return {
+    beginUserScriptRun: (request) => {
+      recorded.begin = request;
+      return Promise.resolve({ status: "ready", token: "tok", sourceName: null });
+    },
+    sendUserScriptRunCubeChunk: () => Promise.resolve(),
+    executeUserScriptRun: (request) => {
+      recorded.executeParams = request.params;
+      beforeExecute();
+      return Promise.resolve({ status: "completed", value: 0.5 });
+    },
+    readUserScriptRunResultChunk: () => Promise.reject(new Error("unused")),
+    releaseUserScriptRun: () => Promise.resolve(),
+    cancelUserScriptRun: () => {
+      recorded.canceled = true;
+      return Promise.resolve();
+    },
+  };
+}

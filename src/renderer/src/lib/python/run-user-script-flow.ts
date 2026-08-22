@@ -1,9 +1,13 @@
+import { USER_SCRIPT_RUN_CHUNK_BYTES } from "@shared/chunked-user-script-run-protocol";
+
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-context";
 
 import {
   runUserScriptOverCubeInChunks,
+  type ChunkedUserScriptRunCallbacks,
   type UserScriptRunChunkedApi,
+  type UserScriptRunExtras,
 } from "./run-user-script-chunked";
 import { buildUserScriptRunCubeInputFromRaster } from "./user-script-cube";
 
@@ -15,10 +19,16 @@ import { buildUserScriptRunCubeInputFromRaster } from "./user-script-cube";
 // Python worker runs. The busy entry registers only once the run is READY
 // (after the import dialog, when any), so no overlay sits behind a native
 // file picker.
+//
+// CT-308: a built-in algorithm run adds two optional bindings - the per-run
+// extras (category masks and params) and a stop controller, whose abort becomes
+// the busy card's Stop button and kills the Python worker.
 
 export interface UserScriptRunFlowBindings {
   readonly busyRegistrar: BusyEntryRegistrar;
   readonly viewportIndex: number;
+  readonly extras?: UserScriptRunExtras;
+  readonly stopController?: AbortController;
 }
 
 export async function runUserScriptOnRasterShowingViewportBusy(
@@ -30,27 +40,46 @@ export async function runUserScriptOnRasterShowingViewportBusy(
 ): Promise<ToolboxRunUserScriptResult> {
   const busy: { handle: BusyEntryHandle | null } = { handle: null };
   try {
-    return await runUserScriptOverCubeInChunks(api, buildUserScriptRunCubeInputFromRaster(raster), source, resultKind, {
-      onRunReady: () => {
-        busy.handle = registerViewportBusyEntryForUserScriptRun(bindings, source);
-      },
-      onUploadProgress: (fraction) => busy.handle?.update({ progress: fraction }),
-      // CT-307: a script that reports in-script progress flips the busy entry
-      // from the worker-run spinner back to the determinate bar.
-      onWorkerProgress: (fraction) => busy.handle?.update({ progress: fraction }),
-    });
+    return await runUserScriptOverCubeInChunks(
+      api,
+      buildUserScriptRunCubeInputFromRaster(raster),
+      source,
+      resultKind,
+      buildRunCallbacksDrivingBusyEntry(bindings, source, busy),
+      USER_SCRIPT_RUN_CHUNK_BYTES,
+      bindings.extras ?? {},
+    );
   } finally {
     busy.handle?.clear();
   }
+}
+
+function buildRunCallbacksDrivingBusyEntry(
+  bindings: UserScriptRunFlowBindings,
+  source: ToolboxRunUserScriptSource,
+  busy: { handle: BusyEntryHandle | null },
+): ChunkedUserScriptRunCallbacks {
+  return {
+    onRunReady: () => {
+      busy.handle = registerViewportBusyEntryForUserScriptRun(bindings, source);
+    },
+    onUploadProgress: (fraction) => busy.handle?.update({ progress: fraction }),
+    // CT-307: a script that reports in-script progress flips the busy entry
+    // from the worker-run spinner back to the determinate bar.
+    onWorkerProgress: (fraction) => busy.handle?.update({ progress: fraction }),
+    abortSignal: bindings.stopController?.signal,
+  };
 }
 
 function registerViewportBusyEntryForUserScriptRun(
   bindings: UserScriptRunFlowBindings,
   source: ToolboxRunUserScriptSource,
 ): BusyEntryHandle {
+  const stopController = bindings.stopController;
   return bindings.busyRegistrar.registerViewportBusyEntry({
     viewportIndex: bindings.viewportIndex,
     label: describeUserScriptRunBusyLabel(source),
+    requestStop: stopController ? () => stopController.abort() : undefined,
   });
 }
 

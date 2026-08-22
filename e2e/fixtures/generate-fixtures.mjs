@@ -1033,6 +1033,17 @@ function listBuiltinScriptReferenceRequests(fixtures) {
       params: { bins: 255 },
       request: { cube: multibandCube, masks: multibandMasks, params: { bins: 255 } },
     },
+    // CT-308: multiband-12bit's two mask classes are fully separable, so the
+    // 255-bin score is exactly 1 and a stub returning 1 would pass. A coarse
+    // binning forces the classes to share bins, pinning a score that only a
+    // real run can reproduce.
+    npcCoarseBins: {
+      script: "npc",
+      fixture: fixtures.multiBandTiff.fileName,
+      maskFixture: fixtures.maskMultibandPng.fileName,
+      params: { bins: 2 },
+      request: { cube: multibandCube, masks: multibandMasks, params: { bins: 2 } },
+    },
     rop: {
       script: "rop",
       fixture: fixtures.multiBandTiff.fileName,

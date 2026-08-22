@@ -566,6 +566,15 @@
       },
       "value": 0.9999999999999991
     },
+    "npcCoarseBins": {
+      "script": "npc",
+      "fixture": "multiband-12bit.tif",
+      "maskFixture": "mask-multiband.png",
+      "params": {
+        "bins": 2
+      },
+      "value": 0.25
+    },
     "rop": {
       "script": "rop",
       "fixture": "multiband-12bit.tif",

@@ -34,6 +34,10 @@ import {
   MasksOptionsPanel,
   type MasksOptionsTarget,
 } from "@/components/masks-options-panel";
+import {
+  NpcOptionsPanel,
+  type NpcPanelTarget,
+} from "@/components/npc-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
@@ -294,6 +298,7 @@ import {
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
+import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
 import type { MaskPanelState } from "@/lib/masks/mask-panel";
 import type { MaskBrushSettings } from "@/lib/masks/mask-brush";
 import { getImageSourceDimensions } from "@/lib/webgl/texture";
@@ -374,6 +379,7 @@ function ApplicationShell(): JSX.Element {
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
+  const [isNpcPanelOpen, setIsNpcPanelOpen] = useState(false);
   const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
     useState<PendingOpenImagesReplace | null>(null);
   const [pendingOpenImagesReview, setPendingOpenImagesReview] =
@@ -511,6 +517,7 @@ function ApplicationShell(): JSX.Element {
     masksTool,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     openActionPanel: regionRequestHandlers.openActionPanel,
+    openNpcPanel: () => openNpcPanelClosingAnyToolPanel(regionRequestHandlers, setIsNpcPanelOpen),
     singleSelectedSource,
     applyActionFlowBindings,
   });
@@ -595,6 +602,16 @@ function ApplicationShell(): JSX.Element {
                 maskBrush={masksTool.brush}
                 onChangeMaskBrush={masksTool.setBrush}
                 onCloseMasks={() => masksTool.setMasksToolActive(false)}
+                isNpcPanelOpen={isNpcPanelOpen}
+                npcTarget={deriveNpcPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onRecordNpcScore={(appliedLabel) =>
+                  appendNpcScoreToHistoryAtViewport(
+                    singleSelectedSource?.index ?? null,
+                    appliedLabel,
+                    renderingApi,
+                  )
+                }
+                onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
@@ -693,6 +710,10 @@ interface ApplicationStageContentProps {
   maskBrush: MaskBrushSettings;
   onChangeMaskBrush: (next: MaskBrushSettings) => void;
   onCloseMasks: () => void;
+  isNpcPanelOpen: boolean;
+  npcTarget: NpcPanelTarget | null;
+  onRecordNpcScore: (appliedLabel: string) => void;
+  onCloseNpcPanel: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
@@ -736,6 +757,15 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       />
     );
   }
+  if (props.isNpcPanelOpen) {
+    return (
+      <NpcOptionsPanel
+        target={props.npcTarget}
+        onRecordScoreInHistory={props.onRecordNpcScore}
+        onClose={props.onCloseNpcPanel}
+      />
+    );
+  }
   if (props.isMasksToolActive) {
     return (
       <MasksOptionsPanel
@@ -770,6 +800,47 @@ function deriveMasksOptionsTargetOrNull(
     masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
   };
 }
+
+// CT-308: NPC reads the ACTIVE panel's cube and that panel's mask layers, so it
+// is offered only for a raster stack (a browser-decoded photo has no cube).
+function deriveNpcPanelTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): NpcPanelTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return {
+    viewportIndex: singleSelectedSource.index,
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    raster: content.source.raster,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+// The score is not an operation on the stack, so nothing about the panel
+// changes; only the audit trail records that it was measured.
+function appendNpcScoreToHistoryAtViewport(
+  viewportIndex: number | null,
+  appliedLabel: string,
+  renderingApi: ViewportRenderingApi,
+): void {
+  if (viewportIndex === null) return;
+  const previous = renderingApi.getRenderingState(viewportIndex);
+  renderingApi.setRenderingState(viewportIndex, {
+    ...previous,
+    operationHistory: appendOperationHistoryEntry(previous.operationHistory, {
+      actionId: NPC_ANALYSIS_ACTION_ID,
+      actionLabel: NPC_ANALYSIS_ACTION_LABEL,
+      appliedLabel,
+      parameterValues: NO_PARAMETER_VALUES,
+    }),
+  });
+}
+
+const NPC_ANALYSIS_ACTION_ID = "npc";
+const NPC_ANALYSIS_ACTION_LABEL = "NPC";
 
 function writeMaskPanelStateAtViewport(
   viewportIndex: number | null,
@@ -934,6 +1005,7 @@ interface OperationCommandHandlerBindings {
   readonly masksTool: { readonly toggleMasksTool: () => void };
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly openNpcPanel: () => void;
   readonly singleSelectedSource: SingleSelectedSource | null;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
 }
@@ -946,6 +1018,7 @@ function buildOperationCommandHandlers(
     toggleMasks: bindings.masksTool.toggleMasksTool,
     toggleBandSubset: bindings.bandSubsetToggle.onToggle,
     openActionPanel: bindings.openActionPanel,
+    openNpcPanel: bindings.openNpcPanel,
     applyGeometricTransform: (transform) =>
       applyQuickGeometricTransformToActiveSource(
         transform,
@@ -1871,6 +1944,17 @@ interface ToolPanelRegionRequestHandlers {
   readonly closeActionPanel: () => void;
   readonly beginRegionRequest: () => void;
   readonly clearOperationRegion: () => void;
+}
+
+// CT-308: the NPC aside and the tool-options panel compete for the same
+// right-side slot, so opening NPC from the menu closes any open operation panel
+// (and its pending region request) instead of hiding behind it.
+function openNpcPanelClosingAnyToolPanel(
+  regionRequestHandlers: ToolPanelRegionRequestHandlers,
+  setIsNpcPanelOpen: (open: boolean) => void,
+): void {
+  regionRequestHandlers.closeActionPanel();
+  setIsNpcPanelOpen(true);
 }
 
 function buildToolPanelRegionRequestHandlers(

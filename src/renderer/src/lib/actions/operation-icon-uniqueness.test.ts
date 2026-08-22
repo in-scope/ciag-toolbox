@@ -4,6 +4,7 @@ import { BoxSelect, FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 import {
   buildToolbarOperationGroups,
   MASKS_TOGGLE_ICON,
+  NPC_PANEL_ICON,
   QUICK_TRANSFORM_ICONS,
   type ToolbarOperationGroupContext,
 } from "./operation-command-bindings";
@@ -28,6 +29,7 @@ const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIc
   ["grid-layout", Grid2x2],
   ["toggle-region-tool", BoxSelect],
   ["toggle-masks", MASKS_TOGGLE_ICON],
+  ["npc", NPC_PANEL_ICON],
 ];
 
 function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
@@ -57,6 +59,7 @@ function buildIdleToolbarContext(): ToolbarOperationGroupContext {
       toggleMasks: () => {},
       toggleBandSubset: () => {},
       openActionPanel: () => {},
+      openNpcPanel: () => {},
       applyGeometricTransform: () => {},
     },
     getActionAvailability: () => ({ isAvailable: true }),

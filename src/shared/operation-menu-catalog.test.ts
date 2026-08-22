@@ -64,6 +64,7 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
       "Concatenate Stacks",
       "ICA",
       "MNF",
+      "NPC",
       "PCA",
       "RGB Color Composite",
       "Spectral Derivative",

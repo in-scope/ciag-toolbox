@@ -3,6 +3,7 @@ import {
   Brush,
   FlipHorizontal,
   FlipVertical,
+  Gauge,
   RotateCcw,
   RotateCw,
   type LucideIcon,
@@ -39,6 +40,7 @@ export interface OperationCommandHandlers {
   readonly toggleMasks: () => void;
   readonly toggleBandSubset: () => void;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly openNpcPanel: () => void;
   readonly applyGeometricTransform: (transform: GeometricTransform) => void;
 }
 
@@ -63,6 +65,8 @@ function runOperationCommandBehavior(
       return handlers.toggleBandSubset();
     case "open-action-panel":
       return openActionPanelForCommand(command, handlers);
+    case "open-npc-panel":
+      return handlers.openNpcPanel();
     case "apply-geometric-transform":
       return applyGeometricTransformForCommand(command, handlers);
   }
@@ -146,6 +150,10 @@ export const QUICK_TRANSFORM_ICONS: Record<string, LucideIcon> = {
 // icon assignment for the masks tool.
 export const MASKS_TOGGLE_ICON: LucideIcon = Brush;
 
+// Exported so the icon-uniqueness test and the NPC aside header share one icon
+// assignment for the score analysis (CT-308).
+export const NPC_PANEL_ICON: LucideIcon = Gauge;
+
 const SUBSET_BANDS_UNAVAILABLE_HINT = "select a multi-band stack";
 
 export function buildToolbarOperationGroups(
@@ -180,6 +188,9 @@ function buildToolbarOperationItem(
       return buildBandSubsetToggleItem(command, context);
     case "open-action-panel":
       return buildActionItem(command, context);
+    // CT-308: NPC is menu-only, so it projects no toolbar item.
+    case "open-npc-panel":
+      return null;
     case "apply-geometric-transform":
       return buildQuickTransformItem(command, context);
   }

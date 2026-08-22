@@ -26,6 +26,7 @@ export type OperationCommandBehavior =
   | "toggle-masks"
   | "toggle-subset-bands"
   | "open-action-panel"
+  | "open-npc-panel"
   | "apply-geometric-transform";
 
 export interface OperationCommand {
@@ -202,6 +203,21 @@ const BAND_OPS_GROUP: OperationGroup = {
   ],
 };
 
+// Stage 6 analyses that produce a SCORE rather than a raster, so they open
+// their own panel instead of the shared tool-options panel (CT-308).
+const ANALYSIS_GROUP: OperationGroup = {
+  key: "analysis",
+  commands: [
+    {
+      id: "npc",
+      label: "NPC",
+      behavior: "open-npc-panel",
+      showInMenu: true,
+      showInToolbar: false,
+    },
+  ],
+};
+
 // Whole-cube user scripting (CT-216).
 const SCRIPTS_GROUP: OperationGroup = {
   key: "scripts",
@@ -236,6 +252,7 @@ export const MULTI_BAND_MENU: OperationMenu = {
     SPECTRAL_DERIVATIVE_GROUP,
     DIMENSION_REDUCTION_GROUP,
     BAND_OPS_GROUP,
+    ANALYSIS_GROUP,
   ],
 };
 

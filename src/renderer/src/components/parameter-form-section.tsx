@@ -3,6 +3,10 @@ import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
 import {
+  PANEL_NUMERIC_INPUT_CLASSES,
+  PANEL_SELECT_CLASSES,
+} from "@/components/form-control-classes";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -286,14 +290,12 @@ function NumericParameterField(props: NumericParameterFieldProps): JSX.Element {
             ),
           )
         }
-        className={NUMERIC_INPUT_CLASSES}
+        className={PANEL_NUMERIC_INPUT_CLASSES}
       />
     </label>
   );
 }
 
-const NUMERIC_INPUT_CLASSES =
-  "h-8 rounded-md border bg-background px-2 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
 
 function resolveNumericInputStep(
   schema: NumberParameterSchema | IntegerParameterSchema,
@@ -333,7 +335,7 @@ function BandNumberParameterField(props: BandNumberParameterFieldProps): JSX.Ele
         onChange={(event) =>
           props.onChangeValue(readBandNumberOrDefault(parseNumericInputValueOrFallback(event.target.value, props.value), props.value))
         }
-        className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
+        className={cn(PANEL_NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </label>
@@ -370,7 +372,7 @@ function ComponentCountParameterField(props: ComponentCountParameterFieldProps):
             clampComponentCountInput(event.target.value, displayValue, bandCount),
           )
         }
-        className={NUMERIC_INPUT_CLASSES}
+        className={PANEL_NUMERIC_INPUT_CLASSES}
       />
       {bandCount !== null ? (
         <span className="text-xs text-muted-foreground">
@@ -441,7 +443,7 @@ function ClipBoundNumberInput(props: ClipBoundNumberInputProps): JSX.Element {
         onChange={(event) =>
           props.onChangeValue(parseNumericInputValueOrFallback(event.target.value, props.value))
         }
-        className={cn(NUMERIC_INPUT_CLASSES, props.invalid && "border-destructive focus:ring-destructive")}
+        className={cn(PANEL_NUMERIC_INPUT_CLASSES, props.invalid && "border-destructive focus:ring-destructive")}
       />
     </label>
   );
@@ -506,7 +508,7 @@ function EnumParameterField(props: EnumParameterFieldProps): JSX.Element {
         id={id}
         value={props.value}
         onChange={(event) => props.onChangeValue(event.target.value)}
-        className={ENUM_SELECT_CLASSES}
+        className={PANEL_SELECT_CLASSES}
       >
         {props.schema.options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -518,8 +520,6 @@ function EnumParameterField(props: EnumParameterFieldProps): JSX.Element {
   );
 }
 
-const ENUM_SELECT_CLASSES =
-  "h-8 rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
 
 interface CubeScopeParameterFieldProps {
   schema: CubeScopeParameterSchema;
@@ -583,7 +583,7 @@ function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
         aria-label="Bands to process"
         aria-invalid={rangeError !== null}
         onChange={(event) => props.onChangeValue(event.target.value)}
-        className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
+        className={cn(PANEL_NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </div>
