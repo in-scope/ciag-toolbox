@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, Layers, Link2, X } from "lucide-react";
+import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
 import { notifyError } from "@/lib/notifications/notify";
 
+import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
@@ -369,16 +370,24 @@ function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonPro
   );
 }
 
-// CT-248: a true-colour photo can be flipped into a display-only channel view
-// where its R/G/B scroll like a scientific stack. The button label names the
-// action each state offers, matching the display-only toggle family above.
+// CT-248/CT-295: a true-colour photo can be flipped into a display-only channel
+// view where its R/G/B scroll like a scientific stack. The toggle carries the
+// stable "RGB color composite" name (CT-259 pattern: aria-label never changes,
+// aria-pressed carries the state) and the RgbCompositeIcon venn glyph, shared on
+// purpose with the RGB Color Composite operation (same meaning, one icon).
 interface ChannelViewToggleButtonProps {
   enabled: boolean;
   onToggle: () => void;
 }
 
+const RGB_COMPOSITE_TOGGLE_LABEL = "RGB color composite";
+const RGB_COMPOSITE_SHOWN_TOOLTIP =
+  "Showing the 3 channels as one color image. Click to view each channel separately.";
+const CHANNELS_SHOWN_TOOLTIP =
+  "Showing each channel separately. Click to view as one RGB color image.";
+
 function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Element {
-  const label = props.enabled ? "View color image" : "View channels separately";
+  const tooltip = props.enabled ? CHANNELS_SHOWN_TOOLTIP : RGB_COMPOSITE_SHOWN_TOOLTIP;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -386,14 +395,14 @@ function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Eleme
           variant="ghost"
           size="icon"
           className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
-          aria-label={label}
-          aria-pressed={props.enabled}
+          aria-label={RGB_COMPOSITE_TOGGLE_LABEL}
+          aria-pressed={!props.enabled}
           onClick={stopPropagationThenToggle(props.onToggle)}
         >
-          <Layers className="size-4" />
+          <RgbCompositeIcon className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
