@@ -3,7 +3,7 @@ import { SquareDashedMousePointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { OpenInNewPanelSwitchRow } from "@/components/open-in-new-panel-switch-row";
+import { ResultDestinationControl } from "@/components/result-destination-control";
 import { ParameterFormSection } from "@/components/parameter-form-section";
 import {
   buildDefaultParameterValuesForSchemas,
@@ -498,10 +498,9 @@ interface PanelFooterProps {
 function ToolOptionsPanelFooter(props: PanelFooterProps): JSX.Element {
   return (
     <div className="flex flex-col gap-3 border-t p-3">
-      <OpenInNewPanelSwitchRow
-        switchId="tool-options-open-in-new-viewport"
-        checked={props.openInNewViewport}
-        onCheckedChange={props.onChangeOpenInNewViewport}
+      <ResultDestinationControl
+        openInNewViewport={props.openInNewViewport}
+        onChangeOpenInNewViewport={props.onChangeOpenInNewViewport}
       />
       <PanelFooterButtons
         canApply={props.canApply}

@@ -6,7 +6,7 @@ import { BandThumbnail } from "@/components/band-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { OpenInNewPanelSwitchRow } from "@/components/open-in-new-panel-switch-row";
+import { ResultDestinationControl } from "@/components/result-destination-control";
 import {
   buildInitialKeptBandSetFromRemoved,
   listRemovedBandIndexesFromKeptSet,
@@ -376,10 +376,9 @@ interface SubsetBandsApplyControlsProps {
 function SubsetBandsApplyControls(props: SubsetBandsApplyControlsProps): JSX.Element {
   return (
     <div className="flex flex-col gap-2 border-t pt-2">
-      <OpenInNewPanelSwitchRow
-        switchId="subset-bands-open-in-new-viewport"
-        checked={props.openInNewViewport}
-        onCheckedChange={props.onChangeOpenInNewViewport}
+      <ResultDestinationControl
+        openInNewViewport={props.openInNewViewport}
+        onChangeOpenInNewViewport={props.onChangeOpenInNewViewport}
       />
       <SubsetBandsButtonRow
         disabledReason={props.disabledReason}
