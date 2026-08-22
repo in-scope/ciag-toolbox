@@ -18,13 +18,25 @@ export interface CubePayloadHeader {
   wavelengths: number[] | null;
 }
 
+// CT-307: category masks travel as ONE raw uint8 frame after the cube frame
+// (never JSON-encoded); this header, carried in the JSON request, tells the
+// Python side how to slice it into `count` numpy arrays of shape (height, width).
+export interface MaskPayloadHeader {
+  count: number;
+  height: number;
+  width: number;
+}
+
 // A formula is a single expression the worker wraps as run(cube); a script defines run
 // itself; a package is a multi-module tool extracted to a directory whose top-level
-// main.py defines run. The user never writes the wrapping function for a formula.
+// main.py defines run; a builtin is one of the packaged Stage 6 algorithm modules
+// loaded from the app's built-in script directory (CT-307). The user never writes
+// the wrapping function for a formula.
 export type UserScriptInput =
   | { kind: "formula"; expression: string }
   | { kind: "script"; scriptSource: string }
-  | { kind: "package"; packageDirectory: string };
+  | { kind: "package"; packageDirectory: string }
+  | { kind: "builtin"; directory: string; moduleName: string };
 
 // 'value' results come back as JSON (weight vectors, bands); 'cube' results come back
 // as a JSON header frame followed by one raw little-endian float32 frame, because
@@ -35,6 +47,14 @@ export interface RunUserScriptRequest {
   type: "run-user-script";
   input: UserScriptInput;
   cube: CubePayloadHeader | null;
+  // CT-307: when non-null, ONE raw uint8 frame of count*height*width mask
+  // bytes follows the cube frame; the bootstrap slices it into per-category
+  // numpy arrays and delivers them as params["masks"].
+  masks: MaskPayloadHeader | null;
+  // CT-307: the plain dict passed as run()'s third positional argument (after
+  // the bootstrap adds masks and the progress callback). null when the caller
+  // sends no parameters.
+  params: JsonValue | null;
   resultKind: UserScriptResultKind;
   // Where the worker writes a cube result's raw little-endian float32 bytes
   // (band-major), CT-219g: a multi-gigabyte stdout frame makes the reading
@@ -52,10 +72,13 @@ export type CubeResultShape = [number, number, number];
 
 // CT-219g: a cube result's bytes never cross stdout; the worker spools them to
 // the request's cubeResultSpoolPath and this response only announces shape and size.
+// CT-307: progress frames stream BEFORE the final response while the script runs;
+// they never settle the run.
 export type PythonWorkerResponse =
   | { type: "script-result"; value: JsonValue }
   | { type: "script-error"; message: string; traceback?: string }
-  | { type: "cube-result"; shape: CubeResultShape; totalBytes: number };
+  | { type: "cube-result"; shape: CubeResultShape; totalBytes: number }
+  | { type: "progress"; fraction: number };
 
 // The wire message a cube-result run sends after spooling its raw bytes.
 interface CompletedCubeMessage {
@@ -117,6 +140,7 @@ function parseWorkerResponsePayload(payload: Buffer): PythonWorkerResponse {
     throw new MalformedWorkerResponseError("payload is not valid JSON");
   }
   if (isScriptResultResponse(parsed) || isScriptErrorResponse(parsed)) return parsed;
+  if (isProgressResponse(parsed)) return parsed;
   if (isCompletedCubeMessage(parsed)) return cubeResultFromCompletedMessage(parsed);
   throw new MalformedWorkerResponseError("payload is not a known response message");
 }
@@ -144,6 +168,15 @@ function isScriptErrorResponse(candidate: unknown): candidate is PythonWorkerRes
     candidate !== null &&
     (candidate as { type?: unknown }).type === "script-error" &&
     typeof (candidate as { message?: unknown }).message === "string"
+  );
+}
+
+function isProgressResponse(candidate: unknown): candidate is PythonWorkerResponse {
+  return (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    (candidate as { type?: unknown }).type === "progress" &&
+    Number.isFinite((candidate as { fraction?: unknown }).fraction)
   );
 }
 

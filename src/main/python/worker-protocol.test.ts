@@ -22,6 +22,8 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "script", scriptSource: "def run(): return 1" },
       cube: null,
+      masks: null,
+      params: null,
       resultKind: "value",
       cubeResultSpoolPath: null,
       sandbox: true,
@@ -32,9 +34,32 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "script", scriptSource: "def run(): return 1" },
       cube: null,
+      masks: null,
+      params: null,
       resultKind: "value",
       cubeResultSpoolPath: null,
       sandbox: true,
+    });
+  });
+
+  it("carries params and the mask header for a built-in run (CT-307)", () => {
+    const frame = encodeWorkerRequestFrame({
+      type: "run-user-script",
+      input: { kind: "builtin", directory: "C:/app/builtin-python", moduleName: "npc" },
+      cube: { shape: [3, 4, 4], dtype: "float32", wavelengths: [450, 550, 650] },
+      masks: { count: 2, height: 4, width: 4 },
+      params: { bins: 255 },
+      resultKind: "value",
+      cubeResultSpoolPath: null,
+      sandbox: true,
+    });
+    const parsed = JSON.parse(frame.subarray(4).toString("utf8")) as Record<string, unknown>;
+    expect(parsed["masks"]).toEqual({ count: 2, height: 4, width: 4 });
+    expect(parsed["params"]).toEqual({ bins: 255 });
+    expect(parsed["input"]).toEqual({
+      kind: "builtin",
+      directory: "C:/app/builtin-python",
+      moduleName: "npc",
     });
   });
 
@@ -43,6 +68,8 @@ describe("encodeWorkerRequestFrame", () => {
       type: "run-user-script",
       input: { kind: "formula", expression: "# λ = 550nm" },
       cube: null,
+      masks: null,
+      params: null,
       resultKind: "cube",
       cubeResultSpoolPath: null,
       sandbox: true,
@@ -122,6 +149,31 @@ describe("WorkerResponseFrameDecoder", () => {
   it("rejects a JSON payload that is not a known response message", () => {
     const decoder = new WorkerResponseFrameDecoder();
     const payload = Buffer.from(JSON.stringify({ type: "mystery" }), "utf8");
+    const header = Buffer.alloc(4);
+    header.writeUInt32LE(payload.length, 0);
+    expect(() =>
+      decoder.appendChunkAndTakeCompletedResponses(Buffer.concat([header, payload])),
+    ).toThrow(MalformedWorkerResponseError);
+  });
+
+  // CT-307: progress frames stream ahead of the final response.
+  it("decodes progress frames followed by the settling response", () => {
+    const decoder = new WorkerResponseFrameDecoder();
+    const chunk = Buffer.concat([
+      encodeResponseFrame({ type: "progress", fraction: 0.25 }),
+      encodeResponseFrame({ type: "progress", fraction: 0.75 }),
+      encodeResponseFrame({ type: "script-result", value: "done" }),
+    ]);
+    expect(decoder.appendChunkAndTakeCompletedResponses(chunk)).toEqual([
+      { type: "progress", fraction: 0.25 },
+      { type: "progress", fraction: 0.75 },
+      { type: "script-result", value: "done" },
+    ]);
+  });
+
+  it("rejects a progress frame whose fraction is not a finite number", () => {
+    const decoder = new WorkerResponseFrameDecoder();
+    const payload = Buffer.from(JSON.stringify({ type: "progress", fraction: "half" }), "utf8");
     const header = Buffer.alloc(4);
     header.writeUInt32LE(payload.length, 0);
     expect(() =>

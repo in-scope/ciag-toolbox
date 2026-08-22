@@ -29,15 +29,59 @@ export const USER_SCRIPT_RUN_RELEASE_CHANNEL = "user-script:run-release";
 // executing worker (not begun, already settled) cancels nothing.
 export const USER_SCRIPT_RUN_CANCEL_CHANNEL = "user-script:run-cancel";
 
+// CT-307: while a run session executes, in-script progress frames from the
+// Python worker are pushed to the renderer over this channel (main -> renderer,
+// webContents.send), keyed by the run token so overlapping sessions stay apart.
+export const USER_SCRIPT_RUN_PROGRESS_CHANNEL = "user-script:run-progress";
+
 export const USER_SCRIPT_RUN_CHUNK_BYTES = 64 * 1024 * 1024;
+
+// CT-307: the packaged algorithm scripts shipped under resources/builtin-python.
+// A begin request may only name one of these; the main process resolves the
+// name to the built-in script directory (never a renderer-supplied path).
+export const BUILTIN_SCRIPT_NAMES = [
+  "npc",
+  "rop",
+  "local_pca",
+  "local_mnf",
+  "l2_minimization",
+] as const;
+
+export type BuiltinScriptName = (typeof BUILTIN_SCRIPT_NAMES)[number];
+
+export function isBuiltinScriptName(candidate: string): candidate is BuiltinScriptName {
+  return (BUILTIN_SCRIPT_NAMES as ReadonlyArray<string>).includes(candidate);
+}
 
 // An import run with a scriptPath uses that file directly; without one, begin
 // shows the import dialog (the flow band weighting and band selection keep).
 // The Custom transform picks its file up front through the pick-script channel
-// and runs at Apply time with the remembered path.
+// and runs at Apply time with the remembered path. A builtin run names one of
+// the packaged Stage 6 algorithm scripts (CT-307); no dialog is shown.
 export type UserScriptRunSource =
   | { readonly mode: "formula"; readonly expression: string }
-  | { readonly mode: "import"; readonly scriptPath?: string };
+  | { readonly mode: "import"; readonly scriptPath?: string }
+  | { readonly mode: "builtin"; readonly scriptName: BuiltinScriptName };
+
+// CT-307: parameters for one execute of a run session, JSON-safe by
+// construction (they ride an IPC invoke and then the worker request frame).
+export type UserScriptRunParams = Readonly<Record<string, unknown>>;
+
+// CT-307: category masks ride the run session as raw uint8 bytes appended
+// after the cube bytes on the SAME chunk channel (height/width come from the
+// cube descriptor); the worker delivers them to the script as numpy arrays.
+export interface UserScriptRunMasksDescriptor {
+  readonly count: number;
+}
+
+// The product caps mask categories at 5; the protocol refuses anything larger
+// so a harness bug cannot describe an absurd mask upload.
+export const USER_SCRIPT_RUN_MAX_MASK_COUNT = 5;
+
+export interface UserScriptRunProgressEvent {
+  readonly token: string;
+  readonly fraction: number;
+}
 
 export type UserScriptPickScriptResult =
   | { readonly canceled: true }
@@ -56,6 +100,9 @@ export interface UserScriptRunBeginRequest {
   readonly source: UserScriptRunSource;
   readonly resultKind: UserScriptRunResultKind;
   readonly cube: UserScriptRunCubeDescriptor;
+  // CT-307: when present, count * height * width mask bytes are expected on
+  // the chunk channel AFTER the cube bytes.
+  readonly masks?: UserScriptRunMasksDescriptor;
 }
 
 export type UserScriptRunBeginResult =
@@ -72,6 +119,10 @@ export interface UserScriptRunCubeChunkRequest {
 
 export interface UserScriptRunExecuteRequest {
   readonly token: string;
+  // CT-307: per-execute parameters (a plain dict for the script's third
+  // positional argument). A session can execute more than once against its
+  // retained spooled cube, each time with fresh params (ROP's press-to-reroll).
+  readonly params?: UserScriptRunParams;
 }
 
 // A completed cube run answers with the shape only; the band bytes are pulled

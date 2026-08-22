@@ -11,8 +11,11 @@ interface FakeApiRecord {
   begins: ToolboxUserScriptRunBeginRequest[];
   uploadedChunks: Uint8Array[];
   executedTokens: string[];
+  executes: ToolboxUserScriptRunExecuteRequest[];
   releasedTokens: string[];
   canceledTokens: string[];
+  emitProgress: (event: ToolboxUserScriptRunProgressEvent) => void;
+  progressListenerCount: () => number;
 }
 
 interface FakeApiBehavior {
@@ -23,7 +26,17 @@ interface FakeApiBehavior {
 }
 
 function buildFakeApi(behavior: FakeApiBehavior = {}): { api: UserScriptRunChunkedApi; record: FakeApiRecord } {
-  const record: FakeApiRecord = { begins: [], uploadedChunks: [], executedTokens: [], releasedTokens: [], canceledTokens: [] };
+  const progressListeners = new Set<(event: ToolboxUserScriptRunProgressEvent) => void>();
+  const record: FakeApiRecord = {
+    begins: [],
+    uploadedChunks: [],
+    executedTokens: [],
+    executes: [],
+    releasedTokens: [],
+    canceledTokens: [],
+    emitProgress: (event) => progressListeners.forEach((listener) => listener(event)),
+    progressListenerCount: () => progressListeners.size,
+  };
   const resultChunks = [...(behavior.resultChunks ?? [])];
   const api: UserScriptRunChunkedApi = {
     beginUserScriptRun: (request) => {
@@ -37,7 +50,12 @@ function buildFakeApi(behavior: FakeApiBehavior = {}): { api: UserScriptRunChunk
     },
     executeUserScriptRun: (request) => {
       record.executedTokens.push(request.token);
+      record.executes.push(request);
       return Promise.resolve(behavior.execute ?? { status: "completed", value: [1, 2] });
+    },
+    onUserScriptRunProgress: (listener) => {
+      progressListeners.add(listener);
+      return () => progressListeners.delete(listener);
     },
     readUserScriptRunResultChunk: () => {
       const next = resultChunks.shift();
@@ -154,6 +172,70 @@ describe("runUserScriptOverCubeInChunks", () => {
     };
     const result = await runUserScriptOverCubeInChunks(api, cube, FORMULA, "value");
     expect(result.status).toBe("failed");
+  });
+
+  // CT-307: masks ride the same chunk channel after the cube bytes, and the
+  // begin request declares their count.
+  it("declares the mask count at begin and uploads mask bytes after the cube bytes", async () => {
+    const { api, record } = buildFakeApi();
+    const cube = buildCubeInput([[1, 2, 3, 4]], 2);
+    const masks = [Uint8Array.from([1, 1, 0, 0]), Uint8Array.from([0, 0, 2, 2])];
+    await runUserScriptOverCubeInChunks(api, cube, FORMULA, "value", {}, 1024, { masks });
+    expect(record.begins[0]?.masks).toEqual({ count: 2 });
+    expect(record.uploadedChunks.map((chunk) => chunk.byteLength)).toEqual([16, 4, 4]);
+    expect(Array.from(record.uploadedChunks[1]!)).toEqual([1, 1, 0, 0]);
+    expect(Array.from(record.uploadedChunks[2]!)).toEqual([0, 0, 2, 2]);
+  });
+
+  it("fails a run whose mask does not match the stack's spatial size", async () => {
+    const { api } = buildFakeApi();
+    const result = await runUserScriptOverCubeInChunks(
+      api,
+      buildCubeInput([[1, 2, 3, 4]], 2),
+      FORMULA,
+      "value",
+      {},
+      1024,
+      { masks: [Uint8Array.from([1, 0])] },
+    );
+    expect(result).toEqual({
+      status: "failed",
+      message: "A mask did not match the described stack shape.",
+    });
+  });
+
+  it("passes per-execute params through to the execute request", async () => {
+    const { api, record } = buildFakeApi();
+    await runUserScriptOverCubeInChunks(api, buildCubeInput([[1]], 1), FORMULA, "value", {}, 1024, {
+      params: { seed: 42, bins: 255 },
+    });
+    expect(record.executes[0]).toEqual({ token: "tok", params: { seed: 42, bins: 255 } });
+  });
+
+  it("omits params from the execute request when none are given", async () => {
+    const { api, record } = buildFakeApi();
+    await runUserScriptOverCubeInChunks(api, buildCubeInput([[1]], 1), FORMULA, "value");
+    expect(record.executes[0]).toEqual({ token: "tok" });
+  });
+
+  // CT-307: in-script progress for THIS run's token reaches onWorkerProgress;
+  // other tokens are filtered out and the listener is removed afterwards.
+  it("routes this run's worker progress to onWorkerProgress and unsubscribes after execute", async () => {
+    const { api, record } = buildFakeApi();
+    const wrapped: UserScriptRunChunkedApi = {
+      ...api,
+      executeUserScriptRun: (request) => {
+        record.emitProgress({ token: "tok", fraction: 0.5 });
+        record.emitProgress({ token: "other-run", fraction: 0.9 });
+        return api.executeUserScriptRun(request);
+      },
+    };
+    const fractions: number[] = [];
+    await runUserScriptOverCubeInChunks(wrapped, buildCubeInput([[1]], 1), FORMULA, "value", {
+      onWorkerProgress: (fraction) => fractions.push(fraction),
+    });
+    expect(fractions).toEqual([0.5]);
+    expect(record.progressListenerCount()).toBe(0);
   });
 });
 

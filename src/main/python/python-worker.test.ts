@@ -11,9 +11,13 @@ import {
   createChunkedUserScriptRunSessionStore,
   type ChunkedUserScriptRunSessionStore,
 } from "./chunked-user-script-run";
-import { encodeCubeAsFloat32Payload, type CubeForUserScript } from "./cube-payload";
+import {
+  encodeCubeAsFloat32Payload,
+  encodeMaskCategoriesAsUint8Payload,
+  type CubeForUserScript,
+} from "./cube-payload";
 import { resolveActivePythonInterpreterPath } from "./interpreter-resolver";
-import { runUserScriptInPythonSubprocess } from "./python-worker";
+import { runUserScriptInPythonSubprocess, type PythonWorkerRunRequest } from "./python-worker";
 import { prepareImportedUserScriptFromFilePath } from "./script-import";
 import { writeZipArchiveWithEntries } from "./zip-archive-test-helper";
 
@@ -562,4 +566,163 @@ function buildCombinedRow(
     columns.push(combineTwoBands(cube.bands[0]![pixelIndex]!, cube.bands[1]![pixelIndex]!));
   }
   return columns;
+}
+
+// CT-307: params, masks, in-script progress, and built-in script loading.
+describe.skipIf(interpreterPath === null)("python worker CT-307 additions (bundled runtime)", () => {
+  const TIMEOUT_MS = 30_000;
+
+  const paramsCube: CubeForUserScript = {
+    bands: [Float32Array.from([1, 2, 3, 4])],
+    height: 2,
+    width: 2,
+    wavelengths: null,
+  };
+
+  function encodeTwoMaskCategories() {
+    return encodeMaskCategoriesAsUint8Payload({
+      categories: [Uint8Array.from([1, 1, 0, 0]), Uint8Array.from([0, 0, 1, 1])],
+      height: 2,
+      width: 2,
+    });
+  }
+
+  function runScriptWithExtras(
+    scriptSource: string,
+    extras: Partial<PythonWorkerRunRequest>,
+  ): ReturnType<typeof runUserScriptInPythonSubprocess> {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: { kind: "script", scriptSource },
+      cube: encodeCubeAsFloat32Payload(paramsCube),
+      resultKind: "value",
+      sandbox: false,
+      timeoutMs: TIMEOUT_MS,
+      ...extras,
+    });
+  }
+
+  it("passes the params dict as the third positional argument", async () => {
+    const outcome = await runScriptWithExtras(
+      "def run(cube, wavelengths, params):\n    return params['gain'] * float(cube[0][0][0])\n",
+      { params: { gain: 3 } },
+    );
+    expect(outcome).toEqual({ kind: "completed", value: 3 });
+  }, 60_000);
+
+  it("keeps 2-arity scripts working when params ride the request (arity compatibility)", async () => {
+    const outcome = await runScriptWithExtras(
+      "def run(cube, wavelengths=None):\n    return float(cube.sum())\n",
+      { params: { ignored: true } },
+    );
+    expect(outcome).toEqual({ kind: "completed", value: 10 });
+  }, 60_000);
+
+  it("delivers masks as per-category uint8 numpy arrays of shape (height, width)", async () => {
+    const outcome = await runScriptWithExtras(
+      [
+        "def run(cube, wavelengths, params):",
+        "    masks = params['masks']",
+        "    return {",
+        "        'count': len(masks),",
+        "        'shapes': [list(m.shape) for m in masks],",
+        "        'dtypes': [str(m.dtype) for m in masks],",
+        "        'sums': [int(m.sum()) for m in masks],",
+        "    }",
+        "",
+      ].join("\n"),
+      { masks: encodeTwoMaskCategories() },
+    );
+    expect(outcome).toEqual({
+      kind: "completed",
+      value: {
+        count: 2,
+        shapes: [
+          [2, 2],
+          [2, 2],
+        ],
+        dtypes: ["uint8", "uint8"],
+        sums: [2, 2],
+      },
+    });
+  }, 60_000);
+
+  it("streams in-script progress frames to onProgress without settling the run", async () => {
+    const fractions: number[] = [];
+    const outcome = await runScriptWithExtras(
+      [
+        "def run(cube, wavelengths, params):",
+        "    report = params['report_progress']",
+        "    report(0.25)",
+        "    report(0.75)",
+        "    report(1.0)",
+        "    return 'done'",
+        "",
+      ].join("\n"),
+      { onProgress: (fraction) => fractions.push(fraction) },
+    );
+    expect(outcome).toEqual({ kind: "completed", value: "done" });
+    expect(fractions).toEqual([0.25, 0.75, 1]);
+  }, 60_000);
+
+  it("runs a built-in script from the repo's builtin directory under the sandbox", async () => {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const outcome = await runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: {
+        kind: "builtin",
+        directory: path.join(process.cwd(), "resources", "builtin-python"),
+        moduleName: "npc",
+      },
+      cube: encodeCubeAsFloat32Payload(paramsCube),
+      masks: encodeTwoMaskCategories(),
+      params: { bins: 2 },
+      resultKind: "value",
+      sandbox: true,
+      timeoutMs: 120_000,
+    });
+    // Top-row values {1, 2} and bottom-row values {3, 4} split cleanly into 2
+    // bins over [1, 4], so the multi-class NPC is exactly 1.
+    expect(outcome).toEqual({ kind: "completed", value: 1 });
+  }, 120_000);
+
+  it("draws identical ROP projections for the same seed across two runs", async () => {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const runOnce = (): ReturnType<typeof runUserScriptInPythonSubprocess> =>
+      runUserScriptInPythonSubprocess({
+        interpreterPath: interpreterPath!,
+        input: {
+          kind: "builtin",
+          directory: path.join(process.cwd(), "resources", "builtin-python"),
+          moduleName: "rop",
+        },
+        cube: encodeCubeAsFloat32Payload(paramsCube),
+        params: { seed: 1234, count: 1 },
+        resultKind: "cube",
+        cubeResultSpoolPath: nextSpoolPathForCt307(),
+        sandbox: true,
+        timeoutMs: 120_000,
+      });
+    const first = await runOnce();
+    const second = await runOnce();
+    expect(first.kind).toBe("completed-cube");
+    expect(second.kind).toBe("completed-cube");
+    if (first.kind !== "completed-cube" || second.kind !== "completed-cube") return;
+    expect(await readFloatsFromSpool(first.spoolPath)).toEqual(
+      await readFloatsFromSpool(second.spoolPath),
+    );
+  }, 240_000);
+});
+
+function nextSpoolPathForCt307(): string {
+  return path.join(
+    tmpdir(),
+    `msi-worker-test-ct307-${Date.now()}-${Math.floor(Math.random() * 1e9)}.bin`,
+  );
+}
+
+async function readFloatsFromSpool(spoolPath: string): Promise<number[]> {
+  const bytes = await fs.readFile(spoolPath);
+  return Array.from(new Float32Array(new Uint8Array(bytes).buffer));
 }

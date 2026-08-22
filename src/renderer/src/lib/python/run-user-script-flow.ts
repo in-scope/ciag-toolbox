@@ -35,6 +35,9 @@ export async function runUserScriptOnRasterShowingViewportBusy(
         busy.handle = registerViewportBusyEntryForUserScriptRun(bindings, source);
       },
       onUploadProgress: (fraction) => busy.handle?.update({ progress: fraction }),
+      // CT-307: a script that reports in-script progress flips the busy entry
+      // from the worker-run spinner back to the determinate bar.
+      onWorkerProgress: (fraction) => busy.handle?.update({ progress: fraction }),
     });
   } finally {
     busy.handle?.clear();
@@ -54,5 +57,7 @@ function registerViewportBusyEntryForUserScriptRun(
 // Deliberately no "on the stack": a run only stages a result (the stack
 // changes on Apply), and the old wording read as if the stack was mutating.
 export function describeUserScriptRunBusyLabel(source: ToolboxRunUserScriptSource): string {
-  return source.mode === "formula" ? "Running formula..." : "Running imported tool...";
+  if (source.mode === "formula") return "Running formula...";
+  if (source.mode === "builtin") return "Running analysis...";
+  return "Running imported tool...";
 }

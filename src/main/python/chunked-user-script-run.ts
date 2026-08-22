@@ -3,7 +3,7 @@ import { open, unlink, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { EncodedCubePayload } from "./cube-payload";
+import type { EncodedCubePayload, EncodedMaskPayload } from "./cube-payload";
 import type { UserScriptInput } from "./worker-protocol";
 import {
   USER_SCRIPT_RUN_CHUNK_BYTES,
@@ -25,6 +25,9 @@ import {
 
 export interface BeginChunkedUserScriptRunRequest {
   readonly cube: UserScriptRunCubeDescriptor;
+  // CT-307: how many category masks (each height * width uint8 bytes) follow
+  // the cube bytes on the chunk channel; 0 or absent for a mask-free run.
+  readonly maskCount?: number;
   readonly resultKind: UserScriptRunResultKind;
   readonly input: UserScriptInput;
   readonly releaseInputResources: () => Promise<void>;
@@ -36,6 +39,7 @@ export interface BeginChunkedUserScriptRunRequest {
 export interface ExecutableUserScriptRun {
   readonly input: UserScriptInput;
   readonly cube: EncodedCubePayload;
+  readonly masks: EncodedMaskPayload | null;
   readonly resultKind: UserScriptRunResultKind;
   readonly sourceName: string | null;
   readonly interpreterPath: string;
@@ -52,8 +56,13 @@ export interface StoredCubeResultSummary {
 export interface ChunkedUserScriptRunSessionStore {
   begin(request: BeginChunkedUserScriptRunRequest): Promise<string>;
   appendCubeChunk(token: string, bytes: Uint8Array): Promise<void>;
+  // CT-307: callable more than once per session - the spooled cube (and mask)
+  // bytes are RETAINED until release so ROP can re-execute without re-upload.
+  // Throws while a previous execute is still in flight.
   takeExecutableRun(token: string): ExecutableUserScriptRun;
-  releaseInputResourcesAfterRun(token: string): Promise<void>;
+  // CT-307: marks the in-flight execute finished so the next execute may start;
+  // input resources are released by release(), not here.
+  markExecutionSettled(token: string): void;
   storeCubeResultForPull(
     token: string,
     shape: [number, number, number],
@@ -83,13 +92,20 @@ interface PendingCubeResultPull {
 interface ChunkedUserScriptRunSession {
   readonly request: BeginChunkedUserScriptRunRequest;
   readonly expectedCubeBytes: number;
+  // CT-307: mask bytes are appended to the same spool file after the cube
+  // bytes; the worker receives them as a separate raw frame.
+  readonly expectedMaskBytes: number;
   readonly resultSpoolPath: string;
   cubeFile: SpooledCubeFile | null;
-  hasExecuted: boolean;
+  isExecuting: boolean;
   receivedCubeBytes: number;
   hasReleasedInputResources: boolean;
   resultPull: PendingCubeResultPull | null;
   killExecutingWorker: (() => void) | null;
+}
+
+function expectedUploadBytesOfSession(session: ChunkedUserScriptRunSession): number {
+  return session.expectedCubeBytes + session.expectedMaskBytes;
 }
 
 export function createChunkedUserScriptRunSessionStore(
@@ -102,7 +118,10 @@ export function createChunkedUserScriptRunSessionStore(
     appendCubeChunk: async (token, bytes) =>
       appendChunkToSessionCubeFile(requireSession(sessions, token), bytes),
     takeExecutableRun: (token) => takeExecutableRunFromSession(requireSession(sessions, token), chunkBytes),
-    releaseInputResourcesAfterRun: (token) => releaseSessionInputResources(sessions.get(token)),
+    markExecutionSettled: (token) => {
+      const session = sessions.get(token);
+      if (session) session.isExecuting = false;
+    },
     storeCubeResultForPull: (token, shape, bands) =>
       storeCubeResultOnSession(requireSession(sessions, token), shape, bands),
     readNextResultChunk: async (token) =>
@@ -130,15 +149,25 @@ async function beginSession(
   sessions.set(token, {
     request,
     expectedCubeBytes,
+    expectedMaskBytes: maskByteLengthOfRequest(request),
     resultSpoolPath: join(temporaryDirectory, `msi-user-script-cube-result-${token}.bin`),
     cubeFile: await openCubeSpoolFile(temporaryDirectory, token),
-    hasExecuted: false,
+    isExecuting: false,
     receivedCubeBytes: 0,
     hasReleasedInputResources: false,
     resultPull: null,
     killExecutingWorker: null,
   });
   return token;
+}
+
+function maskByteLengthOfRequest(request: BeginChunkedUserScriptRunRequest): number {
+  const count = request.maskCount ?? 0;
+  if (count === 0) return 0;
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error("The script run described an invalid mask set.");
+  }
+  return count * request.cube.height * request.cube.width;
 }
 
 async function openCubeSpoolFile(
@@ -174,10 +203,11 @@ async function appendChunkToSessionCubeFile(
   session: ChunkedUserScriptRunSession,
   bytes: Uint8Array,
 ): Promise<void> {
-  if (session.cubeFile === null || session.hasExecuted) {
+  if (session.cubeFile === null || session.isExecuting) {
     throw new Error("This user-script run already executed");
   }
-  if (bytes.byteLength === 0 || session.receivedCubeBytes + bytes.byteLength > session.expectedCubeBytes) {
+  const expectedUploadBytes = expectedUploadBytesOfSession(session);
+  if (bytes.byteLength === 0 || session.receivedCubeBytes + bytes.byteLength > expectedUploadBytes) {
     throw new Error("The uploaded stack bytes did not match the described stack shape.");
   }
   await writeExactLengthAtOffset(session.cubeFile.handle, bytes, session.receivedCubeBytes);
@@ -199,17 +229,23 @@ async function writeExactLengthAtOffset(
   }
 }
 
+// CT-307: executable any number of times against the retained spool (ROP's
+// press-to-reroll never re-uploads); only one execute may be in flight at once
+// because the segment reader reuses a single buffer per stream.
 function takeExecutableRunFromSession(
   session: ChunkedUserScriptRunSession,
   chunkBytes: number,
 ): ExecutableUserScriptRun {
-  if (session.cubeFile === null || session.hasExecuted) {
-    throw new Error("This user-script run already executed");
+  if (session.cubeFile === null) {
+    throw new Error("This user-script run was already released");
   }
-  if (session.receivedCubeBytes !== session.expectedCubeBytes) {
+  if (session.isExecuting) {
+    throw new Error("This user-script run is already executing");
+  }
+  if (session.receivedCubeBytes !== expectedUploadBytesOfSession(session)) {
     throw new Error("The uploaded stack bytes did not match the described stack shape.");
   }
-  session.hasExecuted = true;
+  session.isExecuting = true;
   return describeExecutableRun(session, chunkBytes);
 }
 
@@ -223,8 +259,9 @@ function describeExecutableRun(
     cube: {
       header: buildCubePayloadHeaderFromDescriptor(request.cube),
       totalByteLength: expectedCubeBytes,
-      readSegments: () => readSpooledCubeSegments(session, chunkBytes),
+      readSegments: () => readSpooledSegments(session, chunkBytes, 0, expectedCubeBytes),
     },
+    masks: describeSpooledMaskPayloadOrNull(session, chunkBytes),
     resultKind: request.resultKind,
     sourceName: request.sourceName,
     interpreterPath: request.interpreterPath,
@@ -233,22 +270,39 @@ function describeExecutableRun(
   };
 }
 
+function describeSpooledMaskPayloadOrNull(
+  session: ChunkedUserScriptRunSession,
+  chunkBytes: number,
+): EncodedMaskPayload | null {
+  const count = session.request.maskCount ?? 0;
+  if (count === 0) return null;
+  const { height, width } = session.request.cube;
+  return {
+    header: { count, height, width },
+    totalByteLength: session.expectedMaskBytes,
+    readSegments: () =>
+      readSpooledSegments(session, chunkBytes, session.expectedCubeBytes, session.expectedMaskBytes),
+  };
+}
+
 // Streams the spooled upload back off disk one chunk at a time, REUSING one
 // buffer for the whole stream: the consumer awaits each write's flush before
 // pulling the next segment, and avoiding gigabytes of allocation churn matters
 // in Electron main, where a burst of large short-lived buffers can outrun GC
 // and fatally fail a later allocation (CT-219g).
-async function* readSpooledCubeSegments(
+async function* readSpooledSegments(
   session: ChunkedUserScriptRunSession,
   chunkBytes: number,
+  startOffsetBytes: number,
+  totalBytes: number,
 ): AsyncIterable<Buffer> {
   const file = session.cubeFile;
   if (file === null) throw new Error("The uploaded stack bytes were already released.");
-  const reusedSegment = Buffer.allocUnsafe(Math.min(chunkBytes, session.expectedCubeBytes));
-  for (let offset = 0; offset < session.expectedCubeBytes; offset += chunkBytes) {
-    const length = Math.min(chunkBytes, session.expectedCubeBytes - offset);
+  const reusedSegment = Buffer.allocUnsafe(Math.min(chunkBytes, Math.max(totalBytes, 1)));
+  for (let offset = 0; offset < totalBytes; offset += chunkBytes) {
+    const length = Math.min(chunkBytes, totalBytes - offset);
     const segment = reusedSegment.subarray(0, length);
-    await readExactLengthAtOffset(file.handle, segment, offset);
+    await readExactLengthAtOffset(file.handle, segment, startOffsetBytes + offset);
     yield segment;
   }
 }
@@ -277,8 +331,9 @@ function buildCubePayloadHeaderFromDescriptor(
 }
 
 // Releases everything the worker needed as input: the imported-script temp
-// resources AND the spooled cube file (the run has consumed both by the time
-// this is called from the execute handler's finally).
+// resources AND the spooled cube file. CT-307: called only from release() -
+// the spool is retained across executes so a session can re-execute without
+// re-uploading the cube.
 async function releaseSessionInputResources(
   session: ChunkedUserScriptRunSession | undefined,
 ): Promise<void> {
@@ -306,6 +361,9 @@ function storeCubeResultOnSession(
   if (shapeBytes !== totalBytes) {
     throw new Error("The script result bands did not match its stack shape.");
   }
+  // CT-307: a re-execute overwrites the result spool; drop any stale pull
+  // handle from the previous execute before serving the fresh result.
+  void session.resultPull?.handle?.close().catch(() => undefined);
   session.resultPull = { totalBytes, handle: null, readOffsetBytes: 0 };
   return { totalBytes };
 }

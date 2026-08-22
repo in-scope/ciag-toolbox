@@ -1,9 +1,14 @@
+import { existsSync } from "node:fs";
 import { totalmem } from "node:os";
 import { basename } from "node:path";
 
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 
 import { showOpenDialogOrStub } from "../e2e-dialog-stub";
+import {
+  builtinScriptModuleNameOrThrow,
+  resolveBuiltinScriptsDirectory,
+} from "./builtin-scripts";
 import {
   createChunkedUserScriptRunSessionStore,
   type ChunkedUserScriptRunSessionStore,
@@ -23,6 +28,7 @@ import {
   runUserScriptInPythonSubprocess,
   type PythonWorkerOutcome,
 } from "./python-worker";
+import type { JsonValue } from "./worker-protocol";
 import { describeUserScriptRunMemoryRefusalOrNull } from "./user-script-run-memory";
 import { wallClockTimeoutMsForUserScriptRun } from "./user-script-timeouts";
 import {
@@ -31,6 +37,8 @@ import {
   USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+  USER_SCRIPT_RUN_MAX_MASK_COUNT,
+  USER_SCRIPT_RUN_PROGRESS_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
   USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
   type UserScriptRunBeginRequest,
@@ -80,8 +88,8 @@ export function registerRunUserScriptIpcHandler(): void {
   ipcMain.handle(USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL, (_event, request: UserScriptRunCubeChunkRequest) =>
     sessions.appendCubeChunk(request.token, request.bytes),
   );
-  ipcMain.handle(USER_SCRIPT_RUN_EXECUTE_CHANNEL, (_event, request: UserScriptRunExecuteRequest) =>
-    handleExecuteUserScriptRun(sessions, request.token),
+  ipcMain.handle(USER_SCRIPT_RUN_EXECUTE_CHANNEL, (event, request: UserScriptRunExecuteRequest) =>
+    handleExecuteUserScriptRun(sessions, event, request),
   );
   ipcMain.handle(USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL, (_event, request: UserScriptRunResultChunkRequest) =>
     sessions.readNextResultChunk(request.token),
@@ -108,12 +116,22 @@ async function handleBeginUserScriptRun(
   );
   if (memoryRefusal !== null) return { status: "failed", message: memoryRefusal };
   try {
+    validateMasksDescriptor(request);
     const selection = resolveInterpreterSelectionOrThrow();
     const run = await prepareUserScriptInputOrCancel(findWindowForIpcEvent(event), request.source);
     if (run === null) return { status: "canceled" };
     return await beginSessionForPreparedRun(sessions, request, selection, run);
   } catch (error) {
     return { status: "failed", message: describeUserScriptFailure(error) };
+  }
+}
+
+// CT-307: the product caps mask categories at 5; a larger (or non-integer)
+// count in a begin request is a harness bug surfaced as a plain failure.
+function validateMasksDescriptor(request: UserScriptRunBeginRequest): void {
+  const count = request.masks?.count ?? 0;
+  if (!Number.isInteger(count) || count < 0 || count > USER_SCRIPT_RUN_MAX_MASK_COUNT) {
+    throw new Error("The script run described an invalid mask set.");
   }
 }
 
@@ -126,6 +144,7 @@ async function beginSessionForPreparedRun(
   try {
     const token = await sessions.begin({
       cube: request.cube,
+      maskCount: request.masks?.count ?? 0,
       resultKind: request.resultKind,
       input: run.prepared.input,
       releaseInputResources: run.prepared.releaseResources,
@@ -156,8 +175,26 @@ async function prepareUserScriptInputOrCancel(
       sourceName: null,
     };
   }
+  if (source.mode === "builtin") return prepareBuiltinScriptRun(source.scriptName);
   if (source.scriptPath !== undefined) return prepareImportedUserScriptFromKnownPath(source.scriptPath);
   return prepareImportedUserScriptFromDialog(window);
+}
+
+// CT-307: a builtin run names a packaged Stage 6 algorithm script; main
+// resolves the directory itself (dev repo vs. process.resourcesPath) and no
+// dialog is shown.
+function prepareBuiltinScriptRun(scriptName: string): PreparedUserScriptRun {
+  const moduleName = builtinScriptModuleNameOrThrow(scriptName);
+  const directory = resolveBuiltinScriptsDirectory({
+    isPackagedApp: app.isPackaged,
+    packagedResourcesPath: process.resourcesPath,
+    developmentRepoRootPath: app.getAppPath(),
+    fileExists: existsSync,
+  });
+  return {
+    prepared: { input: { kind: "builtin", directory, moduleName }, releaseResources: releaseNothing },
+    sourceName: moduleName,
+  };
 }
 
 // The Custom transform picks its script file up front (the pick-script channel)
@@ -200,39 +237,66 @@ async function chooseImportedScriptFilePathOrNull(
   return result.canceled || firstPath === undefined ? null : firstPath;
 }
 
+// CT-307: input resources and the spooled cube are NOT released here - the
+// session retains them so ROP can re-execute without re-uploading; release()
+// cleans everything up.
 async function handleExecuteUserScriptRun(
   sessions: ChunkedUserScriptRunSessionStore,
-  token: string,
+  event: Electron.IpcMainInvokeEvent,
+  request: UserScriptRunExecuteRequest,
 ): Promise<UserScriptRunExecuteResult> {
+  const token = request.token;
   try {
     const run = sessions.takeExecutableRun(token);
-    const outcome = await runExecutableUserScriptInSubprocess(sessions, token, run);
+    const outcome = await runExecutableUserScriptInSubprocess(sessions, event, request, run);
     return mapWorkerOutcomeToExecuteResult(sessions, token, run.resultKind, outcome);
   } catch (error) {
     return { status: "failed", message: describeUserScriptFailure(error) };
   } finally {
     sessions.clearExecutingWorkerKill(token);
-    await sessions.releaseInputResourcesAfterRun(token).catch(() => undefined);
+    sessions.markExecutionSettled(token);
   }
 }
 
 // CT-268: the worker registers its cancel trigger with the session store while
 // it runs, so the cancel channel can SIGKILL the subprocess mid-run.
+// CT-307: per-execute params ride the execute request, and in-script progress
+// frames are pushed to the requesting renderer keyed by the run token.
 function runExecutableUserScriptInSubprocess(
   sessions: ChunkedUserScriptRunSessionStore,
-  token: string,
+  event: Electron.IpcMainInvokeEvent,
+  request: UserScriptRunExecuteRequest,
   run: ExecutableUserScriptRun,
 ): Promise<PythonWorkerOutcome> {
   return runUserScriptInPythonSubprocess({
     interpreterPath: run.interpreterPath,
     input: run.input,
     cube: run.cube,
+    masks: run.masks,
+    params: sanitizeExecuteParamsOrNull(request.params),
     resultKind: run.resultKind,
     cubeResultSpoolPath: run.cubeResultSpoolPath,
     sandbox: run.sandbox,
     timeoutMs: wallClockTimeoutMsForUserScriptRun(run.resultKind, run.cube.totalByteLength),
-    registerCancel: (cancelRun) => sessions.registerExecutingWorkerKill(token, cancelRun),
+    registerCancel: (cancelRun) => sessions.registerExecutingWorkerKill(request.token, cancelRun),
+    onProgress: (fraction) => sendRunProgressToRenderer(event.sender, request.token, fraction),
   });
+}
+
+// Params crossed one IPC invoke, so they are structured-clone data; anything
+// that is not a plain object is dropped rather than sent to the worker.
+function sanitizeExecuteParamsOrNull(params: unknown): JsonValue | null {
+  if (typeof params !== "object" || params === null || Array.isArray(params)) return null;
+  return params as JsonValue;
+}
+
+function sendRunProgressToRenderer(
+  sender: Electron.WebContents,
+  token: string,
+  fraction: number,
+): void {
+  if (sender.isDestroyed()) return;
+  sender.send(USER_SCRIPT_RUN_PROGRESS_CHANNEL, { token, fraction });
 }
 
 function mapWorkerOutcomeToExecuteResult(

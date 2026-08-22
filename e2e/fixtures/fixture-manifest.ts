@@ -71,6 +71,35 @@ export interface MaskFixture {
   readonly values: ReadonlyArray<number>;
 }
 
+// CT-307: reference outputs pinned by the generate-fixtures.mjs reference
+// runner, which executes the built-in algorithm scripts with the bundled
+// Python runtime. The parity oracle for CT-308 through CT-313: app results
+// must match within 1e-4 relative tolerance.
+export interface BuiltinScriptReferenceBase {
+  readonly script: string;
+  readonly fixture: string;
+  readonly maskFixture?: string;
+  readonly params: Readonly<Record<string, number | boolean | null>>;
+}
+
+export interface BuiltinScriptValueReference extends BuiltinScriptReferenceBase {
+  readonly value: number;
+}
+
+export interface BuiltinScriptCubeReference extends BuiltinScriptReferenceBase {
+  readonly shape: ReadonlyArray<number>;
+  readonly values: ReadonlyArray<number>;
+}
+
+export interface BuiltinScriptReferences {
+  readonly ropSeed: number;
+  readonly npc: BuiltinScriptValueReference;
+  readonly rop: BuiltinScriptCubeReference;
+  readonly l2Minimization: BuiltinScriptCubeReference;
+  readonly localPca: BuiltinScriptCubeReference;
+  readonly localMnf: BuiltinScriptCubeReference;
+}
+
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
 // CT-272: written by generate-png16-fixture.mjs (sharp/libvips, an external
@@ -103,6 +132,9 @@ export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 export const maskMultibandPng = manifestJson.maskMultibandPng as MaskFixture;
 export const maskEightBySquarePng = manifestJson.maskEightBySquarePng as MaskFixture;
+export const parityStackTiff = manifestJson.parityStackTiff as SingleFileFixture;
+export const builtinScriptReferences =
+  manifestJson.builtinScriptReferences as unknown as BuiltinScriptReferences;
 
 export function fixturePath(fileName: string): string {
   return join(FIXTURES_DIRECTORY, fileName);

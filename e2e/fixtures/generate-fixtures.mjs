@@ -9,7 +9,8 @@
 // written to manifest.json so specs assert against documented numbers rather
 // than magic constants. Do NOT depend on the large captures in test-images/.
 
-import { writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
@@ -19,7 +20,8 @@ const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 function generateAllFixtures() {
   const fixtures = buildAllFixtures();
   writeAllFixtureFiles(fixtures);
-  writeManifestFile(fixtures);
+  const builtinScriptReferences = computeBuiltinScriptReferenceOutputs(fixtures);
+  writeManifestFile(fixtures, builtinScriptReferences);
 }
 
 function buildAllFixtures() {
@@ -37,6 +39,7 @@ function buildAllFixtures() {
     enviFloatStack: buildEnviFloatStackFixture(),
     maskMultibandPng: buildMaskForMultiBandStackFixture(),
     maskEightBySquarePng: buildMismatchedMaskFixture(),
+    parityStackTiff: buildParityStackTiffFixture(),
   };
 }
 
@@ -60,6 +63,7 @@ function writeAllFixtureFiles(fixtures) {
     fixtures.maskMultibandPng.sidecarBytes,
   );
   writeFixtureFile(fixtures.maskEightBySquarePng.fileName, fixtures.maskEightBySquarePng.bytes);
+  writeFixtureFile(fixtures.parityStackTiff.fileName, fixtures.parityStackTiff.bytes);
 }
 
 function writeFixtureFile(fileName, bytes) {
@@ -67,8 +71,8 @@ function writeFixtureFile(fileName, bytes) {
   process.stdout.write(`wrote ${fileName} (${bytes.length} bytes)\n`);
 }
 
-function writeManifestFile(fixtures) {
-  const manifest = buildFixtureManifest(fixtures);
+function writeManifestFile(fixtures, builtinScriptReferences) {
+  const manifest = buildFixtureManifest(fixtures, builtinScriptReferences);
   const text = `${JSON.stringify(manifest, null, 2)}\n`;
   writeFileSync(join(FIXTURES_DIRECTORY, "manifest.json"), text);
   process.stdout.write("wrote manifest.json\n");
@@ -891,6 +895,189 @@ function writeUint16StripAtOffset(view, offset, band) {
   }
 }
 
+// --- Parity stack for Local PCA / Local MNF (CT-307/CT-311/CT-312) -----------
+// 16x16, 3 bands, uint16. The 4x4 stacks are too small and too collinear for
+// the local PCA/MNF defaults (MNF's noise statistics need genuine per-band
+// variation), so this fixture layers deterministic LCG noise over per-band
+// gradients. No clocks, no Math.random: identical bytes on every regeneration.
+
+const PARITY_STACK_SIZE = 16;
+const PARITY_BAND_BASES = [300, 1200, 2400];
+const PARITY_GRADIENT_X_STEP = 8;
+const PARITY_GRADIENT_Y_STEP = 5;
+const PARITY_NOISE_AMPLITUDE = 120;
+const PARITY_NOISE_SEED = 0x53474d31;
+
+function buildParityStackTiffFixture() {
+  const nextNoise = createDeterministicNoiseGenerator(PARITY_NOISE_SEED);
+  const bands = PARITY_BAND_BASES.map((base) => buildParityBand(base, nextNoise));
+  return {
+    fileName: "parity-16x16.tif",
+    width: PARITY_STACK_SIZE,
+    height: PARITY_STACK_SIZE,
+    bands,
+    bytes: encodeMultiPageUint16TiffBytes(PARITY_STACK_SIZE, PARITY_STACK_SIZE, bands),
+  };
+}
+
+function buildParityBand(base, nextNoise) {
+  const band = new Uint16Array(PARITY_STACK_SIZE * PARITY_STACK_SIZE);
+  for (let y = 0; y < PARITY_STACK_SIZE; y += 1) {
+    for (let x = 0; x < PARITY_STACK_SIZE; x += 1) {
+      const gradient = base + PARITY_GRADIENT_X_STEP * x + PARITY_GRADIENT_Y_STEP * y;
+      band[y * PARITY_STACK_SIZE + x] = gradient + Math.round(nextNoise() * PARITY_NOISE_AMPLITUDE);
+    }
+  }
+  return band;
+}
+
+// Numerical Recipes LCG; full 32-bit state, values in [0, 1).
+function createDeterministicNoiseGenerator(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+// --- Built-in script reference runner (CT-307) --------------------------------
+// Executes the committed built-in algorithm scripts (resources/builtin-python)
+// directly with the bundled Python runtime against the fixtures above and pins
+// their outputs into manifest.json: the parity oracle for CT-308 through
+// CT-313 (app results must match within 1e-4 relative tolerance). Cube results
+// are coerced to float32 exactly as the worker bootstrap does, so the pinned
+// values equal what the app delivers.
+
+const REPO_ROOT_DIRECTORY = join(FIXTURES_DIRECTORY, "..", "..");
+const BUILTIN_SCRIPTS_DIRECTORY = join(REPO_ROOT_DIRECTORY, "resources", "builtin-python");
+const ROP_REFERENCE_SEED = 20260822;
+
+const REFERENCE_RUNNER_PYTHON_SOURCE = `
+import json, sys
+import numpy as np
+request = json.loads(sys.stdin.read())
+sys.path.insert(0, request["directory"])
+module = __import__(request["moduleName"])
+cube = np.array(request["cube"], dtype=np.float32)
+params = dict(request.get("params") or {})
+masks = request.get("masks")
+if masks is not None:
+    params["masks"] = [np.array(mask, dtype=np.uint8) for mask in masks]
+params["report_progress"] = lambda fraction: None
+value = module.run(cube, request.get("wavelengths"), params)
+if isinstance(value, np.ndarray):
+    coerced = np.ascontiguousarray(np.asarray(value).astype("<f4", copy=False))
+    out = {"kind": "cube", "shape": list(coerced.shape), "values": coerced.astype(np.float64).ravel().tolist()}
+else:
+    out = {"kind": "value", "value": float(value)}
+sys.stdout.write(json.dumps(out))
+`;
+
+function bundledPythonInterpreterPathOrThrow() {
+  const relative = process.platform === "win32" ? "python.exe" : join("bin", "python3");
+  const interpreterPath = join(REPO_ROOT_DIRECTORY, ".python", relative);
+  if (!existsSync(interpreterPath)) {
+    throw new Error(
+      `The bundled Python runtime is required to pin built-in script reference outputs ` +
+        `(missing ${interpreterPath}). Run: node scripts/setup-python-runtime.mjs`,
+    );
+  }
+  return interpreterPath;
+}
+
+function runBuiltinScriptWithBundledRuntime(interpreterPath, moduleName, request) {
+  const spawned = spawnSync(interpreterPath, ["-I", "-X", "utf8", "-c", REFERENCE_RUNNER_PYTHON_SOURCE], {
+    input: JSON.stringify({ directory: BUILTIN_SCRIPTS_DIRECTORY, moduleName, ...request }),
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (spawned.status !== 0) {
+    throw new Error(`Reference run of ${moduleName} failed:\n${spawned.stderr || spawned.error}`);
+  }
+  return JSON.parse(spawned.stdout);
+}
+
+function cubeAsNestedBandRows(fixture) {
+  return fixture.bands.map((band) => bandAsRows(band, fixture.width, fixture.height));
+}
+
+function bandAsRows(band, width, height) {
+  const rows = [];
+  for (let y = 0; y < height; y += 1) {
+    rows.push(Array.from(band.subarray(y * width, (y + 1) * width), Number));
+  }
+  return rows;
+}
+
+// One 2D 0/1 mask per category index present in the mask fixture, in index order.
+function maskCategoriesAsNestedRows(maskFixture) {
+  const categoryIndexes = [...new Set(maskFixture.values.filter((value) => value > 0))].sort();
+  return categoryIndexes.map((categoryIndex) =>
+    bandAsRows(
+      Uint8Array.from(maskFixture.values, (value) => (value === categoryIndex ? 1 : 0)),
+      maskFixture.width,
+      maskFixture.height,
+    ),
+  );
+}
+
+function listBuiltinScriptReferenceRequests(fixtures) {
+  const multibandCube = cubeAsNestedBandRows(fixtures.multiBandTiff);
+  const multibandMasks = maskCategoriesAsNestedRows(fixtures.maskMultibandPng);
+  const parityCube = cubeAsNestedBandRows(fixtures.parityStackTiff);
+  return {
+    npc: {
+      script: "npc",
+      fixture: fixtures.multiBandTiff.fileName,
+      maskFixture: fixtures.maskMultibandPng.fileName,
+      params: { bins: 255 },
+      request: { cube: multibandCube, masks: multibandMasks, params: { bins: 255 } },
+    },
+    rop: {
+      script: "rop",
+      fixture: fixtures.multiBandTiff.fileName,
+      params: { seed: ROP_REFERENCE_SEED, count: 1 },
+      request: { cube: multibandCube, params: { seed: ROP_REFERENCE_SEED, count: 1 } },
+    },
+    l2Minimization: {
+      script: "l2_minimization",
+      fixture: fixtures.multiBandTiff.fileName,
+      maskFixture: fixtures.maskMultibandPng.fileName,
+      params: {},
+      request: { cube: multibandCube, masks: multibandMasks, params: {} },
+    },
+    localPca: {
+      script: "local_pca",
+      fixture: fixtures.parityStackTiff.fileName,
+      params: {},
+      request: { cube: parityCube, params: {} },
+    },
+    localMnf: {
+      script: "local_mnf",
+      fixture: fixtures.parityStackTiff.fileName,
+      params: {},
+      request: { cube: parityCube, params: {} },
+    },
+  };
+}
+
+function computeBuiltinScriptReferenceOutputs(fixtures) {
+  const interpreterPath = bundledPythonInterpreterPathOrThrow();
+  const references = { ropSeed: ROP_REFERENCE_SEED };
+  for (const [key, definition] of Object.entries(listBuiltinScriptReferenceRequests(fixtures))) {
+    references[key] = describeReferenceOutput(definition, interpreterPath);
+    process.stdout.write(`pinned builtin reference ${key} (${definition.script})\n`);
+  }
+  return references;
+}
+
+function describeReferenceOutput(definition, interpreterPath) {
+  const { request, ...description } = definition;
+  const output = runBuiltinScriptWithBundledRuntime(interpreterPath, definition.script, request);
+  if (output.kind === "value") return { ...description, value: output.value };
+  return { ...description, shape: output.shape, values: output.values };
+}
+
 // --- Manifest ---------------------------------------------------------------
 
 function describeMaskFixture(fixture) {
@@ -906,7 +1093,7 @@ function describeMaskFixture(fixture) {
   };
 }
 
-function buildFixtureManifest(fixtures) {
+function buildFixtureManifest(fixtures, builtinScriptReferences) {
   return {
     note: "Generated by e2e/fixtures/generate-fixtures.mjs - do not edit by hand.",
     lowContrastGrayPng: describeGrayscaleFixture(fixtures.lowContrastGrayPng),
@@ -922,6 +1109,8 @@ function buildFixtureManifest(fixtures) {
     enviFloatStack: describeEnviFloatFixture(fixtures.enviFloatStack),
     maskMultibandPng: describeMaskFixture(fixtures.maskMultibandPng),
     maskEightBySquarePng: describeMaskFixture(fixtures.maskEightBySquarePng),
+    parityStackTiff: describeStackFixture(fixtures.parityStackTiff, "uint16"),
+    builtinScriptReferences,
   };
 }
 

@@ -31,13 +31,17 @@ export function runUserScriptOverRasterAtApply(
     resultKind,
     {
       onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress),
+      // CT-307: a script that reports in-script progress drives the apply bar
+      // through the worker-run phase too.
+      onWorkerProgress: (fraction) => onProgress?.(fraction),
       abortSignal,
     },
   );
 }
 
-// The upload fraction is determinate; the worker-run phase reports nothing, so
-// the busy bar holds at the uploaded fraction while the Python executes.
+// The upload fraction is determinate; the worker-run phase otherwise reports
+// nothing, so the busy bar holds at the uploaded fraction while the Python
+// executes (unless the script reports in-script progress, CT-307).
 function reportUploadFractionAsApplyProgress(
   fraction: number | null,
   onProgress: UnitProgressCallback | undefined,

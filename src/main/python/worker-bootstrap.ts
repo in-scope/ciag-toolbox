@@ -55,6 +55,30 @@ def write_response_frame(payload):
     REAL_STDOUT.flush()
 
 
+# CT-307: in-script determinate progress. Built-in scripts (and any 3-arity user
+# script) receive this callable as params["report_progress"]; each accepted call
+# writes a small JSON progress frame ahead of the final response. Reports are
+# clamped to [0, 1] and rate-limited to 1% steps so a tight scoring loop cannot
+# flood the pipe with frames.
+PROGRESS_MINIMUM_STEP = 0.01
+_last_reported_progress = [None]
+
+
+def report_progress(fraction):
+    try:
+        value = float(fraction)
+    except (TypeError, ValueError):
+        return
+    if value != value:
+        return
+    value = 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+    last = _last_reported_progress[0]
+    if last is not None and value < 1.0 and value - last < PROGRESS_MINIMUM_STEP:
+        return
+    _last_reported_progress[0] = value
+    write_response_frame(encode_response({"type": "progress", "fraction": value}))
+
+
 def reconstruct_cube_from_frame(cube_bytes, header):
     import numpy as np
     shape = tuple(header["shape"])
@@ -93,12 +117,26 @@ def load_run_function_from_package(package_directory):
     return run_function
 
 
+def load_run_function_from_builtin(directory, module_name):
+    # CT-307: a packaged Stage 6 algorithm module under the app's built-in
+    # script directory; loaded like a package, but by its own module name.
+    import importlib
+    sys.path.insert(0, directory)
+    builtin_module = importlib.import_module(module_name)
+    run_function = getattr(builtin_module, "run", None)
+    if not callable(run_function):
+        raise RuntimeError("The built-in script must define a run() function.")
+    return run_function
+
+
 def load_run_function(input_spec):
     kind = input_spec.get("kind") if isinstance(input_spec, dict) else None
     if kind == "formula":
         return build_formula_run_function(input_spec.get("expression", ""))
     if kind == "package":
         return load_run_function_from_package(input_spec.get("packageDirectory", ""))
+    if kind == "builtin":
+        return load_run_function_from_builtin(input_spec.get("directory", ""), input_spec.get("moduleName", ""))
     return load_run_function_from_script((input_spec or {}).get("scriptSource", ""))
 
 
@@ -111,13 +149,17 @@ def count_positional_parameters(run_function):
     return sum(1 for parameter in parameters if parameter.kind in kinds)
 
 
-def invoke_run_function(run_function, cube, wavelengths):
+def invoke_run_function(run_function, cube, wavelengths, params):
+    # CT-307: dispatch by declared positional arity so 0/1/2-arity user scripts
+    # keep working; 3-or-more-arity scripts also receive the params dict.
     positional = count_positional_parameters(run_function)
     if cube is None or positional == 0:
         return run_function()
     if positional == 1:
         return run_function(cube)
-    return run_function(cube, wavelengths)
+    if positional == 2:
+        return run_function(cube, wavelengths)
+    return run_function(cube, wavelengths, params)
 
 
 CUBE_RESULT_CONTRACT_MESSAGE = (
@@ -191,8 +233,15 @@ def encode_response(message):
 
 
 def sandbox_user_origin_prefixes(input_spec):
-    if isinstance(input_spec, dict) and input_spec.get("kind") == "package":
+    if not isinstance(input_spec, dict):
+        return []
+    if input_spec.get("kind") == "package":
         directory = input_spec.get("packageDirectory")
+        return [directory] if directory else []
+    if input_spec.get("kind") == "builtin":
+        # CT-307: the sandbox must be able to read the built-in script
+        # directory (lazy sibling imports after the hook installs).
+        directory = input_spec.get("directory")
         return [directory] if directory else []
     return []
 
@@ -203,7 +252,19 @@ def encode_result_frames(request, value):
     return [encode_response({"type": "script-result", "value": make_json_safe(value)})]
 
 
-def run_user_code(request, cube):
+def build_params_argument(request, masks):
+    # CT-307: the effective third positional argument. The request's plain
+    # params dict is copied, mask arrays (numpy uint8, never JSON) slot in
+    # under "masks", and the progress callback is always available.
+    raw_params = request.get("params")
+    params = dict(raw_params) if isinstance(raw_params, dict) else {}
+    if masks is not None:
+        params["masks"] = masks
+    params["report_progress"] = report_progress
+    return params
+
+
+def run_user_code(request, cube, masks):
     input_spec = request.get("input")
     run_function = load_run_function(input_spec)
     if request.get("sandbox"):
@@ -212,15 +273,15 @@ def run_user_code(request, cube):
             request.get("cubeResultSpoolPath"),
         )
     wavelengths = (request.get("cube") or {}).get("wavelengths")
-    value = invoke_run_function(run_function, cube, wavelengths)
+    value = invoke_run_function(run_function, cube, wavelengths, build_params_argument(request, masks))
     return encode_result_frames(request, value)
 
 
-def handle_request(request, cube):
+def handle_request(request, cube, masks):
     if not isinstance(request, dict) or request.get("type") != "run-user-script":
         return [encode_response({"type": "script-error", "message": "Malformed worker request."})]
     try:
-        return run_user_code(request, cube)
+        return run_user_code(request, cube, masks)
     except BaseException as error:
         message = str(error) or type(error).__name__
         return [encode_response({"type": "script-error", "message": message, "traceback": traceback.format_exc()})]
@@ -236,6 +297,27 @@ def read_cube_if_present(request, stream):
     return reconstruct_cube_from_frame(cube_bytes, header)
 
 
+def reconstruct_masks_from_frame(mask_bytes, header):
+    import numpy as np
+    count = int(header["count"])
+    shape = (count, int(header["height"]), int(header["width"]))
+    stacked = np.frombuffer(mask_bytes, dtype=np.uint8).reshape(shape)
+    return [stacked[index].copy() for index in range(count)]
+
+
+def read_masks_if_present(request, stream):
+    # CT-307: one raw uint8 frame (same 8-byte length prefix as the cube frame)
+    # carrying every category mask, sliced into per-category (height, width)
+    # numpy arrays. Mirrors the mask payload write in python-worker.ts.
+    header = request.get("masks") if isinstance(request, dict) else None
+    if header is None:
+        return None
+    mask_bytes = read_cube_frame_payload(stream)
+    if mask_bytes is None:
+        raise RuntimeError("The mask payload frame was missing.")
+    return reconstruct_masks_from_frame(mask_bytes, header)
+
+
 def main():
     request_payload = read_frame_payload(sys.stdin.buffer)
     if request_payload is None:
@@ -243,10 +325,11 @@ def main():
     request = json.loads(request_payload.decode("utf-8"))
     try:
         cube = read_cube_if_present(request, sys.stdin.buffer)
+        masks = read_masks_if_present(request, sys.stdin.buffer)
     except BaseException as error:
         write_response_frame(encode_response({"type": "script-error", "message": str(error)}))
         return
-    for frame_payload in handle_request(request, cube):
+    for frame_payload in handle_request(request, cube, masks):
         write_response_frame(frame_payload)
 
 

@@ -57,6 +57,7 @@ import {
   USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+  USER_SCRIPT_RUN_PROGRESS_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
   USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
   type UserScriptPickScriptResult,
@@ -66,6 +67,7 @@ import {
   type UserScriptRunCubeChunkRequest,
   type UserScriptRunExecuteRequest,
   type UserScriptRunExecuteResult,
+  type UserScriptRunProgressEvent,
   type UserScriptRunReleaseRequest,
   type UserScriptRunResultChunkRequest,
   type UserScriptRunResultChunkResult,
@@ -509,6 +511,17 @@ function cancelUserScriptRunInMainProcess(
   ) as Promise<void>;
 }
 
+// CT-307: in-script progress frames pushed from main while a run executes;
+// the renderer filters by run token.
+function subscribeToUserScriptRunProgress(
+  listener: (event: UserScriptRunProgressEvent) => void,
+): () => void {
+  const handler = (_event: IpcRendererEvent, progress: UserScriptRunProgressEvent): void =>
+    listener(progress);
+  ipcRenderer.on(USER_SCRIPT_RUN_PROGRESS_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(USER_SCRIPT_RUN_PROGRESS_CHANNEL, handler);
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -593,6 +606,7 @@ const apiBridge = {
   readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
   releaseUserScriptRun: releaseUserScriptRunInMainProcess,
   cancelUserScriptRun: cancelUserScriptRunInMainProcess,
+  onUserScriptRunProgress: subscribeToUserScriptRunProgress,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;

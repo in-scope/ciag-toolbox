@@ -315,9 +315,14 @@ interface ToolboxPythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
+// CT-307: builtin names mirror BUILTIN_SCRIPT_NAMES in
+// src/shared/chunked-user-script-run-protocol.ts; keep in sync.
+type ToolboxBuiltinScriptName = "npc" | "rop" | "local_pca" | "local_mnf" | "l2_minimization";
+
 type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
-  | { mode: "import"; scriptPath?: string };
+  | { mode: "import"; scriptPath?: string }
+  | { mode: "builtin"; scriptName: ToolboxBuiltinScriptName };
 
 type ToolboxUserScriptPickResult =
   | { canceled: true }
@@ -346,6 +351,9 @@ interface ToolboxUserScriptRunBeginRequest {
   source: ToolboxRunUserScriptSource;
   resultKind: ToolboxRunUserScriptResultKind;
   cube: ToolboxUserScriptRunCubeDescriptor;
+  // CT-307: when present, count * height * width mask bytes follow the cube
+  // bytes on the chunk channel.
+  masks?: { count: number };
 }
 
 type ToolboxUserScriptRunBeginResult =
@@ -360,6 +368,14 @@ interface ToolboxUserScriptRunCubeChunkRequest {
 
 interface ToolboxUserScriptRunExecuteRequest {
   token: string;
+  // CT-307: per-execute parameters for the script's third positional argument.
+  params?: Record<string, unknown>;
+}
+
+// CT-307: in-script progress pushed from main while a run executes.
+interface ToolboxUserScriptRunProgressEvent {
+  token: string;
+  fraction: number;
 }
 
 type ToolboxUserScriptRunExecuteResult =
@@ -516,6 +532,9 @@ interface ToolboxApi {
   cancelUserScriptRun: (
     request: ToolboxUserScriptRunCancelRequest,
   ) => Promise<void>;
+  onUserScriptRunProgress: (
+    listener: (event: ToolboxUserScriptRunProgressEvent) => void,
+  ) => () => void;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (
     listener: ToolboxThemeChangeListener,

@@ -3,7 +3,7 @@
 // Expected failures (script errors, timeouts, crashes) resolve as a failed outcome
 // with a user-facing message; this function never rejects for them.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { EncodedCubePayload } from "./cube-payload";
+import type { EncodedCubePayload, EncodedMaskPayload } from "./cube-payload";
 import { PYTHON_WORKER_BOOTSTRAP_SOURCE } from "./worker-bootstrap";
 import {
   encodeCubeFrameLengthPrefix,
@@ -28,10 +28,18 @@ export interface PythonWorkerRunRequest {
   // over-2GiB buffer, a fatal native OOM). The outcome reports the file.
   resultKind: UserScriptResultKind;
   cubeResultSpoolPath?: string;
+  // CT-307: category masks delivered to the script as numpy uint8 arrays via
+  // params["masks"]; their bytes ride one raw frame after the cube frame.
+  masks?: EncodedMaskPayload | null;
+  // CT-307: the plain dict for run()'s third positional argument.
+  params?: JsonValue | null;
   // True in bundled mode (the app's own interpreter, sandboxed); false in the
   // explicitly-trusted own-environment mode (CT-208e). The wall-clock kill applies either way.
   sandbox: boolean;
   timeoutMs: number;
+  // CT-307: called for each in-script progress frame (fraction 0..1) while the
+  // worker runs; progress frames never settle the run.
+  onProgress?: (fraction: number) => void;
   // CT-268: called with the run's cancel trigger once observation starts. The
   // caller invokes it (from the cancel IPC) to SIGKILL the subprocess; the run
   // then settles as a "canceled" failure instead of hanging to the timeout.
@@ -54,7 +62,13 @@ export async function runUserScriptInPythonSubprocess(
   const worker = spawnPythonWorkerProcess(request.interpreterPath);
   sendRunUserScriptRequestToWorker(worker, request);
   return new Promise((resolveOutcome) => {
-    const observer = new PythonWorkerRunObserver(worker, request.timeoutMs, spoolPath, resolveOutcome);
+    const observer = new PythonWorkerRunObserver(
+      worker,
+      request.timeoutMs,
+      spoolPath,
+      resolveOutcome,
+      request.onProgress,
+    );
     observer.beginObserving();
     request.registerCancel?.(() => observer.cancelBecauseUserStopped());
   });
@@ -102,6 +116,7 @@ async function writeRunRequestFramesSequentially(
   try {
     await writeToStreamAwaitingFlush(stdin, encodeWorkerRequestFrame(buildWorkerRequest(request)));
     await writeCubePayloadAsRawFrame(stdin, request.cube);
+    await writeMaskPayloadAsRawFrame(stdin, request.masks ?? null);
     stdin.end();
   } catch {
     stdin.destroy();
@@ -115,6 +130,19 @@ async function writeCubePayloadAsRawFrame(
   if (cube === null) return;
   await writeToStreamAwaitingFlush(stdin, encodeCubeFrameLengthPrefix(cube.totalByteLength));
   for await (const segment of cube.readSegments()) {
+    await writeToStreamAwaitingFlush(stdin, segment);
+  }
+}
+
+// CT-307: the mask frame reuses the cube frame's 8-byte length prefix and
+// follows the cube frame; the bootstrap's read_masks_if_present mirrors this.
+async function writeMaskPayloadAsRawFrame(
+  stdin: ChildProcessWithoutNullStreams["stdin"],
+  masks: EncodedMaskPayload | null,
+): Promise<void> {
+  if (masks === null) return;
+  await writeToStreamAwaitingFlush(stdin, encodeCubeFrameLengthPrefix(masks.totalByteLength));
+  for await (const segment of masks.readSegments()) {
     await writeToStreamAwaitingFlush(stdin, segment);
   }
 }
@@ -136,6 +164,8 @@ function buildWorkerRequest(request: PythonWorkerRunRequest): RunUserScriptReque
     type: "run-user-script",
     input: request.input,
     cube: request.cube?.header ?? null,
+    masks: request.masks?.header ?? null,
+    params: request.params ?? null,
     resultKind: request.resultKind,
     cubeResultSpoolPath: request.cubeResultSpoolPath ?? null,
     sandbox: request.sandbox,
@@ -143,7 +173,7 @@ function buildWorkerRequest(request: PythonWorkerRunRequest): RunUserScriptReque
 }
 
 function outcomeFromWorkerResponse(
-  response: PythonWorkerResponse,
+  response: Exclude<PythonWorkerResponse, { type: "progress" }>,
   cubeSpoolPath: string | null,
 ): PythonWorkerOutcome {
   if (response.type === "script-result") return { kind: "completed", value: response.value };
@@ -175,6 +205,7 @@ class PythonWorkerRunObserver {
     private readonly timeoutMs: number,
     private readonly cubeSpoolPath: string | null,
     private readonly settleWithOutcome: (outcome: PythonWorkerOutcome) => void,
+    private readonly onProgress?: (fraction: number) => void,
   ) {}
 
   beginObserving(): void {
@@ -190,11 +221,20 @@ class PythonWorkerRunObserver {
   private handleStdoutChunk(chunk: Buffer): void {
     try {
       const responses = this.responseDecoder.appendChunkAndTakeCompletedResponses(chunk);
-      const firstResponse = responses[0];
-      if (firstResponse !== undefined) this.settle(outcomeFromWorkerResponse(firstResponse, this.cubeSpoolPath));
+      for (const response of responses) this.routeWorkerResponse(response);
     } catch (decodeError) {
       this.settleAsCrashed(decodeError instanceof Error ? decodeError.message : String(decodeError));
     }
+  }
+
+  // CT-307: progress frames stream ahead of the final response and never
+  // settle the run; the first non-progress response does.
+  private routeWorkerResponse(response: PythonWorkerResponse): void {
+    if (response.type === "progress") {
+      if (!this.hasSettled) this.onProgress?.(response.fraction);
+      return;
+    }
+    this.settle(outcomeFromWorkerResponse(response, this.cubeSpoolPath));
   }
 
   private collectStderrChunk(chunk: Buffer): void {
