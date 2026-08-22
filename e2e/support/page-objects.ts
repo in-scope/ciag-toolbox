@@ -177,6 +177,7 @@ export {
   expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingBandWeightingWording,
   expectNoUserFacingFalseColorWording,
+  expectNoUserFacingBasicProcessingHyphenWording,
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,

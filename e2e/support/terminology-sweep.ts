@@ -46,3 +46,12 @@ export async function expectNoUserFacingFalseColorWording(page: Page): Promise<v
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/false-color/i);
 }
+
+// CT-294: the menu is "Basic Processing"; the hyphenated "Basic-Processing"
+// wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingBasicProcessingHyphenWording(
+  page: Page,
+): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/Basic-Processing/);
+}

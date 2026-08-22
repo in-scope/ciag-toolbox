@@ -101,7 +101,7 @@ function clickFileMenuItemWhoseLabelStartsWith(
 }
 
 // Clicks an operation item in whichever operation menu (Tools,
-// Basic-Processing, Multi-band) carries it, and fails loudly when the label is
+// Basic Processing, Multi-band) carries it, and fails loudly when the label is
 // missing so a regrouped menu cannot silently no-op a spec.
 export function triggerOperationMenuItem(
   app: ElectronApplication,

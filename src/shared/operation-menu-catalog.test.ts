@@ -18,10 +18,10 @@ function findMenuByLabel(menuLabel: string): OperationMenu {
 }
 
 describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
-  it("orders the operation menus Tools, Basic-Processing, Multi-band", () => {
+  it("orders the operation menus Tools, Basic Processing, Multi-band", () => {
     expect(OPERATION_MENUS.map((menu) => menu.menuLabel)).toEqual([
       "Tools",
-      "Basic-Processing",
+      "Basic Processing",
       "Multi-band",
     ]);
   });
@@ -42,8 +42,8 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
     ]);
   });
 
-  it("puts per-pixel and per-band value processing under Basic-Processing", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Basic-Processing"))).toEqual([
+  it("puts per-pixel and per-band value processing under Basic Processing", () => {
+    expect(listMenuItemLabels(findMenuByLabel("Basic Processing"))).toEqual([
       "Brightness & Contrast",
       "Clip by Value",
       "Contrast Curve",

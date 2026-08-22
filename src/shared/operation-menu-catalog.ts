@@ -1,4 +1,4 @@
-// Single source of truth for the operation menus (Tools, Basic-Processing,
+// Single source of truth for the operation menus (Tools, Basic Processing,
 // Multi-band; CT-289 reorg from the Jul 30 meeting list).
 //
 // Both the native application menu (main process) and the React toolbar
@@ -216,7 +216,7 @@ export const TOOLS_MENU: OperationMenu = {
 
 // Per-pixel and per-band value processing on the current stack.
 export const BASIC_PROCESSING_MENU: OperationMenu = {
-  menuLabel: "Basic-Processing",
+  menuLabel: "Basic Processing",
   groups: [ADJUST_GROUP, CLIP_GROUP, DATA_GROUP, FILTERS_GROUP, SCRIPTS_GROUP],
 };
 

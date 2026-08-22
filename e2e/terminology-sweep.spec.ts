@@ -11,6 +11,7 @@ import {
   drawInspectionRoiBetweenPixels,
   enqueueAndTriggerOpenImages,
   expectNoUserFacingBandWeightingWording,
+  expectNoUserFacingBasicProcessingHyphenWording,
   expectNoUserFacingFalseColorWording,
   expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
@@ -135,6 +136,13 @@ test("the composite tool is named RGB Color Composite, never False-color Composi
   } finally {
     await closeToolboxApp(app);
   }
+});
+
+// CT-294: the menu is "Basic Processing"; the hyphenated "Basic-Processing"
+// wording must not surface anywhere in the app.
+test("the menu is Basic Processing, never Basic-Processing", async () => {
+  await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
+  await expectNoUserFacingBasicProcessingHyphenWording(launched.window);
 });
 
 async function openWavelengthStackReviewModal(app: LaunchedApp): Promise<void> {
