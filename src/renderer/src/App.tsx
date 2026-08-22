@@ -743,6 +743,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
         onChangeMasks={props.onChangeMasks}
         brush={props.maskBrush}
         onChangeBrush={props.onChangeMaskBrush}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
         onClose={props.onCloseMasks}
       />
     );
@@ -763,6 +764,7 @@ function deriveMasksOptionsTargetOrNull(
   const dimensions = getImageSourceDimensions(content.source);
   return {
     viewportNumber: singleSelectedSource.summary.viewportNumber,
+    fileName: content.fileName,
     width: dimensions.width,
     height: dimensions.height,
     masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,

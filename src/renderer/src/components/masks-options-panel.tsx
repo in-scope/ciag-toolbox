@@ -3,9 +3,11 @@ import { X } from "lucide-react";
 import { MaskBrushControls } from "@/components/mask-brush-controls";
 import { MaskFileTransferButtons } from "@/components/mask-file-transfer-buttons";
 import { MaskLayerEditor } from "@/components/mask-layer-editor";
+import { MaskThresholdPromotionControl } from "@/components/mask-threshold-promotion-control";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { buildLoadedPanelReferenceToken, type LoadedReferenceCandidate } from "@/lib/image/reference-token";
 import {
   addNewMaskLayerToPanel,
   deleteMaskLayerFromPanel,
@@ -26,6 +28,7 @@ import type { MaskLayer } from "@/lib/masks/mask-layer";
 
 export interface MasksOptionsTarget {
   readonly viewportNumber: number;
+  readonly fileName: string;
   readonly width: number;
   readonly height: number;
   readonly masks: MaskPanelState;
@@ -36,6 +39,7 @@ export interface MasksOptionsPanelProps {
   readonly onChangeMasks: (next: MaskPanelState) => void;
   readonly brush: MaskBrushSettings;
   readonly onChangeBrush: (next: MaskBrushSettings) => void;
+  readonly loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
   readonly onClose: () => void;
 }
 
@@ -53,6 +57,7 @@ export function MasksOptionsPanel(props: MasksOptionsPanelProps): JSX.Element {
             onChangeMasks={props.onChangeMasks}
             brush={props.brush}
             onChangeBrush={props.onChangeBrush}
+            loadedReferenceCandidates={props.loadedReferenceCandidates}
           />
         ) : (
           <p className="text-xs text-muted-foreground">{NO_ACTIVE_PANEL_HINT}</p>
@@ -106,6 +111,7 @@ interface MaskLayerListProps {
 interface MasksOptionsBodyProps extends MaskLayerListProps {
   readonly brush: MaskBrushSettings;
   readonly onChangeBrush: (next: MaskBrushSettings) => void;
+  readonly loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
 }
 
 function MasksOptionsBody(props: MasksOptionsBodyProps): JSX.Element {
@@ -130,6 +136,8 @@ interface SelectedMaskLayerSectionsProps extends MasksOptionsBodyProps {
 }
 
 function SelectedMaskLayerSections(props: SelectedMaskLayerSectionsProps): JSX.Element {
+  const onChangeLayer = (next: MaskLayer) =>
+    props.onChangeMasks(replaceMaskLayerInPanel(props.target.masks, props.layer.id, () => next));
   return (
     <>
       <MaskBrushControls
@@ -137,11 +145,18 @@ function SelectedMaskLayerSections(props: SelectedMaskLayerSectionsProps): JSX.E
         brush={props.brush}
         onChangeBrush={props.onChangeBrush}
       />
+      <MaskThresholdPromotionControl
+        layer={props.layer}
+        brush={props.brush}
+        width={props.target.width}
+        height={props.target.height}
+        excludeToken={buildLoadedPanelReferenceToken(props.target.viewportNumber, props.target.fileName)}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
+        onChangeLayer={onChangeLayer}
+      />
       <MaskLayerEditor
         layer={props.layer}
-        onChangeLayer={(next) =>
-          props.onChangeMasks(replaceMaskLayerInPanel(props.target.masks, props.layer.id, () => next))
-        }
+        onChangeLayer={onChangeLayer}
         onDeleteLayer={() =>
           props.onChangeMasks(deleteMaskLayerFromPanel(props.target.masks, props.layer.id))
         }
