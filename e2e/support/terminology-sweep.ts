@@ -39,3 +39,10 @@ export async function expectNoUserFacingBandWeightingWording(page: Page): Promis
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/band weighting/i);
 }
+
+// CT-292: the composite tool is named "RGB Color Composite"; the old
+// "False-color" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingFalseColorWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/false-color/i);
+}

@@ -60,10 +60,10 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
 
   it("puts cross-band and whole-cube operations under Multi-band", () => {
     expect(listMenuItemLabels(findMenuByLabel("Multi-band"))).toEqual([
-      "False-color Composite",
       "ICA",
       "MNF",
       "PCA",
+      "RGB Color Composite",
       "Spectral Derivative",
       "Weighted Sum",
     ]);

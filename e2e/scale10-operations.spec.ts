@@ -590,9 +590,9 @@ test("spectral derivative reads out the exact 600 band spacing", async () => {
 
 test("false-color composite aliases the assigned bands into the channels", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict(`operation: False-color Composite (bands ${OPS_TOP_BAND_NUMBER}/25/1)`, async () => {
+  await recordSweepVerdict(`operation: RGB Color Composite (bands ${OPS_TOP_BAND_NUMBER}/25/1)`, async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("False-color Composite", configureFalseColorBands);
+    const applied = await openConfigureAndApplyFromSourcePanel("RGB Color Composite", configureFalseColorBands);
     // CT-278: the committed composite renders as one colour image (band 45
     // data in the bright red channel), so sample the canvas FIRST, then flip
     // to the CT-248 channel view to navigate the bands for the readouts.
@@ -605,9 +605,9 @@ test("false-color composite aliases the assigned bands into the channels", async
 });
 
 async function configureFalseColorBands(): Promise<void> {
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band R", OPS_TOP_BAND_NUMBER);
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band G", 25);
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band B", 1);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band R", OPS_TOP_BAND_NUMBER);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band G", 25);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band B", 1);
 }
 
 async function expectResultCanvasShowsContent(): Promise<void> {

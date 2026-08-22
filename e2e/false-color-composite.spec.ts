@@ -40,7 +40,8 @@ import { expectChannelViewEnabled, toggleChannelView } from "./support/channel-v
 // whose band 1 is dim with a bright top-left corner, band 3 is bright with a dark
 // top-left corner, and band 2 is uniform. Swapping R and B then flips the composite color.
 
-const FALSE_COLOR_LABEL = "False-color Composite";
+// CT-292: user-facing "False-color Composite" is renamed "RGB Color Composite".
+const FALSE_COLOR_LABEL = "RGB Color Composite";
 const PANEL = 1;
 const SIDE = 4;
 const BAND_COUNT = 3;

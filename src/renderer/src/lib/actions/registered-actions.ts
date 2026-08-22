@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsDownUp, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, Palette, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsDownUp, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
+import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
@@ -1529,17 +1530,20 @@ const FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA: BandNumberParameterSchema = {
   defaultValue: 3,
 };
 
+// CT-292: user-facing "False-color Composite" is renamed "RGB Color
+// Composite"; the internal id, file names, and history vocabulary stay
+// "false-color" (CT-245 pattern).
 export const FALSE_COLOR_ACTION: RegisteredViewportAction = {
   id: "false-color",
-  label: "False-color Composite",
-  icon: Palette,
+  label: "RGB Color Composite",
+  icon: RgbCompositeIcon,
   parameters: [
     FALSE_COLOR_RED_BAND_PARAMETER_SCHEMA,
     FALSE_COLOR_GREEN_BAND_PARAMETER_SCHEMA,
     FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA,
   ],
-  successMessage: "False-color composite applied",
-  appliedLabel: "False-color composite",
+  successMessage: "RGB color composite applied",
+  appliedLabel: "RGB color composite",
   formatAppliedLabel: formatFalseColorAppliedLabel,
   apply: resetBandDependentStateAfterBandCountChange,
   transformSource: createFalseColorSourceTransform(),
@@ -1565,7 +1569,7 @@ function createFalseColorSourceTransform(): ViewportActionSourceTransform {
 
 function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): string {
   const assignment = readFalseColorBandAssignment(parameterValues);
-  return `False-color (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
+  return `RGB Color Composite (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
 }
 
 export const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";

@@ -11,6 +11,7 @@ import {
   drawInspectionRoiBetweenPixels,
   enqueueAndTriggerOpenImages,
   expectNoUserFacingBandWeightingWording,
+  expectNoUserFacingFalseColorWording,
   expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
   expectPanelHoldsFile,
@@ -121,6 +122,19 @@ test("the Threshold panel offers a Method selector and no Auto button", async ()
 test("no user-facing text or accessible name exposes the word viewport", async () => {
   await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
   await expectNoUserFacingViewportWording(launched.window);
+});
+
+// CT-292: the composite tool is user-facing "RGB Color Composite"; the old
+// "False-color Composite" name must not surface anywhere, including with its own panel open.
+test("the composite tool is named RGB Color Composite, never False-color Composite", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "RGB Color Composite");
+    await expectNoUserFacingFalseColorWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
 });
 
 async function openWavelengthStackReviewModal(app: LaunchedApp): Promise<void> {

@@ -824,7 +824,7 @@ describe("FALSE_COLOR_ACTION", () => {
   it("records the three band assignments in the applied label", () => {
     expect(
       FALSE_COLOR_ACTION.formatAppliedLabel!({ redBandNumber: 5, greenBandNumber: 3, blueBandNumber: 8 }),
-    ).toBe("False-color (R band 5, G band 3, B band 8)");
+    ).toBe("RGB Color Composite (R band 5, G band 3, B band 8)");
   });
 });
 

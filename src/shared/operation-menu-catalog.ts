@@ -108,7 +108,7 @@ const CLIP_GROUP: OperationGroup = {
   ],
 };
 
-// CT-289: RGB to Grayscale is a preparation tool; False-color Composite is a
+// CT-289: RGB to Grayscale is a preparation tool; RGB Color Composite is a
 // cross-band operation, so the two live in different menus now.
 const STACK_PREPARATION_GROUP: OperationGroup = {
   key: "stack-preparation",
@@ -118,9 +118,11 @@ const STACK_PREPARATION_GROUP: OperationGroup = {
   ],
 };
 
+// CT-292: user-facing "False-color Composite" is renamed "RGB Color
+// Composite"; the internal id stays "false-color".
 const COMPOSITE_GROUP: OperationGroup = {
   key: "composite",
-  commands: [buildMenuOnlyActionCommand("false-color", "False-color Composite")],
+  commands: [buildMenuOnlyActionCommand("false-color", "RGB Color Composite")],
 };
 
 const TRANSFORM_GROUP: OperationGroup = {

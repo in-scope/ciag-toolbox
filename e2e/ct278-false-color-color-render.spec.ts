@@ -37,7 +37,8 @@ const DIMENSIONS: PixelDimensions = {
   width: multiBandTiff.width,
   height: multiBandTiff.height,
 };
-const FALSE_COLOR_LABEL = "False-color Composite";
+// CT-292: user-facing "False-color Composite" is renamed "RGB Color Composite".
+const FALSE_COLOR_LABEL = "RGB Color Composite";
 // Every image pixel's display-byte channel spread is at least 5 (blue 6-7
 // against red 0-1); the floor of 3 leaves headroom for GPU rounding.
 const HUE_CHANNEL_SPREAD_FLOOR = 3;
