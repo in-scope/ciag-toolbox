@@ -4,6 +4,7 @@ import {
   clampValueToDataTypeRangeRoundingIntegers,
   dataTypeValueRangeForBand,
   isFloatTypedArray,
+  midpointOfDataTypeValueRange,
 } from "@/lib/image/data-type-value-range";
 import {
   mapBandValuesPreservingType,
@@ -44,15 +45,12 @@ function stretchBandContrastClampedToTypeRange(
 ): RasterTypedArray {
   const range = dataTypeValueRangeForBand(band, sampleFormat);
   const roundForIntegerOutput = !isFloatTypedArray(band);
-  const mean = computeArithmeticMeanOfBand(band);
+  const midpoint = midpointOfDataTypeValueRange(range);
   return mapBandValuesPreservingType(band, (value) =>
-    clampValueToDataTypeRangeRoundingIntegers((value - mean) * contrastRatio + mean, range, roundForIntegerOutput),
+    clampValueToDataTypeRangeRoundingIntegers(
+      (value - midpoint) * contrastRatio + midpoint,
+      range,
+      roundForIntegerOutput,
+    ),
   );
-}
-
-function computeArithmeticMeanOfBand(band: RasterTypedArray): number {
-  if (band.length === 0) return 0;
-  let runningSum = 0;
-  for (let index = 0; index < band.length; index += 1) runningSum += band[index] ?? 0;
-  return runningSum / band.length;
 }

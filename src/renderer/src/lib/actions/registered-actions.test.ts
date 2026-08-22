@@ -115,8 +115,10 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
       prepared,
     );
     const raster = (result as { raster: RasterImage }).raster;
-    expect(Array.from(raster.bandPixels[0]!)).toEqual([50, 50]);
-    expect(Array.from(raster.bandPixels[1]!)).toEqual([50, 50]);
+    // CT-297: a contrast of 0 collapses every band to the middle of the data-type
+    // range (127.5, rounded up to 128), not each band's own mean.
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([128, 128]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([128, 128]);
   });
 
   it("records the slider values and affected bands in the applied label", () => {
@@ -153,23 +155,24 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
     expect(prepared.applyToAllBands).toBe(false);
   });
 
-  it("adjusts all three channels of a composite even without the all-bands flag, centring contrast per channel (CT-247)", async () => {
+  it("adjusts all three channels of a composite even without the all-bands flag, centring contrast on the shared data-range midpoint (CT-247, CT-297)", async () => {
     const result = await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoPixelRgbCompositeRaster() },
       { brightnessPercent: 0, contrastRatio: 2, applyToAllBands: false },
     );
     const raster = (result as { raster: RasterImage }).raster;
-    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 150]);
-    expect(Array.from(raster.bandPixels[1]!)).toEqual([30, 70]);
-    expect(Array.from(raster.bandPixels[2]!)).toEqual([5, 25]);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([73, 255]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 173]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([127, 133]);
   });
 });
 
-// Two pixels per channel with distinct channel means (50 / 50 / 15), so a
-// contrast of 2 stretches each channel around ITS OWN mean.
+// CT-297: three channels with very different band values (and so very different
+// OWN means), so a contrast of 2 proves centring on the shared uint8 midpoint
+// (127.5) rather than each channel's own mean.
 function makeTwoPixelRgbCompositeRaster(): RasterImage {
   return {
-    bandPixels: [Uint8Array.from([0, 100]), Uint8Array.from([40, 60]), Uint8Array.from([10, 20])],
+    bandPixels: [Uint8Array.from([100, 200]), Uint8Array.from([50, 150]), Uint8Array.from([127, 130])],
     width: 2,
     height: 1,
     bandCount: 3,

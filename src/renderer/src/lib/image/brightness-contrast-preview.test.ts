@@ -97,7 +97,7 @@ describe("buildBrightnessContrastPreviewLutOrNull", () => {
     }
   });
 
-  it("expands the display levels around the band mean when contrast exceeds 1", () => {
+  it("expands the display levels around the middle of the data range when contrast exceeds 1", () => {
     const lut = buildBrightnessContrastPreviewLutOrNull(makeUint8Raster([0, 255]), 0, 0, 2)!;
     expect(lut[0]!).toBe(0);
     expect(lut[LAST_ENTRY]!).toBe(1);
@@ -115,8 +115,8 @@ describe("buildBrightnessContrastPreviewLutOrNull", () => {
   });
 });
 
-// CT-247: the composite preview must equal the committed Apply over bands 0/1/2,
-// where contrast centres on each channel's OWN brightened mean.
+// CT-247: the composite preview must equal the committed Apply over bands 0/1/2.
+// CT-297: contrast centres on the middle of the data range, shared by every channel.
 function normalizedAppliedCompositeChannels(
   brightnessPercent: number,
   contrastRatio: number,
@@ -140,7 +140,7 @@ describe("buildBrightnessContrastCompositePreviewLutsOrNull", () => {
     expect(buildBrightnessContrastCompositePreviewLutsOrNull(null, 20, 1.2)).toBeNull();
   });
 
-  it("pins each channel LUT to the committed Apply over bands 0/1/2 (per-channel brightened means)", () => {
+  it("pins each channel LUT to the committed Apply over bands 0/1/2", () => {
     const luts = buildBrightnessContrastCompositePreviewLutsOrNull(makeRgbCompositeRaster(), 20, 1.2)!;
     const applied = normalizedAppliedCompositeChannels(20, 1.2);
     const channelValues = [COMPOSITE_RED_VALUES, COMPOSITE_GREEN_VALUES, COMPOSITE_BLUE_VALUES];
@@ -152,11 +152,11 @@ describe("buildBrightnessContrastCompositePreviewLutsOrNull", () => {
     });
   });
 
-  it("centres contrast per channel: the same input value maps differently on channels with different means", () => {
+  it("centres contrast on the shared data-range midpoint: the same input value maps identically on every channel", () => {
     const luts = buildBrightnessContrastCompositePreviewLutsOrNull(makeRgbCompositeRaster(), 0, 2)!;
     const midCoordinate = 100 / UINT8_MAX;
     const redPreview = sampleLutAtDisplayCoordinate(luts.red, midCoordinate);
     const bluePreview = sampleLutAtDisplayCoordinate(luts.blue, midCoordinate);
-    expect(Math.abs(redPreview - bluePreview)).toBeGreaterThan(0.05);
+    expect(redPreview).toBeCloseTo(bluePreview, 5);
   });
 });

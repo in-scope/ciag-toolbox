@@ -36,9 +36,9 @@ import {
 // panel closed) reflects the baked band data - matching the CT-178 oracle pattern.
 //
 // Exact Red oracle at (1,0) for Brightness +20%, Contrast 1.2 (uint8):
-// brightened red band = clamp(v + 51) over {200,10,255,0} -> {251,61,255,51}, mean 154.5;
-// contrast: round((61 - 154.5) * 1.2 + 154.5) = 42. A global (cross-channel) mean would
-// give 49 instead, so the readout also pins the per-channel mean centring.
+// brightened red band = clamp(v + 51) over {200,10,255,0} -> {251,61,255,51}; CT-297:
+// contrast centres on the uint8 data-range MIDPOINT (127.5), not any band mean, so
+// round((61 - 127.5) * 1.2 + 127.5) = 48.
 
 const PANEL = 1;
 const DIMENSIONS: PixelDimensions = { width: rgbPng.width, height: rgbPng.height };
@@ -46,7 +46,7 @@ const PROBE = { x: 1, y: 0 };
 const PROBE_RED_BEFORE = 10;
 const BRIGHTNESS_PERCENT = 20;
 const CONTRAST_RATIO = 1.2;
-const PROBE_RED_AFTER = 42;
+const PROBE_RED_AFTER = 48;
 // Expected channel-average shifts on the 2x2 fixture are +29/+32/+51; assert well below.
 const MIN_PREVIEW_CHANNEL_DELTA = 15;
 const APPLY_MATCHES_PREVIEW_TOLERANCE = 12;

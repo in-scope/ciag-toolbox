@@ -859,7 +859,7 @@ const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
   id: BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID,
   label: "Contrast",
   description:
-    "Scales each pixel around the band mean: (value - mean) * contrast + mean. 1 leaves the band unchanged; values clip to the data-type range.",
+    "Scales each pixel around the middle of the data range: (value - mid) * contrast + mid. 1 leaves the band unchanged; values clip to the data-type range.",
   defaultValue: 1,
   min: 0.05,
   max: 20,
@@ -873,7 +873,7 @@ const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
-  description: "Applies band-wise: every band is adjusted around its own mean.",
+  description: "Applies band-wise: every band is adjusted around the middle of its own data range.",
   defaultValue: false,
   hiddenForTrueColorComposite: true,
 };
