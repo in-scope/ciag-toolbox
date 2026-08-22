@@ -11,6 +11,10 @@ export interface ParameterSchemaBase {
   // Brightness & Contrast "Apply to all bands" switch - a photo always adjusts
   // all three channels, so the choice would be meaningless there).
   readonly hiddenForTrueColorComposite?: boolean;
+  // CT-282: hide this field for a single-band source, mirroring the built-in
+  // cube-scope hiding rule (a full-stack vs band-wise choice is redundant when
+  // there is only one band). First user: the threshold Otsu scope selector.
+  readonly hiddenForSingleBandSource?: boolean;
 }
 
 export interface ParameterVisibilityCondition {
@@ -255,6 +259,7 @@ function describeBandWiseRangeErrorForSchemaOrNull(
   bandCount: number | null,
 ): string | null {
   if (!shouldShowCubeScopeControl(bandCount)) return null;
+  if (!isParameterSchemaVisible(schema, values)) return null;
   const choice = readCubeScopeChoiceOrDefault(values[schema.id] ?? schema.defaultValue, schema.defaultValue);
   if (choice !== BAND_WISE_SCOPE) return null;
   return describeCubeScopeBandRangeErrorOrNull(

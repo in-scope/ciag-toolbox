@@ -12,14 +12,14 @@ import {
   type CubeTransformEditingState,
 } from "@/lib/image/band-ops/cube-transform-editing";
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
+import { throwIfOperationStopped } from "@/lib/image/operation-stop";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { runUserScriptOverCubeInChunks } from "@/lib/python/run-user-script-chunked";
-import { buildUserScriptRunCubeInputFromRaster } from "@/lib/python/user-script-cube";
+import { runUserScriptOverRasterAtApply } from "@/lib/python/run-user-script-at-apply";
 
 import type { ParameterValuesById } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -54,6 +54,7 @@ export type CubeTransformScriptRunner = (
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ) => Promise<ToolboxRunUserScriptResult>;
 
 export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
@@ -67,6 +68,7 @@ export const CUSTOM_TRANSFORM_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatCustomTransformAppliedLabel,
   prepareParameterValuesForApply: injectConfiguredCubeTransformForApply,
   apply: resetStateForTransformedStackOutput,
+  supportsStopDuringApply: true,
   transformSourceAsync: createCustomTransformSourceTransform(),
 };
 
@@ -111,10 +113,13 @@ function resetStateForTransformedStackOutput(
 export function createCustomTransformSourceTransform(
   runScript: CubeTransformScriptRunner = runCubeTransformScriptThroughWorker,
 ): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const scriptSource = readConfiguredScriptSource(parameterValues);
-    const result = await runScript(source.raster, scriptSource, onProgress);
+    const result = await runScript(source.raster, scriptSource, onProgress, abortSignal);
+    // A stopped run may still settle with SOME outcome (the killed worker
+    // reports a failure); the signal, not the outcome, decides "stopped".
+    throwIfOperationStopped(abortSignal);
     return { kind: "raster", raster: buildStackFromRunResult(source.raster, result) };
   };
 }
@@ -123,23 +128,9 @@ function runCubeTransformScriptThroughWorker(
   raster: RasterImage,
   source: ToolboxRunUserScriptSource,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ToolboxRunUserScriptResult> {
-  return runUserScriptOverCubeInChunks(
-    window.toolboxApi,
-    buildUserScriptRunCubeInputFromRaster(raster),
-    source,
-    "cube",
-    { onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress) },
-  );
-}
-
-// The upload fraction is determinate; the worker-run phase reports nothing, so
-// the busy bar holds at the uploaded fraction while the Python executes.
-function reportUploadFractionAsApplyProgress(
-  fraction: number | null,
-  onProgress: TransformProgressCallback | undefined,
-): void {
-  if (fraction !== null) onProgress?.(fraction);
+  return runUserScriptOverRasterAtApply(raster, source, "cube", onProgress, abortSignal);
 }
 
 function readConfiguredScriptSource(parameterValues: ParameterValuesById): ToolboxRunUserScriptSource {
@@ -178,12 +169,13 @@ function buildFloat32StackFromValidatedCube(
   raster: RasterImage,
   cube: TransformedCubeResult,
 ): RasterImage {
+  const [_bandCount, height, width] = cube.shape;
   const metadata = buildTransformOutputBandMetadata(
     readSourceBandMetadata(raster),
     cube.bands.length,
   );
   const output = makeFloat32RasterFromBands(
-    { width: raster.width, height: raster.height, bandLabels: metadata.bandLabels },
+    { width, height, bandLabels: metadata.bandLabels },
     cube.bands,
   );
   return metadata.bandWavelengths ? { ...output, bandWavelengths: metadata.bandWavelengths } : output;

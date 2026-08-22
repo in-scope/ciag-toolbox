@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   clampToDisplayUnit,
   computeDataTypeUnitMappingForRaster,
+  computeRasterSampleDisplayMapping,
+  mapRasterSampleToDisplayValue,
   mapRawValueToDisplayUnit,
 } from "@/lib/image/data-type-display-range";
 import type { RasterImage, RasterSampleFormat } from "@/lib/image/raster-image";
@@ -74,3 +76,25 @@ function buildRaster(
     bandCount: 1,
   };
 }
+
+// CT-296: the shared "what does the renderer upload for this sample" mapping,
+// used by the tile uploader and by the as-viewed PNG/JPEG export.
+describe("mapRasterSampleToDisplayValue", () => {
+  it("pre-scales an integer sample over its data-type range", () => {
+    const mapping = computeRasterSampleDisplayMapping(buildRaster("uint", 16));
+    expect(mapRasterSampleToDisplayValue(65535, mapping)).toBe(1);
+    expect(mapRasterSampleToDisplayValue(0, mapping)).toBe(0);
+    expect(mapRasterSampleToDisplayValue(4095, mapping)).toBeCloseTo(4095 / 65535, 12);
+  });
+
+  it("offsets a signed integer sample so zero lands mid-window", () => {
+    const mapping = computeRasterSampleDisplayMapping(buildRaster("int", 16));
+    expect(mapRasterSampleToDisplayValue(0, mapping)).toBeCloseTo(32768 / 65535, 12);
+  });
+
+  it("passes a float sample through unscaled and unclamped", () => {
+    const mapping = computeRasterSampleDisplayMapping(buildRaster("float", 32));
+    expect(mapRasterSampleToDisplayValue(-12.5, mapping)).toBe(-12.5);
+    expect(mapRasterSampleToDisplayValue(4200, mapping)).toBe(4200);
+  });
+});

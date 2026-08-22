@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertAllocationFitsRemainingBudget,
@@ -11,6 +11,7 @@ import {
   RENDERER_ARRAY_BUFFER_POOL_BYTES,
   sumLiveRasterBytesAcrossSources,
   USABLE_RASTER_MEMORY_BUDGET_BYTES,
+  usableRasterMemoryBudgetBytes,
 } from "./raster-memory-budget";
 import type { RasterImage } from "./raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -113,5 +114,35 @@ describe("budget arithmetic", () => {
       expect(message).toContain("Close panels you no longer need");
       expect(message.toLowerCase()).not.toContain("allocation failed");
     }
+  });
+});
+
+// CT-260 e2e test surface: the preload's e2e bridge can lower the budget so
+// memory refusals are reproducible with tiny fixtures.
+describe("e2e memory budget override", () => {
+  interface GlobalCarryingWindow {
+    window?: { toolboxE2E?: { memoryBudgetOverrideBytes?: number | null } };
+  }
+
+  const globalWithWindow = globalThis as GlobalCarryingWindow;
+
+  afterEach(() => {
+    delete globalWithWindow.window;
+  });
+
+  it("uses the measured budget when no e2e bridge exists", () => {
+    expect(usableRasterMemoryBudgetBytes()).toBe(USABLE_RASTER_MEMORY_BUDGET_BYTES);
+  });
+
+  it("uses the bridge's lowered budget when present", () => {
+    globalWithWindow.window = { toolboxE2E: { memoryBudgetOverrideBytes: 1_000 } };
+    expect(usableRasterMemoryBudgetBytes()).toBe(1_000);
+    expect(remainingRasterMemoryBudgetBytes(400)).toBe(600);
+    expect(rasterAllocationExceedsMemoryBudget(601, 400)).toBe(true);
+  });
+
+  it("falls back to the measured budget when the bridge carries no override", () => {
+    globalWithWindow.window = { toolboxE2E: { memoryBudgetOverrideBytes: null } };
+    expect(usableRasterMemoryBudgetBytes()).toBe(USABLE_RASTER_MEMORY_BUDGET_BYTES);
   });
 });

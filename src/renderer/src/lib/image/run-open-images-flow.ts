@@ -185,7 +185,7 @@ async function tryDecodeOpenedImageEntry(
 ): Promise<DecodedSourceOrError> {
   try {
     const source = await decodeImageBytesToViewportSource(
-      { fileName: entry.fileName, bytes: entry.bytes },
+      { fileName: entry.fileName, bytes: entry.bytes, filePath: entry.filePath },
       onDecodeProgress,
     );
     return { source, errorMessage: null };

@@ -101,7 +101,9 @@ export {
 } from "./fixed-unit-float-view";
 export {
   goToBandNumberInput,
+  goToBandNumberInputInPanel,
   selectActiveBandNumber,
+  selectActiveBandNumberInPanel,
   bandNavigatorStrip,
   expectNoOriginalBandAnnotationBesideBandSlider,
   previousBandButton,
@@ -128,6 +130,8 @@ export {
   subsetBandsEditor,
   openSubsetBandsEditor,
   subsetBandsKeepCheckboxes,
+  subsetBandsTypedRangeField,
+  typeSubsetBandsRange,
   uncheckSubsetBandRow,
   setSubsetBandsOpenInNewPanel,
   applySubsetBands,
@@ -161,6 +165,8 @@ export {
   chooseReviewModalGroupMode,
   readReviewModalGroupModeOptionLabels,
   readReviewModalRowFileNamesInOrder,
+  reviewModalRecombineIntoOneStackButton,
+  clickReviewModalRecombineIntoOneStack,
   confirmReviewModal,
   cancelReplaceTargetPicker,
   openImagesErrorToast,
@@ -168,6 +174,11 @@ export {
 export {
   readUserFacingTextAndAccessibleNames,
   expectNoUserFacingViewportWording,
+  expectNoUserFacingSpatialFilterWording,
+  expectNoUserFacingBandWeightingWording,
+  expectNoUserFacingFalseColorWording,
+  expectNoUserFacingBasicProcessingHyphenWording,
+  expectNoUserFacingMsiToolboxWording,
 } from "./terminology-sweep";
 export {
   writeTemporaryWavelengthStackTiffFixtures,
@@ -213,9 +224,11 @@ export {
   confirmSaveImageFormat,
   cancelSaveImageFormatPicker,
   exportSelectedStackThroughSaveDialog,
+  exportSelectedStackAsPngStackToFolder,
   loadImageFromAbsolutePath,
   createTemporaryExportDirectory,
   type SaveImageExportRequest,
+  type SaveImageFolderExportRequest,
 } from "./save-image-flow";
 export {
   saveProjectBundleThroughSaveDialog,
@@ -233,6 +246,9 @@ export {
   expectPanelIsLinked,
   expectPanelIsNotLinked,
   differentSizeLinkErrorToast,
+  LINK_PAN_ZOOM_MULTI_SELECT_HINT,
+  linkPanZoomMenuItemWithHint,
+  expectLinkPanZoomMenuItemIsDisabledWithHint,
 } from "./linked-panels";
 export {
   regionToolButton,
@@ -340,14 +356,16 @@ export {
   THRESHOLD_OPERATION_LABEL,
   thresholdBoundHandle,
   thresholdBoundField,
-  thresholdAutoButton,
-  clickThresholdOtsuAutoButton,
+  thresholdMethodSelect,
+  selectThresholdMethod,
   expectThresholdEditorReady,
+  expectThresholdBoundsEditorAbsent,
   setThresholdBoundField,
   readThresholdBoundFieldValue,
   dragThresholdBoundHandleToFraction,
   releaseThresholdBoundDrag,
   type ThresholdBoundSide,
+  type ThresholdMethodLabel,
 } from "./threshold-editor";
 export {
   readImageTextureUploadCount,
@@ -418,11 +436,17 @@ export {
 } from "./band-weighting";
 export {
   BAND_SELECTION_OPERATION_LABEL,
+  applyBandSelectionFunction,
+  bandSelectionFormulaField,
+  bandSelectionFunctionSegment,
   expectBandSelectionEditorReady,
+  expectBandSelectionToolLoaded,
   clickBandSelectionPreset,
-  runBandSelectionFormula,
-  clickImportBandSelectionScript,
-  expectBandSelectionFunction,
+  enterBandSelectionFormula,
+  importBandSelectionScript,
+  importBandSelectionScriptButton,
+  openBandSelectionFunctionEditor,
+  subsetBandsModeSelect,
 } from "./band-selection";
 export {
   applyCustomTransformAwaitingRun,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BIT_SHIFT_ACTION,
   BRIGHTNESS_CONTRAST_ACTION,
+  CLIP_BY_VALUE_ACTION,
   CROP_TO_REGION_ACTION,
   FALSE_COLOR_ACTION,
   INVERT_ACTION,
@@ -26,6 +27,8 @@ function readEnumParameterOptionValues(action: RegisteredViewportAction): string
   return parameter.options.map((option) => option.value);
 }
 import { DEFAULT_VIEWPORT_RENDERING_STATE } from "./viewport-action";
+import { applyNormalizeToRaster } from "@/lib/image/apply-normalize";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { RasterImage } from "@/lib/image/raster-image";
 
 describe("REGISTERED_VIEWPORT_ACTIONS", () => {
@@ -45,6 +48,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "brightness-contrast",
       "invert",
       "normalize-data",
+      "clip-by-value",
       "standardize",
       "rgb-to-grayscale",
       "false-color",
@@ -111,8 +115,10 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
       prepared,
     );
     const raster = (result as { raster: RasterImage }).raster;
-    expect(Array.from(raster.bandPixels[0]!)).toEqual([50, 50]);
-    expect(Array.from(raster.bandPixels[1]!)).toEqual([50, 50]);
+    // CT-297: a contrast of 0 collapses every band to the middle of the data-type
+    // range (127.5, rounded up to 128), not each band's own mean.
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([128, 128]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([128, 128]);
   });
 
   it("records the slider values and affected bands in the applied label", () => {
@@ -149,23 +155,24 @@ describe("BRIGHTNESS_CONTRAST_ACTION", () => {
     expect(prepared.applyToAllBands).toBe(false);
   });
 
-  it("adjusts all three channels of a composite even without the all-bands flag, centring contrast per channel (CT-247)", async () => {
+  it("adjusts all three channels of a composite even without the all-bands flag, centring contrast on the shared data-range midpoint (CT-247, CT-297)", async () => {
     const result = await BRIGHTNESS_CONTRAST_ACTION.transformSourceAsync!(
       { kind: "raster", raster: makeTwoPixelRgbCompositeRaster() },
       { brightnessPercent: 0, contrastRatio: 2, applyToAllBands: false },
     );
     const raster = (result as { raster: RasterImage }).raster;
-    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 150]);
-    expect(Array.from(raster.bandPixels[1]!)).toEqual([30, 70]);
-    expect(Array.from(raster.bandPixels[2]!)).toEqual([5, 25]);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([73, 255]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([0, 173]);
+    expect(Array.from(raster.bandPixels[2]!)).toEqual([127, 133]);
   });
 });
 
-// Two pixels per channel with distinct channel means (50 / 50 / 15), so a
-// contrast of 2 stretches each channel around ITS OWN mean.
+// CT-297: three channels with very different band values (and so very different
+// OWN means), so a contrast of 2 proves centring on the shared uint8 midpoint
+// (127.5) rather than each channel's own mean.
 function makeTwoPixelRgbCompositeRaster(): RasterImage {
   return {
-    bandPixels: [Uint8Array.from([0, 100]), Uint8Array.from([40, 60]), Uint8Array.from([10, 20])],
+    bandPixels: [Uint8Array.from([100, 200]), Uint8Array.from([50, 150]), Uint8Array.from([127, 130])],
     width: 2,
     height: 1,
     bandCount: 3,
@@ -183,17 +190,6 @@ function makeSingleBandUint8Raster(values: ReadonlyArray<number>): RasterImage {
     bandCount: 1,
     sampleFormat: "uint",
     bitsPerSample: 8,
-  };
-}
-
-function makeSingleBandUint16Raster(values: ReadonlyArray<number>): RasterImage {
-  return {
-    bandPixels: [Uint16Array.from(values)],
-    width: values.length,
-    height: 1,
-    bandCount: 1,
-    sampleFormat: "uint",
-    bitsPerSample: 16,
   };
 }
 
@@ -645,32 +641,55 @@ describe("NORMALIZE_DATA_ACTION", () => {
     ).rejects.toThrow(/out of range/i);
   });
 
-  it("stretches the bulk past the sparse outlier with the robust percentile method (CT-107)", async () => {
-    const bulk = Array.from({ length: 99 }, (_unused, index) => index);
-    const prepared = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
-      { scope: "band-wise", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
-      DEFAULT_VIEWPORT_RENDERING_STATE,
-      "whole-image",
-    );
-    const result = await NORMALIZE_DATA_ACTION.transformSourceAsync!(
-      { kind: "raster", raster: makeSingleBandUint16Raster([...bulk, 1000]) },
-      prepared,
+  it("offers no method selector: the scope control is its only parameter (CT-281)", () => {
+    expect(NORMALIZE_DATA_ACTION.parameters?.map((parameter) => parameter.kind)).toEqual([
+      "cube-scope",
+    ]);
+  });
+});
+
+describe("CLIP_BY_VALUE_ACTION", () => {
+  it("produces output identical to the old Normalize clip-absolute method on the same inputs", async () => {
+    const sourceRaster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const result = await CLIP_BY_VALUE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: sourceRaster },
+      { scope: "full-cube", clipLow: 50, clipHigh: 150 },
     );
     const raster = (result as { raster: RasterImage }).raster;
-    const normalized = Array.from(raster.bandPixels[0]!);
-    expect(normalized[50]).toBeGreaterThan(0.4);
-    expect(normalized[99]).toBe(1);
+    expect(raster).toEqual(
+      applyNormalizeToRaster(sourceRaster, { scope: "full-cube" }, { kind: "clip-absolute", bounds: { lo: 50, hi: 150 } }),
+    );
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([50, 100]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([100, 150]);
   });
 
-  it("records the percentile variant and percentiles in the applied label (CT-107 / CT-250)", () => {
-    const percentileClip = NORMALIZE_DATA_ACTION.prepareParameterValuesForApply!(
-      { scope: "full-cube", method: "robust-percentile", lowPercentile: 2, highPercentile: 98 },
+  it("preserves the source data type and clips only the entered bands under band-wise scope", async () => {
+    const result = await CLIP_BY_VALUE_ACTION.transformSourceAsync!(
+      { kind: "raster", raster: makeTwoBandUint8Raster([0, 100], [100, 200]) },
+      { scope: "band-wise", bandRange: "2", clipLow: 120, clipHigh: 180 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(raster.bandPixels[0]).toBeInstanceOf(Uint8Array);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([0, 100]);
+    expect(Array.from(raster.bandPixels[1]!)).toEqual([120, 180]);
+  });
+
+  it("records the bounds and the scope in the applied label", () => {
+    const sourceRaster = makeTwoBandUint8Raster([0, 100], [100, 200]);
+    const fullStack = CLIP_BY_VALUE_ACTION.prepareParameterValuesForApply!(
+      { scope: "full-cube", clipLow: 850, clipHigh: 1700 },
       DEFAULT_VIEWPORT_RENDERING_STATE,
       "whole-image",
+      sourceRaster,
     );
-    expect(NORMALIZE_DATA_ACTION.formatAppliedLabel!(percentileClip)).toBe(
-      "Normalize to [0,1] (full stack, percentile 2-98%)",
+    expect(CLIP_BY_VALUE_ACTION.formatAppliedLabel!(fullStack)).toBe("Clip to [850, 1700] (full stack)");
+    const bandWise = CLIP_BY_VALUE_ACTION.prepareParameterValuesForApply!(
+      { scope: "band-wise", bandRange: "", clipLow: 0, clipHigh: 1 },
+      DEFAULT_VIEWPORT_RENDERING_STATE,
+      "whole-image",
+      sourceRaster,
     );
+    expect(CLIP_BY_VALUE_ACTION.formatAppliedLabel!(bandWise)).toBe("Clip to [0, 1] (band-wise: bands 1-2)");
   });
 });
 
@@ -790,6 +809,15 @@ describe("FALSE_COLOR_ACTION", () => {
     ).toThrow(/out of range/i);
   });
 
+  it("outputs a raster that renders as an rgb composite", () => {
+    const result = FALSE_COLOR_ACTION.transformSource!(
+      { kind: "raster", raster: makeThreeBandUint8Raster([10], [20], [30]) },
+      { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 3 },
+    );
+    const raster = (result as { raster: RasterImage }).raster;
+    expect(shouldRenderRasterAsRgbComposite(raster)).toBe(true);
+  });
+
   it("resets the selected band after the band count changes", () => {
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, selectedBandIndex: 7 };
     const next = FALSE_COLOR_ACTION.apply(state, { redBandNumber: 1, greenBandNumber: 2, blueBandNumber: 3 });
@@ -799,7 +827,7 @@ describe("FALSE_COLOR_ACTION", () => {
   it("records the three band assignments in the applied label", () => {
     expect(
       FALSE_COLOR_ACTION.formatAppliedLabel!({ redBandNumber: 5, greenBandNumber: 3, blueBandNumber: 8 }),
-    ).toBe("False-color (R band 5, G band 3, B band 8)");
+    ).toBe("RGB Color Composite (R band 5, G band 3, B band 8)");
   });
 });
 
@@ -840,7 +868,7 @@ describe("REFLECT_ACTION", () => {
 });
 
 describe("findGeometricTransformActionForChoice", () => {
-  it("routes rotations to Rotate and reflections to Reflect", () => {
+  it("routes rotations to Rotate and reflections to Flip", () => {
     expect(findGeometricTransformActionForChoice("rotate-90-cw")).toBe(ROTATE_ACTION);
     expect(findGeometricTransformActionForChoice("rotate-270-cw")).toBe(ROTATE_ACTION);
     expect(findGeometricTransformActionForChoice("flip-horizontal")).toBe(REFLECT_ACTION);

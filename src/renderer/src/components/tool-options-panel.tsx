@@ -2,8 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { SquareDashedMousePointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ResultDestinationControl } from "@/components/result-destination-control";
 import { ParameterFormSection } from "@/components/parameter-form-section";
 import {
   buildDefaultParameterValuesForSchemas,
@@ -498,9 +498,9 @@ interface PanelFooterProps {
 function ToolOptionsPanelFooter(props: PanelFooterProps): JSX.Element {
   return (
     <div className="flex flex-col gap-3 border-t p-3">
-      <OpenInNewViewportSwitchRow
-        checked={props.openInNewViewport}
-        onCheckedChange={props.onChangeOpenInNewViewport}
+      <ResultDestinationControl
+        openInNewViewport={props.openInNewViewport}
+        onChangeOpenInNewViewport={props.onChangeOpenInNewViewport}
       />
       <PanelFooterButtons
         canApply={props.canApply}
@@ -508,21 +508,6 @@ function ToolOptionsPanelFooter(props: PanelFooterProps): JSX.Element {
         onApply={props.onApply}
       />
     </div>
-  );
-}
-
-interface SwitchRowProps {
-  checked: boolean;
-  onCheckedChange: (next: boolean) => void;
-}
-
-function OpenInNewViewportSwitchRow(props: SwitchRowProps): JSX.Element {
-  const id = "tool-options-open-in-new-viewport";
-  return (
-    <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-3 text-sm">
-      <span>Open in a new panel</span>
-      <Switch id={id} checked={props.checked} onCheckedChange={props.onCheckedChange} />
-    </label>
   );
 }
 

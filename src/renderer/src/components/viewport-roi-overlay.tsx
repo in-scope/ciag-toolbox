@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 
-import { canonicalizeViewportRoiCorners, type ViewportRoi } from "@/lib/image/viewport-roi";
+import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { CanvasPixelPoint } from "@/lib/webgl/canvas-to-image-pixel";
+import { computeCanvasRectangleForRoiBox } from "@/lib/webgl/roi-box-canvas-geometry";
 import type { RoiDrawCanvasRect } from "@/lib/webgl/roi-draw-input";
 import type { ViewportRenderer } from "@/lib/webgl/viewport-renderer";
 
@@ -74,11 +75,14 @@ function buildInProgressDragOverlayContent(
   return { rectangle, showCornerHandles: false };
 }
 
+// CT-275: the committed rectangle comes from the SAME shared builder the
+// box-edit attachment hit-tests against, so the grabbable area always matches
+// what is drawn.
 function buildCommittedRoiOverlayContent(
   committedRoi: ViewportRoi,
   renderer: ViewportRenderer,
 ): RoiOverlayContent | null {
-  const rectangle = buildCanvasRectangleFromCommittedRoi(committedRoi, renderer);
+  const rectangle = computeCanvasRectangleForRoiBox(committedRoi, renderer);
   if (!rectangle) return null;
   return { rectangle, showCornerHandles: true };
 }
@@ -97,23 +101,6 @@ function buildCanvasRectangleFromCanvasCorners(
     widthPx: Math.abs(current.x - start.x),
     heightPx: Math.abs(current.y - start.y),
   };
-}
-
-function buildCanvasRectangleFromCommittedRoi(
-  roi: ViewportRoi,
-  renderer: ViewportRenderer,
-): CanvasRectangle | null {
-  const canonical = canonicalizeViewportRoiCorners(roi);
-  const topLeft = renderer.getCanvasPointForImagePixel(
-    canonical.imagePixelX0,
-    canonical.imagePixelY0,
-  );
-  const bottomRight = renderer.getCanvasPointForImagePixel(
-    canonical.imagePixelX1 + 1,
-    canonical.imagePixelY1 + 1,
-  );
-  if (!topLeft || !bottomRight) return null;
-  return buildCanvasRectangleFromCanvasCorners(topLeft, bottomRight);
 }
 
 interface RoiOverlaySvgRectangleProps {

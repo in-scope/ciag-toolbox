@@ -8,12 +8,18 @@ import {
   readSaveImageFormatTechnicalDetails,
 } from "@/lib/image/save-image-formats";
 
-const MULTI_BAND_STACK = { isTrueColorPhoto: false, bandCount: 3, selectedBandNumber: 1 };
+const MULTI_BAND_STACK = {
+  isTrueColorPhoto: false,
+  isFloatSource: false,
+  bandCount: 3,
+  selectedBandNumber: 1,
+};
 const SINGLE_BAND_FORMAT_IDS = [
   "tiff-16-bit",
   "tiff-8-bit",
   "tiff-float-32",
   "png-8-bit",
+  "png-16-bit",
   "jpeg-8-bit",
 ] as const;
 
@@ -50,6 +56,28 @@ describe("readSaveImageFormatTechnicalDetails", () => {
     });
   });
 
+  it("maps png-16-bit to a 16-bit PNG descriptor", () => {
+    expect(readSaveImageFormatTechnicalDetails("png-16-bit")).toEqual({
+      kind: "png",
+      targetBitDepth: 16,
+      targetSampleFormat: "uint",
+    });
+  });
+
+  // CT-273: PNG stack exports one file per band into a folder.
+  it("maps the PNG stack variants to png-stack descriptors at their bit depths", () => {
+    expect(readSaveImageFormatTechnicalDetails("png-stack-8-bit")).toEqual({
+      kind: "png-stack",
+      targetBitDepth: 8,
+      targetSampleFormat: "uint",
+    });
+    expect(readSaveImageFormatTechnicalDetails("png-stack-16-bit")).toEqual({
+      kind: "png-stack",
+      targetBitDepth: 16,
+      targetSampleFormat: "uint",
+    });
+  });
+
   it("maps jpeg-8-bit to an 8-bit JPEG descriptor", () => {
     expect(readSaveImageFormatTechnicalDetails("jpeg-8-bit")).toEqual({
       kind: "jpeg",
@@ -77,8 +105,11 @@ describe("readSaveImageFormatTechnicalDetails", () => {
 
 describe("describeSaveImageFormatDisabledReason", () => {
   // CT-173: photos are rasters now, so the gate is the true-colour flag, NOT source.kind.
-  const TRUE_COLOR_PHOTO = true;
-  const SCIENTIFIC_OR_SINGLE_BAND_RASTER = false;
+  const TRUE_COLOR_PHOTO = { isTrueColorPhoto: true, isFloatSource: false, bandCount: 3 };
+  const INTEGER_SCIENTIFIC_RASTER = { isTrueColorPhoto: false, isFloatSource: false, bandCount: 3 };
+  const FLOAT_SCIENTIFIC_RASTER = { isTrueColorPhoto: false, isFloatSource: true, bandCount: 3 };
+  const SINGLE_BAND_INTEGER_RASTER = { isTrueColorPhoto: false, isFloatSource: false, bandCount: 1 };
+  const PNG_STACK_FORMAT_IDS = ["png-stack-8-bit", "png-stack-16-bit"] as const;
 
   it("disables ENVI and ENVI float for a true-colour photo with a raster/scientific reason", () => {
     expect(describeSaveImageFormatDisabledReason("envi", TRUE_COLOR_PHOTO)).toMatch(/ENVI is for raster/);
@@ -89,23 +120,69 @@ describe("describeSaveImageFormatDisabledReason", () => {
     expect(describeSaveImageFormatDisabledReason("tiff-float-32", TRUE_COLOR_PHOTO)).toMatch(/Float export needs raster/);
   });
 
-  it("keeps TIFF 16/8-bit, PNG and JPEG enabled for a true-colour photo", () => {
+  it("keeps TIFF 16/8-bit, 8-bit PNG and JPEG enabled for a true-colour photo", () => {
     expect(describeSaveImageFormatDisabledReason("tiff-16-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("tiff-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("png-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
     expect(describeSaveImageFormatDisabledReason("jpeg-8-bit", TRUE_COLOR_PHOTO)).toBeNull();
   });
 
-  it("enables every format for a scientific stack (it is not a photo)", () => {
+  // CT-271: a true-colour photo keeps 8-bit PNG only.
+  it("disables 16-bit PNG for a true-colour photo pointing at PNG (8-bit)", () => {
+    expect(describeSaveImageFormatDisabledReason("png-16-bit", TRUE_COLOR_PHOTO)).toBe(
+      "Color photos are 8-bit; PNG (8-bit) already keeps every value.",
+    );
+  });
+
+  // CT-271: the locked disabled-reason copy for float sources.
+  it("disables 16-bit PNG for a float source with the ENVI-float hint", () => {
+    expect(describeSaveImageFormatDisabledReason("png-16-bit", FLOAT_SCIENTIFIC_RASTER)).toBe(
+      "16-bit PNG stores integers. Use ENVI float for float data.",
+    );
+  });
+
+  it("keeps every other format enabled for a float scientific raster", () => {
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
+      if (option.id === "png-16-bit" || option.id === "png-stack-16-bit") continue;
+      expect(describeSaveImageFormatDisabledReason(option.id, FLOAT_SCIENTIFIC_RASTER)).toBeNull();
     }
   });
 
-  it("enables every format for a single-band raster, including a promoted grayscale photo", () => {
+  it("enables every format for an integer scientific stack (it is not a photo)", () => {
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
-      expect(describeSaveImageFormatDisabledReason(option.id, SCIENTIFIC_OR_SINGLE_BAND_RASTER)).toBeNull();
+      expect(describeSaveImageFormatDisabledReason(option.id, INTEGER_SCIENTIFIC_RASTER)).toBeNull();
     }
+  });
+
+  it("enables every single-file format for a single-band integer raster, including a promoted grayscale photo", () => {
+    for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
+      if (option.id === "png-stack-8-bit" || option.id === "png-stack-16-bit") continue;
+      expect(describeSaveImageFormatDisabledReason(option.id, SINGLE_BAND_INTEGER_RASTER)).toBeNull();
+    }
+  });
+
+  // CT-273: the PNG stack only applies to a multi-band scientific stack.
+  it("disables both PNG stack variants for a single-band image", () => {
+    for (const formatId of PNG_STACK_FORMAT_IDS) {
+      expect(describeSaveImageFormatDisabledReason(formatId, SINGLE_BAND_INTEGER_RASTER)).toBe(
+        "PNG stack saves one file per band; a single-band image saves as one PNG.",
+      );
+    }
+  });
+
+  it("disables both PNG stack variants for a true-colour photo", () => {
+    for (const formatId of PNG_STACK_FORMAT_IDS) {
+      expect(describeSaveImageFormatDisabledReason(formatId, TRUE_COLOR_PHOTO)).toBe(
+        "Color photos are one image; PNG stack is for multi-band stacks.",
+      );
+    }
+  });
+
+  it("disables the 16-bit PNG stack for a float stack with the CT-271 locked copy, keeping the 8-bit stack enabled", () => {
+    expect(describeSaveImageFormatDisabledReason("png-stack-16-bit", FLOAT_SCIENTIFIC_RASTER)).toBe(
+      "16-bit PNG stores integers. Use ENVI float for float data.",
+    );
+    expect(describeSaveImageFormatDisabledReason("png-stack-8-bit", FLOAT_SCIENTIFIC_RASTER)).toBeNull();
   });
 });
 
@@ -131,8 +208,23 @@ describe("describeSaveImageFormatBandCoverageNote", () => {
     expect(describeSaveImageFormatBandCoverageNote("envi-float", MULTI_BAND_STACK)).toBe("Saves all 3 bands.");
   });
 
+  // CT-273: the PNG stack's coverage note discloses the one-file-per-band shape.
+  it("tells the PNG stack saves all bands as separate files", () => {
+    expect(describeSaveImageFormatBandCoverageNote("png-stack-8-bit", MULTI_BAND_STACK)).toBe(
+      "Saves all 3 bands as separate files.",
+    );
+    expect(describeSaveImageFormatBandCoverageNote("png-stack-16-bit", MULTI_BAND_STACK)).toBe(
+      "Saves all 3 bands as separate files.",
+    );
+  });
+
   it("discloses nothing for a single-band stack (no bands are lost)", () => {
-    const singleBandStack = { isTrueColorPhoto: false, bandCount: 1, selectedBandNumber: 1 };
+    const singleBandStack = {
+      isTrueColorPhoto: false,
+      isFloatSource: false,
+      bandCount: 1,
+      selectedBandNumber: 1,
+    };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
       expect(describeSaveImageFormatBandCoverageNote(option.id, singleBandStack)).toBeNull();
     }
@@ -141,7 +233,12 @@ describe("describeSaveImageFormatBandCoverageNote", () => {
   // CT-173: a true-colour photo is a 3-band raster, but it is shown as one colour image, not a
   // browsable band stack, so it must not warn about "saving band 1 of 3" like a scientific stack.
   it("discloses nothing for a true-colour photo even though it has three bands", () => {
-    const trueColorPhoto = { isTrueColorPhoto: true, bandCount: 3, selectedBandNumber: 1 };
+    const trueColorPhoto = {
+      isTrueColorPhoto: true,
+      isFloatSource: false,
+      bandCount: 3,
+      selectedBandNumber: 1,
+    };
     for (const option of SAVE_IMAGE_FORMAT_OPTIONS) {
       expect(describeSaveImageFormatBandCoverageNote(option.id, trueColorPhoto)).toBeNull();
     }
@@ -157,13 +254,16 @@ describe("findSaveImageFormatOptionOrThrow", () => {
 });
 
 describe("SAVE_IMAGE_FORMAT_OPTIONS", () => {
-  it("offers TIFF (16/8-bit/float), PNG, JPEG, and ENVI (uint/float) save formats", () => {
+  it("offers TIFF (16/8-bit/float), PNG (8/16-bit), PNG stack (8/16-bit), JPEG, and ENVI (uint/float) save formats", () => {
     const ids = SAVE_IMAGE_FORMAT_OPTIONS.map((option) => option.id);
     expect(ids).toEqual([
       "tiff-16-bit",
       "tiff-8-bit",
       "tiff-float-32",
       "png-8-bit",
+      "png-16-bit",
+      "png-stack-8-bit",
+      "png-stack-16-bit",
       "jpeg-8-bit",
       "envi",
       "envi-float",

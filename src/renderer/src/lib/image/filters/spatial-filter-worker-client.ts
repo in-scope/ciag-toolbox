@@ -1,3 +1,4 @@
+import { OperationStoppedError } from "@/lib/image/operation-stop";
 import type { RasterTypedArray } from "@/lib/image/raster-image";
 import {
   reportCompletedUnitAndYieldSoProgressCanPaint,
@@ -29,15 +30,19 @@ export function isSpatialFilterWorkerAvailable(): boolean {
   return typeof Worker !== "undefined";
 }
 
+// CT-268: an abort rejects the in-flight band promise with OperationStoppedError;
+// the finally then terminates the worker, which kills the FFT loop mid-band and
+// releases the worker's grid memory.
 export async function filterBandsOnDedicatedSpatialFilterWorker(
   bands: ReadonlyArray<SpatialFilterBandInput>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const worker = spawnSpatialFilterWorker();
   try {
-    return await filterEachBandSequentially(worker, bands, shape, settings, onProgress);
+    return await filterEachBandSequentially(worker, bands, shape, settings, onProgress, abortSignal);
   } finally {
     worker.terminate();
   }
@@ -58,6 +63,7 @@ async function filterEachBandSequentially(
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const filteredByBandIndex = new Map<number, Float32Array>();
   reportMultiUnitWorkStarting(onProgress, bands.length);
@@ -67,9 +73,9 @@ async function filterEachBandSequentially(
       onProgress?.((requestId + fraction) / bands.length);
     filteredByBandIndex.set(
       band.bandIndex,
-      await requestSingleBandFilter(worker, request, onWithinBandProgress),
+      await requestSingleBandFilter(worker, request, onWithinBandProgress, abortSignal),
     );
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, requestId + 1, bands.length);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, requestId + 1, bands.length, abortSignal);
   }
   return filteredByBandIndex;
 }
@@ -78,13 +84,39 @@ function requestSingleBandFilter(
   worker: Worker,
   request: SpatialFilterWorkerRequest,
   onWithinBandProgress: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
+    const rejectBecauseStopped = (): void => reject(new OperationStoppedError());
+    if (abortSignal?.aborted) return rejectBecauseStopped();
+    abortSignal?.addEventListener("abort", rejectBecauseStopped, { once: true });
+    const settleRemovingStopListener = wrapSettlersToRemoveStopListener(resolve, reject, abortSignal, rejectBecauseStopped);
     worker.onmessage = (event: MessageEvent<SpatialFilterWorkerResponse>) =>
-      settleSingleBandFilter(event.data, request.requestId, resolve, reject, onWithinBandProgress);
-    worker.onerror = (event) => reject(new Error(event.message || "Spatial filter worker failed"));
+      settleSingleBandFilter(event.data, request.requestId, settleRemovingStopListener.resolve, settleRemovingStopListener.reject, onWithinBandProgress);
+    worker.onerror = (event) => settleRemovingStopListener.reject(new Error(event.message || "Frequency filter worker failed"));
     worker.postMessage(request);
   });
+}
+
+// Each band adds one abort listener; removing it when the band settles keeps a
+// long-lived signal from accumulating one listener per filtered band.
+function wrapSettlersToRemoveStopListener(
+  resolve: (values: Float32Array) => void,
+  reject: (reason: Error) => void,
+  abortSignal: AbortSignal | undefined,
+  stopListener: () => void,
+): { resolve: (values: Float32Array) => void; reject: (reason: Error) => void } {
+  const removeStopListener = (): void => abortSignal?.removeEventListener("abort", stopListener);
+  return {
+    resolve: (values) => {
+      removeStopListener();
+      resolve(values);
+    },
+    reject: (reason) => {
+      removeStopListener();
+      reject(reason);
+    },
+  };
 }
 
 function settleSingleBandFilter(

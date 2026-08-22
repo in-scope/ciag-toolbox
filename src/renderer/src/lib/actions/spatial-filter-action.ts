@@ -13,6 +13,7 @@ import {
   type SpatialFilterBandInput,
 } from "@/lib/image/filters/spatial-filter-worker-client";
 import { makeFloatRasterReusingUnchangedSourceBands } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { getRasterBandPixelsOrThrow, type RasterImage } from "@/lib/image/raster-image";
 import {
@@ -138,10 +139,7 @@ const SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: SPATIAL_FILTER_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack filters every band's picture. Band-wise filters only the entered bands " +
-    "and carries the other bands through unchanged. Leave the band field empty to process " +
-    "every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: SPATIAL_FILTER_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -149,7 +147,9 @@ const SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
 
 export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
   id: SPATIAL_FILTER_ACTION_ID,
-  label: "Spatial Filter",
+  // CT-280: user-facing "Spatial Filter" is renamed "Frequency Filters"; the
+  // internal id, file names, and parameter ids stay "spatial-filter".
+  label: "Frequency Filters",
   icon: Grid3x3,
   parameters: [
     SPATIAL_FILTER_MODE_PARAMETER_SCHEMA,
@@ -158,13 +158,14 @@ export const SPATIAL_FILTER_ACTION: RegisteredViewportAction = {
     SPATIAL_FILTER_BANDPASS_CUTOFFS_PARAMETER_SCHEMA,
     SPATIAL_FILTER_SCOPE_PARAMETER_SCHEMA,
   ],
-  successMessage: "Spatial filter applied",
-  appliedLabel: "Spatial filter",
+  successMessage: "Frequency filters applied",
+  appliedLabel: "Frequency filters",
   loadingMessage: "Filtering spatial frequencies...",
   formatAppliedLabel: formatSpatialFilterAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountIntoSpatialFilterParameters,
   apply: (state) => state,
   assertCanApplyToSource: assertSpatialFilterSourceFitsWorkingGrid,
+  supportsStopDuringApply: true,
   transformSourceAsync: transformSourceThroughSpatialFilter,
 };
 
@@ -227,6 +228,7 @@ async function transformSourceThroughSpatialFilter(
   rawSource: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ViewportImageSource> {
   const source = coerceViewportSourceToRasterSource(rawSource);
   const settings = readSpatialFilterSettings(parameterValues);
@@ -235,7 +237,7 @@ async function transformSourceThroughSpatialFilter(
     parameterValues,
     source.raster.bandCount,
   );
-  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings, onProgress);
+  const raster = await filterBandsOfRaster(source.raster, filteredBandIndexes, settings, onProgress, abortSignal);
   return { kind: "raster", raster };
 }
 
@@ -244,28 +246,31 @@ async function filterBandsOfRaster(
   filteredBandIndexes: ReadonlySet<number>,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
-  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings, onProgress);
+  const filteredByIndex = await filterScopedBands(raster, filteredBandIndexes, shape, settings, onProgress, abortSignal);
   return makeFloatRasterReusingUnchangedSourceBands(raster, filteredBandIndexes, (_band, index) =>
     readFilteredBandOrThrow(filteredByIndex, index),
   );
 }
 
 // CT-221: the progress fraction counts FILTERED bands (bands completed / bands to
-// filter), one tick as each band returns from the worker.
+// filter), one tick as each band returns from the worker. CT-268: an abort
+// terminates the dedicated worker mid-band (its grid memory releases with it).
 function filterScopedBands(
   raster: RasterImage,
   filteredBandIndexes: ReadonlySet<number>,
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const bands = listScopedBandInputs(raster, filteredBandIndexes);
   if (isSpatialFilterWorkerAvailable()) {
-    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings, onProgress);
+    return filterBandsOnDedicatedSpatialFilterWorker(bands, shape, settings, onProgress, abortSignal);
   }
-  return filterBandsOnThisThread(bands, shape, settings, onProgress);
+  return filterBandsOnThisThread(bands, shape, settings, onProgress, abortSignal);
 }
 
 function listScopedBandInputs(
@@ -285,6 +290,7 @@ async function filterBandsOnThisThread(
   shape: BandSpatialShape,
   settings: SpatialFrequencyFilterSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Map<number, Float32Array>> {
   const reusableGrid = createReusableSpatialFilterGrid();
   const filteredByBandIndex = new Map<number, Float32Array>();
@@ -296,7 +302,7 @@ async function filterBandsOnThisThread(
       band.bandIndex,
       reusableGrid.filterBand(band.pixels, shape, settings, onWithinBandProgress),
     );
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, completedBefore + 1, bands.length, abortSignal);
   }
   return filteredByBandIndex;
 }
@@ -307,13 +313,13 @@ function readFilteredBandOrThrow(
 ): Float32Array {
   const filtered = filteredByIndex.get(bandIndex);
   if (filtered) return filtered;
-  throw new Error(`Spatial filter produced no result for band ${bandIndex + 1}`);
+  throw new Error(`Frequency filter produced no result for band ${bandIndex + 1}`);
 }
 
 function formatSpatialFilterAppliedLabel(parameterValues: ParameterValuesById): string {
   const settings = readSpatialFilterSettings(parameterValues);
   const scopeText = describeCubeScopeForAppliedLabel(SPATIAL_FILTER_SCOPE_IDS, parameterValues);
-  return `Spatial filter (${describeSettingsForLabel(settings)}, ${scopeText})`;
+  return `Frequency filters (${describeSettingsForLabel(settings)}, ${scopeText})`;
 }
 
 function describeSettingsForLabel(settings: SpatialFrequencyFilterSettings): string {

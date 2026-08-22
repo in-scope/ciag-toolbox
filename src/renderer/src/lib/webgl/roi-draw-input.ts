@@ -136,7 +136,7 @@ function releasePointerCaptureIfHeld(canvas: HTMLCanvasElement, pointerId: numbe
   if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
 }
 
-function extractCanvasPointFromPointerEvent(
+export function extractCanvasPointFromPointerEvent(
   event: PointerEvent,
   canvas: HTMLCanvasElement,
 ): CanvasPixelPoint {

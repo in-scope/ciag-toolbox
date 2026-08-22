@@ -30,6 +30,49 @@ export async function writeTemporaryGrayscalePngFixture(): Promise<string> {
   return filePath;
 }
 
+// CT-263: two 4x4 uniform-value grayscale PNG variants sized to match the
+// committed low-contrast-gray.png fixture, so a trio of grayscale PNGs can
+// combine into one 3-band stack with a distinct known value per band. The
+// names avoid 3-4 digit runs so the wavelength parser never orders them.
+export interface GrayscalePngVariantFixtureFile {
+  readonly filePath: string;
+  readonly fileName: string;
+  readonly uniformValue: number;
+}
+
+const GRAYSCALE_VARIANT_SIDE = 4;
+const GRAYSCALE_VARIANT_FILES: ReadonlyArray<Pick<GrayscalePngVariantFixtureFile, "fileName" | "uniformValue">> = [
+  { fileName: "gray-uniform-b.png", uniformValue: 30 },
+  { fileName: "gray-uniform-c.png", uniformValue: 220 },
+];
+
+export async function writeTemporaryGrayscalePngVariantFixtures(): Promise<
+  ReadonlyArray<GrayscalePngVariantFixtureFile>
+> {
+  const directory = await mkdtemp(join(tmpdir(), "msi-e2e-"));
+  return Promise.all(
+    GRAYSCALE_VARIANT_FILES.map((file) => writeUniformGrayscaleVariantFile(directory, file)),
+  );
+}
+
+async function writeUniformGrayscaleVariantFile(
+  directory: string,
+  file: Pick<GrayscalePngVariantFixtureFile, "fileName" | "uniformValue">,
+): Promise<GrayscalePngVariantFixtureFile> {
+  const filePath = join(directory, file.fileName);
+  await writeFile(filePath, encodeGrayscalePng(buildUniformGrayscaleFixture(file.uniformValue)));
+  return { filePath, fileName: file.fileName, uniformValue: file.uniformValue };
+}
+
+function buildUniformGrayscaleFixture(uniformValue: number): GrayscalePngFixture {
+  const row = Array.from({ length: GRAYSCALE_VARIANT_SIDE }, () => uniformValue);
+  return {
+    width: GRAYSCALE_VARIANT_SIDE,
+    height: GRAYSCALE_VARIANT_SIDE,
+    pixelRows: Array.from({ length: GRAYSCALE_VARIANT_SIDE }, () => row),
+  };
+}
+
 function encodeGrayscalePng(fixture: GrayscalePngFixture): Buffer {
   const headerChunk = encodePngChunk("IHDR", buildGrayscaleHeaderData(fixture));
   const dataChunk = encodePngChunk("IDAT", deflateSync(buildRawScanlines(fixture.pixelRows)));

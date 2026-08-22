@@ -1,4 +1,3 @@
-import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 // CT-239: the renderer-wide raster memory budget.
@@ -66,24 +65,20 @@ function sumSourceBytesSkippingCountedBuffers(
   source: ViewportImageSource,
   countedBuffers: Set<ArrayBufferLike>,
 ): number {
-  if (source.kind === "raster") {
-    return sumRasterBytesSkippingCountedBuffers(source.raster, countedBuffers);
-  }
-  if (source.kind === "pixels") {
-    return sumBufferBytesOnce(source.pixels.buffer, countedBuffers);
-  }
-  return 0;
-}
-
-function sumRasterBytesSkippingCountedBuffers(
-  raster: RasterImage,
-  countedBuffers: Set<ArrayBufferLike>,
-): number {
   let totalBytes = 0;
-  for (const band of raster.bandPixels) {
-    totalBytes += sumBufferBytesOnce(band.buffer, countedBuffers);
+  for (const buffer of listSourceBackingBuffers(source)) {
+    totalBytes += sumBufferBytesOnce(buffer, countedBuffers);
   }
   return totalBytes;
+}
+
+// The backing buffers a source contributes to the live set. Shared with the
+// CT-290 buffer-release flush so "counts toward the budget" and "must not be
+// detached" enumerate buffers identically.
+export function listSourceBackingBuffers(source: ViewportImageSource): ArrayBufferLike[] {
+  if (source.kind === "raster") return source.raster.bandPixels.map((band) => band.buffer);
+  if (source.kind === "pixels") return [source.pixels.buffer];
+  return [];
 }
 
 function sumBufferBytesOnce(
@@ -95,8 +90,25 @@ function sumBufferBytesOnce(
   return buffer.byteLength;
 }
 
+// CT-260 e2e test surface: the preload's e2e bridge can carry a lowered budget
+// (see src/shared/e2e-memory-budget-argument.ts) so memory refusals are
+// reproducible with tiny fixtures. The bridge only exists under
+// --msi-e2e-test-mode, so production launches always use the measured budget.
+interface WindowCarryingE2eBridge {
+  readonly toolboxE2E?: { readonly memoryBudgetOverrideBytes?: number | null };
+}
+
+function readE2eMemoryBudgetOverrideBytesOrNull(): number | null {
+  if (typeof window === "undefined") return null;
+  return (window as WindowCarryingE2eBridge).toolboxE2E?.memoryBudgetOverrideBytes ?? null;
+}
+
+export function usableRasterMemoryBudgetBytes(): number {
+  return readE2eMemoryBudgetOverrideBytesOrNull() ?? USABLE_RASTER_MEMORY_BUDGET_BYTES;
+}
+
 export function remainingRasterMemoryBudgetBytes(liveRasterBytes: number): number {
-  return Math.max(0, USABLE_RASTER_MEMORY_BUDGET_BYTES - liveRasterBytes);
+  return Math.max(0, usableRasterMemoryBudgetBytes() - liveRasterBytes);
 }
 
 export function rasterAllocationExceedsMemoryBudget(

@@ -17,12 +17,11 @@ import {
 import { computeOtsuBoundsForHistogram } from "./otsu";
 import type { ThresholdBounds } from "./threshold";
 
-// CT-201: the Auto button derives an Otsu cutoff for EVERY band up front (plus
-// one cutoff over the combined data), because the scope choice is only known
-// at Apply time: band-wise thresholds each band with its own cutoff, while the
-// combined full-stack scope uses the single cutoff over all bands together.
-// The popup keeps showing just the current band's bounds; the full per-band
-// list surfaces in the audit trail.
+// CT-201/CT-282: the Otsu threshold method derives an Otsu cutoff for EVERY
+// band (plus one cutoff over the combined data) inside the Apply transform:
+// band-wise thresholds each band with its own cutoff, while the full-stack
+// scope applies the single combined-histogram cutoff to every band. The old
+// Auto button (which derived the same set up front) is gone.
 //
 // CT-219d: the cutoffs are derived WITHOUT concatenating the stack (the old
 // combined path copied every band into one Float64Array, ~6.1 GB at reference
@@ -82,30 +81,4 @@ async function computeCombinedOtsuBounds(
     scaleProgressToWindow(onProgress, 0.5, 1),
   );
   return computeOtsuBoundsForHistogram(combined);
-}
-
-export function serializeThresholdOtsuCutoffsToJson(cutoffs: ThresholdOtsuCutoffs): string {
-  return JSON.stringify({
-    perBand: cutoffs.perBandBounds.map(boundsToPair),
-    combined: boundsToPair(cutoffs.combinedBounds),
-  });
-}
-
-export function parseThresholdOtsuCutoffsFromJson(json: string): ThresholdOtsuCutoffs {
-  const parsed = JSON.parse(json) as {
-    perBand: ReadonlyArray<readonly [number, number]>;
-    combined: readonly [number, number];
-  };
-  return {
-    perBandBounds: parsed.perBand.map(pairToBounds),
-    combinedBounds: pairToBounds(parsed.combined),
-  };
-}
-
-function boundsToPair(bounds: ThresholdBounds): readonly [number, number] {
-  return [bounds.lower, bounds.upper];
-}
-
-function pairToBounds(pair: readonly [number, number]): ThresholdBounds {
-  return { lower: pair[0], upper: pair[1] };
 }

@@ -75,6 +75,7 @@ function buildAppEntry(id: string, registeredAtMs: number): BusyEntry {
     progress: null,
     registeredAtMs,
     immediate: false,
+    requestStop: null,
   };
 }
 
@@ -87,5 +88,6 @@ function buildViewportEntry(id: string, registeredAtMs: number, viewportIndex: n
     progress: null,
     registeredAtMs,
     immediate: false,
+    requestStop: null,
   };
 }

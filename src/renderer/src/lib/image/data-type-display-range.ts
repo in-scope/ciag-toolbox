@@ -56,3 +56,30 @@ function signedIntegerZeroOffset(bitsPerSample: number): number {
   if (bitsPerSample <= 0) return 0;
   return Math.pow(2, bitsPerSample - 1);
 }
+
+// The value the renderer UPLOADS for one raster sample (src/renderer/src/lib/
+// webgl/raster-tile-texture.ts): a float band uploads its raw value unscaled,
+// an integer band is pre-scaled into the [0, 1] display window. Export paths
+// that must reproduce the on-screen image share this mapping rather than
+// re-deriving a scale factor of their own (CT-296).
+export interface RasterSampleDisplayMapping {
+  readonly passesSamplesThroughUnscaled: boolean;
+  readonly unitMapping: DataTypeUnitMapping;
+}
+
+export function computeRasterSampleDisplayMapping(
+  raster: RasterImage,
+): RasterSampleDisplayMapping {
+  return {
+    passesSamplesThroughUnscaled: raster.sampleFormat === "float",
+    unitMapping: computeDataTypeUnitMappingForRaster(raster),
+  };
+}
+
+export function mapRasterSampleToDisplayValue(
+  value: number,
+  mapping: RasterSampleDisplayMapping,
+): number {
+  if (mapping.passesSamplesThroughUnscaled) return value;
+  return mapRawValueToDisplayUnit(value, mapping.unitMapping);
+}

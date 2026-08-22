@@ -153,6 +153,7 @@ describe("computeWholeStackPercentileCutPoints (contract and progress)", () => {
       [new Uint16Array(10).fill(3), new Uint16Array(10).fill(7)],
       { lowerPercentile: 2, upperPercentile: 98 },
       (fraction) => ticks.push(fraction),
+      undefined,
       { histogramValuesPerChunk: 5 },
     );
     expect(ticks).toEqual([0, 0.25, 0.5, 0.75, 1]);

@@ -6,18 +6,17 @@ import { multiBandTiff } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
-  applyOperation,
+  applyBandSelectionFunction,
   BAND_SELECTION_OPERATION_LABEL,
-  clickImportBandSelectionScript,
   countPanels,
   enqueueOpenDialogPaths,
-  expectBandSelectionEditorReady,
-  expectBandSelectionFunction,
+  expectBandSelectionToolLoaded,
   expectHistoryToRecordOperation,
   expectMetadataDataTypeAndDimensions,
   expectPixelReadoutToEqual,
+  importBandSelectionScript,
   loadFixtureAsStack,
-  openOperation,
+  openBandSelectionFunctionEditor,
   readMetadata,
   selectPanel,
   type PixelDimensions,
@@ -28,7 +27,7 @@ import {
 // existing e2e fixtures (band-tool.py, weights-tool.py) contain zero imports. This
 // spec drives numpy-band-tool.py, which does an explicit `import numpy as np` and
 // returns np.mean(cube, axis=0), through the REAL Import script... flow of band
-// selection (UI -> IPC -> bundled-mode subprocess -> sandbox, sandbox: true by
+// selection (CT-293: the tool is re-read from disk and run AT Apply) (UI -> IPC -> bundled-mode subprocess -> sandbox, sandbox: true by
 // default for imported tools). On multiband-12bit.tif (3 bands; at (0,0) band 1 =
 // 100, band 2 = 800, band 3 = 1600) the per-pixel mean reads 833.333 at (0,0), a
 // value distinct from any single band, asserted via the pixel-readout oracle.
@@ -55,20 +54,15 @@ test.afterEach(async () => {
 });
 
 test("an imported tool that imports numpy computes its band under the sandbox", async () => {
-  await openBandSelectionEditor();
+  await openBandSelectionFunctionEditor(launched.window);
   await enqueueOpenDialogPaths(launched.window, [IMPORTED_NUMPY_TOOL_PATH]);
-  await clickImportBandSelectionScript(launched.window);
-  await expectBandSelectionFunction(launched.window, "Imported tool: numpy-band-tool.py");
+  await importBandSelectionScript(launched.window);
+  await expectBandSelectionToolLoaded(launched.window, "numpy-band-tool.py");
   await applyAndExpectPerPixelMeanBand();
 });
 
-async function openBandSelectionEditor(): Promise<void> {
-  await openOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
-  await expectBandSelectionEditorReady(launched.window);
-}
-
 async function applyAndExpectPerPixelMeanBand(): Promise<void> {
-  await applyOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
+  await applyBandSelectionFunction(launched.window);
   expect(await countPanels(launched.window)).toBe(RESULT_PANEL);
   await selectPanel(launched.window, RESULT_PANEL);
   await expectResultIsSingleBandFloat32();

@@ -55,11 +55,13 @@ export async function makeFloatRasterFromBandComputationReportingProgress(
   source: RasterImage,
   computeFloatBand: ComputeFloatBandFromSourceReportingProgress,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
     source,
     (index, onWithinBand) => computeFloatBand(source.bandPixels[index]!, index, onWithinBand),
     onProgress,
+    abortSignal,
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
@@ -88,12 +90,14 @@ export async function makeFloatRasterReusingUnchangedSourceBandsReportingProgres
   changedBandIndexes: ReadonlySet<number>,
   computeChangedFloatBand: ComputeFloatBandFromSourceReportingProgress,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const bandPixels = await computeFloatBandsFoldingWithinBandProgress(
     source,
     (index, onWithinBand) =>
       computeChangedBandOrCarryThrough(source, changedBandIndexes, computeChangedFloatBand, index, onWithinBand),
     onProgress,
+    abortSignal,
   );
   return buildFloat32RasterPreservingMetadata(source, bandPixels);
 }
@@ -118,6 +122,7 @@ async function computeFloatBandsFoldingWithinBandProgress(
   source: RasterImage,
   computeBand: (index: number, onWithinBand?: UnitProgressCallback) => Float32Array | Promise<Float32Array>,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array[]> {
   const totalBands = source.bandPixels.length;
   reportMultiUnitWorkStarting(onProgress, totalBands);
@@ -127,7 +132,7 @@ async function computeFloatBandsFoldingWithinBandProgress(
       ? (fraction: number): void => onProgress((index + fraction) / totalBands)
       : undefined;
     bandPixels.push(await computeBandAssertingSourceLength(source, computeBand, index, onWithinBand));
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalBands);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalBands, abortSignal);
   }
   return bandPixels;
 }
@@ -215,6 +220,7 @@ export interface Float32RasterShape {
   readonly width: number;
   readonly height: number;
   readonly bandLabels?: ReadonlyArray<string>;
+  readonly bandWavelengths?: ReadonlyArray<number>;
 }
 
 // CT-180: an operation whose output band count DIFFERS from its source (e.g. a
@@ -234,5 +240,6 @@ export function makeFloat32RasterFromBands(
     sampleFormat: "float",
     bitsPerSample: FLOAT32_BITS_PER_SAMPLE,
     bandLabels: shape.bandLabels ? [...shape.bandLabels] : undefined,
+    bandWavelengths: shape.bandWavelengths ? [...shape.bandWavelengths] : undefined,
   };
 }

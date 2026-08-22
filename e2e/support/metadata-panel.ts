@@ -14,7 +14,7 @@ export interface MetadataReadout {
   readonly bitsPerSample: string;
   readonly sampleFormat: string;
   readonly bandCount: string;
-  readonly fileSize: string;
+  readonly dataSize: string;
   readonly dataType: string;
   readonly originalBand: string | null;
   readonly wavelength: string | null;
@@ -36,7 +36,7 @@ export async function readMetadata(page: Page): Promise<MetadataReadout> {
     bitsPerSample,
     sampleFormat,
     bandCount: await readMetadataRowValue(section, "Bands"),
-    fileSize: await readMetadataRowValue(section, "File size"),
+    dataSize: await readMetadataRowValue(section, "Data size"),
     dataType: `${sampleFormat}${bitsPerSample}`,
     originalBand: await readMetadataRowValueOrNull(section, "Original band"),
     wavelength: await readMetadataRowValueOrNull(section, "Wavelength"),

@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 export interface PendingSaveImageFormatChoice {
   readonly fileName: string;
   readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
@@ -132,6 +133,7 @@ function readSourceBandInfo(
 ): SaveImageSourceBandInfo {
   return {
     isTrueColorPhoto: pending.isTrueColorPhoto,
+    isFloatSource: pending.isFloatSource,
     bandCount: pending.bandCount,
     selectedBandNumber: pending.selectedBandNumber,
   };
@@ -153,7 +155,7 @@ function FormatPickerOptionList(props: FormatPickerOptionListProps): JSX.Element
           label={option.label}
           description={option.description}
           isChosen={props.chosenId === option.id}
-          disabledReason={describeSaveImageFormatDisabledReason(option.id, props.source.isTrueColorPhoto)}
+          disabledReason={describeSaveImageFormatDisabledReason(option.id, props.source)}
           bandCoverageNote={describeSaveImageFormatBandCoverageNote(option.id, props.source)}
           onChoose={() => props.onChoose(option.id)}
         />

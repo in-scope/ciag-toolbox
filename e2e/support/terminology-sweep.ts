@@ -25,3 +25,40 @@ export async function expectNoUserFacingViewportWording(page: Page): Promise<voi
   const sweptText = await readUserFacingTextAndAccessibleNames(page);
   expect(sweptText).not.toMatch(/\bviewport\b/i);
 }
+
+// CT-280: the FFT/Butterworth tool is named "Frequency Filters"; the old
+// "Spatial Filter" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingSpatialFilterWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/spatial filter/i);
+}
+
+// CT-289: the band-combining tool is named "Weighted Sum"; the old
+// "Band Weighting" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingBandWeightingWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/band weighting/i);
+}
+
+// CT-292: the composite tool is named "RGB Color Composite"; the old
+// "False-color" wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingFalseColorWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/false-color/i);
+}
+
+// CT-294: the menu is "Basic Processing"; the hyphenated "Basic-Processing"
+// wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingBasicProcessingHyphenWording(
+  page: Page,
+): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/Basic-Processing/);
+}
+
+// CT-298: the app is named "CHARM Toolbox"; the old "MSI Toolbox"
+// wording must not surface in rendered text or accessible names.
+export async function expectNoUserFacingMsiToolboxWording(page: Page): Promise<void> {
+  const sweptText = await readUserFacingTextAndAccessibleNames(page);
+  expect(sweptText).not.toMatch(/MSI Toolbox/);
+}

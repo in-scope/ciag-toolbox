@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
+import { OperationStoppedError } from "@/lib/image/operation-stop";
 
 import { applyPca, fitPca, fitPcaReportingProgress, varianceExplained } from "./pca";
 
@@ -82,6 +83,19 @@ describe("fitPcaReportingProgress (CT-227)", () => {
   it("works without a progress callback", async () => {
     const fit = await fitPcaReportingProgress(DOMINANT_AXIS_CUBE, 2);
     expect(fit.eigenvalues[0]!).toBeGreaterThan(fit.eigenvalues[1]!);
+  });
+
+  // CT-268: the abort signal reaches the fit's inner chunk loops, so a Stop
+  // clicked mid-fit ends the run at the next chunk boundary.
+  it("cancels mid-fit when the abort signal fires during a progress tick", async () => {
+    const controller = new AbortController();
+    const fit = fitPcaReportingProgress(
+      DOMINANT_AXIS_CUBE,
+      2,
+      () => controller.abort(),
+      controller.signal,
+    );
+    await expect(fit).rejects.toBeInstanceOf(OperationStoppedError);
   });
 });
 

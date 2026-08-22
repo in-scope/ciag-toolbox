@@ -203,6 +203,141 @@
       }
     ]
   },
+  "rgbaTiff": {
+    "fileName": "rgba.tif",
+    "width": 2,
+    "height": 2,
+    "bandCount": 3,
+    "dataType": "uint8",
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          200,
+          100,
+          50
+        ]
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "valuesPerBand": [
+          10,
+          20,
+          30
+        ]
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "valuesPerBand": [
+          255,
+          0,
+          0
+        ]
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "valuesPerBand": [
+          0,
+          255,
+          0
+        ]
+      }
+    ]
+  },
+  "paletteColorTiff": {
+    "fileName": "palette-color.tif",
+    "width": 2,
+    "height": 2,
+    "bandCount": 3,
+    "dataType": "uint8",
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          200,
+          100,
+          50
+        ]
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "valuesPerBand": [
+          10,
+          20,
+          30
+        ]
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "valuesPerBand": [
+          255,
+          0,
+          0
+        ]
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "valuesPerBand": [
+          0,
+          255,
+          0
+        ]
+      }
+    ]
+  },
+  "untaggedRgbTiff": {
+    "fileName": "rgb-untagged.tif",
+    "width": 2,
+    "height": 2,
+    "bandCount": 3,
+    "dataType": "uint8",
+    "samplePixels": [
+      {
+        "x": 0,
+        "y": 0,
+        "valuesPerBand": [
+          200,
+          100,
+          50
+        ]
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "valuesPerBand": [
+          10,
+          20,
+          30
+        ]
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "valuesPerBand": [
+          255,
+          0,
+          0
+        ]
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "valuesPerBand": [
+          0,
+          255,
+          0
+        ]
+      }
+    ]
+  },
   "enviStack": {
     "headerFileName": "envi-stack.hdr",
     "binaryFileName": "envi-stack.bin",

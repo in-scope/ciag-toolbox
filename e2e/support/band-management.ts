@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
-import { applicationToolbar } from "./operations";
+import { applicationToolbar, selectResultDestinationSegment } from "./operations";
 
 // CT-131 band keep/remove + subset helpers.
 //
@@ -12,8 +12,8 @@ import { applicationToolbar } from "./operations";
 // by original number ("Kept bands 1, 3 of the original stack").
 //
 // SUBSET MODE: the toolbar "Subset Bands" toggle (aria-pressed) opens a transient editor
-// section (aria-label "Subset bands") with a "Bands to keep" checkbox list, an "Open in a
-// new panel" switch, and Apply/Cancel. Unchecking a set then Apply removes those bands.
+// section (aria-label "Subset bands") with a "Bands to keep" checkbox list, a "Result"
+// segmented control (CT-291), and Apply/Cancel. Unchecking a set then Apply removes those bands.
 
 export function removeBandButton(page: Page, bandNumber: number): Locator {
   return page.getByRole("button", { name: `Remove band ${bandNumber}` });
@@ -58,6 +58,16 @@ export async function openSubsetBandsEditor(page: Page): Promise<Locator> {
   return editor;
 }
 
+// CT-283: the typed index list above the checkbox list. A valid expression checks
+// exactly those bands; invalid text shows the parse error and changes no selection.
+export function subsetBandsTypedRangeField(page: Page): Locator {
+  return subsetBandsEditor(page).getByRole("textbox", { name: "Bands to keep" });
+}
+
+export async function typeSubsetBandsRange(page: Page, text: string): Promise<void> {
+  await subsetBandsTypedRangeField(page).fill(text);
+}
+
 export function subsetBandsKeepCheckboxes(page: Page): Locator {
   return subsetBandsEditor(page)
     .getByRole("list", { name: "Bands to keep" })
@@ -71,10 +81,7 @@ export async function uncheckSubsetBandRow(page: Page, oneBasedRowNumber: number
 }
 
 export async function setSubsetBandsOpenInNewPanel(page: Page, shouldOpen: boolean): Promise<void> {
-  const toggle = subsetBandsEditor(page).getByRole("switch", { name: "Open in a new panel" });
-  const isChecked = (await toggle.getAttribute("aria-checked")) === "true";
-  if (isChecked !== shouldOpen) await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", String(shouldOpen));
+  await selectResultDestinationSegment(subsetBandsEditor(page), shouldOpen);
 }
 
 export async function applySubsetBands(page: Page): Promise<void> {

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { OperationStoppedError } from "./operation-stop";
 import {
   computeArrayReportingPerUnitProgress,
+  createMacrotaskYieldChannelIfSupported,
   runInChunksReportingProgress,
   scaleProgressToWindow,
   throttleProgressToMinimumStep,
+  yieldOnceSoTheBusyIndicatorCanPaint,
 } from "./unit-progress";
 
 describe("throttleProgressToMinimumStep (CT-225)", () => {
@@ -70,5 +73,82 @@ describe("runInChunksReportingProgress (CT-226)", () => {
     const processed: Array<[number, number]> = [];
     await runInChunksReportingProgress(3, 0.2, (start, end) => processed.push([start, end]));
     expect(processed).toEqual([[0, 1], [1, 2], [2, 3]]);
+  });
+});
+
+describe("chunk boundaries double as stop checkpoints (CT-268)", () => {
+  it("computeArrayReportingPerUnitProgress cancels a sweep at the boundary after the abort", async () => {
+    const controller = new AbortController();
+    const computed: number[] = [];
+    const sweep = computeArrayReportingPerUnitProgress(
+      5,
+      (index) => {
+        computed.push(index);
+        if (index === 1) controller.abort();
+        return index;
+      },
+      () => undefined,
+      controller.signal,
+    );
+    await expect(sweep).rejects.toBeInstanceOf(OperationStoppedError);
+    expect(computed).toEqual([0, 1]);
+  });
+
+  it("runInChunksReportingProgress cancels between chunks and never runs the next chunk", async () => {
+    const controller = new AbortController();
+    const processedStarts: number[] = [];
+    const sweep = runInChunksReportingProgress(
+      10,
+      2,
+      (start) => {
+        processedStarts.push(start);
+        if (start === 2) controller.abort();
+      },
+      undefined,
+      controller.signal,
+    );
+    await expect(sweep).rejects.toBeInstanceOf(OperationStoppedError);
+    expect(processedStarts).toEqual([0, 2]);
+  });
+
+  it("an unaborted signal changes nothing", async () => {
+    const controller = new AbortController();
+    const results = await computeArrayReportingPerUnitProgress(
+      3,
+      (index) => index * 2,
+      undefined,
+      controller.signal,
+    );
+    expect(results).toEqual([0, 2, 4]);
+  });
+});
+
+// CT-270: the paint yield is a MessageChannel macrotask (no Chromium nested-
+// timer clamp); the shared channel resolves concurrent waiters in FIFO order.
+describe("yieldOnceSoTheBusyIndicatorCanPaint (CT-270)", () => {
+  it("resolves as a macrotask", async () => {
+    let resolved = false;
+    const yielded = yieldOnceSoTheBusyIndicatorCanPaint().then(() => {
+      resolved = true;
+    });
+    expect(resolved).toBe(false);
+    await yielded;
+    expect(resolved).toBe(true);
+  });
+
+  it("the macrotask channel resolves concurrent waiters in the order they yielded", async () => {
+    const channel = createMacrotaskYieldChannelIfSupported();
+    expect(channel).not.toBeNull();
+    const order: number[] = [];
+    const waitFor = (id: number) =>
+      new Promise<void>((resolve) => {
+        channel!.waitingResolvers.push(() => {
+          order.push(id);
+          resolve();
+        });
+        channel!.postWakeMessage();
+      });
+    await Promise.all([waitFor(1), waitFor(2), waitFor(3)]);
+    expect(order).toEqual([1, 2, 3]);
   });
 });

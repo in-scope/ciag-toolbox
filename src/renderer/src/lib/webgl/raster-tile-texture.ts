@@ -1,7 +1,7 @@
 import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 import {
-  computeDataTypeUnitMappingForRaster,
-  mapRawValueToDisplayUnit,
+  computeRasterSampleDisplayMapping,
+  mapRasterSampleToDisplayValue,
 } from "@/lib/image/data-type-display-range";
 import type { RasterTile } from "@/lib/webgl/raster-tile-splitter";
 
@@ -160,10 +160,10 @@ function convertIntegerPixelsToDisplayUnitFloat32(
   pixels: RasterTypedArray,
   raster: RasterImage,
 ): Float32Array {
-  const mapping = computeDataTypeUnitMappingForRaster(raster);
+  const mapping = computeRasterSampleDisplayMapping(raster);
   const out = new Float32Array(pixels.length);
   for (let i = 0; i < pixels.length; i++) {
-    out[i] = mapRawValueToDisplayUnit(pixels[i] ?? 0, mapping);
+    out[i] = mapRasterSampleToDisplayValue(pixels[i] ?? 0, mapping);
   }
   return out;
 }

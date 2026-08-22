@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { RasterImage } from "./raster-image";
 import {
   forgetAllReferenceRasters,
+  listRememberedReferenceRasters,
   readRememberedReferenceRasterOrNull,
   rememberReferenceRaster,
   replaceRememberedPanelReferenceRasters,
@@ -43,5 +44,18 @@ describe("replaceRememberedPanelReferenceRasters", () => {
     rememberReferenceRaster(filePathToken, fileRaster);
     replaceRememberedPanelReferenceRasters([]);
     expect(readRememberedReferenceRasterOrNull(filePathToken)).toBe(fileRaster);
+  });
+
+  it("lists every remembered raster (panel and file entries) for the CT-290 release flush", () => {
+    const panelRaster = tinyRaster();
+    const fileRaster = tinyRaster();
+    rememberReferenceRaster("C:/captures/dark-frame.tif", fileRaster);
+    replaceRememberedPanelReferenceRasters([
+      { token: buildLoadedPanelReferenceToken(1, "a.tif"), raster: panelRaster },
+    ]);
+    expect(listRememberedReferenceRasters()).toEqual(
+      expect.arrayContaining([panelRaster, fileRaster]),
+    );
+    expect(listRememberedReferenceRasters()).toHaveLength(2);
   });
 });

@@ -46,14 +46,15 @@ export async function computeWholeStackPercentileCutPoints(
   bands: ReadonlyArray<RasterTypedArray>,
   bounds: PercentileClipBounds,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
   options?: WholeStackPercentileOptions,
 ): Promise<PercentileCutPoints> {
   assertPercentileClipBoundsAreValid(bounds);
   const totalValueCount = bands.reduce((sum, band) => sum + band.length, 0);
   assertPercentileValueCountIsNotEmpty(totalValueCount);
   const kthSmallestValue = await (everyBandFitsASharedCountingHistogram(bands)
-    ? accumulateSharedCountingHistogram(bands, onProgress, options)
-    : sortBandCopiesForOrderStatisticMerge(bands, onProgress));
+    ? accumulateSharedCountingHistogram(bands, onProgress, abortSignal, options)
+    : sortBandCopiesForOrderStatisticMerge(bands, onProgress, abortSignal));
   return {
     lowerCutPoint: interpolateCutPointAtPercentile(kthSmallestValue, totalValueCount, bounds.lowerPercentile),
     upperCutPoint: interpolateCutPointAtPercentile(kthSmallestValue, totalValueCount, bounds.upperPercentile),
@@ -94,6 +95,7 @@ function everyBandFitsASharedCountingHistogram(bands: ReadonlyArray<RasterTypedA
 async function accumulateSharedCountingHistogram(
   bands: ReadonlyArray<RasterTypedArray>,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal: AbortSignal | undefined,
   options: WholeStackPercentileOptions | undefined,
 ): Promise<KthSmallestValueProvider> {
   const range = unionOfBandSampleRanges(bands);
@@ -101,7 +103,7 @@ async function accumulateSharedCountingHistogram(
   const counts = allocateOrReportNotEnoughMemory(
     () => new Float64Array(range.maxValue - range.minValue + 1),
   );
-  await countEveryBandIntoHistogram(bands, counts, range.minValue, onProgress, options);
+  await countEveryBandIntoHistogram(bands, counts, range.minValue, onProgress, abortSignal, options);
   return (k) => kthSmallestValueFromCounts(counts, range.minValue, k);
 }
 
@@ -118,6 +120,7 @@ async function countEveryBandIntoHistogram(
   counts: Float64Array,
   minValue: number,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal: AbortSignal | undefined,
   options: WholeStackPercentileOptions | undefined,
 ): Promise<void> {
   const valuesPerChunk = options?.histogramValuesPerChunk ?? DEFAULT_HISTOGRAM_VALUES_PER_CHUNK;
@@ -128,7 +131,7 @@ async function countEveryBandIntoHistogram(
       bandIndex / bands.length,
       (bandIndex + 1) / bands.length,
     );
-    await countBandValuesInChunks(bands[bandIndex]!, counts, minValue, valuesPerChunk, withinBand);
+    await countBandValuesInChunks(bands[bandIndex]!, counts, minValue, valuesPerChunk, withinBand, abortSignal);
   }
 }
 
@@ -138,6 +141,7 @@ function countBandValuesInChunks(
   minValue: number,
   valuesPerChunk: number,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal: AbortSignal | undefined,
 ): Promise<void> {
   return runInChunksReportingProgress(
     band.length,
@@ -149,6 +153,7 @@ function countBandValuesInChunks(
       }
     },
     onProgress,
+    abortSignal,
   );
 }
 
@@ -166,12 +171,13 @@ function kthSmallestValueFromCounts(counts: Float64Array, minValue: number, k: n
 async function sortBandCopiesForOrderStatisticMerge(
   bands: ReadonlyArray<RasterTypedArray>,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal: AbortSignal | undefined,
 ): Promise<KthSmallestValueProvider> {
   reportMultiUnitWorkStarting(onProgress, bands.length);
   const sortedBands: RasterTypedArray[] = [];
   for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
     sortedBands.push(sortCopyOfBand(bands[bandIndex]!));
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, bandIndex + 1, bands.length);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, bandIndex + 1, bands.length, abortSignal);
   }
   return (k) => kthSmallestValueAcrossSortedBands(sortedBands, k);
 }

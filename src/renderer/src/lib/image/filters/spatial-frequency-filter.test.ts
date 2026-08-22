@@ -160,7 +160,7 @@ describe("createReusableSpatialFilterGrid", () => {
     const reusableGrid = createReusableSpatialFilterGrid();
     expect(() =>
       reusableGrid.filterBand(new Float32Array(1), { width: 20000, height: 20000 }, LOWPASS),
-    ).toThrow(/too large for the spatial filter/);
+    ).toThrow(/too large for the frequency filter/);
   });
 });
 
@@ -201,7 +201,7 @@ describe("spatial filter grid size limit", () => {
       SPATIAL_FILTER_GRID_BYTE_LIMIT,
     );
     expect(() => assertShapeFitsSpatialFilterGrid({ width: 14000, height: 11000 })).toThrow(
-      /too large for the spatial filter.*Crop the stack/s,
+      /too large for the frequency filter.*Crop the stack/s,
     );
   });
 

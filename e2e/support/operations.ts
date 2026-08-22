@@ -52,7 +52,7 @@ export async function openOperation(page: Page, operationLabel: string): Promise
   });
 }
 
-// Explicitly menu-driven launch (e.g. the broad "Rotate" and "Reflect", whose toolbar
+// Explicitly menu-driven launch (e.g. the broad "Rotate" and "Flip", whose toolbar
 // slots are occupied by narrow one-click variants).
 export async function openOperationFromMenu(
   app: ElectronApplication,
@@ -79,14 +79,20 @@ export async function applyOperation(page: Page, operationLabel: string): Promis
     page,
     `Apply ${operationLabel} and wait for the result panel to settle`,
     async () => {
-      const panel = operationPanel(page, operationLabel);
-      await panel.getByRole("button", { name: "Apply", exact: true }).click();
-      await expect(panel).toBeHidden();
-      await expect(operationBusyOverlays(page)).toHaveCount(0, {
-        timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
-      });
+      await clickApplyInPanelAndAwaitResult(page, operationPanel(page, operationLabel));
     },
   );
+}
+
+// Shared by the tool-options panels and the Subset Bands editor (CT-284): click
+// Apply inside the given container, wait for it to close, then wait for any
+// async-transform busy overlay to clear.
+export async function clickApplyInPanelAndAwaitResult(page: Page, panel: Locator): Promise<void> {
+  await panel.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(panel).toBeHidden();
+  await expect(operationBusyOverlays(page)).toHaveCount(0, {
+    timeout: OPERATION_TRANSFORM_COMPLETION_TIMEOUT_MS,
+  });
 }
 
 function operationBusyOverlays(page: Page): Locator {
@@ -96,12 +102,13 @@ function operationBusyOverlays(page: Page): Locator {
     .filter({ has: page.locator("svg.animate-spin") });
 }
 
-// The operation panel defaults to "Open in a new panel" ON, so Apply places the result in a
+// The operation panel defaults to "Result: New panel", so Apply places the result in a
 // FRESH panel and leaves the source untouched. An in-place spec (asserting the SOURCE panel's
-// readout/Metadata/History changed) must turn that switch off first; otherwise the source keeps
-// its pre-op values and the History entry lands on the new result panel, not the source.
+// readout/Metadata/History changed) must select "Replace current panel" first; otherwise the
+// source keeps its pre-op values and the History entry lands on the new result panel, not the
+// source. CT-291: the CT-277 switch was replaced by this two-option segmented control.
 export function openInNewPanelSwitch(page: Page, operationLabel: string): Locator {
-  return operationPanel(page, operationLabel).getByRole("switch", { name: "Open in a new panel" });
+  return operationPanel(page, operationLabel).getByRole("radio", { name: "New panel" });
 }
 
 export async function setOpenInNewPanel(
@@ -111,14 +118,23 @@ export async function setOpenInNewPanel(
 ): Promise<void> {
   await runAsStoryboardStep(
     page,
-    `Set ${operationLabel}'s "Open in a new panel" switch to ${shouldOpenInNewPanel ? "on" : "off"}`,
+    `Set ${operationLabel}'s Result control to ${shouldOpenInNewPanel ? "New panel" : "Replace current panel"}`,
     async () => {
-      const toggle = openInNewPanelSwitch(page, operationLabel);
-      const isChecked = (await toggle.getAttribute("aria-checked")) === "true";
-      if (isChecked !== shouldOpenInNewPanel) await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-checked", String(shouldOpenInNewPanel));
+      await selectResultDestinationSegment(operationPanel(page, operationLabel), shouldOpenInNewPanel);
     },
   );
+}
+
+// Shared by both render sites of the CT-291 "Result" segmented control (the tool-options
+// panel footer and the Subset Bands editor).
+export async function selectResultDestinationSegment(
+  container: Locator,
+  shouldOpenInNewPanel: boolean,
+): Promise<void> {
+  const segmentName = shouldOpenInNewPanel ? "New panel" : "Replace current panel";
+  const segment = container.getByRole("radio", { name: segmentName });
+  await segment.click();
+  await expect(segment).toHaveAttribute("aria-checked", "true");
 }
 
 export async function applyOperationInPlace(page: Page, operationLabel: string): Promise<void> {

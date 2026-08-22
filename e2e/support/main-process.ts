@@ -100,9 +100,9 @@ function clickFileMenuItemWhoseLabelStartsWith(
   }, labelPrefix);
 }
 
-// Clicks an operation item in whichever operation menu (Edit, Image, Adjust,
-// Process, Spectral) carries it, and fails loudly when the label is missing so
-// a regrouped menu cannot silently no-op a spec.
+// Clicks an operation item in whichever operation menu (Tools,
+// Basic Processing, Multi-band) carries it, and fails loudly when the label is
+// missing so a regrouped menu cannot silently no-op a spec.
 export function triggerOperationMenuItem(
   app: ElectronApplication,
   operationLabel: string,
@@ -121,6 +121,27 @@ export function triggerOperationMenuItem(
     if (!target?.click) throw new Error(`No menu item "${label}" in: ${menuLabels.join(", ")}`);
     target.click();
   }, { label: operationLabel, menuLabels: OPERATION_MENU_LABELS });
+}
+
+// CT-289: clicks File > Grid > <layout> ("1x2", ...), the native mirror of the
+// toolbar's grid-layout dropdown.
+export function triggerFileGridLayoutMenuItem(
+  app: ElectronApplication,
+  layout: string,
+): Promise<void> {
+  return app.evaluate(({ Menu }, targetLayout) => {
+    interface RawMenuNode {
+      label: string;
+      click?: () => void;
+      submenu?: { items: RawMenuNode[] };
+    }
+    const menu = Menu.getApplicationMenu() as unknown as { items: RawMenuNode[] } | null;
+    const file = (menu?.items ?? []).find((item) => item.label === "File");
+    const grid = file?.submenu?.items.find((item) => item.label === "Grid");
+    const target = grid?.submenu?.items.find((item) => item.label === targetLayout);
+    if (!target?.click) throw new Error(`No File > Grid > "${targetLayout}" menu item`);
+    target.click();
+  }, layout);
 }
 
 export function triggerSaveProjectMenuItem(app: ElectronApplication): Promise<void> {

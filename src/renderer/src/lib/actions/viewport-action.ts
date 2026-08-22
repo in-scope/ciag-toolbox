@@ -12,7 +12,6 @@ import {
 } from "@/lib/image/spectrum-entry";
 import type { BandSelectionEditingState } from "@/lib/image/band-ops/band-selection";
 import type { CubeTransformEditingState } from "@/lib/image/band-ops/cube-transform-editing";
-import type { ThresholdOtsuCutoffs } from "@/lib/image/threshold/otsu-cutoffs";
 import type { ThresholdBounds } from "@/lib/image/threshold/threshold";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -37,7 +36,6 @@ export interface ViewportRenderingState {
   readonly toneCurveChannelAnchors: ToneCurveChannelAnchors;
   readonly toneCurveActiveChannel: ToneCurveChannel;
   readonly thresholdBounds: ThresholdBounds | null;
-  readonly thresholdOtsuCutoffs: ThresholdOtsuCutoffs | null;
   readonly bandWeights: ReadonlyArray<number> | null;
   readonly bandSelection: BandSelectionEditingState | null;
   readonly cubeTransform: CubeTransformEditingState | null;
@@ -64,7 +62,6 @@ export const DEFAULT_VIEWPORT_RENDERING_STATE: ViewportRenderingState = {
   toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
   toneCurveActiveChannel: DEFAULT_TONE_CURVE_CHANNEL,
   thresholdBounds: null,
-  thresholdOtsuCutoffs: null,
   bandWeights: null,
   bandSelection: null,
   cubeTransform: null,
@@ -93,15 +90,15 @@ export function clearToneCurveEditingState(state: ViewportRenderingState): Viewp
 
 // CT-200: the threshold popup's live bounds live in rendering state (like the
 // tone-curve anchors) so the editor, the GPU preview, and Apply all read one
-// source of truth. Opening/closing the panel and Apply clear them. CT-201: the
-// Auto button's per-band Otsu cutoffs ride alongside the bounds and clear with
-// them; any manual bound edit also discards them (the editor handles that).
+// source of truth. Opening/closing the panel and Apply clear them. (CT-282
+// removed the Auto button's stored Otsu cutoffs: Otsu is now a method whose
+// cutoffs are derived inside the Apply transform.)
 export function hasThresholdEditingState(state: ViewportRenderingState): boolean {
-  return state.thresholdBounds !== null || state.thresholdOtsuCutoffs !== null;
+  return state.thresholdBounds !== null;
 }
 
 export function clearThresholdEditingState(state: ViewportRenderingState): ViewportRenderingState {
-  return { ...state, thresholdBounds: null, thresholdOtsuCutoffs: null };
+  return { ...state, thresholdBounds: null };
 }
 
 // CT-209: the band-weighting popup's per-band weights live in rendering state
@@ -125,6 +122,15 @@ export function hasBandSelectionEditingState(state: ViewportRenderingState): boo
 
 export function clearBandSelectionEditingState(state: ViewportRenderingState): ViewportRenderingState {
   return { ...state, bandSelection: null };
+}
+
+// CT-284: the band-selection function editor lives inside the Subset Bands
+// editor's "By function" mode, so leaving that editor (cancel, toggle off, or a
+// consumed function apply) closes the editor AND drops the staged choice.
+export function closeBandSubsetEditorAndClearFunctionChoice(
+  state: ViewportRenderingState,
+): ViewportRenderingState {
+  return { ...clearBandSelectionEditingState(state), isBandSubsetEditModeActive: false };
 }
 
 // CT-216: the Custom transform popup's ready transform (a result-store token plus
@@ -160,10 +166,16 @@ export type TransformProgressCallback = (fraction: number) => void;
 // thread). An action defines transformSource OR transformSourceAsync; the apply
 // flow gates and runs both kinds only through actionTransformsSource /
 // runActionSourceTransform below.
+// CT-268: the optional abort signal is the apply flow's stop token. A stoppable
+// transform checks it at its chunk boundaries (the unit-progress helpers accept
+// it) and throws OperationStoppedError when the user clicked Stop; worker-based
+// transforms (spatial filter, custom Python) additionally use it to terminate
+// their worker.
 export type ViewportActionAsyncSourceTransform = (
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ) => Promise<ViewportImageSource>;
 
 // CT-097: an operation may emit additional outputs beyond the primary in-place /
@@ -228,9 +240,10 @@ export async function runActionSourceTransform(
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
   onProgress?: TransformProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<ViewportImageSource> {
   if (action.transformSourceAsync) {
-    return action.transformSourceAsync(source, parameterValues, onProgress);
+    return action.transformSourceAsync(source, parameterValues, onProgress, abortSignal);
   }
   if (action.transformSource) return action.transformSource(source, parameterValues);
   return source;

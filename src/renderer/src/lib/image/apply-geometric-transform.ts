@@ -56,27 +56,28 @@ export function isGeometricTransform(value: unknown): value is GeometricTransfor
   return typeof value === "string" && GEOMETRIC_TRANSFORMS.includes(value as GeometricTransform);
 }
 
-interface DestinationPixel {
-  readonly dx: number;
-  readonly dy: number;
-}
+// CT-267: each transform remaps a band with its own tight per-pixel loop
+// (hoisted index math, no per-pixel closure or coordinate objects). The two
+// dimension-swapping rotations walk the band in square tiles so the strided
+// side of the transpose stays cache-resident at Anna-benchmark scale.
+type TightBandRemapLoop = (
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+) => void;
 
 interface GeometricTransformDefinition {
   readonly swapsDimensions: boolean;
-  readonly mapSourcePixelToDestination: (
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ) => DestinationPixel;
+  readonly remapBandWithTightLoop: TightBandRemapLoop;
 }
 
 const GEOMETRIC_TRANSFORM_DEFINITIONS: Record<GeometricTransform, GeometricTransformDefinition> = {
-  "rotate-90-cw": { swapsDimensions: true, mapSourcePixelToDestination: (x, y, _w, h) => ({ dx: h - 1 - y, dy: x }) },
-  "rotate-180": { swapsDimensions: false, mapSourcePixelToDestination: (x, y, w, h) => ({ dx: w - 1 - x, dy: h - 1 - y }) },
-  "rotate-270-cw": { swapsDimensions: true, mapSourcePixelToDestination: (x, y, w, _h) => ({ dx: y, dy: w - 1 - x }) },
-  "flip-horizontal": { swapsDimensions: false, mapSourcePixelToDestination: (x, y, w, _h) => ({ dx: w - 1 - x, dy: y }) },
-  "flip-vertical": { swapsDimensions: false, mapSourcePixelToDestination: (x, y, _w, h) => ({ dx: x, dy: h - 1 - y }) },
+  "rotate-90-cw": { swapsDimensions: true, remapBandWithTightLoop: remapBandRotating90Clockwise },
+  "rotate-180": { swapsDimensions: false, remapBandWithTightLoop: remapBandRotating180 },
+  "rotate-270-cw": { swapsDimensions: true, remapBandWithTightLoop: remapBandRotating270Clockwise },
+  "flip-horizontal": { swapsDimensions: false, remapBandWithTightLoop: remapBandFlippingHorizontally },
+  "flip-vertical": { swapsDimensions: false, remapBandWithTightLoop: remapBandFlippingVertically },
 };
 
 export function applyGeometricTransformToRasterImage(
@@ -87,7 +88,7 @@ export function applyGeometricTransformToRasterImage(
   const destinationWidth = definition.swapsDimensions ? raster.height : raster.width;
   const destinationHeight = definition.swapsDimensions ? raster.width : raster.height;
   const bandPixels = raster.bandPixels.map((band) =>
-    remapBandToDestination(band, raster.width, raster.height, destinationWidth, definition),
+    remapBandToDestination(band, raster.width, raster.height, definition),
   );
   return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
 }
@@ -98,14 +99,16 @@ export async function applyGeometricTransformToRasterImageReportingProgress(
   raster: RasterImage,
   transform: GeometricTransform,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const definition = GEOMETRIC_TRANSFORM_DEFINITIONS[transform];
   const destinationWidth = definition.swapsDimensions ? raster.height : raster.width;
   const destinationHeight = definition.swapsDimensions ? raster.width : raster.height;
   const bandPixels = await computeArrayReportingPerUnitProgress(
     raster.bandPixels.length,
-    (index) => remapBandToDestination(raster.bandPixels[index]!, raster.width, raster.height, destinationWidth, definition),
+    (index) => remapBandToDestination(raster.bandPixels[index]!, raster.width, raster.height, definition),
     onProgress,
+    abortSignal,
   );
   return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
 }
@@ -114,19 +117,99 @@ function remapBandToDestination(
   band: RasterTypedArray,
   width: number,
   height: number,
-  destinationWidth: number,
   definition: GeometricTransformDefinition,
 ): RasterTypedArray {
-  const destination = makeEmptyBandMatchingType(band, band.length);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const { dx, dy } = definition.mapSourcePixelToDestination(x, y, width, height);
-      destination[dy * destinationWidth + dx] = band[y * width + x] ?? 0;
-    }
-  }
+  const destination = allocateTypedArrayLikeBandOrThrow(band, band.length);
+  definition.remapBandWithTightLoop(band, destination, width, height);
   return destination;
 }
 
-function makeEmptyBandMatchingType(band: RasterTypedArray, length: number): RasterTypedArray {
-  return allocateTypedArrayLikeBandOrThrow(band, length);
+// Square tiles keep both the contiguous and the strided side of a transpose
+// inside the cache; 128 uint16/float32 rows of a tile stay well under L2.
+const ROTATION_TILE_SIZE = 128;
+
+type SpatialTileVisitor = (xStart: number, xEnd: number, yStart: number, yEnd: number) => void;
+
+function visitBandInSquareTiles(width: number, height: number, visitTile: SpatialTileVisitor): void {
+  for (let yStart = 0; yStart < height; yStart += ROTATION_TILE_SIZE) {
+    const yEnd = Math.min(height, yStart + ROTATION_TILE_SIZE);
+    for (let xStart = 0; xStart < width; xStart += ROTATION_TILE_SIZE) {
+      visitTile(xStart, Math.min(width, xStart + ROTATION_TILE_SIZE), yStart, yEnd);
+    }
+  }
+}
+
+// Source (x, y) lands at destination (height - 1 - y, x) in a height-wide band.
+function remapBandRotating90Clockwise(
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+): void {
+  visitBandInSquareTiles(width, height, (xStart, xEnd, yStart, yEnd) => {
+    for (let y = yStart; y < yEnd; y += 1) {
+      const sourceRowStart = y * width;
+      const destinationColumn = height - 1 - y;
+      for (let x = xStart; x < xEnd; x += 1) {
+        destination[x * height + destinationColumn] = source[sourceRowStart + x]!;
+      }
+    }
+  });
+}
+
+// Source (x, y) lands at destination (y, width - 1 - x) in a height-wide band.
+function remapBandRotating270Clockwise(
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+): void {
+  visitBandInSquareTiles(width, height, (xStart, xEnd, yStart, yEnd) => {
+    for (let y = yStart; y < yEnd; y += 1) {
+      const sourceRowStart = y * width;
+      for (let x = xStart; x < xEnd; x += 1) {
+        destination[(width - 1 - x) * height + y] = source[sourceRowStart + x]!;
+      }
+    }
+  });
+}
+
+function remapBandRotating180(
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+): void {
+  const lastIndex = width * height - 1;
+  for (let index = 0; index <= lastIndex; index += 1) {
+    destination[lastIndex - index] = source[index]!;
+  }
+}
+
+function remapBandFlippingHorizontally(
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+): void {
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * width;
+    const rowLastIndex = rowStart + width - 1;
+    for (let x = 0; x < width; x += 1) {
+      destination[rowLastIndex - x] = source[rowStart + x]!;
+    }
+  }
+}
+
+function remapBandFlippingVertically(
+  source: RasterTypedArray,
+  destination: RasterTypedArray,
+  width: number,
+  height: number,
+): void {
+  for (let y = 0; y < height; y += 1) {
+    const sourceRowStart = y * width;
+    const mirroredRowStart = (height - 1 - y) * width;
+    destination.set(source.subarray(sourceRowStart, sourceRowStart + width), mirroredRowStart);
+  }
 }

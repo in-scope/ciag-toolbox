@@ -5,8 +5,9 @@
 #   wavelengths - one value per band when the stack carries them, else None
 #
 # Custom transform expects a whole cube back, shaped (N, height, width).
-# The height and width must match the source stack; the output band count N
-# is up to you, as long as it is at least 1.
+# The height, width, and band count N are all up to you: return a crop,
+# resize, or any other spatial size >= 1. The output band count N must be
+# at least 1.
 #
 # Importing this file into Custom transform only loads it: the status line
 # reads "Tool loaded: transform-template.py". Clicking Apply runs it on the

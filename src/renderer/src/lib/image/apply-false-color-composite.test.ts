@@ -5,6 +5,7 @@ import {
   buildFalseColorComposite,
   isFalseColorBandAssignmentInRange,
 } from "./apply-false-color-composite";
+import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { RasterImage } from "@/lib/image/raster-image";
 
 function makeFourBandUint8Raster(): RasterImage {
@@ -52,6 +53,12 @@ describe("buildFalseColorComposite", () => {
     expect(result.width).toBe(2);
     expect(result.height).toBe(1);
     expect(result.sampleFormat).toBe("uint");
+  });
+
+  it("tags the composite as a true-colour rgb raster so it renders in colour", () => {
+    const result = buildFalseColorComposite(makeFourBandUint8Raster(), { r: 1, g: 2, b: 3 });
+    expect(result.colorInterpretation).toBe("rgb");
+    expect(shouldRenderRasterAsRgbComposite(result)).toBe(true);
   });
 
   it("allows the same band to be assigned to more than one channel", () => {

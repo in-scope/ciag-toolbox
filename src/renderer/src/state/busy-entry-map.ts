@@ -10,6 +10,9 @@ export interface BusyEntry {
   // CT-106: bypass the anti-flash paint delay (a fresh, empty result panel has
   // nothing to show, so its loading state must appear immediately).
   readonly immediate: boolean;
+  // CT-268: present for stoppable operations; the indicator card renders a Stop
+  // button that invokes it (the apply flow's AbortController.abort).
+  readonly requestStop: (() => void) | null;
 }
 
 export interface BusyEntryUpdate {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
+import { readMemoryBudgetOverrideBytesFromArguments } from "../shared/e2e-memory-budget-argument";
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
   OPENED_IMAGE_READ_ABORT_CHANNEL,
@@ -14,6 +15,18 @@ import {
   type ChunkedOpenedImageReadFinishRequest,
   type ChunkedOpenedImageReadFinishResult,
 } from "../shared/chunked-opened-image-read-protocol";
+import {
+  PNG16_DECODE_ABORT_CHANNEL,
+  PNG16_DECODE_BEGIN_CHANNEL,
+  PNG16_DECODE_CHUNK_CHANNEL,
+  PNG16_DECODE_FINISH_CHANNEL,
+  type ChunkedPng16DecodeAbortRequest,
+  type ChunkedPng16DecodeBeginRequest,
+  type ChunkedPng16DecodeBeginResult,
+  type ChunkedPng16DecodeChunkRequest,
+  type ChunkedPng16DecodeChunkResult,
+  type ChunkedPng16DecodeFinishRequest,
+} from "../shared/chunked-png16-decode-protocol";
 import {
   SAVE_BUNDLE_ASSET_CHUNK_CHANNEL,
   SAVE_BUNDLE_BEGIN_CHANNEL,
@@ -41,6 +54,7 @@ import {
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
+  USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
@@ -48,6 +62,7 @@ import {
   type UserScriptPickScriptResult,
   type UserScriptRunBeginRequest,
   type UserScriptRunBeginResult,
+  type UserScriptRunCancelRequest,
   type UserScriptRunCubeChunkRequest,
   type UserScriptRunExecuteRequest,
   type UserScriptRunExecuteResult,
@@ -119,6 +134,7 @@ export interface PythonEnvironmentSnapshot {
 
 export type MenuEventListener = () => void;
 export type MenuCommandListener = (commandId: string) => void;
+export type MenuGridLayoutListener = (layout: string) => void;
 export type UnsubscribeMenuListener = () => void;
 export type ThemeChangeListener = (snapshot: ThemeSnapshot) => void;
 export type UnsubscribeThemeListener = () => void;
@@ -136,6 +152,7 @@ const MENU_SAVE_PROJECT_AS_CHANNEL = "menu:save-project-as";
 const MENU_ABOUT_CHANNEL = "menu:about";
 const MENU_PYTHON_ENVIRONMENT_CHANNEL = "menu:python-environment";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
+const MENU_SELECT_GRID_LAYOUT_CHANNEL = "menu:select-grid-layout";
 const MENU_CLOSE_REQUESTED_CHANNEL = "menu:close-requested";
 const APP_CONFIRM_CLOSE_CHANNEL = "app:confirm-close";
 const THEME_GET_INITIAL_SYNC_CHANNEL = "theme:get-initial-sync";
@@ -207,6 +224,39 @@ function abortOpenedImageChunkedReadInMainProcess(
     OPENED_IMAGE_READ_ABORT_CHANNEL,
     request,
   ) as Promise<void>;
+}
+
+// CT-272: the renderer drives the chunked 16-bit PNG decode protocol; main
+// re-reads the file from disk and streams back the DECODED big-endian
+// samples, since Chromium's own PNG decoder downscales 16-bit data to 8 bits.
+function beginPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeBeginRequest,
+): Promise<ChunkedPng16DecodeBeginResult> {
+  return ipcRenderer.invoke(
+    PNG16_DECODE_BEGIN_CHANNEL,
+    request,
+  ) as Promise<ChunkedPng16DecodeBeginResult>;
+}
+
+function readPng16DecodedChunkFromMainProcess(
+  request: ChunkedPng16DecodeChunkRequest,
+): Promise<ChunkedPng16DecodeChunkResult> {
+  return ipcRenderer.invoke(
+    PNG16_DECODE_CHUNK_CHANNEL,
+    request,
+  ) as Promise<ChunkedPng16DecodeChunkResult>;
+}
+
+function finishPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeFinishRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(PNG16_DECODE_FINISH_CHANNEL, request) as Promise<void>;
+}
+
+function abortPng16DecodeInMainProcess(
+  request: ChunkedPng16DecodeAbortRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(PNG16_DECODE_ABORT_CHANNEL, request) as Promise<void>;
 }
 
 // Chunked save-image protocol (CT-237, see
@@ -434,6 +484,16 @@ function releaseUserScriptRunInMainProcess(
   ) as Promise<void>;
 }
 
+// CT-268: kills an executing run's Python worker subprocess (Stop button).
+function cancelUserScriptRunInMainProcess(
+  request: UserScriptRunCancelRequest,
+): Promise<void> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_RUN_CANCEL_CHANNEL,
+    request,
+  ) as Promise<void>;
+}
+
 function subscribeToInvokeCommandMenuEvent(
   listener: MenuCommandListener,
 ): UnsubscribeMenuListener {
@@ -441,6 +501,16 @@ function subscribeToInvokeCommandMenuEvent(
     listener(commandId);
   ipcRenderer.on(MENU_INVOKE_COMMAND_CHANNEL, handler);
   return () => ipcRenderer.removeListener(MENU_INVOKE_COMMAND_CHANNEL, handler);
+}
+
+// CT-289: the File > Grid submenu sends the chosen layout token ("1x2", ...).
+function subscribeToSelectGridLayoutMenuEvent(
+  listener: MenuGridLayoutListener,
+): UnsubscribeMenuListener {
+  const handler = (_event: IpcRendererEvent, layout: string): void =>
+    listener(layout);
+  ipcRenderer.on(MENU_SELECT_GRID_LAYOUT_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(MENU_SELECT_GRID_LAYOUT_CHANNEL, handler);
 }
 
 function readInitialThemeSnapshotSynchronously(): ThemeSnapshot {
@@ -473,6 +543,10 @@ const apiBridge = {
   readOpenedImageChunk: readOpenedImageChunkFromMainProcess,
   finishOpenedImageChunkedRead: finishOpenedImageChunkedReadInMainProcess,
   abortOpenedImageChunkedRead: abortOpenedImageChunkedReadInMainProcess,
+  beginPng16Decode: beginPng16DecodeInMainProcess,
+  readPng16DecodedChunk: readPng16DecodedChunkFromMainProcess,
+  finishPng16Decode: finishPng16DecodeInMainProcess,
+  abortPng16Decode: abortPng16DecodeInMainProcess,
   beginSaveImage: beginSaveImageThroughMainProcess,
   sendSaveImageChunk: sendSaveImageChunkToMainProcess,
   finishSaveImage: finishSaveImageInMainProcess,
@@ -491,6 +565,7 @@ const apiBridge = {
   onMenuAbout: subscribeToAboutMenuEvent,
   onMenuPythonEnvironment: subscribeToPythonEnvironmentMenuEvent,
   onMenuInvokeCommand: subscribeToInvokeCommandMenuEvent,
+  onMenuSelectGridLayout: subscribeToSelectGridLayoutMenuEvent,
   onWindowCloseRequested: subscribeToWindowCloseRequestedEvent,
   confirmWindowClose: confirmWindowCloseThroughMainProcess,
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
@@ -501,6 +576,7 @@ const apiBridge = {
   executeUserScriptRun: executeUserScriptRunInMainProcess,
   readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
   releaseUserScriptRun: releaseUserScriptRunInMainProcess,
+  cancelUserScriptRun: cancelUserScriptRunInMainProcess,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;
@@ -535,6 +611,9 @@ const e2eTestBridge = {
   enqueueOpenDialogPaths: enqueueOpenDialogPathsForTest,
   enqueueSaveDialogPath: enqueueSaveDialogPathForTest,
   resetDialogQueues: resetDialogQueuesForTest,
+  // CT-260: a lowered raster-memory budget (see src/shared/e2e-memory-budget-argument.ts)
+  // so e2e can trigger memory refusals with tiny fixtures.
+  memoryBudgetOverrideBytes: readMemoryBudgetOverrideBytesFromArguments(process.argv),
 } as const;
 
 export type ToolboxE2eBridge = typeof e2eTestBridge;

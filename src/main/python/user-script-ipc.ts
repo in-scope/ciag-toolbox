@@ -28,6 +28,7 @@ import { wallClockTimeoutMsForUserScriptRun } from "./user-script-timeouts";
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
+  USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
@@ -37,6 +38,7 @@ import {
   type UserScriptRunCubeChunkRequest,
   type UserScriptRunExecuteRequest,
   type UserScriptRunExecuteResult,
+  type UserScriptRunCancelRequest,
   type UserScriptRunReleaseRequest,
   type UserScriptRunResultChunkRequest,
   type UserScriptPickScriptResult,
@@ -86,6 +88,9 @@ export function registerRunUserScriptIpcHandler(): void {
   );
   ipcMain.handle(USER_SCRIPT_RUN_RELEASE_CHANNEL, (_event, request: UserScriptRunReleaseRequest) =>
     sessions.release(request.token),
+  );
+  ipcMain.handle(USER_SCRIPT_RUN_CANCEL_CHANNEL, (_event, request: UserScriptRunCancelRequest) =>
+    sessions.cancelExecutingRun(request.token),
   );
 }
 
@@ -201,16 +206,21 @@ async function handleExecuteUserScriptRun(
 ): Promise<UserScriptRunExecuteResult> {
   try {
     const run = sessions.takeExecutableRun(token);
-    const outcome = await runExecutableUserScriptInSubprocess(run);
+    const outcome = await runExecutableUserScriptInSubprocess(sessions, token, run);
     return mapWorkerOutcomeToExecuteResult(sessions, token, run.resultKind, outcome);
   } catch (error) {
     return { status: "failed", message: describeUserScriptFailure(error) };
   } finally {
+    sessions.clearExecutingWorkerKill(token);
     await sessions.releaseInputResourcesAfterRun(token).catch(() => undefined);
   }
 }
 
+// CT-268: the worker registers its cancel trigger with the session store while
+// it runs, so the cancel channel can SIGKILL the subprocess mid-run.
 function runExecutableUserScriptInSubprocess(
+  sessions: ChunkedUserScriptRunSessionStore,
+  token: string,
   run: ExecutableUserScriptRun,
 ): Promise<PythonWorkerOutcome> {
   return runUserScriptInPythonSubprocess({
@@ -221,6 +231,7 @@ function runExecutableUserScriptInSubprocess(
     cubeResultSpoolPath: run.cubeResultSpoolPath,
     sandbox: run.sandbox,
     timeoutMs: wallClockTimeoutMsForUserScriptRun(run.resultKind, run.cube.totalByteLength),
+    registerCancel: (cancelRun) => sessions.registerExecutingWorkerKill(token, cancelRun),
   });
 }
 

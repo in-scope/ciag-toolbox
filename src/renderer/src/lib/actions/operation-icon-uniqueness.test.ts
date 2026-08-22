@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BoxSelect, FolderOpen, Grid2x2 } from "lucide-react";
+import { BoxSelect, FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 
 import {
   buildToolbarOperationGroups,
@@ -22,6 +22,7 @@ import {
 
 const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIcon]> = [
   ["open-image", FolderOpen],
+  ["open-project", FolderInput],
   ["grid-layout", Grid2x2],
   ["toggle-region-tool", BoxSelect],
 ];

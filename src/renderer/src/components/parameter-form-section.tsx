@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import { pickAndRememberReferenceRasterFromDisk } from "@/lib/image/pick-reference-raster";
 import {
   BAND_RANGE_SYNTAX_EXAMPLES,
-  BAND_RANGE_SYNTAX_HINT,
 } from "@/lib/image/parse-band-range";
 import {
   readReferenceTokenDisplayName,
@@ -110,6 +109,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
     return null;
   }
   if (isHiddenCubeScopeRow(props.schema, props.sourceBandCount)) return null;
+  if (isHiddenSingleBandSourceRow(props.schema, props.sourceBandCount)) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <ParameterFieldInput
@@ -131,6 +131,15 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
 
 function isHiddenCubeScopeRow(schema: ParameterSchema, sourceBandCount: number | null): boolean {
   return schema.kind === "cube-scope" && !shouldShowCubeScopeControl(sourceBandCount);
+}
+
+// CT-282: a field flagged hiddenForSingleBandSource is a scope-style choice that
+// is redundant for one band, so it hides exactly like the cube-scope control.
+function isHiddenSingleBandSourceRow(
+  schema: ParameterSchema,
+  sourceBandCount: number | null,
+): boolean {
+  return Boolean(schema.hiddenForSingleBandSource) && !shouldShowCubeScopeControl(sourceBandCount);
 }
 
 function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
@@ -543,10 +552,11 @@ interface BandRangeTextInputProps {
   onChangeValue: (next: string) => void;
 }
 
+// CT-287: no inline syntax hint here; the scope field's schema description is
+// the single band-list help sentence shown for the whole row.
 function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
   const id = useId();
   const rangeError = describeCubeScopeBandRangeErrorOrNull(props.schema, props.value, props.sourceBandCount);
-  const hintId = `${id}-syntax-hint`;
   return (
     <div className="flex flex-col gap-1 pl-6 text-sm">
       <input
@@ -555,14 +565,10 @@ function BandRangeTextInput(props: BandRangeTextInputProps): JSX.Element {
         value={props.value}
         placeholder={BAND_RANGE_SYNTAX_EXAMPLES}
         aria-label="Bands to process"
-        aria-describedby={hintId}
         aria-invalid={rangeError !== null}
         onChange={(event) => props.onChangeValue(event.target.value)}
         className={cn(NUMERIC_INPUT_CLASSES, rangeError && "border-destructive focus:ring-destructive")}
       />
-      <span id={hintId} className="text-xs text-muted-foreground">
-        {BAND_RANGE_SYNTAX_HINT}
-      </span>
       {rangeError ? <span className="text-xs text-destructive">{rangeError}</span> : null}
     </div>
   );
@@ -654,7 +660,7 @@ async function pickReferenceRasterIntoField(
     const picked = await pickAndRememberReferenceRasterFromDisk();
     if (picked) onChangeValue(picked.token);
   } catch (error) {
-    toast.error(describeReferencePickError(error));
+    notifyError(describeReferencePickError(error));
   } finally {
     setIsPicking(false);
   }

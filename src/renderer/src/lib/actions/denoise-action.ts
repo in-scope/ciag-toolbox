@@ -6,6 +6,7 @@ import {
   type DenoiseSettings,
 } from "@/lib/image/filters/denoise";
 import { makeFloatRasterReusingUnchangedSourceBandsReportingProgress } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { UnitProgressCallback } from "@/lib/image/unit-progress";
@@ -103,10 +104,7 @@ const DENOISE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: DENOISE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack denoises every band's picture. Band-wise denoises only the entered bands " +
-    "and carries the other bands through unchanged. Leave the band field empty to process " +
-    "every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: DENOISE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -128,6 +126,7 @@ export const DENOISE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatDenoiseAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountIntoDenoiseParameters,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createDenoiseSourceTransform(),
 };
 
@@ -171,7 +170,7 @@ function readFiniteNumberOrDefault(value: ParameterValue | undefined, fallback: 
 }
 
 function createDenoiseSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const settings = readDenoiseSettings(parameterValues);
     const denoisedBandIndexes = resolveScopedBandIndexSet(
@@ -179,27 +178,30 @@ function createDenoiseSourceTransform(): ViewportActionAsyncSourceTransform {
       parameterValues,
       source.raster.bandCount,
     );
-    const raster = await denoiseBandsOfRaster(source.raster, denoisedBandIndexes, settings, onProgress);
+    const raster = await denoiseBandsOfRaster(source.raster, denoisedBandIndexes, settings, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
 
 // CT-226: each band's kernel work runs in row chunks reporting a within-band
 // fraction, so the busy bar advances continuously through a slow band instead of
-// jumping once per band.
+// jumping once per band. CT-268: the abort signal is checked at those same row
+// chunks, so Stop lands mid-band.
 function denoiseBandsOfRaster(
   raster: RasterImage,
   denoisedBandIndexes: ReadonlySet<number>,
   settings: DenoiseSettings,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const shape = { width: raster.width, height: raster.height };
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
     raster,
     denoisedBandIndexes,
     (band, _bandIndex, onWithinBandProgress) =>
-      applyDenoiseToBandInChunksReportingProgress(band, shape, settings, onWithinBandProgress),
+      applyDenoiseToBandInChunksReportingProgress(band, shape, settings, onWithinBandProgress, abortSignal),
     onProgress,
+    abortSignal,
   );
 }
 

@@ -1,23 +1,9 @@
-export type GridLayout =
-  | "1x1"
-  | "1x2"
-  | "2x1"
-  | "1x3"
-  | "3x1"
-  | "2x2"
-  | "2x3"
-  | "3x2";
+// The layout list and its type live in src/shared/grid-layouts.ts so the
+// native File > Grid submenu (main process) offers the same layouts (CT-289).
+import type { GridLayout } from "@shared/grid-layouts";
 
-export const SELECTABLE_GRID_LAYOUTS: ReadonlyArray<GridLayout> = [
-  "1x1",
-  "1x2",
-  "2x1",
-  "1x3",
-  "3x1",
-  "2x2",
-  "2x3",
-  "3x2",
-];
+export { SELECTABLE_GRID_LAYOUTS } from "@shared/grid-layouts";
+export type { GridLayout };
 
 interface GridDimensions {
   readonly rows: number;

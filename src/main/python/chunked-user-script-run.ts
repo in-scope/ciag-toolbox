@@ -61,6 +61,12 @@ export interface ChunkedUserScriptRunSessionStore {
   ): StoredCubeResultSummary;
   readNextResultChunk(token: string): Promise<UserScriptRunResultChunkResult>;
   release(token: string): Promise<void>;
+  // CT-268: the execute handler registers the running worker's kill while the
+  // subprocess is alive; cancelExecutingRun invokes it (a no-op for a token
+  // with no executing worker) so the renderer's Stop can kill the Python run.
+  registerExecutingWorkerKill(token: string, killWorker: () => void): void;
+  clearExecutingWorkerKill(token: string): void;
+  cancelExecutingRun(token: string): void;
 }
 
 interface SpooledCubeFile {
@@ -83,6 +89,7 @@ interface ChunkedUserScriptRunSession {
   receivedCubeBytes: number;
   hasReleasedInputResources: boolean;
   resultPull: PendingCubeResultPull | null;
+  killExecutingWorker: (() => void) | null;
 }
 
 export function createChunkedUserScriptRunSessionStore(
@@ -101,6 +108,15 @@ export function createChunkedUserScriptRunSessionStore(
     readNextResultChunk: async (token) =>
       readNextResultChunkFromSession(requireSession(sessions, token), chunkBytes),
     release: (token) => releaseSessionDiscardingState(sessions, token),
+    registerExecutingWorkerKill: (token, killWorker) => {
+      const session = sessions.get(token);
+      if (session) session.killExecutingWorker = killWorker;
+    },
+    clearExecutingWorkerKill: (token) => {
+      const session = sessions.get(token);
+      if (session) session.killExecutingWorker = null;
+    },
+    cancelExecutingRun: (token) => sessions.get(token)?.killExecutingWorker?.(),
   };
 }
 
@@ -120,6 +136,7 @@ async function beginSession(
     receivedCubeBytes: 0,
     hasReleasedInputResources: false,
     resultPull: null,
+    killExecutingWorker: null,
   });
   return token;
 }

@@ -219,10 +219,56 @@ function computeColorfulNonClearPixelFraction(decoded: DecodedCanvasPixels): num
 }
 
 function channelSpreadExceedsGrayscaleThreshold(packedRgb: number): boolean {
+  return channelSpreadOfPackedRgb(packedRgb) > GRAYSCALE_CHANNEL_SPREAD_THRESHOLD;
+}
+
+function channelSpreadOfPackedRgb(packedRgb: number): number {
   const red = (packedRgb >> 16) & 0xff;
   const green = (packedRgb >> 8) & 0xff;
   const blue = packedRgb & 0xff;
-  return Math.max(red, green, blue) - Math.min(red, green, blue) > GRAYSCALE_CHANNEL_SPREAD_THRESHOLD;
+  return Math.max(red, green, blue) - Math.min(red, green, blue);
+}
+
+// CT-278: a committed false-color composite of a 12-bit stack renders DARK (raw
+// values over the uint16 display unit), so colorfulNonClearPixelFraction reads 0
+// even though the channels genuinely differ - its non-clear gate drops every
+// image pixel. This summary keeps ALL sampled pixels and counts the ones whose
+// channel spread meets the given floor plus the distinct colours among them, so
+// a dark-but-coloured render (many hued pixels, several distinct hues) is
+// distinguishable from a grayscale one (R==G==B everywhere, zero of both).
+export interface CanvasHueSummary {
+  readonly sampledPixelCount: number;
+  readonly huedPixelCount: number;
+  readonly distinctHueCount: number;
+}
+
+export async function summarizeCanvasHues(
+  canvas: Locator,
+  minimumChannelSpread: number,
+): Promise<CanvasHueSummary> {
+  return summarizeDecodedCanvasHues(
+    await decodeCanvasPixelsExcludingBandNavigator(canvas),
+    minimumChannelSpread,
+  );
+}
+
+function summarizeDecodedCanvasHues(
+  decoded: DecodedCanvasPixels,
+  minimumChannelSpread: number,
+): CanvasHueSummary {
+  const distinctHues = new Set<number>();
+  let sampledPixelCount = 0;
+  let huedPixelCount = 0;
+  const pixelCount = Math.floor(decoded.data.length / decoded.channels);
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (isPixelInsideMask(index, decoded.width, decoded.bandNavigatorMask)) continue;
+    sampledPixelCount += 1;
+    const color = readPackedRgbAtPixel(decoded.data, index * decoded.channels);
+    if (channelSpreadOfPackedRgb(color) < minimumChannelSpread) continue;
+    huedPixelCount += 1;
+    distinctHues.add(color);
+  }
+  return { sampledPixelCount, huedPixelCount, distinctHueCount: distinctHues.size };
 }
 
 // CT-195: an MNF component that overflowed the half-float display texture renders

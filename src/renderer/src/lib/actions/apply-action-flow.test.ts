@@ -1,11 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
+import { OPERATION_STOPPED_MESSAGE } from "@/lib/image/operation-stop";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
+import { reportCompletedUnitAndYieldSoProgressCanPaint } from "@/lib/image/unit-progress";
+import { buildErrorToastOptions } from "@/lib/notifications/toast-options";
+import {
+  queueOutgoingRasterSourceForBufferRelease,
+  releaseQueuedRasterBuffersSkippingShared,
+  resetRasterBufferReleaseStateForTests,
+} from "@/lib/image/raster-buffer-release";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -14,6 +22,11 @@ import {
   runDuplicateAndApplyAtTargetIndex,
   type ApplyActionFlowBindings,
 } from "./apply-action-flow";
+import {
+  BAND_SELECTION_ACTION,
+  createBandSelectionSourceTransform,
+} from "./band-selection-action";
+import { createInFlightApplyRunStore } from "./in-flight-apply-run-store";
 import {
   EMPTY_OPERATION_HISTORY,
   type ViewportOperationHistory,
@@ -30,7 +43,7 @@ import {
 } from "./viewport-action";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 describe("runDuplicateAndApplyAtTargetIndex", () => {
   it("inherits the source viewport's operation history when duplicating to a new viewport", async () => {
@@ -246,7 +259,10 @@ describe("applyActionToDuplicateOfSource with assertCanApplyToSource (CT-190)", 
     expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
     expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
     expect(harness.bindings.setGridLayout).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Reject Source failed: not appliable");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Reject Source failed: not appliable",
+      buildErrorToastOptions(),
+    );
   });
 });
 
@@ -292,6 +308,7 @@ function buildBindingsBackedByMaps(
       renderingByIndex.get(index) ?? DEFAULT_VIEWPORT_RENDERING_STATE,
     setRenderingState,
     busyRegistrar: buildNoopBusyEntryRegistrarForTests(),
+    inFlightApplyRuns: createInFlightApplyRunStore(),
   };
 }
 
@@ -330,7 +347,6 @@ function buildRenderingStateWithHistory(
     toneCurveChannelAnchors: EMPTY_TONE_CURVE_CHANNEL_ANCHORS,
     toneCurveActiveChannel: "rgb",
     thresholdBounds: null,
-    thresholdOtsuCutoffs: null,
     bandWeights: null,
     bandSelection: null,
     cubeTransform: null,
@@ -607,7 +623,9 @@ describe("apply without the whole-cube clone (CT-233)", () => {
       SOURCE_INDEX,
       harness.bindings,
     );
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Throws failed: boom"));
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Throws failed: boom", buildErrorToastOptions()),
+    );
     expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
     sourceRaster.bandPixels.forEach((band, index) => {
       expect(Array.from(band)).toEqual(bandSnapshots[index]);
@@ -636,6 +654,7 @@ function buildRasterDuplicateFlowHarness(
     setImagesByIndex: (updater) => {
       imagesByIndex = updater(imagesByIndex);
     },
+    inFlightApplyRuns: createInFlightApplyRunStore(),
   };
   return { bindings, readContentAtIndex: (index) => imagesByIndex.get(index) };
 }
@@ -720,6 +739,604 @@ function buildCropLikeActionThatClearsSourceRoi(): RegisteredViewportAction {
       roi: null,
     }),
   } as unknown as RegisteredViewportAction;
+}
+
+describe("apply failure clears the operation region (CT-261)", () => {
+  it("clears the source's operation region when an in-place apply fails", () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatThrowsOnApply(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).operationRegion).toBeNull();
+  });
+
+  it("clears the source's operation region when a duplicate-flow transform fails", async () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionThatThrowsOnTransform(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).operationRegion).toBeNull();
+  });
+
+  it("leaves the region's sibling inspection ROI untouched when clearing on failure", () => {
+    const harness = buildFlowHarnessWithSourceOperationRegion();
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatThrowsOnApply(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).roi).toEqual(buildSampleRoi());
+  });
+});
+
+function buildFlowHarnessWithSourceOperationRegion(): DuplicateFlowHarness {
+  const initialSource = {
+    ...buildRenderingStateWithHistory([]),
+    roi: buildSampleRoi(),
+    operationRegion: buildSampleRoi(),
+  };
+  const renderingByIndex = new Map<number, ViewportRenderingState>([[SOURCE_INDEX, initialSource]]);
+  const setRenderingState = vi.fn((index: number, next: ViewportRenderingState) =>
+    renderingByIndex.set(index, next),
+  );
+  const bindings = buildBindingsBackedByMaps(renderingByIndex, setRenderingState);
+  return {
+    bindings,
+    findLatestRenderingStateWriteAtIndex: (i) => readLatestWrite(setRenderingState, i),
+  };
+}
+
+function buildActionThatThrowsOnApply(): RegisteredViewportAction {
+  return {
+    id: "throws-on-apply",
+    label: "Throws On Apply",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Throws",
+    apply: () => {
+      throw new Error("boom");
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
+// --- CT-268: Stop button / abort token -------------------------------------
+
+describe("stoppable applies (CT-268)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.info).mockClear();
+  });
+
+  it("offers the busy entry a requestStop for a stoppable action and none otherwise", async () => {
+    const stopHarness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(3),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      stopHarness.bindings,
+    );
+    expect(stopHarness.capturedRequestStops).toHaveLength(1);
+    expect(stopHarness.capturedRequestStops[0]).toBeTypeOf("function");
+
+    const plainHarness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      plainHarness.bindings,
+    );
+    expect(plainHarness.capturedRequestStops).toEqual([undefined]);
+  });
+
+  it("a stop mid-run cancels the chunked sweep, opens no panel, writes no History, and toasts 'Operation stopped'", async () => {
+    const harness = buildStopFlowHarness({ clickStopAfterFirstProgressTick: true });
+    const completedUnits: number[] = [];
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(5, completedUnits),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(completedUnits.length).toBeLessThan(5);
+    expect(toast.info).toHaveBeenCalledWith(OPERATION_STOPPED_MESSAGE);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
+    expect(harness.clearedBusyEntryCount()).toBe(1);
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: false }]);
+  });
+
+  it("a stopped in-place apply keeps the source untouched and reports no success", async () => {
+    const harness = buildStopFlowHarness({ clickStopAfterFirstProgressTick: true });
+    applyActionInPlaceAtSourceIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(5),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(harness.clearedBusyEntryCount()).toBe(1));
+    expect(toast.info).toHaveBeenCalledWith(OPERATION_STOPPED_MESSAGE);
+    expect(harness.bindings.setImagesByIndex).not.toHaveBeenCalled();
+    expect(harness.bindings.setRenderingState).not.toHaveBeenCalled();
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: false }]);
+  });
+
+  it("a stoppable action that finishes without a stop still lands its result normally", async () => {
+    const harness = buildStopFlowHarness();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildStoppableActionCheckingTheSignalEachUnit(3),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(harness.bindings.setImagesByIndex).toHaveBeenCalled();
+    expect(harness.reportedOutcomes).toEqual([{ succeeded: true }]);
+  });
+});
+
+interface StopFlowHarness {
+  readonly bindings: ApplyActionFlowBindings;
+  readonly capturedRequestStops: Array<(() => void) | undefined>;
+  readonly clearedBusyEntryCount: () => number;
+  readonly reportedOutcomes: Array<{ succeeded: boolean }>;
+}
+
+interface StopFlowHarnessOptions {
+  readonly clickStopAfterFirstProgressTick?: boolean;
+}
+
+// The registrar records each entry's requestStop; with the click option it
+// "presses Stop" as soon as the first progress update arrives, so the abort
+// lands while the chunked sweep is mid-run.
+function buildStopFlowHarness(options: StopFlowHarnessOptions = {}): StopFlowHarness {
+  const capturedRequestStops: Array<(() => void) | undefined> = [];
+  const reportedOutcomes: Array<{ succeeded: boolean }> = [];
+  let clearedCount = 0;
+  const renderingByIndex = new Map<number, ViewportRenderingState>([
+    [SOURCE_INDEX, buildRenderingStateWithHistory([])],
+  ]);
+  const bindings: ApplyActionFlowBindings = {
+    ...buildBindingsBackedByMaps(renderingByIndex, vi.fn()),
+    setImagesByIndex: vi.fn(),
+    busyRegistrar: {
+      registerAppBusyEntry: () => ({ id: "app", update: () => undefined, clear: () => undefined }),
+      registerViewportBusyEntry: (input) => {
+        capturedRequestStops.push(input.requestStop);
+        return buildStopClickingBusyHandle(input.requestStop, options, () => {
+          clearedCount += 1;
+        });
+      },
+    },
+    reportApplyOutcome: (outcome) => reportedOutcomes.push(outcome),
+  };
+  return { bindings, capturedRequestStops, clearedBusyEntryCount: () => clearedCount, reportedOutcomes };
+}
+
+function buildStopClickingBusyHandle(
+  requestStop: (() => void) | undefined,
+  options: StopFlowHarnessOptions,
+  recordClear: () => void,
+): { id: string; update: () => void; clear: () => void } {
+  let hasClickedStop = false;
+  return {
+    id: "viewport",
+    update: () => {
+      if (!options.clickStopAfterFirstProgressTick || hasClickedStop) return;
+      hasClickedStop = true;
+      requestStop?.();
+    },
+    clear: recordClear,
+  };
+}
+
+// The transform sweeps its units through the shared chunk-boundary helper, so
+// the abort check runs exactly where every real chunked operation checks it.
+function buildStoppableActionCheckingTheSignalEachUnit(
+  totalUnits: number,
+  completedUnits: number[] = [],
+): RegisteredViewportAction {
+  return {
+    id: "stoppable",
+    label: "Stoppable",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Stoppable",
+    apply: (state: ViewportRenderingState) => state,
+    supportsStopDuringApply: true,
+    transformSourceAsync: async (
+      _source: ViewportImageSource,
+      _parameterValues: unknown,
+      onProgress?: (fraction: number) => void,
+      abortSignal?: AbortSignal,
+    ) => {
+      for (let unit = 1; unit <= totalUnits; unit += 1) {
+        completedUnits.push(unit);
+        await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, unit, totalUnits, abortSignal);
+      }
+      return buildSinglePixelSource();
+    },
+  } as unknown as RegisteredViewportAction;
+}
+
+// --- CT-269: applies stay isolated while another operation runs -------------
+
+describe("in-flight apply isolation (CT-269)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.info).mockClear();
+  });
+
+  it("a second apply started while the first is in flight reserves a distinct panel", async () => {
+    const harness = buildConcurrentApplyHarness();
+    const first = buildActionWithDeferredAsyncTransform();
+    const second = buildActionWithDeferredAsyncTransform();
+    applyActionToDuplicateOfSource(first.action, NO_PARAMETER_VALUES, SOURCE_INDEX, harness.bindings);
+    applyActionToDuplicateOfSource(second.action, NO_PARAMETER_VALUES, SOURCE_INDEX, harness.bindings);
+    expect(harness.records.map((record) => record.viewportIndex)).toEqual([1, 2]);
+    await first.resolveNextTransform();
+    await second.resolveNextTransform();
+    await vi.waitFor(() => {
+      expect(harness.readContentAtIndex(1)).toBeDefined();
+      expect(harness.readContentAtIndex(2)).toBeDefined();
+    });
+    expect(harness.bindings.inFlightApplyRuns.listReservedResultTargetIndexes()).toEqual(new Set());
+  });
+
+  it("closing the reserved target mid-run discards the completed result and reports a stop", async () => {
+    const harness = buildConcurrentApplyHarness();
+    const deferred = buildActionWithDeferredAsyncTransform();
+    const runPromise = runDuplicateAndApplyAtTargetIndex(
+      deferred.action,
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.bindings.inFlightApplyRuns.cancelAndStopApplyRunsTargetingIndex(TARGET_INDEX)).toBe(true);
+    await deferred.resolveNextTransform();
+    await runPromise;
+    expect(harness.readContentAtIndex(TARGET_INDEX)).toBeUndefined();
+    expect(toast.info).toHaveBeenCalledWith(OPERATION_STOPPED_MESSAGE);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(harness.bindings.inFlightApplyRuns.listReservedResultTargetIndexes()).toEqual(new Set());
+  });
+
+  it("an unrelated panel close mid-run shifts the result to the target's new index", async () => {
+    const harness = buildConcurrentApplyHarness([
+      [0, buildSinglePixelCellContent()],
+      [1, buildSinglePixelCellContent()],
+    ]);
+    const deferred = buildActionWithDeferredAsyncTransform();
+    const runPromise = runDuplicateAndApplyAtTargetIndex(
+      deferred.action,
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      1,
+      2,
+      harness.bindings,
+    );
+    harness.simulateCompactingCloseOfViewport(0);
+    await deferred.resolveNextTransform();
+    await runPromise;
+    expect(harness.readContentAtIndex(1)).toBeDefined();
+    expect(harness.readContentAtIndex(2)).toBeUndefined();
+    expect(toast.success).toHaveBeenCalled();
+  });
+});
+
+interface ConcurrentApplyHarness {
+  readonly bindings: ApplyActionFlowBindings;
+  readonly records: RecordedBusyEntryInput[];
+  readonly readContentAtIndex: (index: number) => ViewportCellContent | undefined;
+  readonly simulateCompactingCloseOfViewport: (index: number) => void;
+}
+
+function buildConcurrentApplyHarness(
+  initialEntries: ReadonlyArray<[number, ViewportCellContent]> = [
+    [SOURCE_INDEX, buildSinglePixelCellContent()],
+  ],
+): ConcurrentApplyHarness {
+  let imagesByIndex: ReadonlyMap<number, ViewportCellContent> = new Map(initialEntries);
+  const records: RecordedBusyEntryInput[] = [];
+  const bindings: ApplyActionFlowBindings = {
+    ...buildRasterHarnessRenderingBindings(),
+    gridLayout: "2x2",
+    cellCount: 4,
+    get imagesByIndex() {
+      return imagesByIndex;
+    },
+    setImagesByIndex: (updater) => {
+      imagesByIndex = updater(imagesByIndex);
+    },
+    busyRegistrar: buildRecordingBusyEntryRegistrar(records),
+    inFlightApplyRuns: createInFlightApplyRunStore(),
+  };
+  const simulateCompactingCloseOfViewport = (index: number): void => {
+    imagesByIndex = compactMapAfterRemovingIndexForTests(imagesByIndex, index);
+    bindings.inFlightApplyRuns.shiftApplyRunIndexesAfterViewportRemoved(index);
+  };
+  return {
+    bindings,
+    records,
+    readContentAtIndex: (index) => imagesByIndex.get(index),
+    simulateCompactingCloseOfViewport,
+  };
+}
+
+function compactMapAfterRemovingIndexForTests(
+  previous: ReadonlyMap<number, ViewportCellContent>,
+  removedIndex: number,
+): ReadonlyMap<number, ViewportCellContent> {
+  const compacted = new Map<number, ViewportCellContent>();
+  for (const [index, content] of previous) {
+    if (index === removedIndex) continue;
+    compacted.set(index > removedIndex ? index - 1 : index, content);
+  }
+  return compacted;
+}
+
+// The flow yields once before invoking the transform, so resolving must first
+// WAIT for the transform to have started (its resolver to exist).
+function buildActionWithDeferredAsyncTransform(): {
+  action: RegisteredViewportAction;
+  resolveNextTransform: () => Promise<void>;
+} {
+  const pendingResolvers: Array<(source: ViewportImageSource) => void> = [];
+  const action = {
+    id: "deferred",
+    label: "Deferred",
+    loadingMessage: "Working...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Deferred",
+    apply: (state: ViewportRenderingState) => state,
+    transformSourceAsync: () =>
+      new Promise<ViewportImageSource>((resolve) => {
+        pendingResolvers.push(resolve);
+      }),
+  } as unknown as RegisteredViewportAction;
+  const resolveNextTransform = async (): Promise<void> => {
+    await vi.waitFor(() => {
+      if (pendingResolvers.length === 0) throw new Error("transform has not started yet");
+    });
+    pendingResolvers.shift()?.(buildSinglePixelSource());
+  };
+  return { action, resolveNextTransform };
+}
+
+// --- CT-276: new-panel success hint ----------------------------------------
+
+describe("new-panel success hint (CT-276)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+  });
+
+  it("appends the hint to the success toast when the result lands in another panel", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Crop to region applied. Closing the original panel frees its memory.",
+      expect.anything(),
+    );
+  });
+
+  it("toasts the plain message when the duplicate path replaces the source panel itself", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    await runDuplicateAndApplyAtTargetIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    expect(toast.success).toHaveBeenCalledWith("Crop to region applied", expect.anything());
+  });
+
+  it("toasts the plain message for an in-place apply", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    applyActionInPlaceAtSourceIndex(
+      buildCropLikeActionWithNewPanelHint(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Crop to region applied", expect.anything()),
+    );
+  });
+});
+
+function buildCropLikeActionWithNewPanelHint(): RegisteredViewportAction {
+  return {
+    id: "crop-like",
+    label: "Crop to Region",
+    icon: () => null,
+    successMessage: "Crop to region applied",
+    successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
+    appliedLabel: "Crop to region",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => buildSinglePixelSource(),
+  } as unknown as RegisteredViewportAction;
+}
+
+describe("a failing band-selection script leaves no result panel (CT-293)", () => {
+  it("places nothing and leaves the source untouched when the Python run fails", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildBandSelectionActionWithFailingScript(),
+      { customBandExpression: "cub[1]" },
+      content,
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.readContentAtIndex(TARGET_INDEX)).toBeUndefined();
+    expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
+  });
+});
+
+function buildBandSelectionActionWithFailingScript(): RegisteredViewportAction {
+  return {
+    ...BAND_SELECTION_ACTION,
+    transformSourceAsync: createBandSelectionSourceTransform(async () => ({
+      status: "failed",
+      message: "NameError: name 'cub' is not defined",
+    })),
+  };
+}
+
+describe("deterministic buffer release on replace (CT-290)", () => {
+  beforeEach(() => {
+    resetRasterBufferReleaseStateForTests();
+    vi.mocked(toast.success).mockClear();
+  });
+
+  it("in-place apply queues the replaced raster; flush detaches unshared bands and skips carried-over ones", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatCarriesBandZeroThroughByReference(sourceRaster),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    flushBufferReleasesTreatingHarnessPanelsAsLive(harness);
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(8);
+    expect(sourceRaster.bandPixels[1]!.buffer.byteLength).toBe(0);
+    expect(sourceRaster.bandPixels[2]!.buffer.byteLength).toBe(0);
+  });
+
+  it("holds the captured source while the transform runs, so a concurrent release cannot detach it", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    const transformGate = buildManuallyResolvedTransformGate();
+    applyActionInPlaceAtSourceIndex(
+      transformGate.action,
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(transformGate.transformHasStarted()).toBe(true));
+    queueOutgoingRasterSourceForBufferRelease(content.source);
+    releaseQueuedRasterBuffersSkippingShared({ liveSources: [], rememberedRasters: [] });
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(8);
+    transformGate.resolveWithFreshSinglePixelSource();
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    releaseQueuedRasterBuffersSkippingShared({ liveSources: [], rememberedRasters: [] });
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(0);
+  });
+
+  it("duplicate path pointed back at the source panel (replace picker) queues the replaced raster", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      content,
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    flushBufferReleasesTreatingHarnessPanelsAsLive(harness);
+    sourceRaster.bandPixels.forEach((band) => expect(band.buffer.byteLength).toBe(0));
+  });
+});
+
+function flushBufferReleasesTreatingHarnessPanelsAsLive(harness: RasterDuplicateFlowHarness): void {
+  const liveSources = [SOURCE_INDEX, TARGET_INDEX]
+    .map((index) => harness.readContentAtIndex(index)?.source)
+    .filter((source): source is ViewportImageSource => source !== undefined);
+  releaseQueuedRasterBuffersSkippingShared({ liveSources, rememberedRasters: [] });
+}
+
+function buildActionThatCarriesBandZeroThroughByReference(
+  sourceRaster: RasterImage,
+): RegisteredViewportAction {
+  return {
+    id: "carry-band-zero",
+    label: "Carry",
+    loadingMessage: "Carrying...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Carried",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => ({
+      kind: "raster",
+      raster: {
+        ...sourceRaster,
+        bandPixels: [sourceRaster.bandPixels[0]!, new Uint16Array(4), new Uint16Array(4)],
+      },
+    }),
+  } as unknown as RegisteredViewportAction;
+}
+
+interface ManuallyResolvedTransformGate {
+  readonly action: RegisteredViewportAction;
+  readonly transformHasStarted: () => boolean;
+  readonly resolveWithFreshSinglePixelSource: () => void;
+}
+
+function buildManuallyResolvedTransformGate(): ManuallyResolvedTransformGate {
+  let resolveTransform: (source: ViewportImageSource) => void = () => undefined;
+  let started = false;
+  const pendingSource = new Promise<ViewportImageSource>((resolve) => {
+    resolveTransform = resolve;
+  });
+  const action = {
+    id: "gated",
+    label: "Gated",
+    loadingMessage: "Running...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Gated",
+    apply: (state: ViewportRenderingState) => state,
+    transformSourceAsync: () => {
+      started = true;
+      return pendingSource;
+    },
+  } as unknown as RegisteredViewportAction;
+  return {
+    action,
+    transformHasStarted: () => started,
+    resolveWithFreshSinglePixelSource: () => resolveTransform(buildSinglePixelSource()),
+  };
 }
 
 void EMPTY_OPERATION_HISTORY;

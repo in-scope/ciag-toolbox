@@ -32,6 +32,7 @@ export async function computeWeightedSumReportingProgress(
   bands: ReadonlyArray<RasterTypedArray>,
   weights: ReadonlyArray<number>,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<Float32Array> {
   const { output, normalizer } = prepareWeightedSumOutput(bands, weights);
   if (normalizer === 0) return output;
@@ -40,6 +41,7 @@ export async function computeWeightedSumReportingProgress(
     weightedSumPixelsPerChunk(bands.length),
     (start, end) => fillNormalizedWeightedSumRange(output, bands, weights, normalizer, start, end),
     onProgress,
+    abortSignal,
   );
   return output;
 }
@@ -100,6 +102,6 @@ function sumOfAbsoluteWeights(weights: ReadonlyArray<number>): number {
 function assertWeightCountMatchesBandCount(bandCount: number, weightCount: number): void {
   if (bandCount === weightCount) return;
   throw new Error(
-    `Band weighting needs one weight per band (expected ${bandCount}, got ${weightCount}).`,
+    `Weighted sum needs one weight per band (expected ${bandCount}, got ${weightCount}).`,
   );
 }

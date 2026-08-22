@@ -1,3 +1,5 @@
+import { throwIfOperationStopped } from "@/lib/image/operation-stop";
+
 // CT-220/CT-221: determinate progress for multi-unit work on the renderer thread.
 // A unit is one page of a multi-page TIFF, one band of an ENVI cube, or one band of
 // an operation's per-band loop; the fraction is completed units / total units. The
@@ -15,14 +17,20 @@ export function reportMultiUnitWorkStarting(
   onProgress(0);
 }
 
+// CT-268: every chunk boundary doubles as a stop checkpoint. The optional abort
+// signal comes from the apply flow's Stop button; a stopped run throws
+// OperationStoppedError out of the compute loop at the next boundary.
 export async function reportCompletedUnitAndYieldSoProgressCanPaint(
   onProgress: UnitProgressCallback | undefined,
   completedUnits: number,
   totalUnits: number,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
+  throwIfOperationStopped(abortSignal);
   if (!onProgress) return;
   onProgress(completedUnits / Math.max(1, totalUnits));
   await yieldOnceSoTheBusyIndicatorCanPaint();
+  throwIfOperationStopped(abortSignal);
 }
 
 // CT-223: phase-structured work (sample extraction, fit, projection) reports each
@@ -30,10 +38,13 @@ export async function reportCompletedUnitAndYieldSoProgressCanPaint(
 export async function reportProgressFractionAndYield(
   onProgress: UnitProgressCallback | undefined,
   fraction: number,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
+  throwIfOperationStopped(abortSignal);
   if (!onProgress) return;
   onProgress(fraction);
   await yieldOnceSoTheBusyIndicatorCanPaint();
+  throwIfOperationStopped(abortSignal);
 }
 
 // CT-222: multi-phase work (e.g. brightness then contrast, normalize then invert)
@@ -72,12 +83,13 @@ export async function runInChunksReportingProgress(
   unitsPerChunk: number,
   processChunk: (startUnit: number, endUnit: number) => void,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const chunkSize = Math.max(1, Math.floor(unitsPerChunk));
   for (let start = 0; start < totalUnits; start += chunkSize) {
     const end = Math.min(totalUnits, start + chunkSize);
     processChunk(start, end);
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, end, totalUnits);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, end, totalUnits, abortSignal);
   }
 }
 
@@ -85,12 +97,13 @@ export async function computeArrayReportingPerUnitProgress<T>(
   totalUnits: number,
   computeUnit: (index: number) => T,
   onProgress: UnitProgressCallback | undefined,
+  abortSignal?: AbortSignal,
 ): Promise<T[]> {
   reportMultiUnitWorkStarting(onProgress, totalUnits);
   const results: T[] = [];
   for (let index = 0; index < totalUnits; index += 1) {
     results.push(computeUnit(index));
-    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalUnits);
+    await reportCompletedUnitAndYieldSoProgressCanPaint(onProgress, index + 1, totalUnits, abortSignal);
   }
   return results;
 }
@@ -98,6 +111,52 @@ export async function computeArrayReportingPerUnitProgress<T>(
 // CT-240: exported for chunked work that must yield WITHOUT reporting progress
 // (e.g. the sample-range sub-chunks inside one FastICA iteration, whose progress
 // unit is the whole iteration).
+//
+// CT-270: the yield is normally a MessageChannel macrotask, not setTimeout(0).
+// Chromium clamps nested timers to ~4 ms, which taxed chunk-heavy sweeps by
+// seconds (the pre-CT-270 covariance build yielded once per band pair). But a
+// long run of back-to-back message tasks can starve rendering (measured: a
+// 2.1 s rAF gap during the FastICA chunk train), so once enough wall time has
+// passed since the last timer yield the next yield takes the timer path, which
+// guarantees the renderer a frame at that cadence. The timer's ~4 ms cost only
+// ever lands after a full paint window of compute, so it stays negligible.
+const MILLISECONDS_BETWEEN_GUARANTEED_PAINT_TIMER_YIELDS = 50;
+let lastPaintTimerYieldAtMs = 0;
+
 export function yieldOnceSoTheBusyIndicatorCanPaint(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  const now = Date.now();
+  const paintWindowElapsed =
+    now - lastPaintTimerYieldAtMs >= MILLISECONDS_BETWEEN_GUARANTEED_PAINT_TIMER_YIELDS;
+  if (!sharedMacrotaskYieldChannel || paintWindowElapsed) {
+    lastPaintTimerYieldAtMs = now;
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return waitForOneMacrotaskMessage(sharedMacrotaskYieldChannel);
 }
+
+export interface MacrotaskYieldChannel {
+  readonly postWakeMessage: () => void;
+  readonly waitingResolvers: Array<() => void>;
+}
+
+// Exported for its unit test; production code goes through the shared instance.
+// The Node MessagePort would otherwise hold the event loop open, so it is
+// unref'd where that exists (browsers have no unref and skip it).
+export function createMacrotaskYieldChannelIfSupported(): MacrotaskYieldChannel | null {
+  if (typeof MessageChannel === "undefined") return null;
+  const channel = new MessageChannel();
+  const waitingResolvers: Array<() => void> = [];
+  channel.port1.onmessage = () => waitingResolvers.shift()?.();
+  (channel.port1 as { unref?: () => void }).unref?.();
+  (channel.port2 as { unref?: () => void }).unref?.();
+  return { postWakeMessage: () => channel.port2.postMessage(undefined), waitingResolvers };
+}
+
+function waitForOneMacrotaskMessage(channel: MacrotaskYieldChannel): Promise<void> {
+  return new Promise((resolve) => {
+    channel.waitingResolvers.push(resolve);
+    channel.postWakeMessage();
+  });
+}
+
+const sharedMacrotaskYieldChannel = createMacrotaskYieldChannelIfSupported();

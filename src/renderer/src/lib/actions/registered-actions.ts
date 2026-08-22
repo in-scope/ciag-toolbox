@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blend, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, Palette, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
+import { Blend, ChevronsDownUp, ChevronsLeft, Crop, Eclipse, FlipHorizontal2, Layers, RotateCwSquare, Scaling, Sigma, SlidersHorizontal, Spline, SunDim, Target } from "lucide-react";
 
+import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import {
   EMPTY_PINNED_ROI_SPECTRA,
   EMPTY_PINNED_SPECTRA,
@@ -17,6 +18,7 @@ import {
   applyToneCurveToWholeStackPerBandMinMaxReportingProgress,
   type ToneCurveAnchor,
 } from "@/lib/image/apply-tone-curve";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
   colorBandIndexForToneCurveChannel,
@@ -151,6 +153,12 @@ export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 export interface RegisteredViewportAction extends ViewportAction {
   readonly icon: RegisteredActionIcon;
   readonly successMessage: string;
+  /**
+   * CT-276: extra sentence appended to the success toast when the result
+   * landed in a DIFFERENT panel than the source (so the source panel still
+   * holds its memory). An in-place apply never shows it.
+   */
+  readonly successHintWhenResultOpensNewPanel?: string;
   readonly appliedLabel: string;
   /**
    * CT-106: operation-specific message shown in the result panel's loading
@@ -158,6 +166,14 @@ export interface RegisteredViewportAction extends ViewportAction {
    * when omitted (see describeOperationLoadingMessage).
    */
   readonly loadingMessage?: string;
+  /**
+   * CT-268: the operation's transform checks the apply flow's abort signal at
+   * its chunk boundaries, so the busy overlay offers a Stop button. Only set
+   * this on actions whose transformSourceAsync actually consults the signal;
+   * a flagged transform that never checks it would show a Stop button that
+   * does nothing.
+   */
+  readonly supportsStopDuringApply?: boolean;
   /**
    * The operation always needs an area; the operation flow makes the user select
    * one (CT-095) and Apply stays disabled until they do.
@@ -271,6 +287,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   label: "Crop to Region",
   icon: Crop,
   successMessage: "Crop to region applied",
+  successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
   appliedLabel: "Crop to region",
   requiresOperationRegion: true,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
@@ -842,7 +859,7 @@ const BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_SCHEMA: SliderParameterSchema = {
   id: BRIGHTNESS_CONTRAST_CONTRAST_PARAMETER_ID,
   label: "Contrast",
   description:
-    "Scales each pixel around the band mean: (value - mean) * contrast + mean. 1 leaves the band unchanged; values clip to the data-type range.",
+    "Scales each pixel around the middle of the data range: (value - mid) * contrast + mid. 1 leaves the band unchanged; values clip to the data-type range.",
   defaultValue: 1,
   min: 0.05,
   max: 20,
@@ -856,7 +873,7 @@ const BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_SCHEMA: BooleanParameterSchema = {
   kind: "boolean",
   id: BRIGHTNESS_CONTRAST_ALL_BANDS_PARAMETER_ID,
   label: "Apply to all bands",
-  description: "Off applies to the selected band only; on applies to every band in the stack.",
+  description: "Applies band-wise: every band is adjusted around the middle of its own data range.",
   defaultValue: false,
   hiddenForTrueColorComposite: true,
 };
@@ -1091,15 +1108,6 @@ function describeInvertAffectedBands(parameterValues: ParameterValuesById): stri
 const NORMALIZE_SCOPE_PARAMETER_ID = "scope";
 const NORMALIZE_BAND_COUNT_PARAMETER_ID = "sourceBandCount";
 const NORMALIZE_BAND_RANGE_PARAMETER_ID = "bandRange";
-const NORMALIZE_METHOD_PARAMETER_ID = "method";
-const NORMALIZE_LOW_PERCENTILE_PARAMETER_ID = "lowPercentile";
-const NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID = "highPercentile";
-const NORMALIZE_CLIP_BOUNDS_PARAMETER_ID = "clipBounds";
-const NORMALIZE_CLIP_LOW_PARAMETER_ID = "clipLow";
-const NORMALIZE_CLIP_HIGH_PARAMETER_ID = "clipHigh";
-const MIN_MAX_METHOD_VALUE = "min-max";
-const ROBUST_PERCENTILE_METHOD_VALUE = "robust-percentile";
-const CLIP_ABSOLUTE_METHOD_VALUE = "clip-absolute";
 
 const NORMALIZE_SCOPE_IDS: CubeScopeParameterIds = {
   scopeParameterId: NORMALIZE_SCOPE_PARAMETER_ID,
@@ -1111,83 +1119,27 @@ const NORMALIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: NORMALIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack normalizes every band according to the stack-wide range; band-wise acts on the individual band range. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: NORMALIZE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
 };
 
-const NORMALIZE_METHOD_PARAMETER_SCHEMA: EnumParameterSchema = {
-  kind: "enum",
-  id: NORMALIZE_METHOD_PARAMETER_ID,
-  label: "Method",
-  description:
-    "Min-max scales by (value - min) / (max - min). Percentile clip does the same using the low and high percentile values, so sparse outliers do not flatten the image; the result spans 0 to 1 and values outside the percentile range clip to 0 and 1.",
-  defaultValue: MIN_MAX_METHOD_VALUE,
-  options: [
-    { value: MIN_MAX_METHOD_VALUE, label: "Min-max" },
-    { value: ROBUST_PERCENTILE_METHOD_VALUE, label: "Percentile clip" },
-    { value: CLIP_ABSOLUTE_METHOD_VALUE, label: "Clip by value" },
-  ],
-};
-
-const NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
-  kind: "number",
-  id: NORMALIZE_LOW_PERCENTILE_PARAMETER_ID,
-  label: "Low percentile",
-  description: "Lower clip percentile.",
-  defaultValue: 2,
-  min: 0,
-  max: 100,
-  step: 0.5,
-  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
-};
-
-const NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA: NumberParameterSchema = {
-  kind: "number",
-  id: NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID,
-  label: "High percentile",
-  description: "Upper clip percentile.",
-  defaultValue: 98,
-  min: 0,
-  max: 100,
-  step: 0.5,
-  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: ROBUST_PERCENTILE_METHOD_VALUE },
-};
-
-const NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
-  kind: "clip-bounds",
-  id: NORMALIZE_CLIP_BOUNDS_PARAMETER_ID,
-  label: "Clip range",
-  description:
-    "Values below the low value clip to it and values above the high value clip to it. The data type and in-range values are kept.",
-  loParameterId: NORMALIZE_CLIP_LOW_PARAMETER_ID,
-  hiParameterId: NORMALIZE_CLIP_HIGH_PARAMETER_ID,
-  loLabel: "Clip low",
-  hiLabel: "Clip high",
-  defaultLo: 0,
-  defaultHi: 1,
-  visibleWhen: { parameterId: NORMALIZE_METHOD_PARAMETER_ID, equals: CLIP_ABSOLUTE_METHOD_VALUE },
-};
-
+// CT-281: Normalize is min-max only. The former method selector's percentile
+// variant lives solely in the Percentile Clip operation and the clip-absolute
+// variant became the standalone Clip by Value operation below.
 export const NORMALIZE_DATA_ACTION: RegisteredViewportAction = {
   id: "normalize-data",
   label: "Normalize",
   icon: Scaling,
-  parameters: [
-    NORMALIZE_SCOPE_PARAMETER_SCHEMA,
-    NORMALIZE_METHOD_PARAMETER_SCHEMA,
-    NORMALIZE_LOW_PERCENTILE_PARAMETER_SCHEMA,
-    NORMALIZE_HIGH_PERCENTILE_PARAMETER_SCHEMA,
-    NORMALIZE_CLIP_BOUNDS_PARAMETER_SCHEMA,
-  ],
+  parameters: [NORMALIZE_SCOPE_PARAMETER_SCHEMA],
   successMessage: "Normalize applied",
   appliedLabel: "Normalize",
   loadingMessage: "Normalizing...",
   formatAppliedLabel: formatNormalizeAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountForNormalize,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createNormalizeSourceTransform(),
 };
 
@@ -1203,11 +1155,16 @@ function injectSourceBandCountForNormalize(
 }
 
 function createNormalizeSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveNormalizeScopeSelection(parameterValues, source.raster.bandCount);
-    const method = resolveNormalizeRangeMethod(parameterValues);
-    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress);
+    const raster = await applyNormalizeToRasterReportingProgress(
+      source.raster,
+      selection,
+      MIN_MAX_NORMALIZE_METHOD,
+      onProgress,
+      abortSignal,
+    );
     return { kind: "raster", raster };
   };
 }
@@ -1219,67 +1176,106 @@ function resolveNormalizeScopeSelection(
   return resolveCubeScopeSelectionFromParameters(NORMALIZE_SCOPE_IDS, parameterValues, bandCount);
 }
 
-function resolveNormalizeRangeMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
-  const method = parameterValues[NORMALIZE_METHOD_PARAMETER_ID];
-  if (method === CLIP_ABSOLUTE_METHOD_VALUE) return resolveClipAbsoluteMethod(parameterValues);
-  if (method === ROBUST_PERCENTILE_METHOD_VALUE) return resolveRobustPercentileMethod(parameterValues);
-  return MIN_MAX_NORMALIZE_METHOD;
-}
-
-// Exported for the CT-239 apply-allocation estimator: clip-absolute preserves
-// the source data type (band-sized output), the scaling methods build a
-// float32 cube.
-export function normalizeMethodPreservesSourceDataType(
-  parameterValues: ParameterValuesById,
-): boolean {
-  return parameterValues[NORMALIZE_METHOD_PARAMETER_ID] === CLIP_ABSOLUTE_METHOD_VALUE;
-}
-
-function resolveRobustPercentileMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
-  return {
-    kind: "percentile",
-    bounds: {
-      lowPercentile: readNormalizePercentile(parameterValues, NORMALIZE_LOW_PERCENTILE_PARAMETER_ID, 2),
-      highPercentile: readNormalizePercentile(parameterValues, NORMALIZE_HIGH_PERCENTILE_PARAMETER_ID, 98),
-    },
-  };
-}
-
-function resolveClipAbsoluteMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
-  return {
-    kind: "clip-absolute",
-    bounds: {
-      lo: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_LOW_PARAMETER_ID], 0),
-      hi: readClipBoundOrDefault(parameterValues[NORMALIZE_CLIP_HIGH_PARAMETER_ID], 1),
-    },
-  };
-}
-
-function readNormalizePercentile(
-  parameterValues: ParameterValuesById,
-  parameterId: string,
-  fallback: number,
-): number {
-  const raw = parameterValues[parameterId];
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
-}
-
 function formatNormalizeAppliedLabel(parameterValues: ParameterValuesById): string {
-  const method = resolveNormalizeRangeMethod(parameterValues);
-  if (method.kind === "clip-absolute") {
-    return `Clip to [${method.bounds.lo}, ${method.bounds.hi}] (${formatNormalizeScopeLabel(parameterValues)})`;
-  }
-  return `Normalize to [0,1] (${formatNormalizeScopeLabel(parameterValues)}${formatNormalizeMethodSuffix(parameterValues)})`;
+  return `Normalize to [0,1] (${describeCubeScopeForAppliedLabel(NORMALIZE_SCOPE_IDS, parameterValues)})`;
 }
 
-function formatNormalizeScopeLabel(parameterValues: ParameterValuesById): string {
-  return describeCubeScopeForAppliedLabel(NORMALIZE_SCOPE_IDS, parameterValues);
+const CLIP_BY_VALUE_SCOPE_PARAMETER_ID = "scope";
+const CLIP_BY_VALUE_BAND_COUNT_PARAMETER_ID = "sourceBandCount";
+const CLIP_BY_VALUE_BAND_RANGE_PARAMETER_ID = "bandRange";
+const CLIP_BY_VALUE_BOUNDS_PARAMETER_ID = "clipBounds";
+const CLIP_BY_VALUE_LOW_PARAMETER_ID = "clipLow";
+const CLIP_BY_VALUE_HIGH_PARAMETER_ID = "clipHigh";
+
+const CLIP_BY_VALUE_SCOPE_IDS: CubeScopeParameterIds = {
+  scopeParameterId: CLIP_BY_VALUE_SCOPE_PARAMETER_ID,
+  bandRangeParameterId: CLIP_BY_VALUE_BAND_RANGE_PARAMETER_ID,
+  bandCountParameterId: CLIP_BY_VALUE_BAND_COUNT_PARAMETER_ID,
+};
+
+const CLIP_BY_VALUE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
+  kind: "cube-scope",
+  id: CLIP_BY_VALUE_SCOPE_PARAMETER_ID,
+  label: "Scope",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
+  defaultValue: FULL_CUBE_SCOPE,
+  bandRangeParameterId: CLIP_BY_VALUE_BAND_RANGE_PARAMETER_ID,
+  emptyBandRangeMeansAllBands: true,
+};
+
+const CLIP_BY_VALUE_BOUNDS_PARAMETER_SCHEMA: ClipBoundsParameterSchema = {
+  kind: "clip-bounds",
+  id: CLIP_BY_VALUE_BOUNDS_PARAMETER_ID,
+  label: "Clip range",
+  description:
+    "Values below the low value clip to it and values above the high value clip to it. The data type and in-range values are kept.",
+  loParameterId: CLIP_BY_VALUE_LOW_PARAMETER_ID,
+  hiParameterId: CLIP_BY_VALUE_HIGH_PARAMETER_ID,
+  loLabel: "Clip low",
+  hiLabel: "Clip high",
+  defaultLo: 0,
+  defaultHi: 1,
+};
+
+// CT-281: the standalone Clip by Value operation. It reuses the CT-194
+// clip-absolute transform that used to be a Normalize method, so it preserves
+// the source data type and the in-range values.
+export const CLIP_BY_VALUE_ACTION: RegisteredViewportAction = {
+  id: "clip-by-value",
+  label: "Clip by Value",
+  icon: ChevronsDownUp,
+  parameters: [CLIP_BY_VALUE_SCOPE_PARAMETER_SCHEMA, CLIP_BY_VALUE_BOUNDS_PARAMETER_SCHEMA],
+  successMessage: "Clip by Value applied",
+  appliedLabel: "Clip by Value",
+  loadingMessage: "Clipping...",
+  formatAppliedLabel: formatClipByValueAppliedLabel,
+  prepareParameterValuesForApply: injectSourceBandCountForClipByValue,
+  apply: (state) => state,
+  supportsStopDuringApply: true,
+  transformSourceAsync: createClipByValueSourceTransform(),
+};
+
+function injectSourceBandCountForClipByValue(
+  rawParameterValues: ParameterValuesById,
+  _sourceRenderingState: ViewportRenderingState,
+  _applyScope: ApplyScope,
+  sourceRaster?: RasterImage | null,
+): ParameterValuesById {
+  return injectSourceBandCountForBandWiseLabels(CLIP_BY_VALUE_SCOPE_IDS, rawParameterValues, sourceRaster);
 }
 
-function formatNormalizeMethodSuffix(parameterValues: ParameterValuesById): string {
-  const method = resolveNormalizeRangeMethod(parameterValues);
-  if (method.kind !== "percentile") return "";
-  return `, percentile ${method.bounds.lowPercentile}-${method.bounds.highPercentile}%`;
+function createClipByValueSourceTransform(): ViewportActionAsyncSourceTransform {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
+    const source = coerceViewportSourceToRasterSource(rawSource);
+    const selection = resolveClipByValueScopeSelection(parameterValues, source.raster.bandCount);
+    const method = resolveClipByValueMethod(parameterValues);
+    const raster = await applyNormalizeToRasterReportingProgress(source.raster, selection, method, onProgress, abortSignal);
+    return { kind: "raster", raster };
+  };
+}
+
+function resolveClipByValueScopeSelection(
+  parameterValues: ParameterValuesById,
+  bandCount: number,
+): ResolvedCubeScopeSelection {
+  return resolveCubeScopeSelectionFromParameters(CLIP_BY_VALUE_SCOPE_IDS, parameterValues, bandCount);
+}
+
+function resolveClipByValueMethod(parameterValues: ParameterValuesById): NormalizeRangeMethod {
+  return { kind: "clip-absolute", bounds: readClipByValueBounds(parameterValues) };
+}
+
+function readClipByValueBounds(parameterValues: ParameterValuesById): { lo: number; hi: number } {
+  return {
+    lo: readClipBoundOrDefault(parameterValues[CLIP_BY_VALUE_LOW_PARAMETER_ID], 0),
+    hi: readClipBoundOrDefault(parameterValues[CLIP_BY_VALUE_HIGH_PARAMETER_ID], 1),
+  };
+}
+
+function formatClipByValueAppliedLabel(parameterValues: ParameterValuesById): string {
+  const bounds = readClipByValueBounds(parameterValues);
+  const scope = describeCubeScopeForAppliedLabel(CLIP_BY_VALUE_SCOPE_IDS, parameterValues);
+  return `Clip to [${bounds.lo}, ${bounds.hi}] (${scope})`;
 }
 
 const STANDARDIZE_SCOPE_PARAMETER_ID = "scope";
@@ -1298,8 +1294,7 @@ const STANDARDIZE_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: STANDARDIZE_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack standardizes by one stack-wide mean and std; band-wise standardizes each entered band by its own mean and std. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: STANDARDIZE_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -1338,6 +1333,7 @@ export const STANDARDIZE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatStandardizeAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountForStandardize,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createStandardizeSourceTransform(),
 };
 
@@ -1353,11 +1349,11 @@ function injectSourceBandCountForStandardize(
 }
 
 function createStandardizeSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const selection = resolveStandardizeScopeSelection(parameterValues, source.raster.bandCount);
     const target = readStandardizeTargetDistribution(parameterValues);
-    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress);
+    const raster = await applyStandardizeToRasterReportingProgress(source.raster, selection, target, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -1534,17 +1530,20 @@ const FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA: BandNumberParameterSchema = {
   defaultValue: 3,
 };
 
+// CT-292: user-facing "False-color Composite" is renamed "RGB Color
+// Composite"; the internal id, file names, and history vocabulary stay
+// "false-color" (CT-245 pattern).
 export const FALSE_COLOR_ACTION: RegisteredViewportAction = {
   id: "false-color",
-  label: "False-color Composite",
-  icon: Palette,
+  label: "RGB Color Composite",
+  icon: RgbCompositeIcon,
   parameters: [
     FALSE_COLOR_RED_BAND_PARAMETER_SCHEMA,
     FALSE_COLOR_GREEN_BAND_PARAMETER_SCHEMA,
     FALSE_COLOR_BLUE_BAND_PARAMETER_SCHEMA,
   ],
-  successMessage: "False-color composite applied",
-  appliedLabel: "False-color composite",
+  successMessage: "RGB color composite applied",
+  appliedLabel: "RGB color composite",
   formatAppliedLabel: formatFalseColorAppliedLabel,
   apply: resetBandDependentStateAfterBandCountChange,
   transformSource: createFalseColorSourceTransform(),
@@ -1570,7 +1569,7 @@ function createFalseColorSourceTransform(): ViewportActionSourceTransform {
 
 function formatFalseColorAppliedLabel(parameterValues: ParameterValuesById): string {
   const assignment = readFalseColorBandAssignment(parameterValues);
-  return `False-color (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
+  return `RGB Color Composite (R band ${assignment.r}, G band ${assignment.g}, B band ${assignment.b})`;
 }
 
 export const GEOMETRIC_TRANSFORM_PARAMETER_ID = "transform";
@@ -1615,19 +1614,22 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  supportsStopDuringApply: true,
   transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
+// CT-279: the user-facing name is "Flip"; the internal id stays "reflect".
 export const REFLECT_ACTION: RegisteredViewportAction = {
   id: "reflect",
-  label: "Reflect",
+  label: "Flip",
   icon: FlipHorizontal2,
   parameters: [REFLECTION_PARAMETER_SCHEMA],
-  successMessage: "Reflection applied",
-  appliedLabel: "Reflect",
+  successMessage: "Flip applied",
+  appliedLabel: "Flip",
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
+  supportsStopDuringApply: true,
   transformSourceAsync: createGeometricTransformSourceTransform(),
 };
 
@@ -1642,10 +1644,10 @@ function clearRegionAfterGeometricTransform(state: ViewportRenderingState): View
 }
 
 function createGeometricTransformSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const transform = readGeometricTransformChoice(parameterValues);
-    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress);
+    const raster = await applyGeometricTransformToRasterImageReportingProgress(source.raster, transform, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -1669,6 +1671,7 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   BRIGHTNESS_CONTRAST_ACTION,
   INVERT_ACTION,
   NORMALIZE_DATA_ACTION,
+  CLIP_BY_VALUE_ACTION,
   STANDARDIZE_ACTION,
   RGB_TO_GRAYSCALE_ACTION,
   FALSE_COLOR_ACTION,

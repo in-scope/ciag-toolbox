@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, Layers, Link2, X } from "lucide-react";
-import { toast } from "sonner";
+import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
+import { notifyError } from "@/lib/notifications/notify";
 
+import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
@@ -29,6 +30,9 @@ import {
   attachPointerReadoutEventHandlers,
   type CanvasCursorPositionPx,
 } from "@/lib/webgl/pointer-readout-input";
+import {
+  attachRoiBoxEditEventHandlers,
+} from "@/lib/webgl/roi-box-edit-input";
 import {
   attachRoiDrawEventHandlers,
   type RoiDrawAttachment,
@@ -66,6 +70,9 @@ interface ViewportProps {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   onCommitRoi: (roi: ViewportRoi) => void;
+  canEditCommittedRoi: boolean;
+  onPreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  onCommitRoiEdit: (roi: ViewportRoi) => void;
   onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
@@ -86,6 +93,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const displaySource = props.previewImageSource ?? imageSource;
   const viewportAriaLabel = describeViewportAriaLabel(props.viewportNumber);
   const [inProgressDragRect, setInProgressDragRect] = useState<RoiDrawCanvasRect | null>(null);
+  const [inProgressEditRoi, setInProgressEditRoi] = useState<ViewportRoi | null>(null);
 
   const panelLink = usePanelLink();
   const linkGroupIndex = panelLinkGroupIndexOrNull(props.viewportNumber);
@@ -98,6 +106,17 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useToneCurvePreviewLutEffect(rendererRef, props.toneCurvePreviewLookupTable ?? null);
   useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
+  // CT-275: registered BEFORE the pan-zoom and draw attachments so a pointer-down
+  // on the committed box claims the gesture ahead of both.
+  useViewportRoiBoxEditing(canvasRef, {
+    canEditCommittedRoi: props.canEditCommittedRoi,
+    committedRoi: props.roi,
+    imageSource,
+    rendererRef,
+    onPreviewRoiEdit: props.onPreviewRoiEdit,
+    onCommitRoiEdit: props.onCommitRoiEdit,
+    setInProgressEditRoi,
+  });
   useViewportPanZoomInteractions(canvasRef, rendererRef, props.isRegionToolActive);
   useViewportPixelReadoutPublisher(readoutContainerRef, canvasRef, rendererRef, {
     viewportNumber: props.viewportNumber ?? null,
@@ -144,7 +163,9 @@ export function Viewport(props: ViewportProps): JSX.Element {
         channelViewEnabled={isChannelViewActive}
         onToggleChannelView={props.onToggleViewChannelsSeparately}
         onClose={props.onClose ?? null}
-        showCloseButton={imageSource !== null && Boolean(props.onClose)}
+        // CT-269: onClose is only provided for closable panels (content, or an
+        // empty cell reserved by an in-flight apply, whose close cancels it).
+        showCloseButton={Boolean(props.onClose)}
       />
       <div ref={readoutContainerRef} className="relative min-h-0 flex-1">
         <canvas
@@ -154,7 +175,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
         />
         <ViewportRoiOverlay
           renderer={rendererRef.current}
-          committedRoi={props.roi}
+          committedRoi={inProgressEditRoi ?? props.roi}
           inProgressDragRect={inProgressDragRect}
           transformVersion={transformVersion}
         />
@@ -230,9 +251,12 @@ interface ViewportHeaderStripProps {
   showCloseButton: boolean;
 }
 
+// The header sits ABOVE the cell's busy overlay (z-20 over its z-10): while an
+// operation runs, the CT-269 close-the-target-cancels-the-run interaction needs
+// the close button to stay clickable instead of being swallowed by the overlay.
 function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2 text-xs">
+    <div className="relative z-20 flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2 text-xs">
       {typeof props.viewportNumber === "number" ? (
         <ViewportNumberBadge viewportNumber={props.viewportNumber} />
       ) : null}
@@ -346,16 +370,24 @@ function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonPro
   );
 }
 
-// CT-248: a true-colour photo can be flipped into a display-only channel view
-// where its R/G/B scroll like a scientific stack. The button label names the
-// action each state offers, matching the display-only toggle family above.
+// CT-248/CT-295: a true-colour photo can be flipped into a display-only channel
+// view where its R/G/B scroll like a scientific stack. The toggle carries the
+// stable "RGB color composite" name (CT-259 pattern: aria-label never changes,
+// aria-pressed carries the state) and the RgbCompositeIcon venn glyph, shared on
+// purpose with the RGB Color Composite operation (same meaning, one icon).
 interface ChannelViewToggleButtonProps {
   enabled: boolean;
   onToggle: () => void;
 }
 
+const RGB_COMPOSITE_TOGGLE_LABEL = "RGB color composite";
+const RGB_COMPOSITE_SHOWN_TOOLTIP =
+  "Showing the 3 channels as one color image. Click to view each channel separately.";
+const CHANNELS_SHOWN_TOOLTIP =
+  "Showing each channel separately. Click to view as one RGB color image.";
+
 function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Element {
-  const label = props.enabled ? "View color image" : "View channels separately";
+  const tooltip = props.enabled ? CHANNELS_SHOWN_TOOLTIP : RGB_COMPOSITE_SHOWN_TOOLTIP;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -363,14 +395,14 @@ function ChannelViewToggleButton(props: ChannelViewToggleButtonProps): JSX.Eleme
           variant="ghost"
           size="icon"
           className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
-          aria-label={label}
-          aria-pressed={props.enabled}
+          aria-label={RGB_COMPOSITE_TOGGLE_LABEL}
+          aria-pressed={!props.enabled}
           onClick={stopPropagationThenToggle(props.onToggle)}
         >
-          <Layers className="size-4" />
+          <RgbCompositeIcon className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
@@ -539,7 +571,7 @@ function useViewportRendererLifecycle(
 }
 
 function showRendererErrorToast(message: string): void {
-  toast.error(message);
+  notifyError(message);
 }
 
 function useImageSourceUploadEffect(
@@ -720,6 +752,63 @@ function buildPixelReadoutSnapshotForCursorOrNull(
 function countSourceBandsForReadout(source: ViewportImageSource): number {
   if (source.kind === "raster") return source.raster.bandCount;
   return 0;
+}
+
+// CT-275: attach the committed-box move/resize handlers. The local preview state
+// drives the overlay while the drag is in flight; the preview callback also feeds
+// the region-edit-preview context so coordinate readouts track the box live.
+interface ViewportRoiBoxEditInputs {
+  readonly canEditCommittedRoi: boolean;
+  readonly committedRoi: ViewportRoi | null;
+  readonly imageSource: ViewportImageSource | null;
+  readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
+  readonly onPreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  readonly onCommitRoiEdit: (roi: ViewportRoi) => void;
+  readonly setInProgressEditRoi: (roi: ViewportRoi | null) => void;
+}
+
+function useViewportRoiBoxEditing(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  inputs: ViewportRoiBoxEditInputs,
+): void {
+  const inputsRef = useLatestValueRef(inputs);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const attachment = attachRoiBoxEditEventHandlers(
+      canvas,
+      buildRoiBoxEditCallbacksFromInputsRef(inputsRef),
+    );
+    return () => attachment.detach();
+    // canvasRef is stable; latest-value ref holds dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function buildRoiBoxEditCallbacksFromInputsRef(
+  inputsRef: MutableRefObject<ViewportRoiBoxEditInputs>,
+): Parameters<typeof attachRoiBoxEditEventHandlers>[1] {
+  return {
+    isRoiBoxEditingEnabled: () =>
+      inputsRef.current.canEditCommittedRoi &&
+      inputsRef.current.committedRoi !== null &&
+      inputsRef.current.imageSource !== null,
+    getCommittedRoi: () => inputsRef.current.committedRoi,
+    getRenderer: () => inputsRef.current.rendererRef.current,
+    getImageExtents: () => readImageExtentsFromSourceOrNull(inputsRef.current.imageSource),
+    onPreviewRoiEdit: (roi) => {
+      inputsRef.current.setInProgressEditRoi(roi);
+      inputsRef.current.onPreviewRoiEdit(roi);
+    },
+    onCommitRoiEdit: (roi) => inputsRef.current.onCommitRoiEdit(roi),
+  };
+}
+
+function readImageExtentsFromSourceOrNull(
+  source: ViewportImageSource | null,
+): { width: number; height: number } | null {
+  if (!source) return null;
+  return getImageSourceDimensions(source);
 }
 
 interface ViewportRoiDrawInputs {

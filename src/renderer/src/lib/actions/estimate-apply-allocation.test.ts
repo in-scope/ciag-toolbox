@@ -17,6 +17,7 @@ import { PCA_ACTION } from "./pca-action";
 import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
 import {
   BIT_SHIFT_ACTION,
+  CLIP_BY_VALUE_ACTION,
   CROP_TO_REGION_ACTION,
   FALSE_COLOR_ACTION,
   FLAT_FIELD_ACTION,
@@ -77,19 +78,14 @@ describe("estimateApplyAllocationBytesForAction", () => {
     );
   });
 
-  it("bills normalize a float32 cube for scaling methods and the source bytes for clip-absolute", () => {
+  it("bills normalize a full float32 cube (min-max only since CT-281)", () => {
     expect(estimateApplyAllocationBytesForAction(NORMALIZE_DATA_ACTION, uint16Source(), {})).toBe(
       FLOAT32_CUBE_BYTES,
     );
-    expect(
-      estimateApplyAllocationBytesForAction(NORMALIZE_DATA_ACTION, uint16Source(), {
-        method: "clip-absolute",
-      }),
-    ).toBe(UINT16_CUBE_BYTES);
   });
 
   it("bills the type-preserving whole-cube operations the source's own bytes", () => {
-    for (const action of [BIT_SHIFT_ACTION, ROTATE_ACTION, REFLECT_ACTION]) {
+    for (const action of [BIT_SHIFT_ACTION, ROTATE_ACTION, REFLECT_ACTION, CLIP_BY_VALUE_ACTION]) {
       expect(estimateApplyAllocationBytesForAction(action, uint16Source(), {}), action.id).toBe(
         UINT16_CUBE_BYTES,
       );

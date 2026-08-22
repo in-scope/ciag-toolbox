@@ -40,7 +40,7 @@ export function butterworthBandpassGain(
 
 function assertCutoffIsPositive(cutoff: number): void {
   if (!Number.isFinite(cutoff) || cutoff <= 0) {
-    throw new Error("Spatial filter needs a cutoff greater than 0 (cycles per pixel).");
+    throw new Error("Frequency filter needs a cutoff greater than 0 (cycles per pixel).");
   }
 }
 
@@ -48,6 +48,6 @@ function assertBandpassCutoffsAreOrdered(lowCutoff: number, highCutoff: number):
   assertCutoffIsPositive(lowCutoff);
   assertCutoffIsPositive(highCutoff);
   if (lowCutoff >= highCutoff) {
-    throw new Error("Spatial filter needs a bandpass low cutoff below the high cutoff.");
+    throw new Error("Frequency filter needs a bandpass low cutoff below the high cutoff.");
   }
 }

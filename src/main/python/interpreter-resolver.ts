@@ -24,7 +24,7 @@ export class PythonInterpreterNotFoundError extends Error {
   constructor(searchedPath: string) {
     super(
       `The bundled Python runtime could not be found (looked in ${searchedPath}). ` +
-        `Reinstall MSI Toolbox, or in development run: node scripts/setup-python-runtime.mjs`,
+        `Reinstall CHARM Toolbox, or in development run: node scripts/setup-python-runtime.mjs`,
     );
     this.name = "PythonInterpreterNotFoundError";
   }

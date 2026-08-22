@@ -36,12 +36,14 @@ export async function mapSelectedRasterBandsPreservingTypeReportingProgress(
   bandIndexes: ReadonlyArray<number>,
   transformSelectedBand: (band: RasterTypedArray) => RasterTypedArray,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const selectedBands = new Set(bandIndexes);
   const bandPixels = await computeArrayReportingPerUnitProgress(
     raster.bandPixels.length,
     (index) => (selectedBands.has(index) ? transformSelectedBand(raster.bandPixels[index]!) : raster.bandPixels[index]!),
     onProgress,
+    abortSignal,
   );
   return { ...raster, bandPixels };
 }

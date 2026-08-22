@@ -1,19 +1,19 @@
 import {
+  computeBandCovarianceMatrixFromMeans,
+  computeBandCovarianceMatrixFromMeansReportingProgress,
   computePerBandMeans,
   computePerBandMeansReportingProgress,
-  covarianceBetweenCentredBands,
   runOverSampleRangesYielding,
   samplesPerChunkForPerBandSweep,
 } from "@/lib/image/dimension-reduction/band-statistics";
 import type { CubeSampleMatrix } from "@/lib/image/dimension-reduction/cube-samples";
 import { projectMeanCentredSamplesOntoComponentVectors } from "@/lib/image/dimension-reduction/project-samples";
-import { buildSymmetricMatrixInPairChunksReportingProgress } from "@/lib/image/dimension-reduction/square-matrix-progress";
 import { decomposeSymmetricMatrix } from "@/lib/image/dimension-reduction/symmetric-eigen";
 import type { ComponentProjection } from "@/lib/image/dimension-reduction/transform-output";
 import { allocateFloat32ArrayOrThrow } from "@/lib/image/raster-allocation";
 import {
-  reportMultiUnitWorkStarting,
   reportProgressFractionAndYield,
+  runInChunksReportingProgress,
   scaleProgressToWindow,
   type UnitProgressCallback,
 } from "@/lib/image/unit-progress";
@@ -46,10 +46,18 @@ import {
 // last-resort GC when a backing-store allocation fails - the measured CT-240
 // failure); the capped matrix is ~150 MB and the estimation math is the same
 // statistic over a large uniform sample. Cubes at or below the cap keep stride
-// 1 and are bit-identical to the uncapped fit. Whitened axes store FLOAT32
-// (mapped allocator, priced by estimate-apply-allocation.ts); the FastICA
-// sweeps accumulate in float64, and the sync and async fits share every
-// accumulation path, so their results stay identical.
+// 1 and are bit-identical to the uncapped fit.
+//
+// CT-270: the whitened set stores FLOAT32 in ONE INTERLEAVED sample-major
+// matrix (a sampled pixel's axis values sit contiguously), so every FastICA
+// sweep reads one linear stream instead of axisCount parallel streams, and the
+// fill centres each pixel's bands once for ALL axes instead of re-reading
+// every band per axis (together: ICA at the Anna benchmark dropped from
+// ~186 s to well inside its 3-minute target). Each stored value is the same
+// band-order dot product as before (mapped allocator, priced by
+// estimate-apply-allocation.ts); the FastICA sweeps accumulate in float64, and
+// the sync and async fits share every accumulation path, so their results stay
+// identical.
 
 export interface IcaFit {
   readonly means: ReadonlyArray<number>;
@@ -100,24 +108,35 @@ export async function fitIcaReportingProgress(
   samples: CubeSampleMatrix,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<IcaFit> {
   const means = await computePerBandMeansReportingProgress(
     samples,
     samples.bandCount,
     scaleProgressToWindow(onProgress, 0, ICA_MEANS_END_FRACTION),
+    abortSignal,
   );
-  const { whitening, whitened } = await whitenCubeReportingProgress(samples, means, components, onProgress);
+  const { whitening, whitened } = await whitenCubeReportingProgress(samples, means, components, onProgress, abortSignal);
   const unmixing = await estimateUnmixingMatrixReportingProgress(
     whitened,
     scaleProgressToWindow(onProgress, ICA_WHITENED_SAMPLES_END_FRACTION, 1),
+    abortSignal,
   );
-  const ordered = await orderUnmixingByRecoveredSourceVarianceYielding(unmixing, whitened);
+  const ordered = await orderUnmixingByRecoveredSourceVarianceYielding(unmixing, whitened, abortSignal);
   return { means, componentVectors: multiplyMatrices(ordered, whitening) };
+}
+
+// CT-270: sample-major interleaved storage - the axisCount whitened values of
+// sampled pixel i live contiguously at values[i * axisCount ..].
+interface WhitenedSampleMatrix {
+  readonly axisCount: number;
+  readonly sampledCount: number;
+  readonly values: Float32Array;
 }
 
 interface WhitenedCube {
   readonly whitening: number[][];
-  readonly whitened: Float32Array[];
+  readonly whitened: WhitenedSampleMatrix;
 }
 
 async function whitenCubeReportingProgress(
@@ -125,53 +144,46 @@ async function whitenCubeReportingProgress(
   means: ReadonlyArray<number>,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<WhitenedCube> {
   const whitening = await buildWhiteningMatrixReportingProgress(
     samples,
     means,
     components,
     scaleProgressToWindow(onProgress, ICA_MEANS_END_FRACTION, ICA_WHITENING_MATRIX_END_FRACTION),
+    abortSignal,
   );
-  const whitened = await projectWhitenedAxesInSampleChunks(
+  const whitened = await fillWhitenedSampleMatrixReportingProgress(
     samples,
     means,
     whitening,
     scaleProgressToWindow(onProgress, ICA_WHITENING_MATRIX_END_FRACTION, ICA_WHITENED_SAMPLES_END_FRACTION),
+    abortSignal,
   );
   return { whitening, whitened };
 }
 
-// One tick per projected axis, with each axis's sampled sweep chunked so it
-// never blocks the renderer past the UI-gap threshold.
-async function projectWhitenedAxesInSampleChunks(
+// The async twin of whitenCentredSamples: the same pixel-major fill in sample
+// chunks (priced by the all-axes-per-pixel cost) with a progress tick and a
+// paint yield per chunk.
+async function fillWhitenedSampleMatrixReportingProgress(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
   whitening: ReadonlyArray<ReadonlyArray<number>>,
   onProgress?: UnitProgressCallback,
-): Promise<Float32Array[]> {
-  reportMultiUnitWorkStarting(onProgress, whitening.length);
+  abortSignal?: AbortSignal,
+): Promise<WhitenedSampleMatrix> {
   const sampling = describeFastIcaFitSampling(samples.sampleCount);
-  const whitened: Float32Array[] = [];
-  for (let axis = 0; axis < whitening.length; axis += 1) {
-    whitened.push(await projectSampledCentredPixelsOntoVectorYielding(samples, means, whitening[axis]!, sampling));
-    await reportProgressFractionAndYield(onProgress, (axis + 1) / whitening.length);
-  }
-  return whitened;
-}
-
-async function projectSampledCentredPixelsOntoVectorYielding(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  vector: ReadonlyArray<number>,
-  sampling: FastIcaFitSampling,
-): Promise<Float32Array> {
-  const projected = allocateFloat32ArrayOrThrow(sampling.sampledCount);
-  await runOverSampleRangesYielding(
+  const matrix = makeWhitenedSampleMatrix(whitening.length, sampling.sampledCount);
+  const centredBands = new Float64Array(samples.bandCount);
+  await runInChunksReportingProgress(
     sampling.sampledCount,
-    samplesPerChunkForPerBandSweep(samples.bandCount),
-    (start, end) => fillWhitenedAxisSampleRange(samples, means, vector, projected, sampling.stride, start, end),
+    samplesPerChunkForPerBandSweep((whitening.length + 1) * samples.bandCount),
+    (start, end) => fillWhitenedSampleRangePixelMajor(samples, means, whitening, matrix, sampling.stride, centredBands, start, end),
+    onProgress,
+    abortSignal,
   );
-  return projected;
+  return matrix;
 }
 
 // ICA imposes no natural component order, but a rank-deficient cube (e.g.
@@ -182,7 +194,7 @@ async function projectSampledCentredPixelsOntoVectorYielding(
 // strength metric, so the kept bands still read plain "IC N".
 function orderUnmixingByRecoveredSourceVariance(
   unmixing: ReadonlyArray<ReadonlyArray<number>>,
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
 ): number[][] {
   return sortUnmixingRowsByDescendingVariance(
     unmixing.map((row) => ({ row: [...row], variance: recoveredSourceVariance(row, whitened) })),
@@ -193,11 +205,12 @@ function orderUnmixingByRecoveredSourceVariance(
 // paint yields between sample chunks, then applies the same stable sort.
 async function orderUnmixingByRecoveredSourceVarianceYielding(
   unmixing: ReadonlyArray<ReadonlyArray<number>>,
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const entries: VarianceTaggedRow[] = [];
   for (const row of unmixing) {
-    entries.push({ row: [...row], variance: await recoveredSourceVarianceYielding(row, whitened) });
+    entries.push({ row: [...row], variance: await recoveredSourceVarianceYielding(row, whitened, abortSignal) });
   }
   return sortUnmixingRowsByDescendingVariance(entries);
 }
@@ -213,35 +226,38 @@ function sortUnmixingRowsByDescendingVariance(entries: ReadonlyArray<VarianceTag
 
 function recoveredSourceVariance(
   row: ReadonlyArray<number>,
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
 ): number {
-  const sampleCount = whitened[0]?.length ?? 0;
   const accumulator = { sumOfSquares: 0 };
-  accumulateRecoveredSourceSquares(row, whitened, 0, sampleCount, accumulator);
-  return accumulator.sumOfSquares / Math.max(1, sampleCount);
+  accumulateRecoveredSourceSquares(row, whitened, 0, whitened.sampledCount, accumulator);
+  return accumulator.sumOfSquares / Math.max(1, whitened.sampledCount);
 }
 
 async function recoveredSourceVarianceYielding(
   row: ReadonlyArray<number>,
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
+  abortSignal?: AbortSignal,
 ): Promise<number> {
-  const sampleCount = whitened[0]?.length ?? 0;
   const accumulator = { sumOfSquares: 0 };
-  await runOverSampleRangesYielding(sampleCount, samplesPerChunkForPerBandSweep(whitened.length), (start, end) =>
-    accumulateRecoveredSourceSquares(row, whitened, start, end, accumulator),
+  await runOverSampleRangesYielding(
+    whitened.sampledCount,
+    samplesPerChunkForPerBandSweep(whitened.axisCount),
+    (start, end) => accumulateRecoveredSourceSquares(row, whitened, start, end, accumulator),
+    abortSignal,
   );
-  return accumulator.sumOfSquares / Math.max(1, sampleCount);
+  return accumulator.sumOfSquares / Math.max(1, whitened.sampledCount);
 }
 
 function accumulateRecoveredSourceSquares(
   row: ReadonlyArray<number>,
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   startSample: number,
   endSample: number,
   accumulator: { sumOfSquares: number },
 ): void {
+  const { values, axisCount } = whitened;
   for (let pixel = startSample; pixel < endSample; pixel += 1) {
-    const recovered = dotWhitenedSampleWithVector(whitened, row, pixel);
+    const recovered = dotInterleavedSampleWithVector(values, pixel * axisCount, axisCount, row);
     accumulator.sumOfSquares += recovered * recovered;
   }
 }
@@ -263,7 +279,7 @@ function buildWhiteningMatrix(
   means: ReadonlyArray<number>,
   components: number,
 ): number[][] {
-  const covariance = computeBandCovarianceMatrix(samples, means, samples.bandCount);
+  const covariance = computeBandCovarianceMatrixFromMeans(samples, means);
   return whiteningRowsFromCovariance(covariance, samples.bandCount, components);
 }
 
@@ -272,11 +288,13 @@ async function buildWhiteningMatrixReportingProgress(
   means: ReadonlyArray<number>,
   components: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
-  const covariance = await buildSymmetricMatrixInPairChunksReportingProgress(
-    samples.bandCount,
-    (row, column) => covarianceBetweenBands(samples, means, row, column),
+  const covariance = await computeBandCovarianceMatrixFromMeansReportingProgress(
+    samples,
+    means,
     onProgress,
+    abortSignal,
   );
   return whiteningRowsFromCovariance(covariance, samples.bandCount, components);
 }
@@ -299,80 +317,76 @@ function eigenvalueFloor(eigenvalues: ReadonlyArray<number>): number {
   return largest > 0 ? largest * WHITENING_EIGENVALUE_FLOOR_FRACTION : 1;
 }
 
-function computeBandCovarianceMatrix(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  bandCount: number,
-): number[][] {
-  return Array.from({ length: bandCount }, (_unused, row) =>
-    Array.from({ length: bandCount }, (_unused2, column) =>
-      covarianceBetweenBands(samples, means, row, column),
-    ),
-  );
-}
-
-function covarianceBetweenBands(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  rowBand: number,
-  columnBand: number,
-): number {
-  return covarianceBetweenCentredBands(
-    samples.bandValues[rowBand]!,
-    samples.bandValues[columnBand]!,
-    means[rowBand]!,
-    means[columnBand]!,
-    samples.sampleCount,
-  );
-}
-
+// The whitened matrix is the fit's only cube-scale working set, so it holds
+// only the capped uniform sample (stride 1 below the cap) and stores float32
+// (mapped allocator) - the FastICA sweeps still accumulate in float64, and
+// both the sync and async fits read the same rounded storage.
 function whitenCentredSamples(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
   whitening: ReadonlyArray<ReadonlyArray<number>>,
-): Float32Array[] {
+): WhitenedSampleMatrix {
   const sampling = describeFastIcaFitSampling(samples.sampleCount);
-  return whitening.map((row) => projectSampledCentredPixelsOntoVector(samples, means, row, sampling));
+  const matrix = makeWhitenedSampleMatrix(whitening.length, sampling.sampledCount);
+  const centredBands = new Float64Array(samples.bandCount);
+  fillWhitenedSampleRangePixelMajor(samples, means, whitening, matrix, sampling.stride, centredBands, 0, sampling.sampledCount);
+  return matrix;
 }
 
-// The whitened axes are the fit's only cube-scale working set, so they hold
-// only the capped uniform sample (stride 1 below the cap) and store float32
-// (mapped allocator) - the FastICA sweeps still accumulate in float64, and
-// both the sync and async fits read the same rounded storage.
-function projectSampledCentredPixelsOntoVector(
-  samples: CubeSampleMatrix,
-  means: ReadonlyArray<number>,
-  vector: ReadonlyArray<number>,
-  sampling: FastIcaFitSampling,
-): Float32Array {
-  const projected = allocateFloat32ArrayOrThrow(sampling.sampledCount);
-  fillWhitenedAxisSampleRange(samples, means, vector, projected, sampling.stride, 0, sampling.sampledCount);
-  return projected;
+function makeWhitenedSampleMatrix(axisCount: number, sampledCount: number): WhitenedSampleMatrix {
+  return { axisCount, sampledCount, values: allocateFloat32ArrayOrThrow(axisCount * sampledCount) };
 }
 
-function fillWhitenedAxisSampleRange(
+// Pixel-major fill: centre one pixel's bands once, then project it onto every
+// whitening row. Each stored value is the exact band-order dot the per-axis
+// fill produced; only the (axis, sample) visit order differs, and the outputs
+// are independent, so the matrix content is bit-identical.
+function fillWhitenedSampleRangePixelMajor(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
-  vector: ReadonlyArray<number>,
-  projected: Float32Array,
+  whitening: ReadonlyArray<ReadonlyArray<number>>,
+  matrix: WhitenedSampleMatrix,
   stride: number,
+  centredBands: Float64Array,
   startSampledIndex: number,
   endSampledIndex: number,
 ): void {
   for (let index = startSampledIndex; index < endSampledIndex; index += 1) {
-    projected[index] = dotCentredSampleWithVector(samples, means, vector, index * stride);
+    fillCentredBandsAtPixel(samples, means, index * stride, centredBands);
+    writeWhitenedAxesForSample(whitening, centredBands, matrix, index);
   }
 }
 
-function dotCentredSampleWithVector(
+function fillCentredBandsAtPixel(
   samples: CubeSampleMatrix,
   means: ReadonlyArray<number>,
-  vector: ReadonlyArray<number>,
   pixel: number,
+  centredBands: Float64Array,
+): void {
+  for (let band = 0; band < samples.bandCount; band += 1) {
+    centredBands[band] = samples.bandValues[band]![pixel]! - means[band]!;
+  }
+}
+
+function writeWhitenedAxesForSample(
+  whitening: ReadonlyArray<ReadonlyArray<number>>,
+  centredBands: Float64Array,
+  matrix: WhitenedSampleMatrix,
+  sampledIndex: number,
+): void {
+  const base = sampledIndex * matrix.axisCount;
+  for (let axis = 0; axis < matrix.axisCount; axis += 1) {
+    matrix.values[base + axis] = dotVectorWithCentredBands(whitening[axis]!, centredBands);
+  }
+}
+
+function dotVectorWithCentredBands(
+  vector: ReadonlyArray<number>,
+  centredBands: Float64Array,
 ): number {
   let sum = 0;
-  for (let band = 0; band < samples.bandCount; band += 1) {
-    sum += vector[band]! * (samples.bandValues[band]![pixel]! - means[band]!);
+  for (let band = 0; band < centredBands.length; band += 1) {
+    sum += vector[band]! * centredBands[band]!;
   }
   return sum;
 }
@@ -380,9 +394,9 @@ function dotCentredSampleWithVector(
 // FastICA by deflation: extract one independent component at a time, each
 // decorrelated against the components already found (Gram-Schmidt), so the
 // resulting unmixing rows stay orthonormal in whitened space.
-function estimateUnmixingMatrix(whitened: ReadonlyArray<Float32Array>): number[][] {
+function estimateUnmixingMatrix(whitened: WhitenedSampleMatrix): number[][] {
   const found: number[][] = [];
-  for (let index = 0; index < whitened.length; index += 1) {
+  for (let index = 0; index < whitened.axisCount; index += 1) {
     found.push(extractSingleIndependentComponent(whitened, found, index));
   }
   return found;
@@ -393,23 +407,24 @@ function estimateUnmixingMatrix(whitened: ReadonlyArray<Float32Array>): number[]
 // against the iteration cap (with a completion tick when it converges early), so
 // the bar advances during the sample-sweeping FastICA updates.
 async function estimateUnmixingMatrixReportingProgress(
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[][]> {
   const found: number[][] = [];
-  for (let index = 0; index < whitened.length; index += 1) {
-    const componentWindow = scaleProgressToWindow(onProgress, index / whitened.length, (index + 1) / whitened.length);
-    found.push(await extractSingleIndependentComponentReportingProgress(whitened, found, index, componentWindow));
+  for (let index = 0; index < whitened.axisCount; index += 1) {
+    const componentWindow = scaleProgressToWindow(onProgress, index / whitened.axisCount, (index + 1) / whitened.axisCount);
+    found.push(await extractSingleIndependentComponentReportingProgress(whitened, found, index, componentWindow, abortSignal));
   }
   return found;
 }
 
 function extractSingleIndependentComponent(
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
   index: number,
 ): number[] {
-  let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.length, index), alreadyFound);
+  let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.axisCount, index), alreadyFound);
   for (let iteration = 0; iteration < MAX_FAST_ICA_ITERATIONS; iteration += 1) {
     const next = decorrelateAndNormalize(fastIcaFixedPointUpdate(whitened, vector), alreadyFound);
     if (hasFastIcaConverged(next, vector)) return next;
@@ -419,15 +434,16 @@ function extractSingleIndependentComponent(
 }
 
 async function extractSingleIndependentComponentReportingProgress(
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   alreadyFound: ReadonlyArray<ReadonlyArray<number>>,
   index: number,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<number[]> {
-  let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.length, index), alreadyFound);
+  let vector = decorrelateAndNormalize(makeDeterministicSeedVector(whitened.axisCount, index), alreadyFound);
   for (let iteration = 0; iteration < MAX_FAST_ICA_ITERATIONS; iteration += 1) {
-    const next = decorrelateAndNormalize(await fastIcaFixedPointUpdateYielding(whitened, vector), alreadyFound);
-    await reportProgressFractionAndYield(onProgress, (iteration + 1) / MAX_FAST_ICA_ITERATIONS);
+    const next = decorrelateAndNormalize(await fastIcaFixedPointUpdateYielding(whitened, vector, abortSignal), alreadyFound);
+    await reportProgressFractionAndYield(onProgress, (iteration + 1) / MAX_FAST_ICA_ITERATIONS, abortSignal);
     if (hasFastIcaConverged(next, vector)) return finishComponentReportingCompletion(next, onProgress);
     vector = next;
   }
@@ -458,23 +474,25 @@ function hasFastIcaConverged(next: ReadonlyArray<number>, previous: ReadonlyArra
 // maximally non-Gaussian (independent) projection direction. The sync and async
 // paths share the range accumulator, so their floats are identical; the async
 // path only inserts paint yields between sample chunks.
-function fastIcaFixedPointUpdate(whitened: ReadonlyArray<Float32Array>, vector: ReadonlyArray<number>): number[] {
-  const sampleCount = whitened[0]?.length ?? 0;
-  const accumulators = makeFastIcaSweepAccumulators(whitened.length);
-  accumulateFastIcaSampleRange(whitened, vector, 0, sampleCount, accumulators);
-  return combineFastIcaUpdate(accumulators, vector, sampleCount);
+function fastIcaFixedPointUpdate(whitened: WhitenedSampleMatrix, vector: ReadonlyArray<number>): number[] {
+  const accumulators = makeFastIcaSweepAccumulators(whitened.axisCount);
+  accumulateFastIcaSampleRange(whitened, vector, 0, whitened.sampledCount, accumulators);
+  return combineFastIcaUpdate(accumulators, vector, whitened.sampledCount);
 }
 
 async function fastIcaFixedPointUpdateYielding(
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   vector: ReadonlyArray<number>,
+  abortSignal?: AbortSignal,
 ): Promise<number[]> {
-  const sampleCount = whitened[0]?.length ?? 0;
-  const accumulators = makeFastIcaSweepAccumulators(whitened.length);
-  await runOverSampleRangesYielding(sampleCount, fastIcaSamplesPerChunk(whitened.length), (start, end) =>
-    accumulateFastIcaSampleRange(whitened, vector, start, end, accumulators),
+  const accumulators = makeFastIcaSweepAccumulators(whitened.axisCount);
+  await runOverSampleRangesYielding(
+    whitened.sampledCount,
+    fastIcaSamplesPerChunk(whitened.axisCount),
+    (start, end) => accumulateFastIcaSampleRange(whitened, vector, start, end, accumulators),
+    abortSignal,
   );
-  return combineFastIcaUpdate(accumulators, vector, sampleCount);
+  return combineFastIcaUpdate(accumulators, vector, whitened.sampledCount);
 }
 
 // tanh dominates the per-sample cost, so the chunk budget prices each sample as
@@ -495,37 +513,41 @@ function makeFastIcaSweepAccumulators(axisCount: number): FastIcaSweepAccumulato
 }
 
 function accumulateFastIcaSampleRange(
-  whitened: ReadonlyArray<Float32Array>,
+  whitened: WhitenedSampleMatrix,
   vector: ReadonlyArray<number>,
   startSample: number,
   endSample: number,
   accumulators: FastIcaSweepAccumulators,
 ): void {
+  const { values, axisCount } = whitened;
   for (let pixel = startSample; pixel < endSample; pixel += 1) {
-    const activation = Math.tanh(dotWhitenedSampleWithVector(whitened, vector, pixel));
-    accumulateWeightedSample(accumulators.weightedSampleSum, whitened, pixel, activation);
+    const base = pixel * axisCount;
+    const activation = Math.tanh(dotInterleavedSampleWithVector(values, base, axisCount, vector));
+    addWeightedInterleavedSample(values, base, axisCount, activation, accumulators.weightedSampleSum);
     accumulators.derivativeSum += 1 - activation * activation;
   }
 }
 
-function dotWhitenedSampleWithVector(
-  whitened: ReadonlyArray<Float32Array>,
+function dotInterleavedSampleWithVector(
+  values: Float32Array,
+  base: number,
+  axisCount: number,
   vector: ReadonlyArray<number>,
-  pixel: number,
 ): number {
   let sum = 0;
-  for (let axis = 0; axis < whitened.length; axis += 1) sum += whitened[axis]![pixel]! * vector[axis]!;
+  for (let axis = 0; axis < axisCount; axis += 1) sum += values[base + axis]! * vector[axis]!;
   return sum;
 }
 
-function accumulateWeightedSample(
-  weightedSampleSum: Float64Array,
-  whitened: ReadonlyArray<Float32Array>,
-  pixel: number,
+function addWeightedInterleavedSample(
+  values: Float32Array,
+  base: number,
+  axisCount: number,
   weight: number,
+  weightedSampleSum: Float64Array,
 ): void {
-  for (let axis = 0; axis < whitened.length; axis += 1) {
-    weightedSampleSum[axis] = weightedSampleSum[axis]! + whitened[axis]![pixel]! * weight;
+  for (let axis = 0; axis < axisCount; axis += 1) {
+    weightedSampleSum[axis] = weightedSampleSum[axis]! + values[base + axis]! * weight;
   }
 }
 

@@ -2,13 +2,13 @@ import { buildDisplayNormalizedLookupTable } from "@/lib/image/apply-tone-curve"
 import {
   clampValueToDataTypeRangeRoundingIntegers,
   dataTypeValueRangeForBand,
+  midpointOfDataTypeValueRange,
   type DataTypeValueRange,
 } from "@/lib/image/data-type-value-range";
 import {
   clampBandIndexToRaster,
   getRasterBandPixelsOrThrow,
   type RasterImage,
-  type RasterTypedArray,
 } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
@@ -18,9 +18,8 @@ import { TONE_CURVE_LUT_ENTRY_COUNT } from "@/lib/webgl/tone-curve-lut-texture";
 // preview. It builds the same display-normalized LUT the GPU samples, so dragging a
 // slider remaps the viewed band on the GPU without re-baking the band into a new
 // raster. The committed Apply runs brightness (a clamped additive shift) then
-// contrast around the BRIGHTENED band mean; because the shift moves every pixel and
-// the mean by the same delta, the composed data-domain map is
-// f(v) = (clamp(v + delta) - brightenedMean) * contrast + brightenedMean.
+// contrast around the midpoint of the data range; the composed data-domain map is
+// f(v) = (clamp(v + delta) - m) * contrast + m, where m is that midpoint (CT-297).
 
 export function buildBrightnessContrastPreviewLutOrNull(
   raster: RasterImage | null,
@@ -32,9 +31,9 @@ export function buildBrightnessContrastPreviewLutOrNull(
   const band = getRasterBandPixelsOrThrow(raster, clampBandIndexToRaster(raster, bandIndex));
   const range = dataTypeValueRangeForBand(band, raster.sampleFormat);
   const brightnessDelta = brightnessDeltaForDisplayRange(range, brightnessPercent);
-  const brightenedMean = computeBrightenedBandMean(band, range, brightnessDelta);
+  const midpoint = midpointOfDataTypeValueRange(range);
   return buildDisplayNormalizedLookupTable(
-    (value) => brightenThenContrastDataValue(value, range, brightnessDelta, brightenedMean, contrastRatio),
+    (value) => brightenThenContrastDataValue(value, range, brightnessDelta, midpoint, contrastRatio),
     range,
     TONE_CURVE_LUT_ENTRY_COUNT,
   );
@@ -65,26 +64,13 @@ function brightnessDeltaForDisplayRange(range: DataTypeValueRange, brightnessPer
   return (brightnessPercent / 100) * (range.max - range.min);
 }
 
-function computeBrightenedBandMean(
-  band: RasterTypedArray,
-  range: DataTypeValueRange,
-  brightnessDelta: number,
-): number {
-  if (band.length === 0) return 0;
-  let runningSum = 0;
-  for (let index = 0; index < band.length; index += 1) {
-    runningSum += clampValueToDataTypeRangeRoundingIntegers((band[index] ?? 0) + brightnessDelta, range, false);
-  }
-  return runningSum / band.length;
-}
-
 function brightenThenContrastDataValue(
   value: number,
   range: DataTypeValueRange,
   brightnessDelta: number,
-  brightenedMean: number,
+  midpoint: number,
   contrastRatio: number,
 ): number {
   const brightened = clampValueToDataTypeRangeRoundingIntegers(value + brightnessDelta, range, false);
-  return (brightened - brightenedMean) * contrastRatio + brightenedMean;
+  return (brightened - midpoint) * contrastRatio + midpoint;
 }

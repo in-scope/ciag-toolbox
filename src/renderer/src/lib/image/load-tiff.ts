@@ -24,8 +24,18 @@ const TIFF_SAMPLE_FORMAT_COMPLEX_FLOAT = 6;
 // samples per pixel is a true-colour photo, not a science stack. We load its three samples
 // as R/G/B bands tagged "rgb" so the viewport reopens it as an RGB composite, instead of
 // reading only the first sample as one grey band.
+// CT-288 broadens the colour detection past that exact shape: an RGBA file (photometric
+// RGB with an extra-samples alpha, alpha dropped), a palette-colour file (colormap
+// expanded to 8-bit RGB), and a 3-sample file whose writer omitted the photometric tag
+// all load as 3-band rgb rasters. Multi-page BlackIsZero science stacks are untouched;
+// YCbCr/JPEG-compressed TIFFs stay out of scope.
 const TIFF_PHOTOMETRIC_RGB = 2;
+const TIFF_PHOTOMETRIC_PALETTE = 3;
 const TRUE_COLOUR_BAND_COUNT = 3;
+const PALETTE_CHANNEL_COUNT = 3;
+const PALETTE_EXPANDED_BITS_PER_SAMPLE = 8;
+// TIFF colormap entries are 16-bit per channel; the top byte is the 8-bit colour.
+const PALETTE_COLOR_MAP_TO_BYTE_SHIFT = 8;
 const RGB_BAND_LABELS: ReadonlyArray<string> = ["Red", "Green", "Blue"];
 const RGB_BAND_ORIGINAL_NUMBERS: ReadonlyArray<number> = [1, 2, 3];
 
@@ -49,20 +59,54 @@ export async function loadTiffAsRaster(
   if (pageIsTrueColourRgb(firstPage)) {
     return readSinglePageRgbCompositeRaster(firstPage, firstHeader);
   }
+  const paletteColorMap = await readPaletteColorMapOrNull(firstPage);
+  if (paletteColorMap) {
+    return readSinglePagePaletteRgbRaster(firstPage, firstHeader, paletteColorMap);
+  }
   return readRasterAcrossAllPages(tiff, firstHeader, pageCount, onDecodeProgress);
 }
 
 function pageIsTrueColourRgb(image: GeoTiffImage): boolean {
-  return readPhotometricInterpretationOrNull(image) === TIFF_PHOTOMETRIC_RGB
-    && image.getSamplesPerPixel() === TRUE_COLOUR_BAND_COUNT;
+  const photometric = readPhotometricInterpretationOrNull(image);
+  if (photometric === TIFF_PHOTOMETRIC_RGB) {
+    return image.getSamplesPerPixel() >= TRUE_COLOUR_BAND_COUNT;
+  }
+  return photometric === null && image.getSamplesPerPixel() === TRUE_COLOUR_BAND_COUNT;
+}
+
+interface TiffFileDirectoryAccess {
+  getValue(tag: string): unknown;
+  loadValue(tag: string): Promise<unknown>;
+}
+
+function readFileDirectoryOrNull(image: GeoTiffImage): TiffFileDirectoryAccess | null {
+  const fileDirectory = (image as unknown as {
+    fileDirectory?: TiffFileDirectoryAccess;
+  }).fileDirectory;
+  return fileDirectory ?? null;
 }
 
 function readPhotometricInterpretationOrNull(image: GeoTiffImage): number | null {
-  const fileDirectory = (image as unknown as {
-    fileDirectory?: { getValue(tag: string): unknown };
-  }).fileDirectory;
-  const value = fileDirectory?.getValue("PhotometricInterpretation");
+  const value = readFileDirectoryOrNull(image)?.getValue("PhotometricInterpretation");
   return typeof value === "number" ? value : null;
+}
+
+async function readPaletteColorMapOrNull(
+  image: GeoTiffImage,
+): Promise<ArrayLike<number> | null> {
+  if (readPhotometricInterpretationOrNull(image) !== TIFF_PHOTOMETRIC_PALETTE) return null;
+  const value = await readFileDirectoryOrNull(image)?.loadValue("ColorMap");
+  return colorMapHoldsAllThreeChannels(value) ? value : null;
+}
+
+function colorMapHoldsAllThreeChannels(value: unknown): value is ArrayLike<number> {
+  if (!isNumericArrayLike(value)) return false;
+  return value.length >= PALETTE_CHANNEL_COUNT && value.length % PALETTE_CHANNEL_COUNT === 0;
+}
+
+function isNumericArrayLike(value: unknown): value is ArrayLike<number> {
+  if (Array.isArray(value)) return true;
+  return ArrayBuffer.isView(value) && !(value instanceof DataView);
 }
 
 async function readSinglePageRgbCompositeRaster(
@@ -92,7 +136,44 @@ function buildTrueColourRgbRaster(
 async function readAllBandPixels(image: GeoTiffImage): Promise<RasterTypedArray[]> {
   const rasters = (await image.readRasters({ interleave: false })) as ReadonlyArray<RasterTypedArray>;
   if (rasters.length === 0) throw new Error("TIFF contained no readable bands");
+  // Keeping the first three planes drops any extra samples (e.g. an RGBA alpha, CT-288).
   return rasters.slice(0, TRUE_COLOUR_BAND_COUNT) as RasterTypedArray[];
+}
+
+async function readSinglePagePaletteRgbRaster(
+  image: GeoTiffImage,
+  header: TiffPageHeader,
+  colorMap: ArrayLike<number>,
+): Promise<RasterImage> {
+  const paletteIndexes = await readFirstBandPixels(image);
+  return buildTrueColourRgbRaster(
+    { ...header, bitsPerSample: PALETTE_EXPANDED_BITS_PER_SAMPLE, sampleFormat: "uint" },
+    expandPaletteIndexesToRgbBands(paletteIndexes, colorMap),
+  );
+}
+
+function expandPaletteIndexesToRgbBands(
+  paletteIndexes: RasterTypedArray,
+  colorMap: ArrayLike<number>,
+): RasterTypedArray[] {
+  const entryCount = colorMap.length / PALETTE_CHANNEL_COUNT;
+  return [0, 1, 2].map((channel) =>
+    expandOnePaletteChannelToBand(paletteIndexes, colorMap, channel * entryCount, entryCount),
+  );
+}
+
+function expandOnePaletteChannelToBand(
+  paletteIndexes: RasterTypedArray,
+  colorMap: ArrayLike<number>,
+  channelOffset: number,
+  entryCount: number,
+): Uint8Array {
+  const band = new Uint8Array(paletteIndexes.length);
+  for (let pixelIndex = 0; pixelIndex < paletteIndexes.length; pixelIndex += 1) {
+    const paletteIndex = Math.min(paletteIndexes[pixelIndex]!, entryCount - 1);
+    band[pixelIndex] = colorMap[channelOffset + paletteIndex]! >> PALETTE_COLOR_MAP_TO_BYTE_SHIFT;
+  }
+  return band;
 }
 
 async function readRasterAcrossAllPages(

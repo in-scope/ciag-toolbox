@@ -54,12 +54,32 @@ export interface NoisyGrayFixture extends SingleFileFixture {
 
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
+// CT-272: written by generate-png16-fixture.mjs (sharp/libvips, an external
+// reference encoder), NOT by generate-fixtures.mjs, so it is pinned here by
+// hand instead of in manifest.json. value = 300 + (y*width + x) * 500; every
+// pixel exceeds 255, so an 8-bit downscale cannot reproduce these readouts.
+export const gradientGray16Png: SingleFileFixture = {
+  fileName: "gradient-gray16.png",
+  width: 6,
+  height: 4,
+  bandCount: 1,
+  dataType: "uint16",
+  samplePixels: [
+    { x: 0, y: 0, valuesPerBand: [300] },
+    { x: 3, y: 1, valuesPerBand: [4800] },
+    { x: 5, y: 3, valuesPerBand: [11800] },
+  ],
+};
+
 export const lowContrastGrayPng = manifestJson.lowContrastGrayPng as SingleFileFixture;
 export const bimodalGrayPng = manifestJson.bimodalGrayPng as BimodalGrayFixture;
 export const noisyGrayPng = manifestJson.noisyGrayPng as NoisyGrayFixture;
 export const rgbPng = manifestJson.rgbPng as SingleFileFixture;
 export const multiBandTiff = manifestJson.multiBandTiff as SingleFileFixture;
 export const flatFieldReferenceTiff = manifestJson.flatFieldReferenceTiff as SingleFileFixture;
+export const rgbaTiff = manifestJson.rgbaTiff as SingleFileFixture;
+export const paletteColorTiff = manifestJson.paletteColorTiff as SingleFileFixture;
+export const untaggedRgbTiff = manifestJson.untaggedRgbTiff as SingleFileFixture;
 export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 

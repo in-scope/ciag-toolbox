@@ -29,23 +29,29 @@ describe("applyContrastToRasterBands", () => {
     expect(Array.from(result.bandPixels[0]!)).toEqual([10, 50, 90]);
   });
 
-  it("collapses the band to its mean when the contrast ratio is 0", () => {
+  it("collapses the band to the middle of the data-type range when the contrast ratio is 0", () => {
     const raster = makeUint8Raster([10, 50, 90]);
     const result = applyContrastToRasterBands(raster, [0], 0);
-    expect(Array.from(result.bandPixels[0]!)).toEqual([50, 50, 50]);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([128, 128, 128]);
   });
 
-  it("expands around the mean and clips at both ends of the data-type range", () => {
-    const raster = makeUint8Raster([0, 50, 100]);
-    const result = applyContrastToRasterBands(raster, [0], 5);
-    expect(Array.from(result.bandPixels[0]!)).toEqual([0, 50, 255]);
+  it("expands around the middle of the data range and clips at both ends", () => {
+    const raster = makeUint8Raster([0, 127, 255]);
+    const result = applyContrastToRasterBands(raster, [0], 3);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([0, 126, 255]);
+  });
+
+  it("centres on 127.5, not the band's own mean, when scaling up", () => {
+    const raster = makeUint8Raster([100, 127, 150, 200]);
+    const result = applyContrastToRasterBands(raster, [0], 2);
+    expect(Array.from(result.bandPixels[0]!)).toEqual([73, 127, 173, 255]);
   });
 
   it("only adjusts the selected band", () => {
     const raster = makeUint8Raster([10, 50, 90], [10, 50, 90]);
     const result = applyContrastToRasterBands(raster, [1], 0);
     expect(Array.from(result.bandPixels[0]!)).toEqual([10, 50, 90]);
-    expect(Array.from(result.bandPixels[1]!)).toEqual([50, 50, 50]);
+    expect(Array.from(result.bandPixels[1]!)).toEqual([128, 128, 128]);
   });
 
   it("keeps a float band float and clips out-of-range results to [0,1]", () => {

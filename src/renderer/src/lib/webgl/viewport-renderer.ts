@@ -57,9 +57,9 @@ import {
 import {
   IDENTITY_RGB_CHANNEL_EXTENTS,
   computeImageRgbChannelExtents,
-  type RgbChannelExtents,
 } from "@/lib/image/compute-image-channel-extents";
 import {
+  floatSourceDataFallsOutsideUnitDisplayWindow,
   resolveEffectiveFloatDisplayNormalization,
   type NormalizationState,
 } from "./float-display-normalization";
@@ -611,20 +611,6 @@ function clampBandIndexForSource(source: ViewportImageSource, bandIndex: number)
 function isSingleBandSourceWithSelectedBand(source: ViewportImageSource): boolean {
   if (source.kind !== "raster") return false;
   return !shouldRenderRasterAsRgbComposite(source.raster);
-}
-
-function floatSourceDataFallsOutsideUnitDisplayWindow(
-  source: ViewportImageSource,
-  extents: RgbChannelExtents,
-): boolean {
-  if (source.kind !== "raster" || source.raster.sampleFormat !== "float") return false;
-  return anyChannelExtentExceedsUnitWindow(extents);
-}
-
-function anyChannelExtentExceedsUnitWindow(extents: RgbChannelExtents): boolean {
-  const exceedsBelow = extents.min.some((minValue) => minValue < 0);
-  const exceedsAbove = extents.max.some((maxValue) => maxValue > 1);
-  return exceedsBelow || exceedsAbove;
 }
 
 function createRasterTileTexturesForSource(

@@ -7,16 +7,17 @@ import {
   operationPanel,
 } from "./operations";
 
-// CT-146 / manual section 13 (CT-087): "Rotate" and "Reflect" are two separate enum
-// operations, each with its own Image-menu entry and side panel. Rotate offers the three
-// rotations (including the rotate-180 that has no one-click button); Reflect offers the two
-// flips. Each panel's parameter renders as a native <select> (EnumParameterField) whose option
-// values are the GeometricTransform ids and whose option labels are the offered choices. Each
-// apply records ONE History entry whose action label is the operation name ("Rotate" or
-// "Reflect") and whose detail is the chosen transform's label (formatGeometricTransformAppliedLabel).
+// CT-146 / manual section 13 (CT-087): "Rotate" and "Flip" (CT-279; internal id "reflect")
+// are two separate enum operations, each with its own Image-menu entry and side panel. Rotate
+// offers the three rotations (including the rotate-180 that has no one-click button); Flip
+// offers the two flips. Each panel's parameter renders as a native <select> (EnumParameterField)
+// whose option values are the GeometricTransform ids and whose option labels are the offered
+// choices. Each apply records ONE History entry whose action label is the operation name
+// ("Rotate" or "Flip") and whose detail is the chosen transform's label
+// (formatGeometricTransformAppliedLabel).
 
 export const ROTATE_LABEL = "Rotate";
-export const REFLECT_LABEL = "Reflect";
+export const REFLECT_LABEL = "Flip";
 
 export type GeometricTransformChoice =
   | "rotate-90-cw"
@@ -82,8 +83,8 @@ export type QuickGeometricTransformChoice = Exclude<GeometricTransformChoice, "r
 const QUICK_TRANSFORM_BUTTON_LABELS: Record<QuickGeometricTransformChoice, string> = {
   "rotate-90-cw": "Rotate 90° clockwise",
   "rotate-270-cw": "Rotate 90° counterclockwise",
-  "flip-horizontal": "Reflect horizontally",
-  "flip-vertical": "Reflect vertically",
+  "flip-horizontal": "Flip horizontally",
+  "flip-vertical": "Flip vertically",
 };
 
 export function quickTransformToolbarButton(

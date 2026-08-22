@@ -56,3 +56,40 @@ export function clearOperationRegionFromState(
 ): ViewportRenderingState {
   return { ...state, operationRegion: null };
 }
+
+/**
+ * CT-261: the operation region box must never strand on a panel. These helpers
+ * are the single clearing path shared by the three lifecycles that can leave a
+ * box behind: an apply that FAILS (apply-action-flow), the panel selection
+ * moving to another panel, and a tool panel being cancelled/closed (App).
+ */
+export interface OperationRegionStateAccess {
+  readonly getRenderingState: (viewportIndex: number) => ViewportRenderingState;
+  readonly setRenderingState: (viewportIndex: number, next: ViewportRenderingState) => void;
+}
+
+export function clearOperationRegionAtViewportIndex(
+  viewportIndex: number,
+  stateAccess: OperationRegionStateAccess,
+): void {
+  const state = stateAccess.getRenderingState(viewportIndex);
+  if (!state.operationRegion) return;
+  stateAccess.setRenderingState(viewportIndex, clearOperationRegionFromState(state));
+}
+
+export function listViewportIndexesLeavingSelection(
+  previousSelection: ReadonlySet<number>,
+  nextSelection: ReadonlySet<number>,
+): number[] {
+  return [...previousSelection].filter((index) => !nextSelection.has(index));
+}
+
+export function clearOperationRegionOnViewportsLeavingSelection(
+  previousSelection: ReadonlySet<number>,
+  nextSelection: ReadonlySet<number>,
+  stateAccess: OperationRegionStateAccess,
+): void {
+  for (const index of listViewportIndexesLeavingSelection(previousSelection, nextSelection)) {
+    clearOperationRegionAtViewportIndex(index, stateAccess);
+  }
+}

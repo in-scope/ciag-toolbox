@@ -23,8 +23,8 @@ export const PCA_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   loadingMessage: "Computing principal components...",
   componentLabelPrefix: PCA_COMPONENT_LABEL_PREFIX,
   fit: fitPcaReportingProgress,
-  project: (samples, fit, keptCount, onProgress) =>
-    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.eigenvectors, keptCount, onProgress),
+  project: (samples, fit, keptCount, onProgress, abortSignal) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.eigenvectors, keptCount, onProgress, abortSignal),
   describeKeptComponentLabels: describeKeptPrincipalComponentLabels,
 });
 

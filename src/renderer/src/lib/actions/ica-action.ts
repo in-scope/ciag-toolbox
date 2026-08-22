@@ -23,6 +23,6 @@ export const ICA_ACTION: RegisteredViewportAction = registerDimensionReductionAc
   loadingMessage: "Computing independent components...",
   componentLabelPrefix: ICA_COMPONENT_LABEL_PREFIX,
   fit: fitIcaReportingProgress,
-  project: (samples, fit, keptCount, onProgress) =>
-    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress),
+  project: (samples, fit, keptCount, onProgress, abortSignal) =>
+    projectMeanCentredSamplesOntoComponentVectorsReportingProgress(samples, fit.means, fit.componentVectors, keptCount, onProgress, abortSignal),
 });

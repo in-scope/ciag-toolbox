@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Dispatch,
   type MouseEvent,
   type MutableRefObject,
@@ -31,7 +32,6 @@ import {
 } from "@/components/tool-options-panel";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
-import { ToolOptionsBandSelectionEditor } from "@/components/tool-options-band-selection-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
 import { ToolOptionsToneCurveEditor } from "@/components/tool-options-tone-curve-editor";
 import {
@@ -58,6 +58,15 @@ import {
   type ApplyActionFlowBindings,
 } from "@/lib/actions/apply-action-flow";
 import {
+  createInFlightApplyRunStore,
+  type InFlightApplyRunStore,
+} from "@/lib/actions/in-flight-apply-run-store";
+import { BAND_SELECTION_ACTION } from "@/lib/actions/band-selection-action";
+import {
+  buildViewportClosingApi,
+  type ViewportClosingApiBindings,
+} from "@/lib/actions/close-viewport-flow";
+import {
   BAND_SUBSET_ACTION,
   GEOMETRIC_TRANSFORM_PARAMETER_ID,
   ROTATE_ACTION,
@@ -74,15 +83,23 @@ import {
   type OperationCommandHandlers,
 } from "@/lib/actions/operation-command-bindings";
 import type { GeometricTransform } from "@/lib/image/apply-geometric-transform";
+import {
+  clearOperationRegionAtViewportIndex,
+  clearOperationRegionOnViewportsLeavingSelection,
+} from "@/lib/actions/operation-region";
 import { shouldEmbedThresholdEditorInOperationPanel } from "@/lib/actions/threshold-editor-placement";
+import {
+  OTSU_THRESHOLD_METHOD,
+  readThresholdMethodChoice,
+} from "@/lib/actions/threshold-action";
 import { shouldEmbedBandWeightingEditorInOperationPanel } from "@/lib/actions/band-weighting-editor-placement";
-import { shouldEmbedBandSelectionEditorInOperationPanel } from "@/lib/actions/band-selection-editor-placement";
 import { shouldEmbedCustomTransformEditorInOperationPanel } from "@/lib/actions/custom-transform-editor-placement";
 import { shouldEmbedToneCurveEditorInOperationPanel } from "@/lib/actions/tone-curve-editor-placement";
 import {
   listKeptBandIndexesFromRemoved,
   listKeptBandOriginalNumbersAfterRemovingBand,
 } from "@/lib/image/apply-band-keep";
+import type { ViewportDisplayMappingState } from "@/lib/image/as-viewed-display-mapping";
 import { buildFalseColorPreviewSourceOrNull } from "@/lib/image/false-color-preview-pixels";
 import type { FalseColorBandAssignment } from "@/lib/image/apply-false-color-composite";
 import { buildToneCurvePreviewLutOrNull } from "@/lib/image/tone-curve-preview";
@@ -108,25 +125,34 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
-import { replaceRememberedPanelReferenceRasters } from "@/lib/image/reference-raster-store";
+import {
+  listRememberedReferenceRasters,
+  replaceRememberedPanelReferenceRasters,
+} from "@/lib/image/reference-raster-store";
+import {
+  readRasterBufferReleaseWorkVersion,
+  releaseQueuedRasterBuffersSkippingShared,
+  subscribeToRasterBufferReleaseWork,
+} from "@/lib/image/raster-buffer-release";
 import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
+  type LoadedReferenceCandidate,
   type ReferencePickerOption,
 } from "@/lib/image/reference-token";
-import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
+import { isSelectableGridLayout } from "@shared/grid-layouts";
 import {
   getGridLayoutCellCount,
   getNextLargerGridLayout,
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
-import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
 import { planOpenImagePlacement } from "@/lib/grid/plan-open-image";
 import {
   planOpenImagesPlacement,
   type OpenImagesPlacementPlan,
 } from "@/lib/grid/plan-open-images";
+import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
 import {
@@ -199,6 +225,7 @@ import {
   type BusyEntryRegistrar,
 } from "@/state/busy-state-context";
 import { PixelReadoutProvider } from "@/state/pixel-readout-context";
+import { RegionEditPreviewProvider } from "@/state/region-edit-preview-context";
 import { RightPanelCollapsedStateProvider } from "@/state/right-panel-collapsed-state";
 import {
   RegionToolProvider,
@@ -243,6 +270,7 @@ import {
 } from "@/state/viewport-rendering-context";
 import {
   clearBandSelectionEditingState,
+  closeBandSubsetEditorAndClearFunctionChoice,
   clearBandWeightingEditingState,
   clearCubeTransformEditingState,
   clearThresholdEditingState,
@@ -281,6 +309,7 @@ interface PendingSaveImageRequest {
   readonly fileName: string;
   readonly viewportIndex: number;
   readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
   readonly bandCount: number;
   readonly selectedBandNumber: number;
 }
@@ -297,6 +326,7 @@ export function App(): JSX.Element {
             <FalseColorPreviewProvider>
               <ToneCurvePreviewProvider>
                 <PixelReadoutProvider>
+                  <RegionEditPreviewProvider>
                   <BusyStateProvider>
                     <RightPanelCollapsedStateProvider>
                       <ApplicationShell />
@@ -306,6 +336,7 @@ export function App(): JSX.Element {
                       <Toaster />
                     </RightPanelCollapsedStateProvider>
                   </BusyStateProvider>
+                  </RegionEditPreviewProvider>
                 </PixelReadoutProvider>
               </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>
@@ -325,6 +356,7 @@ function useThemeClassSyncedWithMainProcess(): void {
 
 function ApplicationShell(): JSX.Element {
   const busyRegistrar = useBusyEntryRegistrar();
+  const inFlightApplyRuns = useInFlightApplyRunStore();
   const [gridLayout, setGridLayout] = useState<GridLayout>(DEFAULT_GRID_LAYOUT);
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
@@ -363,6 +395,7 @@ function ApplicationShell(): JSX.Element {
     pruneRenderingStateToCellCount: renderingApi.pruneRenderingStateToCellCount,
     pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
   });
+  useMenuSelectGridLayoutTriggersHandler(handleGridLayoutChange);
   const gridLayoutRef = useLatestRef(gridLayout);
   const handleOpenImagesRequested = useOpenImagesThroughDialogHandler({
     imagesByIndexRef,
@@ -419,6 +452,7 @@ function ApplicationShell(): JSX.Element {
     renderingApi,
     replaceSelection,
     busyRegistrar,
+    inFlightApplyRuns,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
   const loadedReferenceCandidates = useLoadedReferenceCandidates(imagesByIndex);
@@ -447,6 +481,7 @@ function ApplicationShell(): JSX.Element {
     cellCount,
     renderingApi,
   });
+  useDeselectionClearsOperationRegionOnLeavingPanels({ selectedIndices, renderingApi });
   const regionRequestHandlers = buildToolPanelRegionRequestHandlers({
     activeSourceIndex: singleSelectedSource?.index ?? null,
     regionRequest,
@@ -486,6 +521,7 @@ function ApplicationShell(): JSX.Element {
     setPendingDuplicate,
     getRenderingState: renderingApi.getRenderingState,
     setRenderingState: renderingApi.setRenderingState,
+    inFlightApplyRuns,
   });
   const closingApi = useViewportClosingApi({
     gridLayout,
@@ -500,6 +536,7 @@ function ApplicationShell(): JSX.Element {
     pruneLinkGroupsToCellCount: panelLink.pruneToCellCount,
     compactLinkGroupsAfterRemovingIndex: panelLink.compactAfterRemovingIndex,
     replaceSelection,
+    inFlightApplyRuns,
   });
   const reimportApi = useViewportReimportApi({
     imagesByIndexRef,
@@ -512,6 +549,7 @@ function ApplicationShell(): JSX.Element {
     <div className="flex h-full flex-col">
       <Toolbar
         onOpenImage={handleOpenImagesRequested}
+        onOpenProject={handleOpenProjectRequested}
         gridLayout={gridLayout}
         onGridLayoutChange={handleGridLayoutChange}
         operationGroups={operationGroups}
@@ -531,6 +569,7 @@ function ApplicationShell(): JSX.Element {
                   activeAction,
                   singleSelectedSource,
                   imagesByIndex,
+                  activeActionParameterValues,
                 )}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
@@ -674,12 +713,17 @@ function buildActiveOperationEmbeddedEditorOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
   imagesByIndex: ImagesByIndexMap,
+  activeActionParameterValues: ParameterValuesById,
 ): ReactNode {
   return (
     buildActiveToneCurveEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveThresholdEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
+    buildActiveThresholdEditorElementOrNull(
+      activeAction,
+      singleSelectedSource,
+      imagesByIndex,
+      activeActionParameterValues,
+    ) ??
     buildActiveBandWeightingEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
-    buildActiveBandSelectionEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex) ??
     buildActiveCustomTransformEditorElementOrNull(activeAction, singleSelectedSource, imagesByIndex)
   );
 }
@@ -706,10 +750,15 @@ function buildActiveThresholdEditorElementOrNull(
   activeAction: RegisteredViewportAction | null,
   singleSelectedSource: SingleSelectedSource | null,
   imagesByIndex: ImagesByIndexMap,
+  activeActionParameterValues: ParameterValuesById,
 ): ReactNode {
   if (!singleSelectedSource) return null;
   const content = imagesByIndex.get(singleSelectedSource.index);
-  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
+  const placement = {
+    activeActionId: activeAction?.id ?? null,
+    sourceKind: content?.source.kind ?? null,
+    activeParameterValues: activeActionParameterValues,
+  };
   if (!shouldEmbedThresholdEditorInOperationPanel(placement)) return null;
   if (content?.source.kind !== "raster") return null;
   return (
@@ -732,24 +781,6 @@ function buildActiveBandWeightingEditorElementOrNull(
   if (content?.source.kind !== "raster") return null;
   return (
     <ToolOptionsBandWeightingEditor
-      viewportIndex={singleSelectedSource.index}
-      raster={content.source.raster}
-    />
-  );
-}
-
-function buildActiveBandSelectionEditorElementOrNull(
-  activeAction: RegisteredViewportAction | null,
-  singleSelectedSource: SingleSelectedSource | null,
-  imagesByIndex: ImagesByIndexMap,
-): ReactNode {
-  if (!singleSelectedSource) return null;
-  const content = imagesByIndex.get(singleSelectedSource.index);
-  const placement = { activeActionId: activeAction?.id ?? null, sourceKind: content?.source.kind ?? null };
-  if (!shouldEmbedBandSelectionEditorInOperationPanel(placement)) return null;
-  if (content?.source.kind !== "raster") return null;
-  return (
-    <ToolOptionsBandSelectionEditor
       viewportIndex={singleSelectedSource.index}
       raster={content.source.raster}
     />
@@ -809,6 +840,20 @@ function useMenuInvokeCommandHandler(handlers: OperationCommandHandlers): void {
         dispatchOperationCommand(commandId, handlers),
       ),
     [handlers],
+  );
+}
+
+// CT-289: the File > Grid submenu mirrors the toolbar's layout dropdown; both
+// funnel into the same layout-change handler.
+function useMenuSelectGridLayoutTriggersHandler(
+  handler: (layout: GridLayout) => void,
+): void {
+  useEffect(
+    () =>
+      window.toolboxApi.onMenuSelectGridLayout((layout) => {
+        if (isSelectableGridLayout(layout)) handler(layout);
+      }),
+    [handler],
   );
 }
 
@@ -890,6 +935,7 @@ function buildPendingSaveImageRequest(
     fileName: candidate.fileName,
     viewportIndex: candidate.index,
     isTrueColorPhoto: candidate.isTrueColorPhoto,
+    isFloatSource: candidate.isFloatSource,
     bandCount: candidate.bandCount,
     selectedBandNumber: selectedBandIndex + 1,
   };
@@ -899,6 +945,7 @@ interface SingleSelectedContentSummary {
   readonly index: number;
   readonly fileName: string;
   readonly isTrueColorPhoto: boolean;
+  readonly isFloatSource: boolean;
   readonly bandCount: number;
 }
 
@@ -915,6 +962,7 @@ function pickSingleSelectedSourceWithContent(
     index: onlyIndex,
     fileName: content.fileName,
     isTrueColorPhoto: readIsTrueColorPhotoFromContent(content),
+    isFloatSource: readIsFloatSourceFromContent(content),
     bandCount: readRasterBandCountFromContentOrNull(content) ?? 1,
   };
 }
@@ -922,6 +970,10 @@ function pickSingleSelectedSourceWithContent(
 function readIsTrueColorPhotoFromContent(content: ViewportCellContent): boolean {
   if (content.source.kind !== "raster") return false;
   return shouldRenderRasterAsRgbComposite(content.source.raster);
+}
+
+function readIsFloatSourceFromContent(content: ViewportCellContent): boolean {
+  return content.source.kind === "raster" && content.source.raster.sampleFormat === "float";
 }
 
 function confirmSaveImageFormatChoice(
@@ -940,9 +992,21 @@ function confirmSaveImageFormatChoice(
       selectedBandIndex: renderingState.selectedBandIndex,
       originalFileName: content.fileName,
       formatId,
+      displayMapping: readDisplayMappingStateForSaving(renderingState),
     },
     bindings.busyRegistrar,
   );
+}
+
+// CT-296: PNG and JPEG save the image AS VIEWED, so the save flow carries the
+// panel's display-only toggles alongside the pixels.
+function readDisplayMappingStateForSaving(
+  renderingState: ViewportRenderingState,
+): ViewportDisplayMappingState {
+  return {
+    normalizationEnabled: renderingState.normalizationEnabled,
+    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
+  };
 }
 
 interface SaveImageFlowToastInput {
@@ -950,6 +1014,7 @@ interface SaveImageFlowToastInput {
   selectedBandIndex: number;
   originalFileName: string;
   formatId: SaveImageFormatId;
+  displayMapping: ViewportDisplayMappingState;
 }
 
 async function runSaveImageFlowAndShowToast(
@@ -965,9 +1030,9 @@ async function runSaveImageFlowAndShowToast(
       onProgress: (fraction) => handle.update({ progress: fraction }),
     });
     if (result.canceled) return;
-    toast.success(`Saved to ${result.filePath}`);
+    notifySuccess(`Saved to ${result.filePath}`);
   } catch (error) {
-    toast.error(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
+    notifyError(buildSaveImageFailureToastText(input.originalFileName, describeUnknownError(error)));
   } finally {
     handle.clear();
   }
@@ -1030,7 +1095,7 @@ async function runOpenImagesDialogFlow(bindings: OpenImagesBindings): Promise<vo
   try {
     await runOpenImagesDialogPhaseAndDispatchOutcome(bindings, handle);
   } catch (error) {
-    toast.error(`Could not open images: ${describeUnknownError(error)}`);
+    notifyError(`Could not open images: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -1110,7 +1175,7 @@ function placeSingleDecodedFileIntoViewport(
   bindings: OpenImagesBindings,
 ): void {
   if (file.decodeError !== null || file.source === null) {
-    toast.error(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
+    notifyError(`Could not open ${file.fileName}: ${file.decodeError ?? "decode failed"}`);
     return;
   }
   routeSingleDecodedSourceToCell(file, targetIndex, bindings);
@@ -1157,7 +1222,7 @@ function applyLoadedImageAtIndex(
     }),
   );
   bindings.selectViewportFromClick(index, { ctrlOrMeta: false, shift: false });
-  toast.success(`Loaded ${pending.fileName}`);
+  notifySuccess(`Loaded ${pending.fileName}`);
 }
 
 interface ConfirmReplaceBindings extends ApplyLoadedImageBindings {
@@ -1192,7 +1257,7 @@ async function confirmOpenImagesReviewGroups(
     if (pendingItems.length === 0) return;
     placePendingItemsAcrossViewports(pendingItems, bindings);
   } catch (error) {
-    toast.error(`Could not place stacks: ${describeUnknownError(error)}`);
+    notifyError(`Could not place stacks: ${describeUnknownError(error)}`);
   }
 }
 
@@ -1405,6 +1470,7 @@ interface ViewportDuplicationApiBindings {
   setPendingDuplicate: SetPendingDuplicate;
   getRenderingState: ViewportRenderingApi["getRenderingState"];
   setRenderingState: ViewportRenderingApi["setRenderingState"];
+  inFlightApplyRuns: InFlightApplyRunStore;
 }
 
 function useViewportDuplicationApi(
@@ -1419,6 +1485,7 @@ function useViewportDuplicationApi(
     setPendingDuplicate,
     getRenderingState,
     setRenderingState,
+    inFlightApplyRuns,
   } = bindings;
   return useMemo(
     () =>
@@ -1431,6 +1498,7 @@ function useViewportDuplicationApi(
         setPendingDuplicate,
         getRenderingState,
         setRenderingState,
+        inFlightApplyRuns,
       }),
     [
       gridLayout,
@@ -1441,6 +1509,7 @@ function useViewportDuplicationApi(
       setPendingDuplicate,
       getRenderingState,
       setRenderingState,
+      inFlightApplyRuns,
     ],
   );
 }
@@ -1479,7 +1548,7 @@ function reportDuplicateExceedsMemoryBudget(
   if (!rasterAllocationExceedsMemoryBudget(estimateSourceCloneBytes(sourceContent.source), liveBytes)) {
     return false;
   }
-  toast.error(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
+  notifyError(`Could not duplicate ${sourceContent.fileName}: ${DUPLICATE_MEMORY_REFUSAL_MESSAGE}`);
   return true;
 }
 
@@ -1488,7 +1557,11 @@ function placeDuplicateInExistingEmptyViewport(
   sourceContent: ViewportCellContent,
   sourceIndex: number,
 ): boolean {
-  const emptyIndex = findLowestIndexEmptyViewport(bindings.imagesByIndex, bindings.cellCount);
+  const emptyIndex = findLowestIndexEmptyViewport(
+    bindings.imagesByIndex,
+    bindings.cellCount,
+    bindings.inFlightApplyRuns.listReservedResultTargetIndexes(),
+  );
   if (emptyIndex === null) return false;
   void applyDuplicateToTargetIndex(sourceContent, sourceIndex, emptyIndex, bindings);
   return true;
@@ -1522,9 +1595,9 @@ async function applyDuplicateToTargetIndex(
   try {
     await placeClonedSourceContentAtIndex(sourceContent, targetIndex, bindings.setImagesByIndex);
     bindings.setRenderingState(targetIndex, bindings.getRenderingState(sourceIndex));
-    toast.success(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
+    notifySuccess(formatDuplicateSuccessMessage(sourceContent.fileName, targetIndex));
   } catch (error) {
-    toast.error(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
+    notifyError(`Could not duplicate ${sourceContent.fileName}: ${describeUnknownError(error)}`);
   }
 }
 
@@ -1579,21 +1652,6 @@ function describeUnknownError(error: unknown): string {
   return String(error);
 }
 
-interface ViewportClosingApiBindings {
-  gridLayout: GridLayout;
-  selectedIndices: ReadonlySet<number>;
-  imagesByIndex: ImagesByIndexMap;
-  setGridLayout: SetGridLayout;
-  setImagesByIndex: SetImagesByIndex;
-  pruneRenderingStateToCellCount: (cellCount: number) => void;
-  compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
-  pruneSelectionToCellCount: (cellCount: number) => void;
-  compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
-  pruneLinkGroupsToCellCount: (cellCount: number) => void;
-  compactLinkGroupsAfterRemovingIndex: (removedIndex: number) => void;
-  replaceSelection: (indices: ReadonlySet<number>) => void;
-}
-
 function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
   const {
     gridLayout,
@@ -1608,6 +1666,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
     pruneLinkGroupsToCellCount,
     compactLinkGroupsAfterRemovingIndex,
     replaceSelection,
+    inFlightApplyRuns,
   } = bindings;
   return useMemo(
     () =>
@@ -1624,6 +1683,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
         pruneLinkGroupsToCellCount,
         compactLinkGroupsAfterRemovingIndex,
         replaceSelection,
+        inFlightApplyRuns,
       }),
     [
       gridLayout,
@@ -1638,6 +1698,7 @@ function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportCl
       pruneLinkGroupsToCellCount,
       compactLinkGroupsAfterRemovingIndex,
       replaceSelection,
+      inFlightApplyRuns,
     ],
   );
 }
@@ -1681,7 +1742,7 @@ async function invokeOpenImageDialogForReimportSafely(): Promise<ToolboxOpenImag
   try {
     return await window.toolboxApi.openImageDialog();
   } catch (error) {
-    toast.error(`Could not open the file dialog: ${describeUnknownError(error)}`);
+    notifyError(`Could not open the file dialog: ${describeUnknownError(error)}`);
     return null;
   }
 }
@@ -1716,83 +1777,12 @@ async function replaceViewportSourceWithReimportedFile(
       }),
     );
     bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
-    toast.success(`Re-imported ${file.fileName}`);
+    notifySuccess(`Re-imported ${file.fileName}`);
   } catch (error) {
-    toast.error(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
+    notifyError(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
-}
-
-function buildViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
-  return {
-    hasContent: (index) => bindings.imagesByIndex.has(index),
-    closeViewport: (index) => closeViewportAndCompactRemainingIndices(index, bindings),
-  };
-}
-
-function closeViewportAndCompactRemainingIndices(
-  index: number,
-  bindings: ViewportClosingApiBindings,
-): void {
-  const content = bindings.imagesByIndex.get(index);
-  if (!content) return;
-  const closeContext = captureCloseContextBeforeMutation(index, bindings);
-  bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
-  bindings.compactRenderingStateAfterRemovingIndex(index);
-  bindings.compactSelectionAfterRemovingIndex(index);
-  bindings.compactLinkGroupsAfterRemovingIndex(index);
-  collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
-  toast.info(formatClosedSingleViewportMessage(index, content.fileName));
-}
-
-interface CloseContextBeforeMutation {
-  readonly currentLayout: GridLayout;
-  readonly closedIndex: number;
-  readonly closedIndexWasOnlySelection: boolean;
-  readonly populatedCellCountBeforeClose: number;
-}
-
-function captureCloseContextBeforeMutation(
-  closedIndex: number,
-  bindings: ViewportClosingApiBindings,
-): CloseContextBeforeMutation {
-  return {
-    currentLayout: bindings.gridLayout,
-    closedIndex,
-    closedIndexWasOnlySelection: isClosedIndexTheOnlySelectedViewport(
-      bindings.selectedIndices,
-      closedIndex,
-    ),
-    populatedCellCountBeforeClose: bindings.imagesByIndex.size,
-  };
-}
-
-function isClosedIndexTheOnlySelectedViewport(
-  selectedIndices: ReadonlySet<number>,
-  closedIndex: number,
-): boolean {
-  return selectedIndices.size === 1 && selectedIndices.has(closedIndex);
-}
-
-function collapseGridLayoutAndRestoreSelectionAfterClose(
-  context: CloseContextBeforeMutation,
-  bindings: ViewportClosingApiBindings,
-): void {
-  const plan = planCloseViewport(context);
-  if (plan.collapsedLayout === null) return;
-  const newCellCount = getGridLayoutCellCount(plan.collapsedLayout);
-  bindings.setGridLayout(plan.collapsedLayout);
-  bindings.pruneRenderingStateToCellCount(newCellCount);
-  bindings.pruneSelectionToCellCount(newCellCount);
-  bindings.pruneLinkGroupsToCellCount(newCellCount);
-  if (plan.fallbackSelectionIndex !== null) {
-    bindings.replaceSelection(new Set([plan.fallbackSelectionIndex]));
-  }
-}
-
-function formatClosedSingleViewportMessage(index: number, fileName: string): string {
-  return `Closed panel ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
 interface ToolPanelRegionRequestHandlerInputs {
@@ -1890,9 +1880,27 @@ function beginOperationRegionRequestForActiveSource(
 
 function clearOperationRegionOnActiveSource(inputs: ToolPanelRegionRequestHandlerInputs): void {
   if (inputs.activeSourceIndex === null) return;
-  const state = inputs.renderingApi.getRenderingState(inputs.activeSourceIndex);
-  if (!state.operationRegion) return;
-  inputs.renderingApi.setRenderingState(inputs.activeSourceIndex, { ...state, operationRegion: null });
+  clearOperationRegionAtViewportIndex(inputs.activeSourceIndex, inputs.renderingApi);
+}
+
+interface DeselectionClearsOperationRegionBindings {
+  readonly selectedIndices: ReadonlySet<number>;
+  readonly renderingApi: ViewportRenderingApi;
+}
+
+// CT-261: a panel that leaves the selection loses its pending operation region,
+// so switching to another panel mid-operation never strands a region box on the
+// panel the user moved away from.
+function useDeselectionClearsOperationRegionOnLeavingPanels(
+  bindings: DeselectionClearsOperationRegionBindings,
+): void {
+  const { selectedIndices, renderingApi } = bindings;
+  const previousSelectionRef = useRef(selectedIndices);
+  useEffect(() => {
+    const previousSelection = previousSelectionRef.current;
+    previousSelectionRef.current = selectedIndices;
+    clearOperationRegionOnViewportsLeavingSelection(previousSelection, selectedIndices, renderingApi);
+  }, [selectedIndices, renderingApi]);
 }
 
 interface ApplyActionFlowBindingsInputs {
@@ -1905,6 +1913,7 @@ interface ApplyActionFlowBindingsInputs {
   renderingApi: ViewportRenderingApi;
   replaceSelection: ViewportSelectionState["replaceSelection"];
   busyRegistrar: BusyEntryRegistrar;
+  inFlightApplyRuns: InFlightApplyRunStore;
 }
 
 function buildApplyActionFlowBindings(
@@ -1921,7 +1930,19 @@ function buildApplyActionFlowBindings(
     setRenderingState: inputs.renderingApi.setRenderingState,
     selectViewportIndex: (index) => inputs.replaceSelection(new Set([index])),
     busyRegistrar: inputs.busyRegistrar,
+    inFlightApplyRuns: inputs.inFlightApplyRuns,
   };
+}
+
+// CT-269: one in-flight apply run store per app session. Mutations bump a
+// version state so close affordances (a reserved target panel's close button)
+// re-render while queries stay synchronous for event handlers.
+function useInFlightApplyRunStore(): InFlightApplyRunStore {
+  const [, bumpRunsVersion] = useState(0);
+  return useMemo(
+    () => createInFlightApplyRunStore(() => bumpRunsVersion((version) => version + 1)),
+    [],
+  );
 }
 
 function deriveSingleSelectedSource(
@@ -1959,12 +1980,30 @@ function useLoadedReferenceCandidates(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],
   );
+  const releaseWorkVersion = useSyncExternalStore(
+    subscribeToRasterBufferReleaseWork,
+    readRasterBufferReleaseWorkVersion,
+  );
   // CT-239: SYNC the store (evicting closed panels' entries) instead of
   // accumulating - the remember-only loop pinned every closed panel's cube.
+  // CT-290: the flush runs AFTER the sync in the same post-commit effect, so a
+  // replaced/closed raster is only detached once no component renders it and
+  // the store no longer remembers it; queue/hold changes re-run the effect.
   useEffect(() => {
-    replaceRememberedPanelReferenceRasters(candidates);
-  }, [candidates]);
+    syncReferenceStoreThenReleaseDeadRasterBuffers(candidates, imagesByIndex);
+  }, [candidates, imagesByIndex, releaseWorkVersion]);
   return candidates;
+}
+
+function syncReferenceStoreThenReleaseDeadRasterBuffers(
+  candidates: ReadonlyArray<LoadedReferenceCandidate>,
+  imagesByIndex: ImagesByIndexMap,
+): void {
+  replaceRememberedPanelReferenceRasters(candidates);
+  releaseQueuedRasterBuffersSkippingShared({
+    liveSources: [...imagesByIndex.values()].map((content) => content.source),
+    rememberedRasters: listRememberedReferenceRasters(),
+  });
 }
 
 function listLoadedRasterPanelEntries(imagesByIndex: ImagesByIndexMap): LoadedPanelReferenceEntry[] {
@@ -2048,18 +2087,23 @@ function useActiveToolDisplayLutPreviewParts(inputs: PublishActiveToolPreviewInp
 
 // CT-200: the manual threshold previews its binary result through the SAME
 // single-band display-LUT slot (only one tool panel is open at a time). It
-// tracks the VIEWED band only and stays display-only until Apply.
+// tracks the VIEWED band only and stays display-only until Apply. CT-282: the
+// preview belongs to the Manual method only - Otsu derives its cutoffs at
+// Apply, so there is nothing to preview while it is selected.
 function useThresholdPreviewLut(
   inputs: PublishActiveToolPreviewInputs,
   state: ViewportRenderingState | null,
 ): ReadonlyArray<number> | null {
   const raster = resolveActiveToolRasterOrNull(inputs, "threshold");
   const isComposite = raster !== null && shouldRenderRasterAsRgbComposite(raster);
+  const isOtsuMethod =
+    readThresholdMethodChoice(inputs.parameterValues) === OTSU_THRESHOLD_METHOD;
   const bandIndex = state?.selectedBandIndex ?? 0;
   const bounds = state?.thresholdBounds ?? null;
   return useMemo(
-    () => (isComposite ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds)),
-    [isComposite, raster, bandIndex, bounds],
+    () =>
+      isComposite || isOtsuMethod ? null : buildThresholdPreviewLutOrNull(raster, bandIndex, bounds),
+    [isComposite, isOtsuMethod, raster, bandIndex, bounds],
   );
 }
 
@@ -2300,6 +2344,13 @@ function buildRightPanelActiveSource(
         openInNewViewport: options.openInNewViewport,
         applyActionFlowBindings: inputs.applyActionFlowBindings,
       }),
+    onApplyFunctionDerivedBand: (options) =>
+      runApplyFunctionDerivedBandForViewport(
+        viewportIndex,
+        raster,
+        options.openInNewViewport,
+        inputs.applyActionFlowBindings,
+      ),
     operationHistory: renderingState.operationHistory,
     roi: renderingState.roi,
     onClearRoi: () =>
@@ -2344,12 +2395,12 @@ function pickKeptBandOriginalNumbersForSubsetOrNull(
 ): ReadonlyArray<number> | null {
   const { raster, removedBandIndexes } = inputs;
   if (!raster) {
-    toast.error("Subset Bands requires a raster source.");
+    notifyError("Subset Bands requires a raster source.");
     return null;
   }
   const keptBandIndexes = listKeptBandIndexesFromRemoved(raster.bandCount, removedBandIndexes);
   if (keptBandIndexes.length === 0) {
-    toast.error("Keep at least one band before applying.");
+    notifyError("Keep at least one band before applying.");
     return null;
   }
   if (keptBandIndexes.length === raster.bandCount) {
@@ -2371,6 +2422,35 @@ function invokeBandSubsetActionOnSourceViewport(
     return;
   }
   applyActionInPlaceAtSourceIndex(BAND_SUBSET_ACTION, parameterValues, sourceIndex, bindings);
+}
+
+// CT-284: the Subset Bands editor's "By function" mode applies through the
+// band-selection action unchanged: the staged choice rides in the source's
+// rendering state and merges into the audit parameters at Apply time, exactly
+// as the old Band Selection panel applied.
+function runApplyFunctionDerivedBandForViewport(
+  sourceIndex: number,
+  raster: RasterImage | null,
+  openInNewViewport: boolean,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!raster) {
+    notifyError("Subset Bands requires a raster source.");
+    return;
+  }
+  const merged = mergeParameterValuesWithSourceRenderingState(
+    BAND_SELECTION_ACTION,
+    NO_PARAMETER_VALUES,
+    bindings.getRenderingState(sourceIndex),
+    "whole-image",
+    raster,
+  );
+  if (merged === null) return;
+  if (openInNewViewport) {
+    applyActionToDuplicateOfSource(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceAtSourceIndex(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
 }
 
 function useViewportBandRemovalApi(
@@ -2401,7 +2481,7 @@ function pickKeptBandNumbersAfterSingleRemovalOrNull(
   removedBandIndex: number,
 ): ReadonlyArray<number> | null {
   if (!raster) {
-    toast.error("Removing a band requires a raster source.");
+    notifyError("Removing a band requires a raster source.");
     return null;
   }
   if (raster.bandCount <= 1) {
@@ -2418,10 +2498,11 @@ function setBandSubsetEditModeActiveAtViewport(
 ): void {
   const previous = renderingApi.getRenderingState(viewportIndex);
   if (previous.isBandSubsetEditModeActive === isActive) return;
-  renderingApi.setRenderingState(viewportIndex, {
-    ...previous,
-    isBandSubsetEditModeActive: isActive,
-  });
+  // Leaving the editor also drops any staged "By function" choice (CT-284).
+  const next = isActive
+    ? { ...previous, isBandSubsetEditModeActive: true }
+    : closeBandSubsetEditorAndClearFunctionChoice(previous);
+  renderingApi.setRenderingState(viewportIndex, next);
 }
 
 function deriveBandSubsetToggleStateForToolbar(
@@ -2539,7 +2620,6 @@ function buildMetadataDisplayForActiveContentOrNull(
     fileName: content.fileName,
     source: content.source,
     originalFilePath: content.originalFilePath,
-    fileSizeBytes: content.fileSizeBytes,
     currentProjectFilePath,
   });
 }
@@ -2616,7 +2696,7 @@ function mergeParameterValuesWithSourceRenderingState(
   try {
     return action.prepareParameterValuesForApply(rawParameterValues, sourceRenderingState, applyScope, sourceRaster);
   } catch (error) {
-    toast.error(formatActionPreparationErrorMessage(action.label, error));
+    notifyError(formatActionPreparationErrorMessage(action.label, error));
     return null;
   }
 }
@@ -2705,7 +2785,7 @@ async function invokeSaveProjectFlowWithToastFeedback(
     });
     return handleSaveProjectFlowOutcome(result, bindings, revisionBeingSaved);
   } catch (error) {
-    toast.error(`Could not save project: ${describeUnknownError(error)}`);
+    notifyError(`Could not save project: ${describeUnknownError(error)}`);
     return false;
   } finally {
     handle.clear();
@@ -2738,7 +2818,7 @@ function handleSaveProjectFlowOutcome(
   if (result.canceled || !result.filePath) return false;
   bindings.setCurrentProjectFilePath(result.filePath);
   bindings.projectRevisionTracker.markContentRevisionAsSaved(revisionBeingSaved);
-  toast.success(`Saved project to ${result.filePath}`);
+  notifySuccess(`Saved project to ${result.filePath}`);
   return true;
 }
 
@@ -2830,7 +2910,7 @@ async function runOpenProjectFlowAndShowToast(
     });
     handleOpenProjectFlowOutcome(result, bindings);
   } catch (error) {
-    toast.error(`Could not open project: ${describeUnknownError(error)}`);
+    notifyError(`Could not open project: ${describeUnknownError(error)}`);
   } finally {
     handle.clear();
   }
@@ -2856,7 +2936,7 @@ function handleOpenProjectFlowOutcome(
 ): void {
   if (result.canceled || !result.opened) return;
   applyOpenedProjectToApplicationState(result.opened, bindings);
-  toast.success(formatOpenedProjectToastMessage(result.opened));
+  notifySuccess(formatOpenedProjectToastMessage(result.opened));
 }
 
 function formatOpenedProjectToastMessage(opened: OpenedProject): string {

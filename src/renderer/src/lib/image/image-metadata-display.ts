@@ -11,14 +11,13 @@ export interface ViewportImageMetadataDisplay {
   readonly bitsPerSample: string;
   readonly sampleFormat: string;
   readonly bandCount: string;
-  readonly fileSize: string;
+  readonly dataSize: string;
 }
 
 export interface ViewportImageMetadataInputs {
   readonly fileName: string;
   readonly source: ViewportImageSource;
   readonly originalFilePath?: string;
-  readonly fileSizeBytes?: number;
   readonly currentProjectFilePath: string | null;
 }
 
@@ -35,13 +34,13 @@ const RAW_CAMERA_EXTENSIONS: ReadonlyArray<string> = [
   ".rw2",
 ];
 
-const FILE_SIZE_UNIT_DESCRIPTORS: ReadonlyArray<FileSizeUnitDescriptor> = [
+const BYTE_COUNT_UNIT_DESCRIPTORS: ReadonlyArray<ByteCountUnitDescriptor> = [
   { suffix: "GB", divisor: 1024 * 1024 * 1024 },
   { suffix: "MB", divisor: 1024 * 1024 },
   { suffix: "KB", divisor: 1024 },
 ];
 
-interface FileSizeUnitDescriptor {
+interface ByteCountUnitDescriptor {
   readonly suffix: string;
   readonly divisor: number;
 }
@@ -59,8 +58,23 @@ export function buildViewportImageMetadataDisplay(
     bitsPerSample: rasterOrNull ? String(rasterOrNull.bitsPerSample) : UNKNOWN_FIELD_PLACEHOLDER,
     sampleFormat: rasterOrNull ? rasterOrNull.sampleFormat : UNKNOWN_FIELD_PLACEHOLDER,
     bandCount: rasterOrNull ? String(rasterOrNull.bandCount) : UNKNOWN_FIELD_PLACEHOLDER,
-    fileSize: formatFileSizeBytesForDisplay(inputs.fileSizeBytes),
+    dataSize: formatRasterDataSizeForDisplayOrPlaceholder(rasterOrNull),
   };
+}
+
+// CT-266: the Metadata section shows the CURRENT raster's in-memory data size
+// (width x height x bands x bytes per sample), never the original file's size,
+// so a cropped or band-reduced stack reports what it holds now.
+export function computeRasterDataSizeBytes(raster: RasterImage): number {
+  const bytesPerSample = raster.bitsPerSample / 8;
+  return raster.width * raster.height * raster.bandCount * bytesPerSample;
+}
+
+function formatRasterDataSizeForDisplayOrPlaceholder(
+  rasterOrNull: RasterImage | null,
+): string {
+  if (!rasterOrNull) return UNKNOWN_FIELD_PLACEHOLDER;
+  return formatByteCountForDisplay(computeRasterDataSizeBytes(rasterOrNull));
 }
 
 export function detectImageFormatFromFileName(fileName: string): ImageFormatLabel {
@@ -77,19 +91,19 @@ function looksLikeRawCameraFileName(lowerCaseFileName: string): boolean {
   return RAW_CAMERA_EXTENSIONS.some((ext) => lowerCaseFileName.endsWith(ext));
 }
 
-export function formatFileSizeBytesForDisplay(bytes: number | undefined): string {
+export function formatByteCountForDisplay(bytes: number | undefined): string {
   if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) {
     return UNKNOWN_FIELD_PLACEHOLDER;
   }
-  const unit = pickLargestApplicableFileSizeUnit(bytes);
+  const unit = pickLargestApplicableByteCountUnit(bytes);
   if (!unit) return `${bytes} B`;
   return `${(bytes / unit.divisor).toFixed(1)} ${unit.suffix}`;
 }
 
-function pickLargestApplicableFileSizeUnit(
+function pickLargestApplicableByteCountUnit(
   bytes: number,
-): FileSizeUnitDescriptor | null {
-  for (const unit of FILE_SIZE_UNIT_DESCRIPTORS) {
+): ByteCountUnitDescriptor | null {
+  for (const unit of BYTE_COUNT_UNIT_DESCRIPTORS) {
     if (bytes >= unit.divisor) return unit;
   }
   return null;

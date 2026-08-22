@@ -16,6 +16,7 @@ import {
 import {
   SubsetBandsSection,
   type SubsetBandsApplyOptions,
+  type SubsetBandsFunctionApplyOptions,
 } from "@/components/subset-bands-section";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +59,10 @@ import {
   useCurrentPixelReadoutSnapshot,
   type ViewportPixelReadoutSnapshot,
 } from "@/state/pixel-readout-context";
+import {
+  useCurrentRegionEditPreview,
+  type RegionEditPreviewSnapshot,
+} from "@/state/region-edit-preview-context";
 
 export type ViewportRightPanelImageSourceKind = "raster" | "browser-source";
 
@@ -74,6 +79,7 @@ export interface ViewportRightPanelActiveSource {
   readonly onEnterBandSubsetEditMode: () => void;
   readonly onExitBandSubsetEditMode: () => void;
   readonly onApplyBandSubset: (options: SubsetBandsApplyOptions) => void;
+  readonly onApplyFunctionDerivedBand: (options: SubsetBandsFunctionApplyOptions) => void;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
@@ -192,11 +198,13 @@ function SubsetBandsSectionForActiveSource(
   return (
     <SubsetBandsSection
       raster={props.raster}
+      viewportIndex={props.activeSource.viewportIndex}
       viewportNumber={props.activeSource.viewportNumber}
       activeBandIndex={displayedBandIndex}
       initialRemovedBandIndexes={props.activeSource.removedBandIndexes}
       onCancel={props.activeSource.onExitBandSubsetEditMode}
       onApply={props.activeSource.onApplyBandSubset}
+      onApplyFunctionDerivedBand={props.activeSource.onApplyFunctionDerivedBand}
     />
   );
 }
@@ -386,7 +394,7 @@ function buildMetadataRowsFromDisplay(
     { label: "Bits per sample", value: metadata.bitsPerSample },
     { label: "Sample format", value: metadata.sampleFormat },
     { label: "Bands", value: metadata.bandCount },
-    { label: "File size", value: metadata.fileSize },
+    { label: "Data size", value: metadata.dataSize },
   ];
 }
 
@@ -409,7 +417,12 @@ interface RegionSectionProps {
 }
 
 function RegionSection(props: RegionSectionProps): JSX.Element | null {
-  const roi = props.activeSource.roi;
+  const editPreview = useCurrentRegionEditPreview();
+  const roi = pickLiveInspectionRoiForRegionSection(
+    editPreview,
+    props.activeSource.viewportNumber,
+    props.activeSource.roi,
+  );
   if (!roi) return null;
   return (
     <section aria-label="Region" className={RIGHT_PANEL_SECTION_CLASSES}>
@@ -420,6 +433,21 @@ function RegionSection(props: RegionSectionProps): JSX.Element | null {
       <RegionCoordinatesList roi={roi} />
     </section>
   );
+}
+
+// CT-275: while the inspection box is being dragged or resized, mirror the
+// in-progress geometry so the coordinates track the mouse live; the committed
+// roi only updates (and the ROI mean spectrum only recomputes) on release.
+function pickLiveInspectionRoiForRegionSection(
+  editPreview: RegionEditPreviewSnapshot | null,
+  viewportNumber: number,
+  committedRoi: ViewportRoi | null,
+): ViewportRoi | null {
+  const isPreviewForThisSection =
+    editPreview !== null &&
+    editPreview.target === "inspection-roi" &&
+    editPreview.viewportNumber === viewportNumber;
+  return isPreviewForThisSection ? editPreview.roi : committedRoi;
 }
 
 interface RegionSectionHeaderProps {

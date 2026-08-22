@@ -120,6 +120,30 @@ test("a failed run keeps the panel open with the formula set, and a corrected fo
   });
 });
 
+test("a formula returning a spatial crop applies as a smaller-dimension stack", async () => {
+  await openCustomTransformEditor();
+  await setCustomTransformFormula(launched.window, "cube[:, 0:3, 0:2]");
+  await applyCustomTransformAwaitingRun(launched.window);
+  await expectCustomTransformPanelClosed(launched.window);
+  expect(await countPanels(launched.window)).toBe(RESULT_PANEL);
+  await selectPanel(launched.window, RESULT_PANEL);
+  await expectMetadataDataTypeAndDimensions(launched.window, {
+    dataType: FLOAT32,
+    width: 2,
+    height: 3,
+  });
+  const metadata = await readMetadata(launched.window);
+  expect(metadata.bandCount).toBe("3");
+  await expectPixelReadoutToEqual(launched.window, {
+    panel: RESULT_PANEL,
+    imageX: 0,
+    imageY: 0,
+    dimensions: { width: 2, height: 3 },
+    expected: 100,
+    tolerance: 0.1,
+  });
+});
+
 async function openCustomTransformEditor(): Promise<void> {
   await openOperation(launched.window, CUSTOM_TRANSFORM_OPERATION_LABEL);
   await expectCustomTransformEditorReady(launched.window);

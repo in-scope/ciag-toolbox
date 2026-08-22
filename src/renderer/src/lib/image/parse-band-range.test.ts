@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BAND_RANGE_FIELD_SYNTAX_HINT,
   BAND_RANGE_SYNTAX_EXAMPLES,
-  BAND_RANGE_SYNTAX_HINT,
+  BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   describeBandRangeErrorOrNull,
   formatBandNumbersAsRangeText,
   parseBandRangeText,
@@ -91,9 +92,16 @@ describe("band-range syntax hint", () => {
     expect(BAND_RANGE_SYNTAX_EXAMPLES).toContain("1-5,10");
   });
 
-  it("warns that ranges use dashes, not colons", () => {
-    expect(BAND_RANGE_SYNTAX_HINT).toContain(BAND_RANGE_SYNTAX_EXAMPLES);
-    expect(BAND_RANGE_SYNTAX_HINT.toLowerCase()).toContain("not colons");
+  it("pins the shared syntax sentence exactly (CT-287)", () => {
+    expect(BAND_RANGE_FIELD_SYNTAX_HINT).toBe(
+      "Use commas to list bands and dashes for ranges (e.g. 1,3,5 or 1-5,10)",
+    );
+  });
+
+  it("pins the shared band-wise scope field description exactly (CT-287)", () => {
+    expect(BAND_WISE_SCOPE_FIELD_DESCRIPTION).toBe(
+      "Use commas to list bands and dashes for ranges (e.g. 1,3,5 or 1-5,10); empty field processes every band.",
+    );
   });
 
   it("sources the empty-input error from the shared examples constant", () => {

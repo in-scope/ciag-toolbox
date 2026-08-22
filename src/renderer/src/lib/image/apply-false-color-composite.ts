@@ -9,6 +9,11 @@ import {
 // them) and the assignment is order-sensitive: r -> channel 0, g -> channel 1,
 // b -> channel 2. The result is a 3-band raster that shares the chosen source
 // band buffers read-only and preserves the source data type.
+//
+// CT-278: the result is tagged colorInterpretation "rgb", so it renders as one
+// colour image (CT-159): RGB composite display, no band navigator, the CT-248
+// "View channels separately" toggle for per-band inspection, and the colour
+// export/project-save paths (CT-173/CT-174) apply automatically.
 
 export interface FalseColorBandAssignment {
   readonly r: number;
@@ -78,5 +83,6 @@ function buildThreeChannelCompositeRaster(
     bandLabels: [`R: band ${assignment.r}`, `G: band ${assignment.g}`, `B: band ${assignment.b}`],
     bandOriginalNumbers: [assignment.r, assignment.g, assignment.b],
     bandWavelengths: undefined,
+    colorInterpretation: "rgb",
   };
 }

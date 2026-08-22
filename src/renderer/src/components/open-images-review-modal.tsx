@@ -5,8 +5,8 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { AlertTriangle, Check, GripVertical, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { AlertTriangle, Check, GripVertical, Plus, Trash2, Undo2 } from "lucide-react";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,15 +18,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatFileSizeBytesForDisplay } from "@/lib/image/image-metadata-display";
+import { classifyOpenedRasterByShape } from "@/lib/image/classify-opened-raster";
+import { formatByteCountForDisplay } from "@/lib/image/image-metadata-display";
 import { findStackedRasterMismatchOrNull } from "@/lib/image/stack-rasters";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { splitGroupRowsIntoSingleImageGroups } from "@/lib/image/group-opened-files";
+import {
+  canRecombineSplitGroupsIntoOriginal,
+  replaceSplitGroupsWithRestoredGroup,
+  splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord,
+} from "@/lib/image/group-opened-files";
 import type {
   GroupedOpenedFileRow,
   OpenedFilesGroup,
   OpenedFilesGroupMode,
   OpenedFilesGroupingProposal,
+  SplitGroupRecoveryRecord,
 } from "@/lib/image/group-opened-files";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +87,7 @@ function OpenImagesReviewBody(props: OpenImagesReviewBodyProps): JSX.Element {
   const [groups, setGroups] = useState<ReadonlyArray<ReviewGroupViewModel>>(() =>
     props.proposal.groups.map(convertGroupingToViewModel),
   );
+  const splitRecovery = useSplitRecoveryRecords(groups, setGroups);
   const dragHandlers = useDragBetweenGroupsHandlers(groups, setGroups);
   return (
     <>
@@ -88,6 +95,7 @@ function OpenImagesReviewBody(props: OpenImagesReviewBodyProps): JSX.Element {
       <OpenImagesReviewGroupList
         groups={groups}
         setGroups={setGroups}
+        splitRecovery={splitRecovery}
         dragHandlers={dragHandlers}
       />
       <AddNewImageButton onAdd={() => setGroups(appendEmptyStackGroup(groups))} />
@@ -125,14 +133,71 @@ function convertViewModelToGroup(model: ReviewGroupViewModel): OpenedFilesGroup 
   };
 }
 
-function replaceGroupWithItsSingleImageSplits(
+// CT-264: splitting a group remembers the pre-split grouping so the
+// "Recombine into one stack" affordance can restore it exactly; the affordance
+// is offered only while every split group still holds its original row.
+interface SplitRecoveryApi {
+  readonly splitGroupRecordingRecovery: (target: ReviewGroupViewModel) => void;
+  readonly recombineSplitGroups: (record: SplitGroupRecoveryRecord) => void;
+  readonly recombinableRecordByFirstSplitGroupId: ReadonlyMap<string, SplitGroupRecoveryRecord>;
+}
+
+function useSplitRecoveryRecords(
   groups: ReadonlyArray<ReviewGroupViewModel>,
+  setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void,
+): SplitRecoveryApi {
+  const [records, setRecords] = useState<ReadonlyArray<SplitGroupRecoveryRecord>>([]);
+  return {
+    splitGroupRecordingRecovery: (target) =>
+      runSplitRecordingRecovery(target, groups, setGroups, records, setRecords),
+    recombineSplitGroups: (record) =>
+      runRecombineSplitGroups(record, groups, setGroups, records, setRecords),
+    recombinableRecordByFirstSplitGroupId: indexRecombinableRecordsByFirstSplitGroupId(
+      groups,
+      records,
+    ),
+  };
+}
+
+function runSplitRecordingRecovery(
   target: ReviewGroupViewModel,
-): ReadonlyArray<ReviewGroupViewModel> {
-  const splitModels = splitGroupRowsIntoSingleImageGroups(convertViewModelToGroup(target)).map(
-    convertGroupingToViewModel,
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+  setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void,
+  records: ReadonlyArray<SplitGroupRecoveryRecord>,
+  setRecords: (next: ReadonlyArray<SplitGroupRecoveryRecord>) => void,
+): void {
+  const split = splitGroupRowsIntoSingleImageGroupsWithRecoveryRecord(
+    convertViewModelToGroup(target),
   );
-  return groups.flatMap((group) => (group.id === target.id ? splitModels : [group]));
+  const splitModels = split.splitGroups.map(convertGroupingToViewModel);
+  setGroups(groups.flatMap((group) => (group.id === target.id ? splitModels : [group])));
+  setRecords([...records, split.recoveryRecord]);
+}
+
+function runRecombineSplitGroups(
+  record: SplitGroupRecoveryRecord,
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+  setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void,
+  records: ReadonlyArray<SplitGroupRecoveryRecord>,
+  setRecords: (next: ReadonlyArray<SplitGroupRecoveryRecord>) => void,
+): void {
+  const restoredModel = convertGroupingToViewModel(record.originalGroup);
+  setGroups(replaceSplitGroupsWithRestoredGroup(groups, record, restoredModel));
+  setRecords(records.filter((existing) => existing !== record));
+}
+
+function indexRecombinableRecordsByFirstSplitGroupId(
+  groups: ReadonlyArray<ReviewGroupViewModel>,
+  records: ReadonlyArray<SplitGroupRecoveryRecord>,
+): ReadonlyMap<string, SplitGroupRecoveryRecord> {
+  const byFirstSplitGroupId = new Map<string, SplitGroupRecoveryRecord>();
+  for (const record of records) {
+    const firstSplitGroupId = record.splitGroupIds[0];
+    if (firstSplitGroupId === undefined) continue;
+    if (!canRecombineSplitGroupsIntoOriginal(groups, record)) continue;
+    byFirstSplitGroupId.set(firstSplitGroupId, record);
+  }
+  return byFirstSplitGroupId;
 }
 
 function appendEmptyStackGroup(
@@ -209,10 +274,13 @@ function buildDragSourceForGroupAndRow(
   return { groupId, rowIndex, isMultiBandRaster: sourceRow ? isMultiBandRasterRow(sourceRow) : false };
 }
 
+// CT-263: only an already-multi-band SCIENTIFIC raster refuses the cross-group
+// drag outright; a colour photo may land in a stack group, where its row badge
+// explains it opens on its own and blocks the combine.
 function isMultiBandRasterRow(row: GroupedOpenedFileRow): boolean {
   if (row.source === null) return false;
   if (row.source.kind !== "raster") return false;
-  return row.source.raster.bandCount > 1;
+  return classifyOpenedRasterByShape(row.source.raster).kind === "already-multi-band";
 }
 
 function rejectMultiBandDragIntoDifferentGroupOrPass(
@@ -221,9 +289,7 @@ function rejectMultiBandDragIntoDifferentGroupOrPass(
 ): boolean {
   const isCrossGroupMove = source.groupId !== targetGroupId;
   if (!source.isMultiBandRaster || !isCrossGroupMove) return true;
-  toast.error("Multi-band stack must open as its own stack; it cannot be combined with other bands.", {
-    duration: 8000,
-  });
+  notifyError("Multi-band stack must open as its own stack; it cannot be combined with other bands.");
   return false;
 }
 
@@ -340,6 +406,7 @@ function pickGroupModeAfterRowInsert(
 interface OpenImagesReviewGroupListProps {
   readonly groups: ReadonlyArray<ReviewGroupViewModel>;
   readonly setGroups: (next: ReadonlyArray<ReviewGroupViewModel>) => void;
+  readonly splitRecovery: SplitRecoveryApi;
   readonly dragHandlers: DragBetweenGroupsHandlers;
 }
 
@@ -347,19 +414,67 @@ function OpenImagesReviewGroupList(props: OpenImagesReviewGroupListProps): JSX.E
   return (
     <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
       {props.groups.map((group, index) => (
-        <OpenImagesReviewGroupCard
+        <OpenImagesReviewGroupListEntry
           key={group.id}
           group={group}
           groupIndex={index}
-          onUpdateGroup={(next) => props.setGroups(replaceGroupById(props.groups, group.id, next))}
-          onRemoveGroup={() => props.setGroups(removeGroupById(props.groups, group.id))}
-          onSplitGroupIntoSingleImages={() =>
-            props.setGroups(replaceGroupWithItsSingleImageSplits(props.groups, group))
-          }
-          dragHandlers={props.dragHandlers}
+          listProps={props}
         />
       ))}
     </div>
+  );
+}
+
+interface OpenImagesReviewGroupListEntryProps {
+  readonly group: ReviewGroupViewModel;
+  readonly groupIndex: number;
+  readonly listProps: OpenImagesReviewGroupListProps;
+}
+
+function OpenImagesReviewGroupListEntry(props: OpenImagesReviewGroupListEntryProps): JSX.Element {
+  const { group, groupIndex, listProps } = props;
+  const { groups, setGroups, splitRecovery, dragHandlers } = listProps;
+  return (
+    <>
+      <RecombineSplitGroupsAffordanceWhenLeading group={group} splitRecovery={splitRecovery} />
+      <OpenImagesReviewGroupCard
+        group={group}
+        groupIndex={groupIndex}
+        onUpdateGroup={(next) => setGroups(replaceGroupById(groups, group.id, next))}
+        onRemoveGroup={() => setGroups(removeGroupById(groups, group.id))}
+        onSplitGroupIntoSingleImages={() => splitRecovery.splitGroupRecordingRecovery(group)}
+        dragHandlers={dragHandlers}
+      />
+    </>
+  );
+}
+
+// CT-264: the recombine affordance renders directly above the FIRST group
+// produced by a split, covering the run of single-image groups beneath it.
+function RecombineSplitGroupsAffordanceWhenLeading(props: {
+  readonly group: ReviewGroupViewModel;
+  readonly splitRecovery: SplitRecoveryApi;
+}): JSX.Element | null {
+  const record = props.splitRecovery.recombinableRecordByFirstSplitGroupId.get(props.group.id);
+  if (record === undefined) return null;
+  return (
+    <RecombineSplitGroupsButton
+      onRecombine={() => props.splitRecovery.recombineSplitGroups(record)}
+    />
+  );
+}
+
+function RecombineSplitGroupsButton(props: { readonly onRecombine: () => void }): JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="self-start"
+      onClick={props.onRecombine}
+    >
+      <Undo2 className="mr-2 size-4" /> Recombine into one stack
+    </Button>
   );
 }
 
@@ -437,6 +552,7 @@ interface GroupValidationSummary {
 type RowValidationState =
   | { readonly kind: "valid" }
   | { readonly kind: "decode-failed"; readonly message: string }
+  | { readonly kind: "color-photo" }
   | { readonly kind: "already-multi-band"; readonly bandCount: number }
   | {
       readonly kind: "property-mismatch";
@@ -473,16 +589,18 @@ function pickFirstStackableRasterBaseline(
   return null;
 }
 
+// CT-263: validation keys on the decoded raster's shape via the shared
+// classifier, so a single-band image of ANY source kind is stackable and a
+// colour photo is called out as a photo (never as a "(1 bands)" raster).
 function deriveRowValidationState(
   row: GroupedOpenedFileRow,
   baseline: RasterImage | null,
 ): RowValidationState {
   if (row.decodeError !== null) return { kind: "decode-failed", message: row.decodeError };
   if (row.source === null) return { kind: "decode-failed", message: "Failed to decode" };
-  if (row.source.kind !== "raster") return { kind: "already-multi-band", bandCount: 1 };
-  if (row.source.raster.bandCount > 1) {
-    return { kind: "already-multi-band", bandCount: row.source.raster.bandCount };
-  }
+  if (row.source.kind !== "raster") return { kind: "color-photo" };
+  const classification = classifyOpenedRasterByShape(row.source.raster);
+  if (classification.kind !== "stackable-plane") return classification;
   return checkAgainstBaselineOrReturnValid(row.source.raster, baseline);
 }
 
@@ -514,6 +632,7 @@ function describeStackDisabledReason(
 ): string {
   if (rows.length < 2) return "Need at least 2 rows to combine bands";
   if (perRow.some((state) => state.kind === "decode-failed")) return "One or more rows failed to decode";
+  if (perRow.some((state) => state.kind === "color-photo")) return "Color photos open on their own; they cannot be combined";
   if (perRow.some((state) => state.kind === "already-multi-band")) return "Already multi-band rasters cannot be combined";
   if (perRow.some((state) => state.kind === "property-mismatch")) return "Row dimensions or formats do not match";
   return "Cannot combine bands";
@@ -835,6 +954,7 @@ function filterValidationStateForGroupMode(
 ): RowValidationState {
   if (mode !== "singles") return state;
   if (state.kind === "already-multi-band") return { kind: "valid" };
+  if (state.kind === "color-photo") return { kind: "valid" };
   if (state.kind === "property-mismatch") return { kind: "valid" };
   return state;
 }
@@ -950,7 +1070,7 @@ function RowMetadataLine({ row }: { row: GroupedOpenedFileRow }): JSX.Element {
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       {row.wavelength !== null ? <RowWavelengthBadge wavelength={row.wavelength} /> : null}
-      <span>{formatFileSizeBytesForDisplay(totalRowSizeIncludingSidecar(row))}</span>
+      <span>{formatByteCountForDisplay(totalRowSizeIncludingSidecar(row))}</span>
     </div>
   );
 }
@@ -1003,6 +1123,7 @@ function ValidationErrorBadge({ state }: { state: RowValidationState }): JSX.Ele
 function describeRowValidationErrorTooltip(state: RowValidationState): string {
   if (state.kind === "valid") return "";
   if (state.kind === "decode-failed") return state.message;
+  if (state.kind === "color-photo") return "Color photo; opens on its own";
   if (state.kind === "already-multi-band") {
     return `Multi-band raster (${state.bandCount} bands); will open as its own stack`;
   }

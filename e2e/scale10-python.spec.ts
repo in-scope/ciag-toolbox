@@ -33,13 +33,14 @@ import {
   applySubsetBands,
   openSubsetBandsEditor,
   setSubsetBandsOpenInNewPanel,
+  subsetBandsEditor,
   subsetBandsKeepCheckboxes,
   uncheckSubsetBandRow,
 } from "./support/band-management";
 import {
   BAND_SELECTION_OPERATION_LABEL,
-  expectBandSelectionEditorReady,
-  runBandSelectionFormula,
+  openBandSelectionFunctionEditor,
+  enterBandSelectionFormula,
 } from "./support/band-selection";
 import {
   BAND_WEIGHTING_OPERATION_LABEL,
@@ -59,10 +60,11 @@ import {
 import { enqueueOpenDialogPaths } from "./support/dialog-stub-controls";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
-import { openOperation, operationPanel } from "./support/operations";
+import { openOperation } from "./support/operations";
 import { selectPanel } from "./support/panels";
 import { runAsStoryboardStep } from "./support/storyboard-step";
 import {
+  applyConfiguredPanelWithBudget,
   applyOperationWithBudget,
   closeGridPanel,
   countGridPanels,
@@ -96,6 +98,9 @@ const SUBSET_KEPT_BAND_COUNT = 25;
 // The PRD grants each Python consumer run 20 minutes; the budget is the
 // acceptance bar and fails before the test timeout.
 const PYTHON_RUN_BUDGET_MS = 20 * 60_000;
+// CT-293: a custom band-selection function runs INSIDE Apply, so its apply
+// budget is the python run budget plus the ordinary apply budget.
+const BAND_SELECTION_SCRIPT_APPLY_BUDGET_MS = PYTHON_RUN_BUDGET_MS + SCALE10_APPLY_BUDGET_MS;
 const SUBSET_TEST_TIMEOUT_MS = 80 * 60_000;
 const PROBE_TEST_TIMEOUT_MS = 60 * 60_000;
 const LEAK_CHECK_TIMEOUT_MS = 60_000;
@@ -240,14 +245,6 @@ async function weightFieldReads(bandNumber: number, expectedValue: string): Prom
   return value === expectedValue;
 }
 
-function bandSelectionShowsFormulaFunction(): Promise<boolean> {
-  return operationPanel(launched.window, BAND_SELECTION_OPERATION_LABEL)
-    .getByText("Selected function: Formula", { exact: true })
-    .count()
-    .then((count) => count > 0)
-    .catch(() => false);
-}
-
 // --- leak checks (the cleanup Standing Rule, asserted in-test) -----------------
 
 async function expectNoLeakedPythonWorkersOrSpools(): Promise<void> {
@@ -348,37 +345,33 @@ async function verifyWeightedMeanReadout(expectedBase: number): Promise<string> 
 
 // --- subset: band selection formula run ----------------------------------------
 
-test("subset band selection: the mean formula stages a custom band and Apply reads the band mean exactly", async () => {
+test("subset band selection: the mean formula runs at Apply and reads the band mean exactly", async () => {
   test.setTimeout(SUBSET_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("python: Band Selection formula run + apply (25-band subset)", async () => {
+  await recordSweepVerdict("python: Band Selection formula apply (25-band subset)", async () => {
     await openTwentyFiveBandSubsetStack();
-    const runMs = await runMeanBandFormulaExpectingStagedFunction();
-    const timing = await applyOperationWithBudget(launched.window, BAND_SELECTION_OPERATION_LABEL, SCALE10_APPLY_BUDGET_MS);
+    await configureMeanBandFormula();
+    const timing = await applyConfiguredPanelWithBudget(
+      launched.window,
+      subsetBandsEditor(launched.window),
+      BAND_SELECTION_OPERATION_LABEL,
+      BAND_SELECTION_SCRIPT_APPLY_BUDGET_MS,
+    );
     expect(timing.maxUiGapMs).toBeLessThanOrEqual(SCALE10_MAX_UI_GAP_MS);
     await expectNoRawAllocationFailureToast(launched.window);
     const oracle = await verifyExactResultReadout(1, (x, y) => SUBSET_MEAN_BASE + (x % 100) + (y % 100), "band mean");
     await expectNoLeakedPythonWorkersOrSpools();
-    return { runMs, applyMs: timing.applyMs, maxUiGapMs: timing.maxUiGapMs, oracle };
+    return { applyMs: timing.applyMs, maxUiGapMs: timing.maxUiGapMs, oracle };
   });
 });
 
-// The formula's 50-megapixel band rides back through the JSON value path and
-// is remembered in the result store; "Selected function: Formula" is the
-// staged proof (the T23 pattern).
-async function runMeanBandFormulaExpectingStagedFunction(): Promise<number> {
-  return runAsStoryboardStep(launched.window, "Run the mean band formula", async () => {
-    await openOperation(launched.window, BAND_SELECTION_OPERATION_LABEL);
-    await expectBandSelectionEditorReady(launched.window);
-    await startUiHeartbeat(launched.window);
-    await runBandSelectionFormula(launched.window, MEAN_BAND_FORMULA);
-    const runMs = await waitForScriptRunSuccess(
-      "Band Selection formula run",
-      bandSelectionShowsFormulaFunction,
-      PYTHON_RUN_BUDGET_MS,
-    );
-    const maxUiGapMs = await stopUiHeartbeatAndReadMaxGapMs(launched.window);
-    expect(maxUiGapMs, "the run must not freeze the renderer").toBeLessThanOrEqual(SCALE10_MAX_UI_GAP_MS);
-    return runMs;
+// CT-293: nothing runs while the editor is open - the formula text is only
+// CONFIGURED here, and Apply uploads the cube, runs the worker, and brings the
+// 50-megapixel band back through the JSON value path in one operation. The
+// apply budget therefore covers the whole Python run.
+async function configureMeanBandFormula(): Promise<void> {
+  await runAsStoryboardStep(launched.window, "Configure the mean band formula", async () => {
+    await openBandSelectionFunctionEditor(launched.window);
+    await enterBandSelectionFormula(launched.window, MEAN_BAND_FORMULA);
   });
 }
 

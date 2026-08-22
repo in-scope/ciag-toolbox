@@ -1,5 +1,6 @@
 import { USER_SCRIPT_RUN_CHUNK_BYTES } from "@shared/chunked-user-script-run-protocol";
 
+import { isOperationStoppedError, throwIfOperationStopped } from "@/lib/image/operation-stop";
 import { describeElectronInvokeFailure } from "@/lib/ipc/electron-invoke-error";
 import { createCubeResultChunkAssembler } from "./cube-result-chunk-assembler";
 
@@ -32,6 +33,7 @@ export interface UserScriptRunChunkedApi {
     request: ToolboxUserScriptRunResultChunkRequest,
   ): Promise<ToolboxUserScriptRunResultChunkResult>;
   releaseUserScriptRun(request: ToolboxUserScriptRunReleaseRequest): Promise<void>;
+  cancelUserScriptRun(request: ToolboxUserScriptRunCancelRequest): Promise<void>;
 }
 
 export interface ChunkedUserScriptRunCallbacks {
@@ -41,6 +43,11 @@ export interface ChunkedUserScriptRunCallbacks {
   // Upload fraction 0..1 while the cube streams up, then null (indeterminate)
   // while the worker runs and any cube result pulls back down.
   readonly onUploadProgress?: (fraction: number | null) => void;
+  // CT-268: the apply flow's stop token. Checked between upload chunks; an
+  // abort during the worker run kills the Python subprocess via the cancel
+  // channel. A stopped run THROWS OperationStoppedError (never a failed
+  // result), so the apply flow shows "Operation stopped" instead of an error.
+  readonly abortSignal?: AbortSignal;
 }
 
 export async function runUserScriptOverCubeInChunks(
@@ -57,6 +64,7 @@ export async function runUserScriptOverCubeInChunks(
   try {
     return await transferCubeAndExecuteRun(api, cube, begun.token, begun.sourceName, callbacks, chunkBytes);
   } catch (error) {
+    if (isOperationStoppedError(error)) throw error;
     return { status: "failed", message: describeUserScriptRunTransferFailure(error) };
   } finally {
     await api.releaseUserScriptRun({ token: begun.token }).catch(() => undefined);
@@ -80,10 +88,31 @@ async function transferCubeAndExecuteRun(
   callbacks: ChunkedUserScriptRunCallbacks,
   chunkBytes: number,
 ): Promise<ToolboxRunUserScriptResult> {
-  await uploadCubeBandsInChunks(api, cube, token, chunkBytes, callbacks.onUploadProgress);
+  await uploadCubeBandsInChunks(api, cube, token, chunkBytes, callbacks.onUploadProgress, callbacks.abortSignal);
   callbacks.onUploadProgress?.(null);
-  const executed = await api.executeUserScriptRun({ token });
+  const executed = await executeRunKillingWorkerOnAbort(api, token, callbacks.abortSignal);
+  throwIfOperationStopped(callbacks.abortSignal);
   return assembleExecutedRunResult(api, token, executed, sourceName);
+}
+
+// CT-268: while the worker executes, an abort invokes the cancel channel, which
+// SIGKILLs the Python subprocess; the pending execute invoke then settles and
+// the post-execute stop check converts the run into OperationStoppedError.
+async function executeRunKillingWorkerOnAbort(
+  api: UserScriptRunChunkedApi,
+  token: string,
+  abortSignal: AbortSignal | undefined,
+): Promise<ToolboxUserScriptRunExecuteResult> {
+  const killWorkerBecauseStopped = (): void => {
+    void api.cancelUserScriptRun({ token }).catch(() => undefined);
+  };
+  throwIfOperationStopped(abortSignal);
+  abortSignal?.addEventListener("abort", killWorkerBecauseStopped, { once: true });
+  try {
+    return await api.executeUserScriptRun({ token });
+  } finally {
+    abortSignal?.removeEventListener("abort", killWorkerBecauseStopped);
+  }
 }
 
 async function uploadCubeBandsInChunks(
@@ -92,13 +121,14 @@ async function uploadCubeBandsInChunks(
   token: string,
   chunkBytes: number,
   onProgress: ((fraction: number | null) => void) | undefined,
+  abortSignal: AbortSignal | undefined,
 ): Promise<void> {
   const totalBytes = cube.bandCount * cube.height * cube.width * Float32Array.BYTES_PER_ELEMENT;
   onProgress?.(0);
   let sentBytes = 0;
   for (let bandIndex = 0; bandIndex < cube.bandCount; bandIndex += 1) {
     const band = takeBandMatchingCubeShape(cube, bandIndex);
-    sentBytes = await uploadOneBandInChunks(api, token, band, chunkBytes, sentBytes, totalBytes, onProgress);
+    sentBytes = await uploadOneBandInChunks(api, token, band, chunkBytes, sentBytes, totalBytes, onProgress, abortSignal);
   }
 }
 
@@ -118,10 +148,12 @@ async function uploadOneBandInChunks(
   sentBytes: number,
   totalBytes: number,
   onProgress: ((fraction: number | null) => void) | undefined,
+  abortSignal: AbortSignal | undefined,
 ): Promise<number> {
   const bandBytes = new Uint8Array(band.buffer, band.byteOffset, band.byteLength);
   let sent = sentBytes;
   for (let offset = 0; offset < bandBytes.byteLength; offset += chunkBytes) {
+    throwIfOperationStopped(abortSignal);
     // slice copies, so the IPC layer never serializes a view over the whole band.
     const chunk = bandBytes.slice(offset, Math.min(offset + chunkBytes, bandBytes.byteLength));
     await api.sendUserScriptRunCubeChunk({ token, bytes: chunk });

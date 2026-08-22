@@ -10,7 +10,7 @@ import { operationPanel } from "./operations";
 // script's "Full cube" / "Band-wise (selected bands)" is stale, per the CT-110 note).
 // Selecting band-wise reveals a "Bands to process" range textbox. An invalid range blocks
 // Apply; since CT-251 an EMPTY range is valid on the five band-wise operations (Normalize,
-// Standardize, Spatial Filter, Denoise, Percentile Clip) and means "process every band"
+// Standardize, Frequency Filters, Denoise, Percentile Clip) and means "process every band"
 // (Threshold still requires a non-empty range).
 
 export const FULL_STACK_SCOPE_LABEL = "Full stack";

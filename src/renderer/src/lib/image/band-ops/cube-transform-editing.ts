@@ -1,4 +1,4 @@
-import { SCRIPTING_DOCS_HINT } from "./user-script-return-contract";
+import { describeScriptErrorWithDocsHint } from "./user-script-return-contract";
 
 // The Custom transform editor CONFIGURES the run instead of executing it: the
 // Python runs at Apply time (unlike band weighting and band selection, which
@@ -45,6 +45,5 @@ export function describeCubeTransformForAudit(state: CubeTransformEditingState):
 // pointer the renderer-side contract errors already end with, so the error text
 // appends it once here.
 export function describeCubeTransformRunError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.endsWith(SCRIPTING_DOCS_HINT) ? message : `${message} ${SCRIPTING_DOCS_HINT}`;
+  return describeScriptErrorWithDocsHint(error);
 }

@@ -72,6 +72,36 @@ interface ToolboxOpenedImageChunkedReadAbortRequest {
   token: string;
 }
 
+// CT-272 chunked 16-bit PNG decode protocol (mirrors
+// src/shared/chunked-png16-decode-protocol.ts; keep in sync).
+interface ToolboxPng16DecodeBeginRequest {
+  filePath: string;
+}
+
+interface ToolboxPng16DecodeBeginResult {
+  token: string;
+  width: number;
+  height: number;
+  channelCount: number;
+}
+
+interface ToolboxPng16DecodeChunkRequest {
+  token: string;
+}
+
+interface ToolboxPng16DecodeChunkResult {
+  done: boolean;
+  bytes: Uint8Array;
+}
+
+interface ToolboxPng16DecodeFinishRequest {
+  token: string;
+}
+
+interface ToolboxPng16DecodeAbortRequest {
+  token: string;
+}
+
 interface ToolboxSaveImageFileFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -79,20 +109,45 @@ interface ToolboxSaveImageFileFilter {
 
 // CT-237: the save-image export streams through the chunked protocol
 // (src/shared/chunked-save-image-protocol.ts); no invoke carries the encoded
-// payload whole.
-type ToolboxSaveImagePart = "primary" | "sidecar";
+// payload whole. CT-273: folder exports address one part per band file.
+type ToolboxSaveImagePart = "primary" | "sidecar" | `file-${number}`;
 
 interface ToolboxSaveImageSidecarDescriptor {
   extension: string;
   byteLength: number;
 }
 
-interface ToolboxSaveImageBeginRequest {
+// CT-271: 16-bit PNG encodes in MAIN from raw big-endian uint16 sample chunks.
+interface ToolboxSaveImagePngSixteenBitGrayscaleEncoding {
+  kind: "png-16-bit-grayscale";
+  width: number;
+  height: number;
+}
+
+interface ToolboxSaveImageSingleFileBeginRequest {
   suggestedFileName: string;
   fileFilter: ToolboxSaveImageFileFilter;
   primaryByteLength: number;
+  primaryEncoding?: ToolboxSaveImagePngSixteenBitGrayscaleEncoding;
   sidecar?: ToolboxSaveImageSidecarDescriptor;
 }
+
+// CT-273: a folder export (PNG stack) begins with a directory pick; each
+// file's chunks arrive under the part name "file-<index>".
+interface ToolboxSaveImageFolderFileDescriptor {
+  fileName: string;
+  byteLength: number;
+  encoding?: ToolboxSaveImagePngSixteenBitGrayscaleEncoding;
+}
+
+interface ToolboxSaveImageFolderBeginRequest {
+  destination: "folder";
+  files: ReadonlyArray<ToolboxSaveImageFolderFileDescriptor>;
+}
+
+type ToolboxSaveImageBeginRequest =
+  | ToolboxSaveImageSingleFileBeginRequest
+  | ToolboxSaveImageFolderBeginRequest;
 
 type ToolboxSaveImageBeginResult =
   | { status: "canceled" }
@@ -297,8 +352,13 @@ interface ToolboxUserScriptRunReleaseRequest {
   token: string;
 }
 
+interface ToolboxUserScriptRunCancelRequest {
+  token: string;
+}
+
 type ToolboxMenuEventListener = () => void;
 type ToolboxMenuCommandListener = (commandId: string) => void;
+type ToolboxMenuGridLayoutListener = (layout: string) => void;
 type ToolboxUnsubscribeMenuListener = () => void;
 type ToolboxThemeChangeListener = (snapshot: ToolboxThemeSnapshot) => void;
 type ToolboxUnsubscribeThemeListener = () => void;
@@ -341,6 +401,14 @@ interface ToolboxApi {
   abortOpenedImageChunkedRead: (
     request: ToolboxOpenedImageChunkedReadAbortRequest,
   ) => Promise<void>;
+  beginPng16Decode: (
+    request: ToolboxPng16DecodeBeginRequest,
+  ) => Promise<ToolboxPng16DecodeBeginResult>;
+  readPng16DecodedChunk: (
+    request: ToolboxPng16DecodeChunkRequest,
+  ) => Promise<ToolboxPng16DecodeChunkResult>;
+  finishPng16Decode: (request: ToolboxPng16DecodeFinishRequest) => Promise<void>;
+  abortPng16Decode: (request: ToolboxPng16DecodeAbortRequest) => Promise<void>;
   beginSaveImage: (
     request: ToolboxSaveImageBeginRequest,
   ) => Promise<ToolboxSaveImageBeginResult>;
@@ -389,6 +457,9 @@ interface ToolboxApi {
   onMenuInvokeCommand: (
     listener: ToolboxMenuCommandListener,
   ) => ToolboxUnsubscribeMenuListener;
+  onMenuSelectGridLayout: (
+    listener: ToolboxMenuGridLayoutListener,
+  ) => ToolboxUnsubscribeMenuListener;
   onWindowCloseRequested: (
     listener: ToolboxMenuEventListener,
   ) => ToolboxUnsubscribeMenuListener;
@@ -412,6 +483,9 @@ interface ToolboxApi {
   ) => Promise<ToolboxUserScriptRunResultChunkResult>;
   releaseUserScriptRun: (
     request: ToolboxUserScriptRunReleaseRequest,
+  ) => Promise<void>;
+  cancelUserScriptRun: (
+    request: ToolboxUserScriptRunCancelRequest,
   ) => Promise<void>;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (

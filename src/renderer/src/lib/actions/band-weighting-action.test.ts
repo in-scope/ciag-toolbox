@@ -55,10 +55,13 @@ describe("BAND_WEIGHTING_ACTION", () => {
     expect(Array.from(result.raster.bandPixels[0]!)).toEqual([800]);
   });
 
-  it("records the weights in the applied label", () => {
+  // CT-289: the user-facing name is "Weighted Sum"; new History entries carry
+  // the renamed vocabulary while stored strings in old projects stay as saved.
+  it("is labelled Weighted Sum and records the weights in the applied label", () => {
+    expect(BAND_WEIGHTING_ACTION.label).toBe("Weighted Sum");
     const state = { ...DEFAULT_VIEWPORT_RENDERING_STATE, bandWeights: [1, -0.5, 0] };
     const prepared = BAND_WEIGHTING_ACTION.prepareParameterValuesForApply!({}, state, "whole-image");
-    expect(BAND_WEIGHTING_ACTION.formatAppliedLabel!(prepared)).toBe("Band weighting (weights: 1, -0.500, 0)");
+    expect(BAND_WEIGHTING_ACTION.formatAppliedLabel!(prepared)).toBe("Weighted sum (weights: 1, -0.500, 0)");
   });
 
   it("resets the selected band to the single produced band after applying", () => {

@@ -439,8 +439,19 @@ export async function applyOperationWithBudget(
   operationLabel: string,
   budgetMs: number,
 ): Promise<TimedApply> {
-  return runAsStoryboardStep(page, `Apply ${operationLabel} within budget`, async () => {
-    const panel = operationPanel(page, operationLabel);
+  return applyConfiguredPanelWithBudget(page, operationPanel(page, operationLabel), operationLabel, budgetMs);
+}
+
+// CT-284: the Subset Bands editor applies band selection through its own Apply
+// button, so budgeted applies accept any panel-like container that hides on
+// Apply (the tool-options aside or the subset editor section).
+export async function applyConfiguredPanelWithBudget(
+  page: Page,
+  panel: ReturnType<typeof operationPanel>,
+  operationDescription: string,
+  budgetMs: number,
+): Promise<TimedApply> {
+  return runAsStoryboardStep(page, `Apply ${operationDescription} within budget`, async () => {
     await startUiHeartbeat(page);
     const progressWatch = watchForDeterminateProgressBar(page);
     const startedAt = Date.now();
@@ -449,7 +460,7 @@ export async function applyOperationWithBudget(
     const applyMs = Date.now() - startedAt;
     progressWatch.stop();
     const maxUiGapMs = await stopUiHeartbeatAndReadMaxGapMs(page);
-    await failOnOperationErrorToast(page, operationLabel);
+    await failOnOperationErrorToast(page, operationDescription);
     return { applyMs, maxUiGapMs, sawDeterminateProgressBar: progressWatch.sawDeterminateBar() };
   });
 }

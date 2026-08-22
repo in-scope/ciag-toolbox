@@ -1,5 +1,5 @@
 import { useCallback, type MouseEvent } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ViewportBusyOverlay } from "@/components/busy-indicators";
 import {
@@ -15,6 +15,10 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
+import {
+  collectPanelIndicesToLinkFromSelection,
+  extractClickModifiers,
+} from "@/lib/grid/viewport-selection-click";
 import {
   computePixelSpectrumOrNull,
   computeRoiMeanSpectrumOrNull,
@@ -39,15 +43,16 @@ import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
 import { useToneCurvePreview } from "@/state/tone-curve-preview-context";
 import type { ToneCurveChannelPreviewLuts } from "@/lib/image/tone-curve-composite-preview";
+import {
+  useRegionEditPreviewPublisher,
+  type RegionEditTarget,
+} from "@/state/region-edit-preview-context";
 import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
-import {
-  useViewportSelection,
-  type ViewportSelectionClickModifiers,
-} from "@/state/selection-context";
+import { useViewportSelection } from "@/state/selection-context";
 import { usePanelLink, type PanelLinkApi, type PanelLinkFailureReason } from "@/state/panel-link-context";
 
 export interface ViewportCellContent {
@@ -120,6 +125,7 @@ function renderViewportCellGridcellElement(
       role="gridcell"
       aria-selected={settings.isSelected}
       onClick={settings.handleClick}
+      onContextMenu={settings.handleContextMenuClick}
       className={getViewportCellClassName(settings.isSelected)}
     >
       {renderViewportCellViewport(props, settings)}
@@ -153,6 +159,9 @@ function renderViewportCellViewport(
       isRegionToolActive={settings.isRegionToolActive}
       roi={settings.roi}
       onCommitRoi={settings.handleCommitRoi}
+      canEditCommittedRoi={settings.canEditCommittedRoi}
+      onPreviewRoiEdit={settings.handlePreviewRoiEdit}
+      onCommitRoiEdit={settings.handleCommitRoiEdit}
       onRegionToolPlainClick={settings.handleRegionToolPlainClick}
       onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
@@ -175,6 +184,7 @@ function ViewportCellContextMenuContent(props: { sourceIndex: number }): JSX.Ele
 interface ViewportCellInteractionSettings {
   isSelected: boolean;
   handleClick: (event: MouseEvent<HTMLDivElement>) => void;
+  handleContextMenuClick: () => void;
   handleClose: (() => void) | undefined;
   previewImageSource: ViewportImageSource | null;
   toneCurvePreviewLookupTable: ReadonlyArray<number> | null;
@@ -192,6 +202,9 @@ interface ViewportCellInteractionSettings {
   isRegionToolActive: boolean;
   roi: ViewportRoi | null;
   handleCommitRoi: (roi: ViewportRoi) => void;
+  canEditCommittedRoi: boolean;
+  handlePreviewRoiEdit: (roi: ViewportRoi | null) => void;
+  handleCommitRoiEdit: (roi: ViewportRoi) => void;
   handleRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
 }
@@ -200,7 +213,8 @@ function useViewportCellInteractionSettings(
   cellIndex: number,
   content: ViewportCellContent | null,
 ): ViewportCellInteractionSettings {
-  const { isViewportSelected, selectViewportFromClick } = useViewportSelection();
+  const { isViewportSelected, selectViewportFromClick, selectViewportFromContextMenuClick } =
+    useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
   const regionRequest = useRegionRequest();
@@ -213,7 +227,8 @@ function useViewportCellInteractionSettings(
   const isOperationRegionRequestActive = regionRequest.isRegionRequestActiveForViewport(cellIndex);
   const handleClick = (event: MouseEvent<HTMLDivElement>) =>
     selectViewportFromClick(cellIndex, extractClickModifiers(event));
-  const handleClose = closing.hasContent(cellIndex)
+  const handleContextMenuClick = (): void => selectViewportFromContextMenuClick(cellIndex);
+  const handleClose = closing.canClose(cellIndex)
     ? () => closing.closeViewport(cellIndex)
     : undefined;
   const handleCommitInspectionRoi = useCallback(
@@ -252,6 +267,33 @@ function useViewportCellInteractionSettings(
   const handleCommitRoi = isOperationRegionRequestActive
     ? handleCommitOperationRegion
     : handleCommitInspectionRoi;
+  // CT-275: edits target whichever committed box is displayed (operationRegion
+  // wins, matching the `operationRegion ?? roi` display rule below). Moving or
+  // resizing the operation region only rewrites the region; moving the
+  // inspection ROI re-commits through the same path as a fresh draw so the
+  // pinned ROI mean spectrum tracks the box. While an explicit "Select region"
+  // request is active the user is redrawing, so body drags must not move the
+  // stale box out from under the new draw.
+  const editedRoiTarget: RegionEditTarget = renderingState.operationRegion
+    ? "operation-region"
+    : "inspection-roi";
+  const publishRegionEditPreview = useRegionEditPreviewPublisher();
+  const viewportNumber = getViewportNumberFromIndex(cellIndex);
+  const handlePreviewRoiEdit = useCallback(
+    (roi: ViewportRoi | null) =>
+      publishRegionEditPreview(roi ? { viewportNumber, target: editedRoiTarget, roi } : null),
+    [publishRegionEditPreview, viewportNumber, editedRoiTarget],
+  );
+  const handleCommitRoiEdit = useCallback(
+    (roi: ViewportRoi) => {
+      if (renderingState.operationRegion) {
+        setRenderingState(cellIndex, { ...renderingState, operationRegion: roi });
+        return;
+      }
+      handleCommitInspectionRoi(roi);
+    },
+    [cellIndex, renderingState, setRenderingState, handleCommitInspectionRoi],
+  );
   const handlePinPixelSpectrum = useCallback(
     (imageX: number, imageY: number) => {
       const next = buildPinnedPixelSpectrumFromImagePoint(content, imageX, imageY);
@@ -304,6 +346,7 @@ function useViewportCellInteractionSettings(
   return {
     isSelected,
     handleClick,
+    handleContextMenuClick,
     handleClose,
     previewImageSource: getPreviewSourceForViewport(cellIndex),
     toneCurvePreviewLookupTable: getLookupTableForViewport(cellIndex),
@@ -321,6 +364,9 @@ function useViewportCellInteractionSettings(
     isRegionToolActive: isRegionToolActive || isOperationRegionRequestActive,
     roi: renderingState.operationRegion ?? renderingState.roi,
     handleCommitRoi,
+    canEditCommittedRoi: !isOperationRegionRequestActive,
+    handlePreviewRoiEdit,
+    handleCommitRoiEdit,
     handleRegionToolPlainClick,
     handlePinPixelSpectrum,
   };
@@ -366,13 +412,6 @@ function getViewportCellClassName(isSelected: boolean): string {
   );
 }
 
-function extractClickModifiers(event: MouseEvent<HTMLDivElement>): ViewportSelectionClickModifiers {
-  return {
-    ctrlOrMeta: event.ctrlKey || event.metaKey,
-    shift: event.shiftKey,
-  };
-}
-
 function DuplicateContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const duplication = useViewportDuplication();
   return (
@@ -400,6 +439,9 @@ function ReimportSourceContextMenuItem(props: { sourceIndex: number }): JSX.Elem
   );
 }
 
+const LINK_PAN_ZOOM_MULTI_SELECT_HINT =
+  "Cmd-click (Mac) or Ctrl-click panels to select more, then link";
+
 function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element {
   const panelLink = usePanelLink();
   const { selectedIndices } = useViewportSelection();
@@ -410,24 +452,32 @@ function LinkPanZoomContextMenuItem(props: { sourceIndex: number }): JSX.Element
       </ContextMenuItem>
     );
   }
+  const indicesToLink = collectPanelIndicesToLinkFromSelection(selectedIndices, props.sourceIndex);
+  if (indicesToLink.length < 2) return <LinkPanZoomDisabledHintMenuItem />;
   return (
-    <ContextMenuItem
-      onSelect={() => linkPanZoomFromSelection(panelLink, selectedIndices, props.sourceIndex)}
-    >
+    <ContextMenuItem onSelect={() => linkPanZoomAcrossPanels(panelLink, indicesToLink)}>
       Link pan &amp; zoom
     </ContextMenuItem>
   );
 }
 
-function linkPanZoomFromSelection(
+function LinkPanZoomDisabledHintMenuItem(): JSX.Element {
+  return (
+    <ContextMenuItem disabled>
+      <div className="flex flex-col gap-0.5">
+        <span>Link pan &amp; zoom</span>
+        <span className="text-xs text-muted-foreground">{LINK_PAN_ZOOM_MULTI_SELECT_HINT}</span>
+      </div>
+    </ContextMenuItem>
+  );
+}
+
+function linkPanZoomAcrossPanels(
   panelLink: PanelLinkApi,
-  selectedIndices: ReadonlySet<number>,
-  sourceIndex: number,
+  panelIndices: ReadonlyArray<number>,
 ): void {
-  const indices = new Set(selectedIndices);
-  indices.add(sourceIndex);
-  const result = panelLink.linkPanels([...indices]);
-  if (!result.ok) toast.error(describePanelLinkFailureMessage(result.reason));
+  const result = panelLink.linkPanels([...panelIndices]);
+  if (!result.ok) notifyError(describePanelLinkFailureMessage(result.reason));
 }
 
 function describePanelLinkFailureMessage(reason: PanelLinkFailureReason): string {

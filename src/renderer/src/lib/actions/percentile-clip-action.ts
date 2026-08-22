@@ -11,6 +11,7 @@ import {
   makeFloatRasterFromBandComputationReportingProgress,
   makeFloatRasterReusingUnchangedSourceBandsReportingProgress,
 } from "@/lib/image/make-float-raster";
+import { BAND_WISE_SCOPE_FIELD_DESCRIPTION } from "@/lib/image/parse-band-range";
 import { coerceViewportSourceToRasterSource } from "@/lib/image/promote-source-to-raster";
 import type { RasterImage } from "@/lib/image/raster-image";
 import { scaleProgressToWindow, type UnitProgressCallback } from "@/lib/image/unit-progress";
@@ -80,10 +81,7 @@ const PERCENTILE_CLIP_SCOPE_PARAMETER_SCHEMA: CubeScopeParameterSchema = {
   kind: "cube-scope",
   id: PERCENTILE_CLIP_SCOPE_PARAMETER_ID,
   label: "Scope",
-  description:
-    "Full stack computes one pair of cut points over every band together and clips the " +
-    "whole stack to it. Band-wise computes each entered band's own cut points and carries " +
-    "the other bands through unchanged. Leave the band field empty to process every band.",
+  description: BAND_WISE_SCOPE_FIELD_DESCRIPTION,
   defaultValue: FULL_CUBE_SCOPE,
   bandRangeParameterId: PERCENTILE_CLIP_BAND_RANGE_PARAMETER_ID,
   emptyBandRangeMeansAllBands: true,
@@ -100,6 +98,7 @@ export const PERCENTILE_CLIP_ACTION: RegisteredViewportAction = {
   formatAppliedLabel: formatPercentileClipAppliedLabel,
   prepareParameterValuesForApply: injectSourceBandCountIntoPercentileClipParameters,
   apply: (state) => state,
+  supportsStopDuringApply: true,
   transformSourceAsync: createPercentileClipSourceTransform(),
 };
 
@@ -134,11 +133,11 @@ export function readPercentileClipBounds(
 }
 
 function createPercentileClipSourceTransform(): ViewportActionAsyncSourceTransform {
-  return async (rawSource, parameterValues, onProgress) => {
+  return async (rawSource, parameterValues, onProgress, abortSignal) => {
     const source = coerceViewportSourceToRasterSource(rawSource);
     const bounds = readPercentileClipBounds(parameterValues);
     assertPercentileClipBoundsAreValid(bounds);
-    const raster = await clipRasterBandsToPercentiles(source.raster, parameterValues, bounds, onProgress);
+    const raster = await clipRasterBandsToPercentiles(source.raster, parameterValues, bounds, onProgress, abortSignal);
     return { kind: "raster", raster };
   };
 }
@@ -148,16 +147,17 @@ function clipRasterBandsToPercentiles(
   parameterValues: ParameterValuesById,
   bounds: PercentileClipBounds,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   if (readPercentileClipScopeChoice(parameterValues) === FULL_CUBE_SCOPE) {
-    return clipEveryBandToWholeStackCutPoints(raster, bounds, onProgress);
+    return clipEveryBandToWholeStackCutPoints(raster, bounds, onProgress, abortSignal);
   }
   const clippedBandIndexes = resolveScopedBandIndexSet(
     PERCENTILE_CLIP_SCOPE_IDS,
     parameterValues,
     raster.bandCount,
   );
-  return clipEachBandToItsOwnCutPoints(raster, clippedBandIndexes, bounds, onProgress);
+  return clipEachBandToItsOwnCutPoints(raster, clippedBandIndexes, bounds, onProgress, abortSignal);
 }
 
 // CT-219c: the cut points come from whole-stack-percentile.ts (no stack
@@ -169,16 +169,19 @@ async function clipEveryBandToWholeStackCutPoints(
   raster: RasterImage,
   bounds: PercentileClipBounds,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   const cutPoints = await computeWholeStackPercentileCutPoints(
     raster.bandPixels,
     bounds,
     scaleProgressToWindow(onProgress, 0, CUT_POINT_PHASE_END_FRACTION),
+    abortSignal,
   );
   return makeFloatRasterFromBandComputationReportingProgress(
     raster,
     (band) => clampValuesToCutPoints(band, cutPoints),
     scaleProgressToWindow(onProgress, CUT_POINT_PHASE_END_FRACTION, 1),
+    abortSignal,
   );
 }
 
@@ -187,12 +190,14 @@ function clipEachBandToItsOwnCutPoints(
   clippedBandIndexes: ReadonlySet<number>,
   bounds: PercentileClipBounds,
   onProgress?: UnitProgressCallback,
+  abortSignal?: AbortSignal,
 ): Promise<RasterImage> {
   return makeFloatRasterReusingUnchangedSourceBandsReportingProgress(
     raster,
     clippedBandIndexes,
     (band) => applyPercentileClip(band, bounds),
     onProgress,
+    abortSignal,
   );
 }
 

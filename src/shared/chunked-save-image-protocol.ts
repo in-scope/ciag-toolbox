@@ -27,7 +27,15 @@ export const SAVE_IMAGE_RELEASE_CHANNEL = "image:save-release";
 
 export const SAVE_IMAGE_CHUNK_BYTES = 64 * 1024 * 1024;
 
-export type SaveImagePart = "primary" | "sidecar";
+// CT-273: a folder export (PNG stack, one file per band) addresses its parts
+// by band-file index instead of the primary/sidecar pair.
+export type SaveImageFolderFilePart = `file-${number}`;
+
+export type SaveImagePart = "primary" | "sidecar" | SaveImageFolderFilePart;
+
+export function saveImageFolderFilePartName(fileIndex: number): SaveImageFolderFilePart {
+  return `file-${fileIndex}`;
+}
 
 export interface SaveImageFileFilter {
   readonly name: string;
@@ -41,11 +49,51 @@ export interface SaveImageSidecarDescriptor {
   readonly byteLength: number;
 }
 
-export interface SaveImageBeginRequest {
+// CT-271: a 16-bit PNG is encoded IN MAIN (Node zlib) because the renderer has
+// no lossless 16-bit PNG encoder (canvas encodes are 8-bit). The renderer
+// streams the RAW row-major big-endian uint16 samples as ordinary chunks;
+// primaryByteLength describes that raw payload (width x height x 2), and the
+// session deflates the filtered scanlines into the destination file as the
+// chunks arrive, so neither process ever holds the encoded export whole.
+export interface SaveImagePngSixteenBitGrayscaleEncoding {
+  readonly kind: "png-16-bit-grayscale";
+  readonly width: number;
+  readonly height: number;
+}
+
+export type SaveImagePartEncoding = SaveImagePngSixteenBitGrayscaleEncoding;
+
+export interface SaveImageSingleFileBeginRequest {
   readonly suggestedFileName: string;
   readonly fileFilter: SaveImageFileFilter;
   readonly primaryByteLength: number;
+  readonly primaryEncoding?: SaveImagePartEncoding;
   readonly sidecar?: SaveImageSidecarDescriptor;
+}
+
+// CT-273: a folder export begins with a directory pick instead of a save
+// dialog. Each described file's chunks arrive under the part name
+// saveImageFolderFilePartName(index); an encoding descriptor means that file's
+// chunks are RAW payload bytes encoded in main, exactly like the primary part.
+export interface SaveImageFolderFileDescriptor {
+  readonly fileName: string;
+  readonly byteLength: number;
+  readonly encoding?: SaveImagePartEncoding;
+}
+
+export interface SaveImageFolderBeginRequest {
+  readonly destination: "folder";
+  readonly files: ReadonlyArray<SaveImageFolderFileDescriptor>;
+}
+
+export type SaveImageBeginRequest =
+  | SaveImageSingleFileBeginRequest
+  | SaveImageFolderBeginRequest;
+
+export function isSaveImageFolderBeginRequest(
+  request: SaveImageBeginRequest,
+): request is SaveImageFolderBeginRequest {
+  return (request as SaveImageFolderBeginRequest).destination === "folder";
 }
 
 export type SaveImageBeginResult =
@@ -65,6 +113,8 @@ export interface SaveImageFinishRequest {
 }
 
 // A finish failure rejects the invoke; the renderer surfaces the message.
+// filePath is the saved primary file, or the destination folder for a
+// CT-273 folder export.
 export interface SaveImageFinishResult {
   readonly filePath: string;
 }

@@ -1,17 +1,20 @@
 import {
-  getRasterBandPixelsOrThrow,
-  type RasterImage,
-  type RasterTypedArray,
-} from "@/lib/image/raster-image";
-import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
-import { buildRgbaBytesFromRgbRaster } from "@/lib/image/rgb-raster-to-rgba";
+  buildAsViewedRgbaBytesFromRaster,
+  mapRgbaBytesThroughDisplayNormalizationInPlace,
+  resolveAsViewedNormalizationForSource,
+  type ViewportDisplayMappingState,
+} from "@/lib/image/as-viewed-display-mapping";
+import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 export type CanvasImageMimeType = "image/png" | "image/jpeg";
 
+// CT-296: PNG and JPEG save the image AS VIEWED, so the encode needs the panel's
+// display state alongside the pixels. Data formats never come through here.
 export interface CanvasEncodeOptions {
   readonly mimeType: CanvasImageMimeType;
   readonly jpegQuality?: number;
+  readonly displayMapping: ViewportDisplayMappingState;
 }
 
 const DEFAULT_JPEG_QUALITY = 0.95;
@@ -21,51 +24,60 @@ export async function encodeViewportSourceAsCanvasBlobBytes(
   selectedBandIndex: number,
   options: CanvasEncodeOptions,
 ): Promise<Uint8Array> {
-  const canvas = renderViewportSourceToOffscreenCanvas(source, selectedBandIndex);
+  const canvas = renderViewportSourceAsViewedToOffscreenCanvas(
+    source,
+    selectedBandIndex,
+    options.displayMapping,
+  );
   const blob = await convertCanvasToImageBlob(canvas, options);
   return convertBlobToBytes(blob);
 }
 
-function renderViewportSourceToOffscreenCanvas(
+function renderViewportSourceAsViewedToOffscreenCanvas(
   source: ViewportImageSource,
   selectedBandIndex: number,
+  displayMapping: ViewportDisplayMappingState,
 ): HTMLCanvasElement {
   if (source.kind === "raster") {
-    return renderRasterSourceToCanvas(source.raster, selectedBandIndex);
+    return renderRasterSourceAsViewedToCanvas(source.raster, selectedBandIndex, displayMapping);
   }
-  return renderBrowserSourceToCanvas(source);
+  return renderBrowserSourceAsViewedToCanvas(source, displayMapping);
 }
 
 // CT-173: a true-colour raster (a promoted photo) renders as a colour composite so PNG/JPEG keep
 // its colour; every other raster renders the selected band as grayscale (a scientific stack).
-function renderRasterSourceToCanvas(
+// CT-296: either way the pixels come from the shared as-viewed display mapping.
+function renderRasterSourceAsViewedToCanvas(
   raster: RasterImage,
   selectedBandIndex: number,
+  displayMapping: ViewportDisplayMappingState,
 ): HTMLCanvasElement {
-  if (shouldRenderRasterAsRgbComposite(raster)) {
-    return renderRgbRasterAsColorCanvas(raster);
-  }
-  return renderRasterBandAsGrayscaleCanvas(raster, selectedBandIndex);
+  const rgba = buildAsViewedRgbaBytesFromRaster(raster, selectedBandIndex, displayMapping);
+  return renderRgbaBytesAsCanvas(rgba, raster.width, raster.height);
 }
 
-function renderRgbRasterAsColorCanvas(raster: RasterImage): HTMLCanvasElement {
-  const canvas = createCanvasAtSize(raster.width, raster.height);
+function renderRgbaBytesAsCanvas(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+): HTMLCanvasElement {
+  const canvas = createCanvasAtSize(width, height);
   const context = acquireTwoDeeContextOrThrow(canvas);
-  const rgba = buildRgbaBytesFromRgbRaster(raster);
-  context.putImageData(createImageDataFromClampedRgbaBytes(rgba, raster.width, raster.height), 0, 0);
+  context.putImageData(createImageDataFromClampedRgbaBytes(rgba, width, height), 0, 0);
   return canvas;
 }
 
-function renderRasterBandAsGrayscaleCanvas(
-  raster: RasterImage,
-  bandIndex: number,
+// A browser-image source is already in display units, so only the normalize
+// block can change it; with normalized viewing off this is the plain draw.
+function renderBrowserSourceAsViewedToCanvas(
+  source: Exclude<ViewportImageSource, { kind: "raster" }>,
+  displayMapping: ViewportDisplayMappingState,
 ): HTMLCanvasElement {
-  const canvas = createCanvasAtSize(raster.width, raster.height);
-  const context = acquireTwoDeeContextOrThrow(canvas);
-  const rgbaBytes = convertRasterBandToRgbaBytes(raster, bandIndex);
-  const imageData = createImageDataFromClampedRgbaBytes(rgbaBytes, raster.width, raster.height);
-  context.putImageData(imageData, 0, 0);
-  return canvas;
+  const normalization = resolveAsViewedNormalizationForSource(source, 0, displayMapping);
+  if (!normalization.enabled) return renderBrowserSourceToCanvas(source);
+  const drawn = readRgbaBytesFromBrowserSourceSync(source);
+  const mapped = mapRgbaBytesThroughDisplayNormalizationInPlace(drawn.rgba, normalization);
+  return renderRgbaBytesAsCanvas(mapped, drawn.width, drawn.height);
 }
 
 function createImageDataFromClampedRgbaBytes(
@@ -117,45 +129,6 @@ function ensureUint8ClampedArrayPixels(
 ): Uint8ClampedArray {
   if (pixels instanceof Uint8ClampedArray) return pixels;
   return new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength);
-}
-
-function convertRasterBandToRgbaBytes(
-  raster: RasterImage,
-  bandIndex: number,
-): Uint8ClampedArray {
-  const pixels = getRasterBandPixelsOrThrow(raster, bandIndex);
-  const scaleFactor = computeUnitScaleFactorForRaster(raster);
-  const rgba = new Uint8ClampedArray(raster.width * raster.height * 4);
-  fillRgbaWithGrayscaleFromBand(rgba, pixels, scaleFactor);
-  return rgba;
-}
-
-function fillRgbaWithGrayscaleFromBand(
-  rgba: Uint8ClampedArray,
-  pixels: RasterTypedArray,
-  scaleFactor: number,
-): void {
-  for (let pixelIndex = 0; pixelIndex < pixels.length; pixelIndex += 1) {
-    const byteValue = quantizeUnitValueToByte((pixels[pixelIndex] ?? 0) * scaleFactor);
-    const offset = pixelIndex * 4;
-    rgba[offset] = byteValue;
-    rgba[offset + 1] = byteValue;
-    rgba[offset + 2] = byteValue;
-    rgba[offset + 3] = 0xff;
-  }
-}
-
-function computeUnitScaleFactorForRaster(raster: RasterImage): number {
-  if (raster.sampleFormat === "float") return 0xff;
-  const containerMax = Math.pow(2, raster.bitsPerSample) - 1;
-  if (containerMax <= 0) return 1;
-  return 0xff / containerMax;
-}
-
-function quantizeUnitValueToByte(value: number): number {
-  if (value <= 0) return 0;
-  if (value >= 0xff) return 0xff;
-  return Math.round(value);
 }
 
 function createCanvasAtSize(width: number, height: number): HTMLCanvasElement {

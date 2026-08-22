@@ -57,6 +57,7 @@ test("a color photo flips to scrollable channels and back with no data change", 
   });
   await test.step("baseline: composite render, no band navigator, toggle offered", async () => {
     await expectChannelViewEnabled(launched.window, PANEL, false);
+    await expectChannelViewToggleShowsVennGlyph();
     await expect(bandNavigator()).toHaveCount(0);
     await expectPanelHeaderToName(launched.window, PANEL, rgbPng.fileName);
     await expectColorfulFractionAbove(COMPOSITE_MIN_COLORFUL_FRACTION);
@@ -101,6 +102,13 @@ test("a scientific multi-band stack never offers the channel-view toggle", async
 
 function bandNavigator() {
   return panelCell(launched.window, PANEL).getByTestId("viewport-band-navigator");
+}
+
+// CT-295: the toggle carries the RgbCompositeIcon venn glyph (shared with the RGB
+// Color Composite operation) - exactly three overlapping <circle> elements.
+async function expectChannelViewToggleShowsVennGlyph(): Promise<void> {
+  const circleCount = await channelViewToggle(launched.window, PANEL).locator("svg circle").count();
+  expect(circleCount).toBe(3);
 }
 
 async function expectProbeReadout(bandNumber: number): Promise<void> {

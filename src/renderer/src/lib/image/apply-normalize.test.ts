@@ -6,10 +6,7 @@ import {
   clampValueToAbsoluteBounds,
   type NormalizeRangeMethod,
 } from "./apply-normalize";
-import { DEFAULT_PERCENTILE_BOUNDS } from "./percentile-value-range";
 import type { RasterImage } from "./raster-image";
-
-const ROBUST_METHOD: NormalizeRangeMethod = { kind: "percentile", bounds: DEFAULT_PERCENTILE_BOUNDS };
 
 function clipMethod(lo: number, hi: number): NormalizeRangeMethod {
   return { kind: "clip-absolute", bounds: { lo, hi } };
@@ -113,33 +110,6 @@ describe("applyNormalizeToRaster", () => {
     const bulkValues = normalized.slice(0, 99);
     expect(Math.max(...bulkValues)).toBeLessThan(0.1);
     expect(normalized[99]).toBe(1);
-  });
-
-  it("stretches the bulk across [0,1] under robust percentile normalize (CT-107)", () => {
-    const raster = makeSingleBandUint16Raster(makeOutlierBandValues());
-    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, ROBUST_METHOD);
-    const normalized = Array.from(result.bandPixels[0]!);
-    // Robust range is roughly [1.98, 97.02], so the mid value (50) lands mid-scale.
-    expect(normalized[50]).toBeGreaterThan(0.4);
-    expect(normalized[50]).toBeLessThan(0.6);
-  });
-
-  it("clips values outside the percentile range to 0 and 1 (CT-107)", () => {
-    const raster = makeSingleBandUint16Raster(makeOutlierBandValues());
-    const result = applyNormalizeToRaster(raster, { scope: "band-wise", bandIndexes: [0] }, ROBUST_METHOD);
-    const normalized = Array.from(result.bandPixels[0]!);
-    expect(normalized[0]).toBe(0);
-    expect(normalized[99]).toBe(1);
-  });
-
-  it("supports robust percentile normalize in full-cube scope (CT-107)", () => {
-    const raster = makeTwoBandUint8Raster([0, 50, 100], [10, 60, 200]);
-    const result = applyNormalizeToRaster(raster, { scope: "full-cube" }, ROBUST_METHOD);
-    expect(result.sampleFormat).toBe("float");
-    for (const value of Array.from(result.bandPixels[0]!).concat(Array.from(result.bandPixels[1]!))) {
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThanOrEqual(1);
-    }
   });
 
   it("clamps below lo to lo, above hi to hi, and passes in-range values through (CT-194)", () => {

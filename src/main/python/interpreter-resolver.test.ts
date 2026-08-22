@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ConfiguredPythonInterpreterNotFoundError,
@@ -97,6 +97,59 @@ describe("resolvePythonInterpreterSelection", () => {
     expect(own).toEqual({ interpreterPath: ownPath, isOwnEnvironmentMode: true });
     const bundled = resolvePythonInterpreterSelection(environmentWhereEverythingExists({}));
     expect(bundled.isOwnEnvironmentMode).toBe(false);
+  });
+});
+
+// CT-262: Wallace suspected his local virtual environments interfered with the
+// packaged app. Bundled mode must never consult PATH or any user Python
+// environment: the only candidate the resolver may test is the interpreter
+// inside the bundled runtime root, and a missing runtime must throw rather
+// than fall back to anything else on the machine.
+describe("bundled mode never consults PATH or user Python environments", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function stubUserPythonEnvironmentVariables(): void {
+    vi.stubEnv("PATH", join("C:", "some-other-python"));
+    vi.stubEnv("VIRTUAL_ENV", join("C:", "users", "wallace", ".venv"));
+    vi.stubEnv("PYTHONHOME", join("C:", "python-home"));
+  }
+
+  it("consults only the interpreter path inside the bundled runtime root", () => {
+    stubUserPythonEnvironmentVariables();
+    for (const [isPackagedApp, runtimeRoot] of [
+      [false, join("C:", "repo", ".python")],
+      [true, join("C:", "app", "resources", "python")],
+    ] as const) {
+      const consultedPaths: string[] = [];
+      const environment = environmentWhereEverythingExists({
+        isPackagedApp,
+        fileExists: (candidatePath) => {
+          consultedPaths.push(candidatePath);
+          return true;
+        },
+      });
+      const resolvedPath = resolveActivePythonInterpreterPath(environment);
+      expect(consultedPaths).toEqual([join(runtimeRoot, "python.exe")]);
+      expect(resolvedPath).toBe(join(runtimeRoot, "python.exe"));
+    }
+  });
+
+  it("throws instead of falling back to PATH when the packaged runtime is missing", () => {
+    stubUserPythonEnvironmentVariables();
+    const consultedPaths: string[] = [];
+    const environment = environmentWhereEverythingExists({
+      isPackagedApp: true,
+      fileExists: (candidatePath) => {
+        consultedPaths.push(candidatePath);
+        return false;
+      },
+    });
+    expect(() => resolveActivePythonInterpreterPath(environment)).toThrow(
+      PythonInterpreterNotFoundError,
+    );
+    expect(consultedPaths).toEqual([join("C:", "app", "resources", "python", "python.exe")]);
   });
 });
 

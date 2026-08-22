@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { toast } from "sonner";
+import { notifyError } from "@/lib/notifications/notify";
 
 import { ScriptDocsLink } from "@/components/script-docs-link";
 import { Button } from "@/components/ui/button";
@@ -108,7 +108,7 @@ async function pickCustomTransformScriptFile(
     if (picked.canceled) return;
     setConfiguredTransform(buildImportedToolCubeTransformState(picked.filePath, picked.fileName));
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : String(error));
+    notifyError(error instanceof Error ? error.message : String(error));
   }
 }
 

@@ -1,19 +1,36 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { panelCell } from "./panels";
+
 // The viewport band navigator (viewport-band-navigator.tsx) overlays each multi-band
 // panel with a 1-based "Go to band number" input that commits a band selection
 // immediately on Enter (bypassing the slider's debounce), updating the Metadata panel's
 // "Original band" and "Wavelength" rows. With a single loaded panel there is exactly one
-// navigator, so this page-level locator is unambiguous; scope it to a panel cell if a
-// future spec loads several multi-band stacks at once.
+// navigator, so the page-level locator is unambiguous; specs holding several multi-band
+// stacks at once must use the panel-scoped variant.
 
 export function goToBandNumberInput(page: Page): Locator {
   return page.getByRole("textbox", { name: "Go to band number" });
 }
 
+export function goToBandNumberInputInPanel(page: Page, panelNumber: number): Locator {
+  return panelCell(page, panelNumber).getByRole("textbox", { name: "Go to band number" });
+}
+
 export async function selectActiveBandNumber(page: Page, oneBasedBandNumber: number): Promise<void> {
-  const input = goToBandNumberInput(page);
+  await fillBandNumberAndCommit(goToBandNumberInput(page), oneBasedBandNumber);
+}
+
+export async function selectActiveBandNumberInPanel(
+  page: Page,
+  panelNumber: number,
+  oneBasedBandNumber: number,
+): Promise<void> {
+  await fillBandNumberAndCommit(goToBandNumberInputInPanel(page, panelNumber), oneBasedBandNumber);
+}
+
+async function fillBandNumberAndCommit(input: Locator, oneBasedBandNumber: number): Promise<void> {
   await input.fill(String(oneBasedBandNumber));
   await input.press("Enter");
 }

@@ -17,67 +17,55 @@ function findMenuByLabel(menuLabel: string): OperationMenu {
   return menu;
 }
 
-describe("operation menu structure", () => {
-  it("orders the operation menus Edit, Image, Adjust, Process, Spectral", () => {
+describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
+  it("orders the operation menus Tools, Basic Processing, Multi-band", () => {
     expect(OPERATION_MENUS.map((menu) => menu.menuLabel)).toEqual([
-      "Edit",
-      "Image",
-      "Adjust",
-      "Process",
-      "Spectral",
+      "Tools",
+      "Basic Processing",
+      "Multi-band",
     ]);
   });
 
   // Operation menus present flat and alphabetical (no separators), so each
   // expectation below is the exact list a user sees, in order.
-  it("keeps selection and crop under Edit", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Edit"))).toEqual([
+  it("puts selection, geometry, and stack preparation under Tools", () => {
+    expect(listMenuItemLabels(findMenuByLabel("Tools"))).toEqual([
+      "Bit Shift",
       "Crop to Region",
+      "Flat-field Correction",
+      "Flip",
+      "RGB to Grayscale",
+      "Rotate",
       "Select Region",
+      "Spectralon Calibration",
       "Subset Bands",
     ]);
   });
 
-  it("puts geometry and color representation under Image", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Image"))).toEqual([
-      "False-color Composite",
-      "Reflect",
-      "RGB to Grayscale",
-      "Rotate",
-    ]);
-  });
-
-  it("puts per-pixel intensity mapping under Adjust", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Adjust"))).toEqual([
+  it("puts per-pixel and per-band value processing under Basic Processing", () => {
+    expect(listMenuItemLabels(findMenuByLabel("Basic Processing"))).toEqual([
       "Brightness & Contrast",
+      "Clip by Value",
       "Contrast Curve",
+      "Custom Transform",
+      "Denoise",
+      "Frequency Filters",
       "Invert",
+      "Normalize",
       "Percentile Clip",
+      "Standardize",
       "Threshold",
     ]);
   });
 
-  it("puts calibration, data conditioning, and filters under Process", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Process"))).toEqual([
-      "Bit Shift",
-      "Denoise",
-      "Flat-field Correction",
-      "Normalize",
-      "Spatial Filter",
-      "Spectralon Calibration",
-      "Standardize",
-    ]);
-  });
-
-  it("puts band-dimension and whole-cube operations under Spectral", () => {
-    expect(listMenuItemLabels(findMenuByLabel("Spectral"))).toEqual([
-      "Band Selection",
-      "Band Weighting",
-      "Custom Transform",
+  it("puts cross-band and whole-cube operations under Multi-band", () => {
+    expect(listMenuItemLabels(findMenuByLabel("Multi-band"))).toEqual([
       "ICA",
       "MNF",
       "PCA",
+      "RGB Color Composite",
       "Spectral Derivative",
+      "Weighted Sum",
     ]);
   });
 

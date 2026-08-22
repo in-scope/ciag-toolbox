@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyManualThreshold,
-  applyManualThresholdAcrossBands,
   isValueWithinThresholdBounds,
   THRESHOLD_BLACK_LEVEL,
   THRESHOLD_WHITE_LEVEL,
@@ -59,33 +58,6 @@ describe("applyManualThreshold", () => {
       THRESHOLD_WHITE_LEVEL,
       THRESHOLD_BLACK_LEVEL,
     ]);
-  });
-});
-
-describe("applyManualThresholdAcrossBands", () => {
-  it("marks a pixel white only when every band is within the bounds", () => {
-    const bandA = Uint8Array.from([100, 100, 200]);
-    const bandB = Uint8Array.from([100, 200, 200]);
-    const result = applyManualThresholdAcrossBands([bandA, bandB], { lower: 90, upper: 110 });
-    expect(Array.from(result)).toEqual([
-      THRESHOLD_WHITE_LEVEL,
-      THRESHOLD_BLACK_LEVEL,
-      THRESHOLD_BLACK_LEVEL,
-    ]);
-  });
-
-  it("matches the single-band threshold when given one band", () => {
-    const band = Uint8Array.from([10, 120, 250]);
-    const bounds = { lower: 50, upper: 200 };
-    expect(Array.from(applyManualThresholdAcrossBands([band], bounds))).toEqual(
-      Array.from(applyManualThreshold(band, bounds)),
-    );
-  });
-
-  it("throws for an empty band list", () => {
-    expect(() => applyManualThresholdAcrossBands([], { lower: 0, upper: 1 })).toThrow(
-      "at least one band",
-    );
   });
 });
 

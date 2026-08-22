@@ -10,16 +10,23 @@ import {
   clickGridBackgroundToClearSelection,
   drawInspectionRoiBetweenPixels,
   enqueueAndTriggerOpenImages,
+  expectNoUserFacingBandWeightingWording,
+  expectNoUserFacingBasicProcessingHyphenWording,
+  expectNoUserFacingFalseColorWording,
+  expectNoUserFacingMsiToolboxWording,
+  expectNoUserFacingSpatialFilterWording,
   expectNoUserFacingViewportWording,
   expectPanelHoldsFile,
   loadFixtureAsStack,
   openImagesReplaceTargetPicker,
   openImagesReviewModal,
   openOperation,
+  operationPanel,
   panelCell,
   readReviewModalGroupModeOptionLabels,
   reviewModalNewStackButton,
   selectGridLayout,
+  thresholdMethodSelect,
   writeTemporaryWavelengthStackTiffFixtures,
 } from "./support/page-objects";
 
@@ -72,9 +79,78 @@ test("a single-band source is labelled a stack and never an image for one band",
   }
 });
 
+// CT-280: the FFT/Butterworth tool is user-facing "Frequency Filters"; the old
+// "Spatial Filter" name must not surface anywhere, including with its own panel open.
+test("the frequency-domain tool is named Frequency Filters, never Spatial Filter", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Frequency Filters");
+    await expectNoUserFacingSpatialFilterWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-289: the band-combining tool is user-facing "Weighted Sum"; the old
+// "Band Weighting" name must not surface anywhere, including with its own panel open.
+test("the band-combining tool is named Weighted Sum, never Band Weighting", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Weighted Sum");
+    await expectNoUserFacingBandWeightingWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-282: the Threshold panel offers Otsu through the Method selector; the old
+// "Auto" button (and its wording) must not surface anywhere in the panel.
+test("the Threshold panel offers a Method selector and no Auto button", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "Threshold");
+    const panel = operationPanel(app.window, "Threshold");
+    await expect(thresholdMethodSelect(app.window)).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Auto", exact: true })).toHaveCount(0);
+    await expect(panel).not.toContainText(/\bAuto\b/);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
 test("no user-facing text or accessible name exposes the word viewport", async () => {
   await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
   await expectNoUserFacingViewportWording(launched.window);
+});
+
+// CT-292: the composite tool is user-facing "RGB Color Composite"; the old
+// "False-color Composite" name must not surface anywhere, including with its own panel open.
+test("the composite tool is named RGB Color Composite, never False-color Composite", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+    await openOperation(app.window, "RGB Color Composite");
+    await expectNoUserFacingFalseColorWording(app.window);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+// CT-294: the menu is "Basic Processing"; the hyphenated "Basic-Processing"
+// wording must not surface anywhere in the app.
+test("the menu is Basic Processing, never Basic-Processing", async () => {
+  await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
+  await expectNoUserFacingBasicProcessingHyphenWording(launched.window);
+});
+
+// CT-298: the app is named "CHARM Toolbox"; the old "MSI Toolbox"
+// wording must not surface anywhere in the app.
+test("the app is named CHARM Toolbox, never MSI Toolbox", async () => {
+  await bringEveryRightPanelAndOperationSurfaceOnScreen(launched);
+  await expectNoUserFacingMsiToolboxWording(launched.window);
 });
 
 async function openWavelengthStackReviewModal(app: LaunchedApp): Promise<void> {
@@ -122,6 +198,14 @@ async function expectFreshLaunchUsesStackWordingNotImage(app: LaunchedApp): Prom
   await expect(
     applicationToolbar(app.window).getByRole("button", { name: /Tone Curve/i }),
   ).toHaveCount(0);
+  // CT-279: "Flip" is the locked term; the old "Reflect" label must not surface
+  // anywhere in the toolbar (the quick buttons read "Flip horizontally/vertically").
+  await expect(
+    applicationToolbar(app.window).getByRole("button", { name: /Reflect/i }),
+  ).toHaveCount(0);
+  await expect(
+    applicationToolbar(app.window).getByRole("button", { name: "Flip horizontally" }),
+  ).toBeVisible();
 }
 
 async function expectLoadedPanelHeaderAvoidsImageNoun(app: LaunchedApp): Promise<void> {

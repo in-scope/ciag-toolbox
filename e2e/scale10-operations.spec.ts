@@ -37,6 +37,7 @@ import { expect, test } from "@playwright/test";
 
 import { selectFullImageScope, selectWholeStackScope } from "./support/apply-scope-control";
 import { nonClearPixelFraction, summarizeCanvasPixels } from "./support/canvas-pixels";
+import { toggleChannelView } from "./support/channel-view";
 import { selectBandWiseScopeForBands, selectFullStackScope } from "./support/cube-scope-control";
 import { chooseFlatFieldReferenceFileThroughDialog, FLAT_FIELD_LIGHT_FIELD_LABEL } from "./support/flat-field-operation";
 import { readHistoryEntries } from "./support/history-panel";
@@ -47,11 +48,7 @@ import { openOperation, operationPanel, setOperationEnumParameter, setOperationN
 import { selectOperationRegionByDrag } from "./support/operation-region-picker";
 import { panelCanvas, selectPanel } from "./support/panels";
 import { runAsStoryboardStep } from "./support/storyboard-step";
-import {
-  clickThresholdOtsuAutoButton,
-  readThresholdBoundFieldValue,
-  setThresholdBoundField,
-} from "./support/threshold-editor";
+import { selectThresholdMethod, setThresholdBoundField } from "./support/threshold-editor";
 import { setToneCurveAnchorField } from "./support/tone-curve-editor";
 import {
   applyOperationWithBudget,
@@ -75,8 +72,6 @@ import {
   scale10Value,
   selectActiveBandNumberInPanel,
   skipUnlessScale10SweepIsEnabled,
-  startUiHeartbeat,
-  stopUiHeartbeatAndReadMaxGapMs,
 } from "./scale10.support";
 
 const SOURCE_PANEL = 1;
@@ -88,7 +83,6 @@ const PROBE_PIXEL = { x: 150, y: 250 };
 // acceptance bar and fail first.
 const ONE_APPLY_TEST_TIMEOUT_MS = 70 * 60_000;
 const TWO_APPLY_TEST_TIMEOUT_MS = 100 * 60_000;
-const OTSU_DERIVE_BUDGET_MS = 20 * 60_000;
 
 // Operation tests run on the first 45 bands (4.5 GB): at-scale evidence put a
 // live session's usable pool near 15.2 GB (texture staging, histograms, and
@@ -375,9 +369,9 @@ test("brightness & contrast at defaults is the identity", async () => {
 
 test("clip by value clamps the whole stack to the absolute bounds", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Clip by value (Normalize clip-absolute, full stack)", async () => {
+  await recordSweepVerdict("operation: Clip by Value (full stack)", async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("Normalize", configureClipByValue);
+    const applied = await openConfigureAndApplyFromSourcePanel("Clip by Value", configureClipByValue);
     const band1 = await verifyResultBandAgainstOracle(
       1,
       (x, y) => clampToRange(scale10Value(0, x, y), CLIP_LOW, CLIP_HIGH),
@@ -389,10 +383,9 @@ test("clip by value clamps the whole stack to the absolute bounds", async () => 
 });
 
 async function configureClipByValue(): Promise<void> {
-  await setOperationEnumParameter(launched.window, "Normalize", "clip-absolute");
-  await selectFullStackScope(launched.window, "Normalize");
-  await setOperationNumberParameter(launched.window, "Normalize", "Clip low", CLIP_LOW);
-  await setOperationNumberParameter(launched.window, "Normalize", "Clip high", CLIP_HIGH);
+  await selectFullStackScope(launched.window, "Clip by Value");
+  await setOperationNumberParameter(launched.window, "Clip by Value", "Clip low", CLIP_LOW);
+  await setOperationNumberParameter(launched.window, "Clip by Value", "Clip high", CLIP_HIGH);
 }
 
 test("normalize min-max scales the whole stack by one cube-wide range", async () => {
@@ -465,9 +458,16 @@ async function configureFlatMaxToneCurve(
   await setToneCurveAnchorField(launched.window, "New value", UINT16_MAX);
 }
 
-test("threshold manual bounds and the Otsu auto cutoff both binarize band 1", async () => {
+// CT-282: Otsu is a method run through the normal Apply (the Auto button is
+// gone), and the band-wise default derives each band's own cutoff, so the
+// result keeps all OPS_BAND_COUNT bands. Band 1's values 600..798 land in bins
+// 2 and 3 of the 256-bin uint16 container histogram (bin width 256), so its
+// derived cutoff is exactly 768.
+const SCALE10_OTSU_BAND1_LOWER_CUTOFF = 768;
+
+test("threshold manual bounds and the Otsu method both binarize band 1", async () => {
   test.setTimeout(TWO_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Threshold (manual, then Otsu auto)", async () => {
+  await recordSweepVerdict("operation: Threshold (manual, then Otsu method)", async () => {
     await openOperationScaleStackViaGroupedFiles();
     const manual = await openConfigureAndApplyFromSourcePanel("Threshold", () =>
       setThresholdBoundField(launched.window, "Lower", THRESHOLD_MANUAL_LOWER_BOUND),
@@ -478,56 +478,25 @@ test("threshold manual bounds and the Otsu auto cutoff both binarize band 1", as
       exactly(),
     );
     await closeResultPanelAndLetMemorySettle();
-    const otsu = await deriveOtsuBoundsAndApply();
+    const otsu = await openConfigureAndApplyFromSourcePanel("Threshold", () =>
+      selectThresholdMethod(launched.window, "Otsu threshold"),
+    );
     const otsuOracle = await verifyResultBandAgainstOracle(
       1,
-      (x, y) => thresholdedByBounds(scale10Value(0, x, y), otsu.lowerBound, otsu.upperBound),
+      (x, y) => thresholdedByBounds(scale10Value(0, x, y), SCALE10_OTSU_BAND1_LOWER_CUTOFF, UINT16_MAX),
       exactly(),
     );
     return {
       manualApplyMs: manual.applyMs,
-      otsuDeriveMs: otsu.deriveMs,
-      otsuApplyMs: otsu.applied.applyMs,
-      maxUiGapMs: Math.max(manual.maxUiGapMs, otsu.deriveMaxUiGapMs, otsu.applied.maxUiGapMs),
-      oracle: `manual ${manualOracle}; otsu [${otsu.lowerBound}, ${otsu.upperBound}] ${otsuOracle}`,
+      otsuApplyMs: otsu.applyMs,
+      maxUiGapMs: Math.max(manual.maxUiGapMs, otsu.maxUiGapMs),
+      oracle: `manual ${manualOracle}; otsu [${SCALE10_OTSU_BAND1_LOWER_CUTOFF}, ${UINT16_MAX}] ${otsuOracle}`,
     };
   });
 });
 
 function thresholdedByBounds(value: number, lowerBound: number, upperBound: number): number {
   return value >= lowerBound && value <= upperBound ? THRESHOLD_WHITE : THRESHOLD_BLACK;
-}
-
-interface OtsuApplyOutcome {
-  readonly lowerBound: number;
-  readonly upperBound: number;
-  readonly deriveMs: number;
-  readonly deriveMaxUiGapMs: number;
-  readonly applied: AppliedOperation;
-}
-
-async function deriveOtsuBoundsAndApply(): Promise<OtsuApplyOutcome> {
-  await selectPanel(launched.window, SOURCE_PANEL);
-  await openOperation(launched.window, "Threshold");
-  await startUiHeartbeat(launched.window);
-  const startedAt = Date.now();
-  await clickThresholdOtsuAutoButton(launched.window);
-  await waitForOtsuLowerBoundToPopulate();
-  const deriveMs = Date.now() - startedAt;
-  const deriveMaxUiGapMs = await stopUiHeartbeatAndReadMaxGapMs(launched.window);
-  expect(deriveMaxUiGapMs, "Otsu derive must stay under the UI-gap threshold").toBeLessThanOrEqual(SCALE10_MAX_UI_GAP_MS);
-  const lowerBound = Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Lower"));
-  const upperBound = Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Upper"));
-  const applied = await applyAssertingSweepBudgets("Threshold");
-  return { lowerBound, upperBound, deriveMs, deriveMaxUiGapMs, applied };
-}
-
-async function waitForOtsuLowerBoundToPopulate(): Promise<void> {
-  await expect
-    .poll(async () => Number.parseFloat(await readThresholdBoundFieldValue(launched.window, "Lower")), {
-      timeout: OTSU_DERIVE_BUDGET_MS,
-    })
-    .toBeGreaterThan(0);
 }
 
 test("percentile clip band-wise and full-stack clamp to the exact cut points", async () => {
@@ -599,10 +568,10 @@ test("denoise gaussian and median preserve the locally-linear ramp interior", as
 
 test("spatial filter lowpass runs the worker at full spatial scale on band 1", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Spatial Filter (lowpass, band-wise band 1)", async () => {
+  await recordSweepVerdict("operation: Frequency Filters (lowpass, band-wise band 1)", async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("Spatial Filter", () =>
-      selectBandWiseScopeForBands(launched.window, "Spatial Filter", "1"),
+    const applied = await openConfigureAndApplyFromSourcePanel("Frequency Filters", () =>
+      selectBandWiseScopeForBands(launched.window, "Frequency Filters", "1"),
     );
     const oracle = await verifySmoothInteriorResultReadout(SPATIAL_FILTER_TOLERANCE, "lowpass on the linear ramp");
     return { ...applied, oracle };
@@ -621,23 +590,24 @@ test("spectral derivative reads out the exact 600 band spacing", async () => {
 
 test("false-color composite aliases the assigned bands into the channels", async () => {
   test.setTimeout(ONE_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict(`operation: False-color Composite (bands ${OPS_TOP_BAND_NUMBER}/25/1)`, async () => {
+  await recordSweepVerdict(`operation: RGB Color Composite (bands ${OPS_TOP_BAND_NUMBER}/25/1)`, async () => {
     await openOperationScaleStackViaGroupedFiles();
-    const applied = await openConfigureAndApplyFromSourcePanel("False-color Composite", configureFalseColorBands);
-    const redChannel = await verifyResultBandAgainstOracle(1, (x, y) => scale10Value(OPS_TOP_BAND_INDEX, x, y), exactly());
-    // Sample the canvas while the BRIGHT channel (band 45 data) is displayed:
-    // navigating to the blue channel first would leave band-1 data on screen,
-    // which renders near-black by the locked CT-148 display convention.
+    const applied = await openConfigureAndApplyFromSourcePanel("RGB Color Composite", configureFalseColorBands);
+    // CT-278: the committed composite renders as one colour image (band 45
+    // data in the bright red channel), so sample the canvas FIRST, then flip
+    // to the CT-248 channel view to navigate the bands for the readouts.
     await expectResultCanvasShowsContent();
+    await toggleChannelView(launched.window, RESULT_PANEL);
+    const redChannel = await verifyResultBandAgainstOracle(1, (x, y) => scale10Value(OPS_TOP_BAND_INDEX, x, y), exactly());
     const blueChannel = await verifyResultBandAgainstOracle(3, (x, y) => scale10Value(0, x, y), exactly());
     return { ...applied, oracle: `R ${redChannel}; B ${blueChannel}` };
   });
 });
 
 async function configureFalseColorBands(): Promise<void> {
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band R", OPS_TOP_BAND_NUMBER);
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band G", 25);
-  await setOperationNumberParameter(launched.window, "False-color Composite", "Band B", 1);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band R", OPS_TOP_BAND_NUMBER);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band G", 25);
+  await setOperationNumberParameter(launched.window, "RGB Color Composite", "Band B", 1);
 }
 
 async function expectResultCanvasShowsContent(): Promise<void> {
@@ -648,7 +618,7 @@ async function expectResultCanvasShowsContent(): Promise<void> {
 
 test("rotate 90 clockwise and reflect horizontal remap coordinates exactly", async () => {
   test.setTimeout(TWO_APPLY_TEST_TIMEOUT_MS);
-  await recordSweepVerdict("operation: Rotate (90 cw), then Reflect (horizontal)", async () => {
+  await recordSweepVerdict("operation: Rotate (90 cw), then Flip (horizontal)", async () => {
     await openOperationScaleStackViaGroupedFiles();
     const rotate = await openConfigureAndApplyFromSourcePanel("Rotate");
     const rotateOracle = await verifyResultBandAgainstOracle(1, rotatedNinetyClockwiseValue, exactly(), {
@@ -656,7 +626,7 @@ test("rotate 90 clockwise and reflect horizontal remap coordinates exactly", asy
       dimensions: ROTATED_DIMENSIONS,
     });
     await closeResultPanelAndLetMemorySettle();
-    const reflect = await openConfigureAndApplyFromSourcePanel("Reflect");
+    const reflect = await openConfigureAndApplyFromSourcePanel("Flip");
     const reflectOracle = await verifyResultBandAgainstOracle(
       1,
       (x, y) => scale10Value(0, SCALE10_DIMENSIONS.width - 1 - x, y),

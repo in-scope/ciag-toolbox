@@ -17,10 +17,12 @@ import {
   type OperationCommand,
   type OperationMenu,
 } from "../shared/operation-menu-catalog";
+import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "../shared/grid-layouts";
 
 const isRunningOnMac = process.platform === "darwin";
 const isRunningInDevMode = process.env.NODE_ENV === "development";
 const MENU_INVOKE_COMMAND_CHANNEL = "menu:invoke-command";
+const MENU_SELECT_GRID_LAYOUT_CHANNEL = "menu:select-grid-layout";
 
 function buildMacAppMenu(): MenuItemConstructorOptions {
   return {
@@ -96,6 +98,26 @@ function buildSaveProjectAsMenuItem(
   };
 }
 
+function sendGridLayoutSelectionToRenderer(
+  window: BrowserWindow,
+  layout: GridLayout,
+): void {
+  if (window.isDestroyed()) return;
+  window.webContents.send(MENU_SELECT_GRID_LAYOUT_CHANNEL, layout);
+}
+
+// CT-289: the File menu mirrors the toolbar's grid layouts, after the project
+// items.
+function buildGridLayoutsSubmenu(window: BrowserWindow): MenuItemConstructorOptions {
+  return {
+    label: "Grid",
+    submenu: SELECTABLE_GRID_LAYOUTS.map((layout) => ({
+      label: layout,
+      click: () => sendGridLayoutSelectionToRenderer(window, layout),
+    })),
+  };
+}
+
 function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
   return {
     label: "File",
@@ -106,6 +128,8 @@ function buildFileMenu(window: BrowserWindow): MenuItemConstructorOptions {
       buildOpenProjectMenuItem(window),
       buildSaveProjectMenuItem(window),
       buildSaveProjectAsMenuItem(window),
+      { type: "separator" },
+      buildGridLayoutsSubmenu(window),
       { type: "separator" },
       isRunningOnMac ? { role: "close" } : { role: "quit" },
     ],

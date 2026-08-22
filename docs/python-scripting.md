@@ -56,7 +56,7 @@ The expected return depends on which operation runs your code:
 
 - **Band weighting**: an N-length weight vector, one weight per band of the stack.
 - **Band selection**: a single height-by-width band matching the stack's spatial size.
-- **Custom transform**: a cube of shape `(N, height, width)`. The height and width must match the source stack; the output band count N is free, any value of 1 or more, so returning fewer, more, or the same number of bands are all valid. When the output band count equals the source's, wavelengths and band labels carry through to the new stack; otherwise the new stack gets generic band labels and no wavelengths.
+- **Custom transform**: a cube of shape `(N, height, width)` with any dimensions >= 1. The output band count N is free (any value of 1 or more), and the spatial dimensions (height, width) are also free - returning a crop, a resized stack, or any shape different from the source is valid. When the output band count equals the source's, wavelengths and band labels carry through to the new stack; otherwise the new stack gets generic band labels and no wavelengths.
 
 Every return must be numeric and finite: a result containing NaN or Inf is rejected.
 

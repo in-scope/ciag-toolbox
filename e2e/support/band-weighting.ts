@@ -3,12 +3,14 @@ import type { Locator, Page } from "@playwright/test";
 
 import { operationPanel } from "./operations";
 
-// CT-209: page objects for the Band Weighting operation panel. The per-band weight
-// fields, the reset helpers, the inline formula field, and the Import script button
-// are all inside the panel; a formula/imported-tool result fills the same weight
-// fields, which is the observable proof the scripting worker ran.
+// CT-209: page objects for the Weighted Sum (internally band-weighting) operation
+// panel. The per-band weight fields, the reset helpers, the inline formula field,
+// and the Import script button are all inside the panel; a formula/imported-tool
+// result fills the same weight fields, which is the observable proof the scripting
+// worker ran. CT-289 renamed the user-facing label; the constant name keeps the
+// internal vocabulary.
 
-export const BAND_WEIGHTING_OPERATION_LABEL = "Band Weighting";
+export const BAND_WEIGHTING_OPERATION_LABEL = "Weighted Sum";
 
 const POPULATE_FROM_SCRIPT_TIMEOUT_MS = 20_000;
 

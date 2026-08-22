@@ -25,6 +25,10 @@ function integerContainerValueRangeForBand(band: RasterTypedArray): DataTypeValu
   return FLOAT_DISPLAY_RANGE;
 }
 
+export function midpointOfDataTypeValueRange(range: DataTypeValueRange): number {
+  return (range.min + range.max) / 2;
+}
+
 export function clampValueToDataTypeRange(value: number, range: DataTypeValueRange): number {
   if (value < range.min) return range.min;
   if (value > range.max) return range.max;

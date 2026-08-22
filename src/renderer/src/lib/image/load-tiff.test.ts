@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+
 import { writeArrayBuffer } from "geotiff";
 import { describe, expect, it } from "vitest";
 
 import { loadTiffAsRaster } from "@/lib/image/load-tiff";
+import type { RasterImage } from "@/lib/image/raster-image";
 
 describe("loadTiffAsRaster", () => {
   it("decodes a small single-band uint16 TIFF into a raster image with one band", async () => {
@@ -51,6 +54,25 @@ describe("loadTiffAsRaster", () => {
     expect(raster.colorInterpretation).toBeUndefined();
   });
 
+  // CT-288: the three committed colour-variant fixtures (e2e/fixtures, written by
+  // generate-fixtures.mjs) all hold the rgb.png pixel colours, so each variant must
+  // decode to the same exact three-band uint8 rgb raster.
+
+  it("loads an RGBA TIFF as a three-band rgb raster with the alpha samples dropped", async () => {
+    const raster = await loadTiffAsRaster(readColorVariantFixtureBytes("rgba.tif"));
+    expectExactRgbPixelColors(raster);
+  });
+
+  it("loads a palette-colour TIFF with its colormap expanded to exact 8-bit RGB", async () => {
+    const raster = await loadTiffAsRaster(readColorVariantFixtureBytes("palette-color.tif"));
+    expectExactRgbPixelColors(raster);
+  });
+
+  it("treats a 3-sample TIFF with a missing photometric tag as RGB", async () => {
+    const raster = await loadTiffAsRaster(readColorVariantFixtureBytes("rgb-untagged.tif"));
+    expectExactRgbPixelColors(raster);
+  });
+
   it("reports a monotonic 0-to-1 progress tick per page on a multi-band stack (CT-220)", async () => {
     const ticks: number[] = [];
     await loadTiffAsRaster(buildThreePageScienceStackTiffBytes(), (fraction) => ticks.push(fraction));
@@ -70,6 +92,33 @@ function expectTicksAreMonotonicNonDecreasingFromZeroToOne(ticks: ReadonlyArray<
   expect(ticks[ticks.length - 1]).toBe(1);
   for (let i = 1; i < ticks.length; i++) {
     expect(ticks[i]!).toBeGreaterThanOrEqual(ticks[i - 1]!);
+  }
+}
+
+// Mirrors the rgb.png / colour-variant pixel table in generate-fixtures.mjs.
+const COLOR_VARIANT_DIMENSION = 2;
+const COLOR_VARIANT_PIXELS: ReadonlyArray<{ x: number; y: number; rgb: [number, number, number] }> = [
+  { x: 0, y: 0, rgb: [200, 100, 50] },
+  { x: 1, y: 0, rgb: [10, 20, 30] },
+  { x: 0, y: 1, rgb: [255, 0, 0] },
+  { x: 1, y: 1, rgb: [0, 255, 0] },
+];
+
+function readColorVariantFixtureBytes(fileName: string): Uint8Array {
+  return new Uint8Array(
+    readFileSync(new URL(`../../../../../e2e/fixtures/${fileName}`, import.meta.url)),
+  );
+}
+
+function expectExactRgbPixelColors(raster: RasterImage): void {
+  expect(raster.bandCount).toBe(3);
+  expect(raster.colorInterpretation).toBe("rgb");
+  expect(raster.bitsPerSample).toBe(8);
+  expect(raster.width).toBe(COLOR_VARIANT_DIMENSION);
+  expect(raster.height).toBe(COLOR_VARIANT_DIMENSION);
+  for (const pixel of COLOR_VARIANT_PIXELS) {
+    const index = pixel.y * COLOR_VARIANT_DIMENSION + pixel.x;
+    expect(raster.bandPixels.map((band) => band[index])).toEqual(pixel.rgb);
   }
 }
 

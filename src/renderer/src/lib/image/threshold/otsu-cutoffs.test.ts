@@ -7,11 +7,7 @@ import {
 import type { RasterImage } from "@/lib/image/raster-image";
 
 import { computeOtsuBoundsForHistogram } from "./otsu";
-import {
-  computeOtsuCutoffsForRasterReportingProgress,
-  parseThresholdOtsuCutoffsFromJson,
-  serializeThresholdOtsuCutoffsToJson,
-} from "./otsu-cutoffs";
+import { computeOtsuCutoffsForRasterReportingProgress } from "./otsu-cutoffs";
 
 // Two 2x2 uint8 bands with well-separated clusters. Otsu keeps the first
 // maximizing split, so a cluster pair {a, b} with an empty valley yields the
@@ -123,15 +119,5 @@ describe("computeOtsuCutoffsForRasterReportingProgress", () => {
     for (let i = 1; i < fractions.length; i += 1) {
       expect(fractions[i]!).toBeGreaterThanOrEqual(fractions[i - 1]!);
     }
-  });
-});
-
-describe("threshold Otsu cutoff serialization", () => {
-  it("round-trips through JSON", async () => {
-    const cutoffs = await computeOtsuCutoffsForRasterReportingProgress(makeTwoBandUint8Raster());
-    const roundTripped = parseThresholdOtsuCutoffsFromJson(
-      serializeThresholdOtsuCutoffsToJson(cutoffs),
-    );
-    expect(roundTripped).toEqual(cutoffs);
   });
 });
