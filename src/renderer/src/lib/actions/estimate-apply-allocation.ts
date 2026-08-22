@@ -37,9 +37,13 @@ const FLOAT32_FULL_CUBE_ACTION_IDS: ReadonlySet<string> = new Set([
   "spectral-derivative",
   "flat-field",
   "spectralon",
-  // The custom transform's output band count is only known after its Python
-  // runs at Apply, so it is priced as a source-band-count float32 cube (the
-  // best dimension-only estimate available).
+  // CT-299: The custom transform's output band count, height, and width are
+  // only known after its Python runs at Apply, so it is priced as a
+  // source-band-count float32 cube at source dimensions (the best estimate
+  // available before the run). This is an upper-bound-style estimate for
+  // shrinking transforms (e.g. a spatial crop), which will actually consume
+  // less memory; the estimate is conservative and never refuses an operation
+  // that would actually fit.
   "custom-transform",
 ]);
 

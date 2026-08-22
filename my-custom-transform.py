@@ -11,8 +11,9 @@ Contract (from docs/python-scripting.md):
 - cube is a numpy array of shape (bands, height, width); cube[k] is band k.
 - wavelengths is a one-per-band sequence when the stack carries them,
   otherwise None, so it must have a default.
-- The return must be a cube of shape (N, height, width). Height and width
-  must match the source stack; N can be any band count of 1 or more.
+- The return must be a cube of shape (N, height, width). N, height, and
+  width can be any size of 1 or more (return a crop, resize, or any other
+  spatial dimensions as needed).
 - Every value must be numeric and finite (no NaN or Inf).
 - Runs are sandboxed by default (numpy, scipy, skimage available) with a
   120 second wall-clock limit for custom transforms.

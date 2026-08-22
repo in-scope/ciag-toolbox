@@ -4,10 +4,7 @@ import {
   buildTransformOutputBandMetadata,
   validateTransformedCubeAgainstSource,
 } from "./cube-transform-contract";
-import {
-  SCRIPTING_DOCS_HINT,
-  UserScriptReturnContractError,
-} from "./user-script-return-contract";
+import { SCRIPTING_DOCS_HINT } from "./user-script-return-contract";
 
 const SOURCE_HEIGHT = 2;
 const SOURCE_WIDTH = 3;
@@ -59,26 +56,38 @@ describe("validateTransformedCubeAgainstSource", () => {
     ).toThrow(/at least one band/);
   });
 
-  it("rejects a height mismatch with the source", () => {
+  it("rejects a cube with height < 1", () => {
     expect(() =>
-      validateTransformedCubeAgainstSource(
-        [2, 5, SOURCE_WIDTH],
-        makeBands(2, 5 * SOURCE_WIDTH),
-        SOURCE_HEIGHT,
-        SOURCE_WIDTH,
-      ),
-    ).toThrow(/expected 2 x 3, got 5 x 3/);
+      validateTransformedCubeAgainstSource([1, 0, SOURCE_WIDTH], [], SOURCE_HEIGHT, SOURCE_WIDTH),
+    ).toThrow(/height >= 1 and width >= 1/);
   });
 
-  it("rejects a width mismatch with the source", () => {
+  it("rejects a cube with width < 1", () => {
+    expect(() =>
+      validateTransformedCubeAgainstSource([1, SOURCE_HEIGHT, 0], [], SOURCE_HEIGHT, SOURCE_WIDTH),
+    ).toThrow(/height >= 1 and width >= 1/);
+  });
+
+  it("accepts a smaller spatial size (cropped cube)", () => {
     expect(() =>
       validateTransformedCubeAgainstSource(
-        [2, SOURCE_HEIGHT, 4],
-        makeBands(2, SOURCE_HEIGHT * 4),
+        [2, 1, 2],
+        makeBands(2, 1 * 2),
         SOURCE_HEIGHT,
         SOURCE_WIDTH,
       ),
-    ).toThrow(UserScriptReturnContractError);
+    ).not.toThrow();
+  });
+
+  it("accepts a larger spatial size (upsampled cube)", () => {
+    expect(() =>
+      validateTransformedCubeAgainstSource(
+        [2, 10, 20],
+        makeBands(2, 10 * 20),
+        SOURCE_HEIGHT,
+        SOURCE_WIDTH,
+      ),
+    ).not.toThrow();
   });
 
   it("rejects a shape that is not three-dimensional", () => {
@@ -108,8 +117,8 @@ describe("validateTransformedCubeAgainstSource", () => {
   it("includes the docs hint in rejection messages", () => {
     expect(() =>
       validateTransformedCubeAgainstSource(
-        [1, 9, 9],
-        makeBands(1, 81),
+        [1, SOURCE_HEIGHT, SOURCE_WIDTH],
+        makeBands(1, 5),
         SOURCE_HEIGHT,
         SOURCE_WIDTH,
       ),

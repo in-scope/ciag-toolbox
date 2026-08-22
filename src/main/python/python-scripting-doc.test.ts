@@ -69,7 +69,7 @@ describe("hosted scripting doc (docs/python-scripting.md)", () => {
     expect(text).toContain("n-length weight vector");
     expect(text).toContain("height-by-width band");
     expect(text).toContain("(n, height, width)");
-    expect(text).toContain("height and width must match the source stack");
+    expect(text).toContain("spatial dimensions");
   });
 
   it("documents every bundled package at its pinned version and import name", () => {

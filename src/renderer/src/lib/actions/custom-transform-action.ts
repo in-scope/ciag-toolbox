@@ -169,12 +169,13 @@ function buildFloat32StackFromValidatedCube(
   raster: RasterImage,
   cube: TransformedCubeResult,
 ): RasterImage {
+  const [_bandCount, height, width] = cube.shape;
   const metadata = buildTransformOutputBandMetadata(
     readSourceBandMetadata(raster),
     cube.bands.length,
   );
   const output = makeFloat32RasterFromBands(
-    { width: raster.width, height: raster.height, bandLabels: metadata.bandLabels },
+    { width, height, bandLabels: metadata.bandLabels },
     cube.bands,
   );
   return metadata.bandWavelengths ? { ...output, bandWavelengths: metadata.bandWavelengths } : output;

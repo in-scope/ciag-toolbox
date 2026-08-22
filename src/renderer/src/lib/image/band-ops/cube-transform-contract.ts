@@ -1,12 +1,12 @@
 import { UserScriptReturnContractError } from "@/lib/image/band-ops/user-script-return-contract";
 
-// CT-215: the return contract for the Custom transform operation. A user formula
-// or imported tool transforms the WHOLE cube and returns a new (bands, height,
-// width) cube; the band count is free (any N >= 1) but the spatial dimensions
-// must match the source stack. Finiteness and 3-dimensionality are already
+// CT-215 / CT-299: the return contract for the Custom transform operation. A user
+// formula or imported tool transforms the WHOLE cube and returns a new (bands,
+// height, width) cube; the band count is free (any N >= 1), and spatial dimensions
+// (height, width) may be any size >= 1. Finiteness and 3-dimensionality are already
 // enforced in Python before the frames are sent (CT-214), so this validates the
-// decoded frames against the SOURCE: spatial match plus internal consistency
-// between the reported shape and the delivered bands.
+// decoded frames: internal consistency between the reported shape and the delivered
+// bands, and that all dimensions are present and >= 1.
 
 export interface TransformedCubeResult {
   readonly shape: ReadonlyArray<number>;
@@ -16,12 +16,12 @@ export interface TransformedCubeResult {
 export function validateTransformedCubeAgainstSource(
   shape: ReadonlyArray<number>,
   bands: ReadonlyArray<Float32Array>,
-  sourceHeight: number,
-  sourceWidth: number,
+  _sourceHeight: number,
+  _sourceWidth: number,
 ): TransformedCubeResult {
   const [bandCount, height, width] = readThreeDimensionalShapeOrThrow(shape);
   rejectFewerThanOneBand(bandCount);
-  rejectSpatialMismatchWithSource(height, width, sourceHeight, sourceWidth);
+  rejectSpatialDimensionsTooSmall(height, width);
   rejectBandListInconsistentWithShape(bands, bandCount, height * width);
   return { shape, bands };
 }
@@ -45,16 +45,11 @@ function rejectFewerThanOneBand(bandCount: number): void {
   );
 }
 
-function rejectSpatialMismatchWithSource(
-  height: number,
-  width: number,
-  sourceHeight: number,
-  sourceWidth: number,
-): void {
-  if (height === sourceHeight && width === sourceWidth) return;
+function rejectSpatialDimensionsTooSmall(height: number, width: number): void {
+  if (height >= 1 && width >= 1) return;
   throw new UserScriptReturnContractError(
-    `The transformed cube must keep the source height and width ` +
-      `(expected ${sourceHeight} x ${sourceWidth}, got ${height} x ${width}).`,
+    `The transformed cube must have height >= 1 and width >= 1 ` +
+      `(got ${height} x ${width}).`,
   );
 }
 

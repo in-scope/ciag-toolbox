@@ -107,13 +107,16 @@ describe("CUSTOM_TRANSFORM_ACTION", () => {
     expect(raster.bandWavelengths).toBeUndefined();
   });
 
-  it("rejects a returned cube whose spatial dimensions mismatch the applied-to source", async () => {
+  it("accepts a returned cube with different spatial dimensions (e.g. a crop)", async () => {
     const runner: CubeTransformScriptRunner = async () => ({
       status: "completed-cube",
-      shape: [1, 2, 2],
-      bands: [Float32Array.from([1, 2, 3, 4])],
+      shape: [1, 1, 1],
+      bands: [Float32Array.from([999])],
     });
-    await expect(applyFormulaTransform(runner)).rejects.toThrow(/keep the source height and width/i);
+    const raster = await applyFormulaTransform(runner);
+    expect(raster.height).toBe(1);
+    expect(raster.width).toBe(1);
+    expect(Array.from(raster.bandPixels[0]!)).toEqual([999]);
   });
 
   it("surfaces a failed run with the docs hint and leaves no output", async () => {
