@@ -6,6 +6,14 @@
 export const SCRIPTING_DOCS_HINT =
   "See the 'How to write a custom script' page for the expected return format.";
 
+// Worker failures (script error, timeout, crash) do not carry the return-format
+// pointer the contract errors above already end with, so the hint is appended
+// once here by every consumer that surfaces a raw run failure.
+export function describeScriptErrorWithDocsHint(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.endsWith(SCRIPTING_DOCS_HINT) ? message : `${message} ${SCRIPTING_DOCS_HINT}`;
+}
+
 export class UserScriptReturnContractError extends Error {
   constructor(problem: string) {
     super(`${problem} ${SCRIPTING_DOCS_HINT}`);

@@ -70,7 +70,6 @@ export function SubsetBandsSection(props: SubsetBandsSectionProps): JSX.Element 
         />
       ) : (
         <SubsetBandsByFunctionBody
-          raster={props.raster}
           viewportIndex={props.viewportIndex}
           onApply={props.onApplyFunctionDerivedBand}
           onCancel={props.onCancel}
@@ -176,7 +175,6 @@ function SubsetBandsKeepBandsBody(props: SubsetBandsKeepBandsBodyProps): JSX.Ele
 }
 
 interface SubsetBandsByFunctionBodyProps {
-  readonly raster: RasterImage;
   readonly viewportIndex: number;
   readonly onApply: (options: SubsetBandsFunctionApplyOptions) => void;
   readonly onCancel: () => void;
@@ -186,7 +184,7 @@ function SubsetBandsByFunctionBody(props: SubsetBandsByFunctionBodyProps): JSX.E
   const [openInNewViewport, setOpenInNewViewport] = useState(true);
   return (
     <>
-      <BandSelectionFunctionEditor viewportIndex={props.viewportIndex} raster={props.raster} />
+      <BandSelectionFunctionEditor viewportIndex={props.viewportIndex} />
       <SubsetBandsApplyControls
         openInNewViewport={openInNewViewport}
         onChangeOpenInNewViewport={setOpenInNewViewport}

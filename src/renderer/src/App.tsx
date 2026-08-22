@@ -133,7 +133,6 @@ import {
   releaseQueuedRasterBuffersSkippingShared,
   subscribeToRasterBufferReleaseWork,
 } from "@/lib/image/raster-buffer-release";
-import { listRememberedBandSelectionResultBuffers } from "@/lib/image/band-ops/band-selection-result-store";
 import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
@@ -1990,7 +1989,6 @@ function syncReferenceStoreThenReleaseDeadRasterBuffers(
   releaseQueuedRasterBuffersSkippingShared({
     liveSources: [...imagesByIndex.values()].map((content) => content.source),
     rememberedRasters: listRememberedReferenceRasters(),
-    rememberedBuffers: listRememberedBandSelectionResultBuffers(),
   });
 }
 

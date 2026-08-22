@@ -19,8 +19,7 @@ import {
   EMPTY_PINNED_SPECTRA,
 } from "@/lib/image/spectrum-entry";
 import type { RasterImage } from "@/lib/image/raster-image";
-import { runUserScriptOverCubeInChunks } from "@/lib/python/run-user-script-chunked";
-import { buildUserScriptRunCubeInputFromRaster } from "@/lib/python/user-script-cube";
+import { runUserScriptOverRasterAtApply } from "@/lib/python/run-user-script-at-apply";
 
 import type { ParameterValuesById } from "./parameter-schema";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -131,25 +130,7 @@ function runCubeTransformScriptThroughWorker(
   onProgress?: TransformProgressCallback,
   abortSignal?: AbortSignal,
 ): Promise<ToolboxRunUserScriptResult> {
-  return runUserScriptOverCubeInChunks(
-    window.toolboxApi,
-    buildUserScriptRunCubeInputFromRaster(raster),
-    source,
-    "cube",
-    {
-      onUploadProgress: (fraction) => reportUploadFractionAsApplyProgress(fraction, onProgress),
-      abortSignal,
-    },
-  );
-}
-
-// The upload fraction is determinate; the worker-run phase reports nothing, so
-// the busy bar holds at the uploaded fraction while the Python executes.
-function reportUploadFractionAsApplyProgress(
-  fraction: number | null,
-  onProgress: TransformProgressCallback | undefined,
-): void {
-  if (fraction !== null) onProgress?.(fraction);
+  return runUserScriptOverRasterAtApply(raster, source, "cube", onProgress, abortSignal);
 }
 
 function readConfiguredScriptSource(parameterValues: ParameterValuesById): ToolboxRunUserScriptSource {

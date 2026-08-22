@@ -65,7 +65,6 @@ export function holdSourcesBuffersWhileInUse(
 export interface SharedBufferSources {
   readonly liveSources: Iterable<ViewportImageSource>;
   readonly rememberedRasters: Iterable<RasterImage>;
-  readonly rememberedBuffers?: Iterable<ArrayBufferLike>;
 }
 
 export function releaseQueuedRasterBuffersSkippingShared(shared: SharedBufferSources): void {
@@ -108,7 +107,6 @@ function collectSharedBuffers(shared: SharedBufferSources): Set<ArrayBufferLike>
   addBackingBuffersOfSources(shared.liveSources, buffers);
   addBackingBuffersOfSources(listHeldSources(), buffers);
   for (const raster of shared.rememberedRasters) addRasterBandBuffers(raster, buffers);
-  for (const buffer of shared.rememberedBuffers ?? []) buffers.add(buffer);
   return buffers;
 }
 

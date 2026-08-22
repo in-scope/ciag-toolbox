@@ -435,12 +435,15 @@ export {
 export {
   BAND_SELECTION_OPERATION_LABEL,
   applyBandSelectionFunction,
+  bandSelectionFormulaField,
+  bandSelectionFunctionSegment,
   expectBandSelectionEditorReady,
+  expectBandSelectionToolLoaded,
   clickBandSelectionPreset,
+  enterBandSelectionFormula,
+  importBandSelectionScript,
+  importBandSelectionScriptButton,
   openBandSelectionFunctionEditor,
-  runBandSelectionFormula,
-  clickImportBandSelectionScript,
-  expectBandSelectionFunction,
   subsetBandsModeSelect,
 } from "./band-selection";
 export {

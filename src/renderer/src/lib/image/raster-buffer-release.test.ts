@@ -78,18 +78,6 @@ describe("raster-buffer-release", () => {
     expect(sharedBand.buffer.byteLength).toBe(8);
   });
 
-  it("never detaches a buffer listed among remembered standalone buffers", () => {
-    const sharedBand = new Float32Array(4);
-    const outgoing = rasterWithBands([sharedBand]);
-    queueOutgoingRasterSourceForBufferRelease(rasterSource(outgoing));
-    releaseQueuedRasterBuffersSkippingShared({
-      liveSources: [],
-      rememberedRasters: [],
-      rememberedBuffers: [sharedBand.buffer],
-    });
-    expect(sharedBand.buffer.byteLength).toBe(16);
-  });
-
   it("never detaches a source held in use, and releases it after the hold ends", () => {
     const band = new Uint16Array(4);
     const source = rasterSource(rasterWithBands([band]));

@@ -22,6 +22,10 @@ import {
   runDuplicateAndApplyAtTargetIndex,
   type ApplyActionFlowBindings,
 } from "./apply-action-flow";
+import {
+  BAND_SELECTION_ACTION,
+  createBandSelectionSourceTransform,
+} from "./band-selection-action";
 import { createInFlightApplyRunStore } from "./in-flight-apply-run-store";
 import {
   EMPTY_OPERATION_HISTORY,
@@ -1185,6 +1189,33 @@ function buildCropLikeActionWithNewPanelHint(): RegisteredViewportAction {
     apply: (state: ViewportRenderingState) => state,
     transformSource: () => buildSinglePixelSource(),
   } as unknown as RegisteredViewportAction;
+}
+
+describe("a failing band-selection script leaves no result panel (CT-293)", () => {
+  it("places nothing and leaves the source untouched when the Python run fails", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildBandSelectionActionWithFailingScript(),
+      { customBandExpression: "cub[1]" },
+      content,
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.readContentAtIndex(TARGET_INDEX)).toBeUndefined();
+    expect(harness.readContentAtIndex(SOURCE_INDEX)).toBe(content);
+  });
+});
+
+function buildBandSelectionActionWithFailingScript(): RegisteredViewportAction {
+  return {
+    ...BAND_SELECTION_ACTION,
+    transformSourceAsync: createBandSelectionSourceTransform(async () => ({
+      status: "failed",
+      message: "NameError: name 'cub' is not defined",
+    })),
+  };
 }
 
 describe("deterministic buffer release on replace (CT-290)", () => {
