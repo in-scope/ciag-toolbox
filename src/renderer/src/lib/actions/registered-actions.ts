@@ -379,7 +379,9 @@ export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
   transformSource: createBandSubsetSourceTransform(),
 };
 
-function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+// Exported for CT-301's Duplicate Bands action, which lives on the same
+// Subset Bands editor surface and resets the same band-count-changing state.
+export function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
   return clearPinnedSpectraFromState({
     ...state,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -388,7 +390,7 @@ function clearBandSubsetStateAfterApply(state: ViewportRenderingState): Viewport
   });
 }
 
-function clearBandSubsetEditModeFromSource(
+export function clearBandSubsetEditModeFromSource(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
   return {

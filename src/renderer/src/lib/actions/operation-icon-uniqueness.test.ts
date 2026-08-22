@@ -11,6 +11,7 @@ import {
   REGISTERED_VIEWPORT_ACTIONS,
   type RegisteredActionIcon,
 } from "./registered-actions";
+import { DUPLICATE_BANDS_ACTION } from "./duplicate-bands-action";
 
 // One icon, one meaning, app-wide: two different operations must never share an
 // icon component, even when only one of them currently shows a toolbar button
@@ -33,6 +34,7 @@ function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
       (action): [string, RegisteredActionIcon] => [action.id, action.icon],
     ),
     [BAND_SUBSET_ACTION.id, BAND_SUBSET_ACTION.icon],
+    [DUPLICATE_BANDS_ACTION.id, DUPLICATE_BANDS_ACTION.icon],
     ...Object.entries(QUICK_TRANSFORM_ICONS),
     ...TOOLBAR_CHROME_AND_TOGGLE_ICONS,
   ];

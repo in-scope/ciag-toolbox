@@ -63,6 +63,10 @@ import {
 } from "@/lib/actions/in-flight-apply-run-store";
 import { BAND_SELECTION_ACTION } from "@/lib/actions/band-selection-action";
 import {
+  buildDuplicateBandsParameterValuesFromBandNumbers,
+  DUPLICATE_BANDS_ACTION,
+} from "@/lib/actions/duplicate-bands-action";
+import {
   buildViewportClosingApi,
   type ViewportClosingApiBindings,
 } from "@/lib/actions/close-viewport-flow";
@@ -2352,6 +2356,14 @@ function buildRightPanelActiveSource(
         options.openInNewViewport,
         inputs.applyActionFlowBindings,
       ),
+    onApplyDuplicateBands: (options) =>
+      runApplyDuplicateBandsForViewport({
+        viewportIndex,
+        raster,
+        bandIndexesToDuplicate: options.bandIndexesToDuplicate,
+        openInNewViewport: options.openInNewViewport,
+        applyActionFlowBindings: inputs.applyActionFlowBindings,
+      }),
     operationHistory: renderingState.operationHistory,
     roi: renderingState.roi,
     onClearRoi: () =>
@@ -2452,6 +2464,58 @@ function runApplyFunctionDerivedBandForViewport(
     return;
   }
   applyActionInPlaceAtSourceIndex(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
+}
+
+interface ApplyDuplicateBandsInputs {
+  readonly viewportIndex: number;
+  readonly raster: ViewportRightPanelActiveSource["raster"];
+  readonly bandIndexesToDuplicate: ReadonlyArray<number>;
+  readonly openInNewViewport: boolean;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
+// CT-301: the Subset Bands editor's "Duplicate" mode. The editor works in
+// CURRENT band indexes; App resolves them to ORIGINAL band numbers (the same
+// indirection Subset Bands' own "keep bands" mode uses) before building the
+// action's audit parameters.
+function runApplyDuplicateBandsForViewport(inputs: ApplyDuplicateBandsInputs): void {
+  const bandNumbers = pickDuplicateBandOriginalNumbersOrNull(inputs);
+  if (bandNumbers === null) return;
+  invokeDuplicateBandsActionOnSourceViewport(
+    inputs.viewportIndex,
+    bandNumbers,
+    inputs.openInNewViewport,
+    inputs.applyActionFlowBindings,
+  );
+}
+
+function pickDuplicateBandOriginalNumbersOrNull(
+  inputs: ApplyDuplicateBandsInputs,
+): ReadonlyArray<number> | null {
+  const { raster, bandIndexesToDuplicate } = inputs;
+  if (!raster) {
+    notifyError("Subset Bands requires a raster source.");
+    return null;
+  }
+  if (bandIndexesToDuplicate.length === 0) {
+    notifyError("Enter at least one band to duplicate.");
+    return null;
+  }
+  return bandIndexesToDuplicate.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
+}
+
+function invokeDuplicateBandsActionOnSourceViewport(
+  sourceIndex: number,
+  bandNumbersInOrder: ReadonlyArray<number>,
+  openInNewViewport: boolean,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const parameterValues = buildDuplicateBandsParameterValuesFromBandNumbers(bandNumbersInOrder);
+  if (openInNewViewport) {
+    applyActionToDuplicateOfSource(DUPLICATE_BANDS_ACTION, parameterValues, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceAtSourceIndex(DUPLICATE_BANDS_ACTION, parameterValues, sourceIndex, bindings);
 }
 
 function useViewportBandRemovalApi(

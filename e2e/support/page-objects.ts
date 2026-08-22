@@ -449,6 +449,12 @@ export {
   subsetBandsModeSelect,
 } from "./band-selection";
 export {
+  DUPLICATE_BANDS_OPERATION_LABEL,
+  openSubsetBandsDuplicateEditor,
+  subsetBandsDuplicateField,
+  typeSubsetBandsDuplicateRange,
+} from "./duplicate-bands";
+export {
   applyCustomTransformAwaitingRun,
   clickImportCustomTransformScript,
   CUSTOM_TRANSFORM_FORMULA_SET_STATUS,

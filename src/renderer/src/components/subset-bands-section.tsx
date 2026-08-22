@@ -15,6 +15,7 @@ import {
 import {
   BAND_RANGE_FIELD_SYNTAX_HINT,
   BAND_RANGE_SYNTAX_EXAMPLES,
+  parseBandRangeText,
 } from "@/lib/image/parse-band-range";
 import {
   deriveKeptBandSelectionFromTypedRangeText,
@@ -35,10 +36,19 @@ export interface SubsetBandsFunctionApplyOptions {
   readonly openInNewViewport: boolean;
 }
 
-// CT-284: the editor's two ways to make a band tool of the stack. "Keep bands"
+// CT-301: "Duplicate" appends copies of the typed bands to the end of the
+// stack; the indexes are CURRENT band positions (0-based), listed in the
+// order the typed range parses to.
+export interface SubsetBandsDuplicateApplyOptions {
+  readonly bandIndexesToDuplicate: ReadonlyArray<number>;
+  readonly openInNewViewport: boolean;
+}
+
+// CT-284: the editor's ways to make a band tool of the stack. "Keep bands"
 // is the CT-091 index selection; "By function" houses the former Band Selection
-// capabilities (presets, formula, imported tool) and applies through that action.
-export type SubsetBandsEditorMode = "keep-bands" | "by-function";
+// capabilities (presets, formula, imported tool) and applies through that
+// action; "Duplicate" (CT-301) appends copies of chosen bands to the end.
+export type SubsetBandsEditorMode = "keep-bands" | "by-function" | "duplicate";
 
 export interface SubsetBandsSectionProps {
   readonly raster: RasterImage;
@@ -49,6 +59,7 @@ export interface SubsetBandsSectionProps {
   readonly onCancel: () => void;
   readonly onApply: (options: SubsetBandsApplyOptions) => void;
   readonly onApplyFunctionDerivedBand: (options: SubsetBandsFunctionApplyOptions) => void;
+  readonly onApplyDuplicateBands: (options: SubsetBandsDuplicateApplyOptions) => void;
 }
 
 export function SubsetBandsSection(props: SubsetBandsSectionProps): JSX.Element {
@@ -68,10 +79,16 @@ export function SubsetBandsSection(props: SubsetBandsSectionProps): JSX.Element 
           onApply={props.onApply}
           onCancel={props.onCancel}
         />
-      ) : (
+      ) : mode === "by-function" ? (
         <SubsetBandsByFunctionBody
           viewportIndex={props.viewportIndex}
           onApply={props.onApplyFunctionDerivedBand}
+          onCancel={props.onCancel}
+        />
+      ) : (
+        <SubsetBandsDuplicateBody
+          raster={props.raster}
+          onApply={props.onApplyDuplicateBands}
           onCancel={props.onCancel}
         />
       )}
@@ -90,6 +107,7 @@ interface SubsetBandsSectionHeaderProps {
 const MODE_DESCRIPTIONS: Record<SubsetBandsEditorMode, string> = {
   "keep-bands": "Choose which bands to keep. Apply to create a new stack with just those bands.",
   "by-function": "Derive one band from the whole stack with a function.",
+  duplicate: "Duplicate bands as copies appended to the end of the stack.",
 };
 
 function SubsetBandsSectionHeader(props: SubsetBandsSectionHeaderProps): JSX.Element {
@@ -122,6 +140,7 @@ function SubsetBandsModeSelect(props: SubsetBandsModeSelectProps): JSX.Element {
       >
         <option value="keep-bands">Keep bands</option>
         <option value="by-function">By function</option>
+        <option value="duplicate">Duplicate</option>
       </select>
     </label>
   );
@@ -196,6 +215,44 @@ function SubsetBandsByFunctionBody(props: SubsetBandsByFunctionBodyProps): JSX.E
   );
 }
 
+interface SubsetBandsDuplicateBodyProps {
+  readonly raster: RasterImage;
+  readonly onApply: (options: SubsetBandsDuplicateApplyOptions) => void;
+  readonly onCancel: () => void;
+}
+
+// CT-301: a typed band list (the same parse-band-range machinery as "Keep
+// bands"), appended as copies at the end of the stack in the parsed order.
+function SubsetBandsDuplicateBody(props: SubsetBandsDuplicateBodyProps): JSX.Element {
+  const [typedRangeText, setTypedRangeText] = useState("");
+  const [openInNewViewport, setOpenInNewViewport] = useState(true);
+  const parsed = parseBandRangeText(typedRangeText, props.raster.bandCount);
+  const onApply = () => {
+    if (!parsed.ok) return;
+    props.onApply({
+      bandIndexesToDuplicate: parsed.bandNumbers.map((bandNumber) => bandNumber - 1),
+      openInNewViewport,
+    });
+  };
+  return (
+    <>
+      <SubsetBandsTypedRangeField
+        ariaLabel="Bands to duplicate"
+        value={typedRangeText}
+        error={typedRangeText.trim().length > 0 && !parsed.ok ? parsed.error : null}
+        onChangeValue={setTypedRangeText}
+      />
+      <SubsetBandsApplyControls
+        openInNewViewport={openInNewViewport}
+        onChangeOpenInNewViewport={setOpenInNewViewport}
+        disabledReason={parsed.ok ? null : "Enter at least one band to duplicate"}
+        onCancel={props.onCancel}
+        onApply={onApply}
+      />
+    </>
+  );
+}
+
 interface KeptBandSelectionDrivenByTypedRange {
   readonly keptBandIndexes: ReadonlySet<number>;
   readonly typedRangeText: string;
@@ -227,6 +284,7 @@ interface SubsetBandsTypedRangeFieldProps {
   readonly value: string;
   readonly error: string | null;
   readonly onChangeValue: (nextText: string) => void;
+  readonly ariaLabel?: string;
 }
 
 function SubsetBandsTypedRangeField(props: SubsetBandsTypedRangeFieldProps): JSX.Element {
@@ -239,7 +297,7 @@ function SubsetBandsTypedRangeField(props: SubsetBandsTypedRangeFieldProps): JSX
         type="text"
         value={props.value}
         placeholder={BAND_RANGE_SYNTAX_EXAMPLES}
-        aria-label="Bands to keep"
+        aria-label={props.ariaLabel ?? "Bands to keep"}
         aria-describedby={hintId}
         aria-invalid={props.error !== null}
         onChange={(event) => props.onChangeValue(event.target.value)}

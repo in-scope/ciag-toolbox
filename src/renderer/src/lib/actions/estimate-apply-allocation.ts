@@ -9,6 +9,11 @@ import {
   CONCATENATE_STACKS_ACTION_ID,
   CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID,
 } from "@/lib/actions/concatenate-stacks-action";
+import {
+  DUPLICATE_BANDS_ACTION_ID,
+  DUPLICATE_BANDS_PARAMETER_ID_BAND_NUMBERS,
+  readDuplicatedBandNumbersFromParameterValues,
+} from "@/lib/actions/duplicate-bands-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
 import { readRasterReferenceTokenOrEmpty, NO_RASTER_REFERENCE_SELECTED } from "@/lib/actions/parameter-schema";
@@ -102,7 +107,30 @@ function estimateAllocationBytesForRasterApply(
   if (action.id === CONCATENATE_STACKS_ACTION_ID) {
     return estimateConcatenateStacksAllocationBytes(raster, parameterValues);
   }
+  if (action.id === DUPLICATE_BANDS_ACTION_ID) {
+    return estimateDuplicateBandsAllocationBytes(raster, parameterValues);
+  }
   return singleFloatBandBytes(raster);
+}
+
+// CT-301: the output keeps the source's own byte count PLUS one band's worth
+// of bytes per duplicated band (same type as the source, never widened).
+function estimateDuplicateBandsAllocationBytes(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): number {
+  const duplicatedCount = tryCountDuplicatedBands(parameterValues);
+  const bytesPerBand = pixelCountOf(raster) * (raster.bitsPerSample / 8);
+  return sumRasterBandBytes(raster) + duplicatedCount * bytesPerBand;
+}
+
+function tryCountDuplicatedBands(parameterValues: ParameterValuesById): number {
+  if (typeof parameterValues[DUPLICATE_BANDS_PARAMETER_ID_BAND_NUMBERS] !== "string") return 0;
+  try {
+    return readDuplicatedBandNumbersFromParameterValues(parameterValues).length;
+  } catch {
+    return 0;
+  }
 }
 
 // CT-300: pixelCount x totalBandCount x the widened type's byte width, using
