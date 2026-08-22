@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLoadedPanelReferenceToken,
   buildLoadedReferenceCandidates,
+  filterLoadedReferenceCandidatesByDimensions,
   isLoadedPanelReferenceToken,
   readReferenceTokenDisplayName,
   type LoadedPanelReferenceEntry,
@@ -39,13 +40,41 @@ describe("reference-token", () => {
     expect(candidates[0]!.label).toBe("Panel 1 (a.tif)");
     expect(candidates[1]!.raster).toBe(entries[1]!.raster);
   });
+
+  it("filters candidates to only those matching the given width and height", () => {
+    const entries: LoadedPanelReferenceEntry[] = [
+      { viewportNumber: 1, fileName: "a.tif", raster: makeRaster(2, 1) },
+      { viewportNumber: 2, fileName: "b.tif", raster: makeRaster(8, 8) },
+      { viewportNumber: 3, fileName: "c.tif", raster: makeRaster(2, 1) },
+    ];
+    const candidates = buildLoadedReferenceCandidates(entries);
+    const matching = filterLoadedReferenceCandidatesByDimensions(candidates, 2, 1);
+    expect(matching.map((candidate) => candidate.label)).toEqual(["Panel 1 (a.tif)", "Panel 3 (c.tif)"]);
+  });
+
+  it("returns no candidates when nothing matches the given dimensions", () => {
+    const entries: LoadedPanelReferenceEntry[] = [{ viewportNumber: 1, fileName: "a.tif", raster: makeRaster(2, 1) }];
+    const candidates = buildLoadedReferenceCandidates(entries);
+    expect(filterLoadedReferenceCandidatesByDimensions(candidates, 8, 8)).toEqual([]);
+  });
+
+  it("excludes the given token even when its dimensions match", () => {
+    const entries: LoadedPanelReferenceEntry[] = [
+      { viewportNumber: 1, fileName: "a.tif", raster: makeRaster(2, 1) },
+      { viewportNumber: 2, fileName: "b.tif", raster: makeRaster(2, 1) },
+    ];
+    const candidates = buildLoadedReferenceCandidates(entries);
+    const selfToken = buildLoadedPanelReferenceToken(1, "a.tif");
+    const matching = filterLoadedReferenceCandidatesByDimensions(candidates, 2, 1, selfToken);
+    expect(matching.map((candidate) => candidate.label)).toEqual(["Panel 2 (b.tif)"]);
+  });
 });
 
-function makeRaster(): RasterImage {
+function makeRaster(width = 2, height = 1): RasterImage {
   return {
-    bandPixels: [new Uint8Array([1, 2])],
-    width: 2,
-    height: 1,
+    bandPixels: [new Uint8Array(width * height).fill(1)],
+    width,
+    height,
     bitsPerSample: 8,
     sampleFormat: "uint",
     bandCount: 1,

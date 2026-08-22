@@ -24,7 +24,11 @@ import {
   canonicalizeViewportRoiCorners,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
-import type { ReferencePickerOption } from "@/lib/image/reference-token";
+import {
+  buildLoadedPanelReferenceToken,
+  filterLoadedReferenceCandidatesByDimensions,
+  type LoadedReferenceCandidate,
+} from "@/lib/image/reference-token";
 
 export interface ToolOptionsApplyOptions {
   readonly openInNewViewport: boolean;
@@ -39,12 +43,14 @@ export interface ToolOptionsSourceViewport {
   readonly sourceBandCount: number | null;
   readonly selectedBandNumber: number;
   readonly isTrueColorComposite: boolean;
+  readonly sourceWidth: number | null;
+  readonly sourceHeight: number | null;
 }
 
 interface ToolOptionsPanelProps {
   action: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
-  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates?: ReadonlyArray<LoadedReferenceCandidate>;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
@@ -73,7 +79,7 @@ export function ToolOptionsPanel(props: ToolOptionsPanelProps): JSX.Element | nu
 interface ToolOptionsPanelShellProps {
   action: RegisteredViewportAction;
   sourceViewport: ToolOptionsSourceViewport | null;
-  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates?: ReadonlyArray<LoadedReferenceCandidate>;
   onCancel: () => void;
   onApply: (options: ToolOptionsApplyOptions) => void;
   onParametersChange?: (values: ParameterValuesById) => void;
@@ -106,7 +112,12 @@ function ToolOptionsPanelShell(props: ToolOptionsPanelShellProps): JSX.Element {
     : DEFAULT_APPLY_SCOPE;
   const isRegionRequiredNow = doesActionRequireRegionNow(props.action, effectiveApplyScope);
   const operationRegion = props.sourceViewport?.operationRegion ?? null;
-  const hasBlockingParameterError = hasBlockingParameterValueError(parameterSchemas, parameterValues, props.sourceViewport);
+  const hasBlockingParameterError = hasBlockingParameterValueError(
+    parameterSchemas,
+    parameterValues,
+    props.sourceViewport,
+    props.loadedReferenceCandidates ?? EMPTY_LOADED_REFERENCE_CANDIDATES,
+  );
   const handleApply = () =>
     props.onApply({ openInNewViewport, parameterValues, applyScope: effectiveApplyScope });
   return (
@@ -201,13 +212,54 @@ function computeWhetherApplyIsAllowed(
   return !hasBlockingParameterError;
 }
 
+const EMPTY_LOADED_REFERENCE_CANDIDATES: ReadonlyArray<LoadedReferenceCandidate> = [];
+
+// CT-300: a restricted raster-reference picker must never offer the active
+// panel as its own second stack.
+function resolveSourceOwnLoadedPanelTokenOrNull(
+  sourceViewport: ToolOptionsSourceViewport | null,
+): string | null {
+  if (sourceViewport === null) return null;
+  return buildLoadedPanelReferenceToken(sourceViewport.viewportNumber, sourceViewport.fileName);
+}
+
 function hasBlockingParameterValueError(
   parameterSchemas: ReadonlyArray<ParameterSchema>,
   parameterValues: ParameterValuesById,
   sourceViewport: ToolOptionsSourceViewport | null,
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>,
 ): boolean {
   const bandCount = sourceViewport?.sourceBandCount ?? null;
-  return describeBlockingParameterErrorOrNull(parameterSchemas, parameterValues, bandCount) !== null;
+  const qualifyingCounts = buildQualifyingReferenceCandidateCountsById(
+    parameterSchemas,
+    loadedReferenceCandidates,
+    sourceViewport,
+  );
+  return describeBlockingParameterErrorOrNull(parameterSchemas, parameterValues, bandCount, qualifyingCounts) !== null;
+}
+
+// CT-300: for each raster-reference field restricted to dimension-matching
+// panels, count how many loaded candidates actually qualify.
+function buildQualifyingReferenceCandidateCountsById(
+  parameterSchemas: ReadonlyArray<ParameterSchema>,
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>,
+  sourceViewport: ToolOptionsSourceViewport | null,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  if (sourceViewport === null || sourceViewport.sourceWidth === null || sourceViewport.sourceHeight === null) {
+    return counts;
+  }
+  const matching = filterLoadedReferenceCandidatesByDimensions(
+    loadedReferenceCandidates,
+    sourceViewport.sourceWidth,
+    sourceViewport.sourceHeight,
+    resolveSourceOwnLoadedPanelTokenOrNull(sourceViewport) ?? undefined,
+  );
+  for (const schema of parameterSchemas) {
+    if (schema.kind !== "raster-reference" || !schema.restrictToLoadedPanelsMatchingSourceDimensions) continue;
+    counts.set(schema.id, matching.length);
+  }
+  return counts;
 }
 
 const PANEL_CLASSES =
@@ -297,7 +349,7 @@ function PanelCloseButton({ onCancel }: { onCancel: () => void }): JSX.Element {
 
 interface PanelBodyProps {
   sourceViewport: ToolOptionsSourceViewport | null;
-  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates?: ReadonlyArray<LoadedReferenceCandidate>;
   embeddedEditor?: ReactNode;
   parameterSchemas: ReadonlyArray<ParameterSchema>;
   parameterValues: ParameterValuesById;
@@ -323,6 +375,9 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
           values={props.parameterValues}
           sourceBandCount={props.sourceViewport?.sourceBandCount ?? null}
           sourceIsTrueColorComposite={props.sourceViewport?.isTrueColorComposite ?? false}
+          sourceWidth={props.sourceViewport?.sourceWidth ?? null}
+          sourceHeight={props.sourceViewport?.sourceHeight ?? null}
+          sourceOwnLoadedPanelToken={resolveSourceOwnLoadedPanelTokenOrNull(props.sourceViewport)}
           loadedReferenceCandidates={props.loadedReferenceCandidates}
           onChangeValue={props.onChangeParameterValue}
         />

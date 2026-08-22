@@ -5,8 +5,15 @@ import {
   readRoiFromCropParameterValues,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import {
+  CONCATENATE_STACKS_ACTION_ID,
+  CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID,
+} from "@/lib/actions/concatenate-stacks-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
+import { readRasterReferenceTokenOrEmpty, NO_RASTER_REFERENCE_SELECTED } from "@/lib/actions/parameter-schema";
+import { widenSampleType } from "@/lib/image/concatenate-stacks";
+import { readRememberedReferenceRasterOrNull } from "@/lib/image/reference-raster-store";
 import { TONE_CURVE_SCOPE_PARAMETER_ID, WHOLE_STACK_TONE_CURVE_SCOPE_VALUE } from "@/lib/actions/tone-curve-scope";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -92,7 +99,34 @@ function estimateAllocationBytesForRasterApply(
   if (action.id === "invert") return estimateInvertAllocationBytes(raster, parameterValues);
   if (action.id === "threshold") return thresholdCubeBytes(raster);
   if (action.id === "crop-to-region") return estimateCropAllocationBytes(raster, parameterValues);
+  if (action.id === CONCATENATE_STACKS_ACTION_ID) {
+    return estimateConcatenateStacksAllocationBytes(raster, parameterValues);
+  }
   return singleFloatBandBytes(raster);
+}
+
+// CT-300: pixelCount x totalBandCount x the widened type's byte width, using
+// the actual resolved second stack when one is chosen; falls back to the
+// active stack's own byte count (a conservative floor) before a second stack
+// is picked.
+function estimateConcatenateStacksAllocationBytes(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): number {
+  const second = tryResolveConcatenateStacksSecondStack(parameterValues);
+  if (!second) return sumRasterBandBytes(raster);
+  const widened = widenSampleType(
+    { sampleFormat: raster.sampleFormat, bitsPerSample: raster.bitsPerSample },
+    { sampleFormat: second.sampleFormat, bitsPerSample: second.bitsPerSample },
+  );
+  const totalBandCount = raster.bandCount + second.bandCount;
+  return pixelCountOf(raster) * totalBandCount * (widened.bitsPerSample / 8);
+}
+
+function tryResolveConcatenateStacksSecondStack(parameterValues: ParameterValuesById): RasterImage | null {
+  const token = readRasterReferenceTokenOrEmpty(parameterValues[CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID]);
+  if (token === NO_RASTER_REFERENCE_SELECTED) return null;
+  return readRememberedReferenceRasterOrNull(token);
 }
 
 function pixelCountOf(raster: RasterImage): number {

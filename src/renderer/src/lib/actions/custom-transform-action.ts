@@ -169,7 +169,7 @@ function buildFloat32StackFromValidatedCube(
   raster: RasterImage,
   cube: TransformedCubeResult,
 ): RasterImage {
-  const [_bandCount, height, width] = cube.shape;
+  const [, height, width] = cube.shape;
   const metadata = buildTransformOutputBandMetadata(
     readSourceBandMetadata(raster),
     cube.bands.length,

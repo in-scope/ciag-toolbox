@@ -16,8 +16,9 @@ import {
   BAND_RANGE_SYNTAX_EXAMPLES,
 } from "@/lib/image/parse-band-range";
 import {
+  filterLoadedReferenceCandidatesByDimensions,
   readReferenceTokenDisplayName,
-  type ReferencePickerOption,
+  type LoadedReferenceCandidate,
 } from "@/lib/image/reference-token";
 import {
   formatComponentCountLabel,
@@ -60,7 +61,10 @@ interface ParameterFormSectionProps {
   onChangeValue: (id: string, next: ParameterValue) => void;
   sourceBandCount?: number | null;
   sourceIsTrueColorComposite?: boolean;
-  loadedReferenceCandidates?: ReadonlyArray<ReferencePickerOption>;
+  sourceWidth?: number | null;
+  sourceHeight?: number | null;
+  sourceOwnLoadedPanelToken?: string | null;
+  loadedReferenceCandidates?: ReadonlyArray<LoadedReferenceCandidate>;
 }
 
 export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Element {
@@ -75,6 +79,9 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           allValues={props.values}
           sourceBandCount={props.sourceBandCount ?? null}
           sourceIsTrueColorComposite={props.sourceIsTrueColorComposite ?? false}
+          sourceWidth={props.sourceWidth ?? null}
+          sourceHeight={props.sourceHeight ?? null}
+          sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken ?? null}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
           onChangeValueAtId={props.onChangeValue}
@@ -84,7 +91,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
   );
 }
 
-const EMPTY_REFERENCE_CANDIDATES: ReadonlyArray<ReferencePickerOption> = [];
+const EMPTY_REFERENCE_CANDIDATES: ReadonlyArray<LoadedReferenceCandidate> = [];
 
 // A clip-bounds field owns two values keyed by its own ids, so it has no single
 // schema-level value/default; its component reads both from allValues instead.
@@ -99,7 +106,10 @@ interface ParameterFieldRowProps {
   allValues: ParameterValuesById;
   sourceBandCount: number | null;
   sourceIsTrueColorComposite: boolean;
-  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  sourceOwnLoadedPanelToken: string | null;
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
   onChangeValue: (next: ParameterValue) => void;
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
@@ -118,6 +128,9 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
         allValues={props.allValues}
         sourceBandCount={props.sourceBandCount}
         sourceIsTrueColorComposite={props.sourceIsTrueColorComposite}
+        sourceWidth={props.sourceWidth}
+        sourceHeight={props.sourceHeight}
+        sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken}
         loadedReferenceCandidates={props.loadedReferenceCandidates}
         onChangeValue={props.onChangeValue}
         onChangeValueAtId={props.onChangeValueAtId}
@@ -180,6 +193,9 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
         schema={props.schema}
         value={readRasterReferenceTokenOrEmpty(props.value)}
         loadedReferenceCandidates={props.loadedReferenceCandidates}
+        sourceWidth={props.sourceWidth}
+        sourceHeight={props.sourceHeight}
+        sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -600,13 +616,26 @@ function CubeScopeRadioRow(props: CubeScopeRadioRowProps): JSX.Element {
 interface RasterReferenceParameterFieldProps {
   schema: RasterReferenceParameterSchema;
   value: string;
-  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  sourceOwnLoadedPanelToken: string | null;
   onChangeValue: (next: string) => void;
 }
 
 function RasterReferenceParameterField(props: RasterReferenceParameterFieldProps): JSX.Element {
   const [isPicking, setIsPicking] = useState(false);
   const selectedFileName = readBaseFileNameFromTokenOrNull(props.value);
+  if (props.schema.restrictToLoadedPanelsMatchingSourceDimensions) {
+    return (
+      <RestrictedLoadedPanelReferenceField
+        schema={props.schema}
+        selectedFileName={selectedFileName}
+        candidates={resolveDimensionMatchingCandidates(props)}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       <span className="text-foreground">{props.schema.label}</span>
@@ -626,8 +655,45 @@ function RasterReferenceParameterField(props: RasterReferenceParameterFieldProps
   );
 }
 
+function resolveDimensionMatchingCandidates(
+  props: RasterReferenceParameterFieldProps,
+): ReadonlyArray<LoadedReferenceCandidate> {
+  if (props.sourceWidth === null || props.sourceHeight === null) return [];
+  return filterLoadedReferenceCandidatesByDimensions(
+    props.loadedReferenceCandidates,
+    props.sourceWidth,
+    props.sourceHeight,
+    props.sourceOwnLoadedPanelToken ?? undefined,
+  );
+}
+
+interface RestrictedLoadedPanelReferenceFieldProps {
+  schema: RasterReferenceParameterSchema;
+  selectedFileName: string | null;
+  candidates: ReadonlyArray<LoadedReferenceCandidate>;
+  onChangeValue: (next: string) => void;
+}
+
+// CT-300: Concatenate Stacks offers loaded panels ONLY (no file picker), scoped
+// to panels whose stack matches the active stack's width and height.
+function RestrictedLoadedPanelReferenceField(props: RestrictedLoadedPanelReferenceFieldProps): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <span className="text-foreground">{props.schema.label}</span>
+      <RasterReferenceSelectedFileText fileName={props.selectedFileName} optional={props.schema.optional} />
+      {props.candidates.length === 0 ? (
+        <span className="text-xs text-muted-foreground">
+          No open stack matches the active stack&apos;s width and height.
+        </span>
+      ) : (
+        <LoadedPanelReferenceMenu candidates={props.candidates} onSelectToken={props.onChangeValue} />
+      )}
+    </div>
+  );
+}
+
 interface LoadedPanelReferenceMenuProps {
-  candidates: ReadonlyArray<ReferencePickerOption>;
+  candidates: ReadonlyArray<LoadedReferenceCandidate>;
   onSelectToken: (token: string) => void;
 }
 

@@ -49,6 +49,23 @@ export function buildLoadedReferenceCandidates(
   }));
 }
 
+// CT-300: Concatenate Stacks offers only loaded panels whose stack matches the
+// active stack's width and height, excluding the active panel itself (its own
+// token, when given) so a stack is never offered as its own second stack.
+export function filterLoadedReferenceCandidatesByDimensions(
+  candidates: ReadonlyArray<LoadedReferenceCandidate>,
+  width: number,
+  height: number,
+  excludeToken?: string,
+): LoadedReferenceCandidate[] {
+  return candidates.filter(
+    (candidate) =>
+      candidate.token !== excludeToken &&
+      candidate.raster.width === width &&
+      candidate.raster.height === height,
+  );
+}
+
 function describeLoadedPanelReference(viewportNumber: number, fileName: string): string {
   return `Panel ${viewportNumber} (${fileName})`;
 }

@@ -147,6 +147,7 @@ import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
 import { BAND_WEIGHTING_ACTION } from "./band-weighting-action";
 import { BAND_SELECTION_ACTION } from "./band-selection-action";
 import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
+import { CONCATENATE_STACKS_ACTION } from "./concatenate-stacks-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1688,4 +1689,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   BAND_WEIGHTING_ACTION,
   BAND_SELECTION_ACTION,
   CUSTOM_TRANSFORM_ACTION,
+  CONCATENATE_STACKS_ACTION,
 ];

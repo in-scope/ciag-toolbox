@@ -138,7 +138,6 @@ import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
   type LoadedReferenceCandidate,
-  type ReferencePickerOption,
 } from "@/lib/image/reference-token";
 import { isSelectableGridLayout } from "@shared/grid-layouts";
 import {
@@ -661,7 +660,7 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
-  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
   toolOptionsEmbeddedEditor: ReactNode;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
@@ -1965,6 +1964,8 @@ function deriveSingleSelectedSource(
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
       selectedBandNumber: renderingState.selectedBandIndex + 1,
       isTrueColorComposite: readIsTrueColorPhotoFromContent(content),
+      sourceWidth: content.source.kind === "raster" ? content.source.raster.width : null,
+      sourceHeight: content.source.kind === "raster" ? content.source.raster.height : null,
     },
   };
 }
@@ -1975,7 +1976,7 @@ function readRasterBandCountFromContentOrNull(content: ViewportCellContent): num
 
 function useLoadedReferenceCandidates(
   imagesByIndex: ImagesByIndexMap,
-): ReadonlyArray<ReferencePickerOption> {
+): ReadonlyArray<LoadedReferenceCandidate> {
   const candidates = useMemo(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],

@@ -65,6 +65,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "band-weighting",
       "band-selection",
       "custom-transform",
+      "concatenate-stacks",
     ]);
   });
 

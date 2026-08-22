@@ -86,6 +86,11 @@ export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
   readonly kind: "raster-reference";
   readonly optional: boolean;
   readonly defaultValue: string;
+  // CT-300: restrict the picker to already-loaded panels whose stack matches
+  // the active stack's width and height (no file-on-disk option, since an
+  // undecoded file's dimensions are unknown); Apply is blocked while no
+  // candidate qualifies or none is chosen.
+  readonly restrictToLoadedPanelsMatchingSourceDimensions?: boolean;
 }
 
 export const NO_RASTER_REFERENCE_SELECTED = "";
@@ -226,10 +231,47 @@ export function describeBlockingParameterErrorOrNull(
   schemas: ReadonlyArray<ParameterSchema>,
   values: ParameterValuesById,
   bandCount: number | null,
+  qualifyingLoadedReferenceCandidateCountsById?: ReadonlyMap<string, number>,
 ): string | null {
   const bandScopeError = describeBandScopeBlockingErrorOrNull(schemas, values, bandCount);
   if (bandScopeError) return bandScopeError;
-  return describeClipBoundsBlockingErrorOrNull(schemas, values);
+  const clipBoundsError = describeClipBoundsBlockingErrorOrNull(schemas, values);
+  if (clipBoundsError) return clipBoundsError;
+  return describeRasterReferenceBlockingErrorOrNull(
+    schemas,
+    values,
+    qualifyingLoadedReferenceCandidateCountsById,
+  );
+}
+
+// CT-300: a raster-reference field restricted to dimension-matching loaded
+// panels blocks Apply until a qualifying panel exists AND one is chosen.
+function describeRasterReferenceBlockingErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  qualifyingCandidateCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  for (const schema of schemas) {
+    if (schema.kind !== "raster-reference" || !schema.restrictToLoadedPanelsMatchingSourceDimensions) continue;
+    const error = describeRestrictedRasterReferenceErrorForSchemaOrNull(schema, values, qualifyingCandidateCountsById);
+    if (error) return error;
+  }
+  return null;
+}
+
+function describeRestrictedRasterReferenceErrorForSchemaOrNull(
+  schema: RasterReferenceParameterSchema,
+  values: ParameterValuesById,
+  qualifyingCandidateCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  const qualifyingCount = qualifyingCandidateCountsById?.get(schema.id) ?? 0;
+  if (qualifyingCount === 0) {
+    return "No open stack matches the active stack's width and height. Open a matching stack to continue.";
+  }
+  if (readRasterReferenceTokenOrEmpty(values[schema.id]) === NO_RASTER_REFERENCE_SELECTED) {
+    return "Choose a stack to continue.";
+  }
+  return null;
 }
 
 function describeClipBoundsBlockingErrorOrNull(

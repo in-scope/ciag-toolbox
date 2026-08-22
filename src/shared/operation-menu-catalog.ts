@@ -191,7 +191,11 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
 // id stays "band-weighting".
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
-  commands: [buildMenuOnlyActionCommand("band-weighting", "Weighted Sum")],
+  commands: [
+    buildMenuOnlyActionCommand("band-weighting", "Weighted Sum"),
+    // CT-300: concatenate two open stacks' bands into one wider stack.
+    buildMenuOnlyActionCommand("concatenate-stacks", "Concatenate Stacks"),
+  ],
 };
 
 // Whole-cube user scripting (CT-216).
