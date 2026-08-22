@@ -3011,6 +3011,7 @@ function buildSaveableViewportEntry(
       parameterValues: { ...entry.parameterValues },
       timestampMs: entry.timestampMs,
     })),
+    masks: renderingState.masks,
   };
 }
 
@@ -3135,5 +3136,6 @@ function mapProjectRenderingStateToViewportRenderingState(
       parameterValues: Object.freeze({ ...entry.parameterValues }),
       timestampMs: entry.timestampMs,
     })),
+    masks: viewport.masks,
   };
 }

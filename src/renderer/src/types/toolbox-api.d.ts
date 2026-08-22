@@ -202,7 +202,9 @@ interface ToolboxSaveBundleDraftOperationHistoryEntry {
 // Chunked project-save protocol (CT-219e), mirroring
 // src/shared/chunked-save-bundle-protocol.ts: baked asset bytes cross as
 // byte-length descriptors at begin and follow as small asset chunks.
-type ToolboxSaveBundleAssetPart = "primary" | "sidecar";
+// CT-306: mask layers add one "mask-<position>" part per layer on top of the
+// stack's primary part and its optional sidecar.
+type ToolboxSaveBundleAssetPart = "primary" | "sidecar" | `mask-${number}`;
 
 interface ToolboxSaveBundleBakedPartDescriptor {
   extension: string;
@@ -225,6 +227,20 @@ type ToolboxSaveBundleAssetDescriptor =
   | ToolboxSaveBundleBakedAssetDescriptor
   | ToolboxSaveBundleExternalAssetDescriptor;
 
+interface ToolboxSaveBundleMaskCategoryDescriptor {
+  name: string;
+  color: string;
+}
+
+interface ToolboxSaveBundleMaskLayerDescriptor {
+  name: string;
+  width: number;
+  height: number;
+  categories: ReadonlyArray<ToolboxSaveBundleMaskCategoryDescriptor>;
+  opacityPercent: number;
+  byteLength: number;
+}
+
 interface ToolboxSaveBundleViewportHeaderEntry {
   index: number;
   fileName: string;
@@ -232,6 +248,8 @@ interface ToolboxSaveBundleViewportHeaderEntry {
   renderingState: ToolboxSaveBundleDraftRenderingState;
   operationHistory: ReadonlyArray<ToolboxSaveBundleDraftOperationHistoryEntry>;
   colorInterpretation?: "rgb";
+  masks?: ReadonlyArray<ToolboxSaveBundleMaskLayerDescriptor>;
+  selectedMaskIndex?: number | null;
 }
 
 interface ToolboxSaveBundleDraftHeader {

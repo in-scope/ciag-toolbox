@@ -45,7 +45,15 @@ export interface SaveBundleViewportRenderingState {
   readonly lastAppliedOperationLabel: string | null;
 }
 
-export type SaveBundleAssetPart = "primary" | "sidecar";
+// CT-306: a viewport no longer has a fixed two-part asset shape. Alongside the
+// stack's primary part (and an ENVI .bin sidecar) it may carry one mask PNG per
+// mask layer, addressed as "mask-0", "mask-1", and so on by the layer's
+// position in the panel's mask list.
+export type SaveBundleAssetPart = "primary" | "sidecar" | `mask-${number}`;
+
+export function buildMaskAssetPartKey(maskPosition: number): SaveBundleAssetPart {
+  return `mask-${maskPosition}`;
+}
 
 // A baked asset crosses as a byte-length DESCRIPTOR here; its bytes follow
 // separately as asset chunks and spool to a temp file in main.
@@ -70,6 +78,22 @@ export type SaveBundleAssetDescriptor =
   | SaveBundleBakedAssetDescriptor
   | SaveBundleExternalAssetDescriptor;
 
+// CT-306: a mask layer's labelling travels in the header and its category
+// indexes follow as a PNG upload part, exactly like a baked stack part.
+export interface SaveBundleMaskCategoryDescriptor {
+  readonly name: string;
+  readonly color: string;
+}
+
+export interface SaveBundleMaskLayerDescriptor {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly categories: ReadonlyArray<SaveBundleMaskCategoryDescriptor>;
+  readonly opacityPercent: number;
+  readonly byteLength: number;
+}
+
 export interface SaveBundleViewportHeaderEntry {
   readonly index: number;
   readonly fileName: string;
@@ -77,6 +101,8 @@ export interface SaveBundleViewportHeaderEntry {
   readonly renderingState: SaveBundleViewportRenderingState;
   readonly operationHistory: ReadonlyArray<SaveBundleOperationHistoryEntry>;
   readonly colorInterpretation?: "rgb";
+  readonly masks?: ReadonlyArray<SaveBundleMaskLayerDescriptor>;
+  readonly selectedMaskIndex?: number | null;
 }
 
 export interface SaveBundleDraftHeader {

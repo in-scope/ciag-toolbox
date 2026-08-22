@@ -1,10 +1,12 @@
 import { restoreSourceColorInterpretation } from "@/lib/image/restore-source-color-interpretation";
 import { readAndDecodeSingleOpenedImageFileOrThrow } from "@/lib/image/run-open-images-flow";
 import type { UnitProgressCallback } from "@/lib/image/unit-progress";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { parseProjectFileFromJsonString } from "./parse-project";
 import type { ProjectFile, ProjectViewportEntry } from "./project-schema";
+import { readMaskPanelStateForViewportEntry } from "./read-project-mask-assets";
 
 // CT-236: bundle assets never cross IPC as whole byte payloads. Each viewport
 // asset is resolved to file metadata by main and then read through the same
@@ -19,6 +21,8 @@ export interface OpenedProjectViewportSnapshot {
   readonly originalFilePath: string;
   readonly fileSizeBytes: number;
   readonly entry: ProjectViewportEntry;
+  // CT-306: empty for a version 2 bundle and for any panel saved without masks.
+  readonly masks: MaskPanelState;
 }
 
 export interface OpenedProject {
@@ -118,13 +122,16 @@ async function readSingleViewportAssetOrThrow(
     throw new Error(`Bundle asset "${entry.source.relativePath}" is missing or unreadable`);
   }
   const decoded = await readAndDecodeSingleOpenedImageFileOrThrow(resolved.file, onDecodeProgress);
-  return buildViewportSnapshotFromDecodedAsset(entry, resolved.file, decoded.source);
+  return buildViewportSnapshotFromDecodedAsset(entry, resolved.file, decoded.source, {
+    masks: await readMaskPanelStateForViewportEntry(projectFilePath, entry),
+  });
 }
 
 function buildViewportSnapshotFromDecodedAsset(
   entry: ProjectViewportEntry,
   file: ToolboxOpenImagesDialogFileMetadataEntry,
   source: ViewportImageSource,
+  restored: { masks: MaskPanelState },
 ): OpenedProjectViewportSnapshot {
   return {
     index: entry.index,
@@ -133,5 +140,6 @@ function buildViewportSnapshotFromDecodedAsset(
     originalFilePath: file.filePath,
     fileSizeBytes: file.fileSizeBytes,
     entry,
+    masks: restored.masks,
   };
 }
