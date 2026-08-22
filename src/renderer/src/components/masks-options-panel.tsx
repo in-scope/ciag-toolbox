@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 
+import { MaskBrushControls } from "@/components/mask-brush-controls";
 import { MaskFileTransferButtons } from "@/components/mask-file-transfer-buttons";
 import { MaskLayerEditor } from "@/components/mask-layer-editor";
 import { Button } from "@/components/ui/button";
@@ -14,11 +15,14 @@ import {
   selectMaskLayerInPanel,
   type MaskPanelState,
 } from "@/lib/masks/mask-panel";
+import type { MaskBrushSettings } from "@/lib/masks/mask-brush";
+import type { MaskLayer } from "@/lib/masks/mask-layer";
 
 // CT-302: the Masks tool's aside. It lists the ACTIVE panel's mask layers with
 // New / Rename / Delete, keeps exactly one of them selected (only the selected
 // layer renders as an overlay), and edits that layer's categories and opacity.
-// CT-303 added the Import/Export row (components/mask-file-transfer-buttons.tsx).
+// CT-303 added the Import/Export row (components/mask-file-transfer-buttons.tsx)
+// and CT-304 the brush controls (components/mask-brush-controls.tsx).
 
 export interface MasksOptionsTarget {
   readonly viewportNumber: number;
@@ -30,6 +34,8 @@ export interface MasksOptionsTarget {
 export interface MasksOptionsPanelProps {
   readonly target: MasksOptionsTarget | null;
   readonly onChangeMasks: (next: MaskPanelState) => void;
+  readonly brush: MaskBrushSettings;
+  readonly onChangeBrush: (next: MaskBrushSettings) => void;
   readonly onClose: () => void;
 }
 
@@ -42,7 +48,12 @@ export function MasksOptionsPanel(props: MasksOptionsPanelProps): JSX.Element {
       />
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         {props.target ? (
-          <MasksOptionsBody target={props.target} onChangeMasks={props.onChangeMasks} />
+          <MasksOptionsBody
+            target={props.target}
+            onChangeMasks={props.onChangeMasks}
+            brush={props.brush}
+            onChangeBrush={props.onChangeBrush}
+          />
         ) : (
           <p className="text-xs text-muted-foreground">{NO_ACTIVE_PANEL_HINT}</p>
         )}
@@ -87,9 +98,14 @@ function MasksPanelCloseButton({ onClose }: { onClose: () => void }): JSX.Elemen
   );
 }
 
-interface MasksOptionsBodyProps {
+interface MaskLayerListProps {
   readonly target: MasksOptionsTarget;
   readonly onChangeMasks: (next: MaskPanelState) => void;
+}
+
+interface MasksOptionsBodyProps extends MaskLayerListProps {
+  readonly brush: MaskBrushSettings;
+  readonly onChangeBrush: (next: MaskBrushSettings) => void;
 }
 
 function MasksOptionsBody(props: MasksOptionsBodyProps): JSX.Element {
@@ -104,22 +120,37 @@ function MasksOptionsBody(props: MasksOptionsBodyProps): JSX.Element {
         masks={props.target.masks}
         onChangeMasks={props.onChangeMasks}
       />
-      {selected ? (
-        <MaskLayerEditor
-          layer={selected}
-          onChangeLayer={(next) =>
-            props.onChangeMasks(replaceMaskLayerInPanel(props.target.masks, selected.id, () => next))
-          }
-          onDeleteLayer={() =>
-            props.onChangeMasks(deleteMaskLayerFromPanel(props.target.masks, selected.id))
-          }
-        />
-      ) : null}
+      {selected ? <SelectedMaskLayerSections layer={selected} {...props} /> : null}
     </>
   );
 }
 
-function MaskLayerList(props: MasksOptionsBodyProps): JSX.Element {
+interface SelectedMaskLayerSectionsProps extends MasksOptionsBodyProps {
+  readonly layer: MaskLayer;
+}
+
+function SelectedMaskLayerSections(props: SelectedMaskLayerSectionsProps): JSX.Element {
+  return (
+    <>
+      <MaskBrushControls
+        layer={props.layer}
+        brush={props.brush}
+        onChangeBrush={props.onChangeBrush}
+      />
+      <MaskLayerEditor
+        layer={props.layer}
+        onChangeLayer={(next) =>
+          props.onChangeMasks(replaceMaskLayerInPanel(props.target.masks, props.layer.id, () => next))
+        }
+        onDeleteLayer={() =>
+          props.onChangeMasks(deleteMaskLayerFromPanel(props.target.masks, props.layer.id))
+        }
+      />
+    </>
+  );
+}
+
+function MaskLayerList(props: MaskLayerListProps): JSX.Element {
   if (!panelHasMaskLayers(props.target.masks)) {
     return <p className="text-xs text-muted-foreground">{NO_LAYERS_HINT}</p>;
   }
@@ -143,12 +174,12 @@ function MaskLayerList(props: MasksOptionsBodyProps): JSX.Element {
 
 // Radix reports an empty string when the pressed item is clicked again; ignore
 // it so exactly one layer stays selected.
-function selectMaskLayerWhenChosen(layerId: string, props: MasksOptionsBodyProps): void {
+function selectMaskLayerWhenChosen(layerId: string, props: MaskLayerListProps): void {
   if (layerId === "") return;
   props.onChangeMasks(selectMaskLayerInPanel(props.target.masks, layerId));
 }
 
-function NewMaskLayerButton(props: MasksOptionsBodyProps): JSX.Element {
+function NewMaskLayerButton(props: MaskLayerListProps): JSX.Element {
   return (
     <Button variant="outline" size="sm" onClick={() => props.onChangeMasks(addLayer(props))}>
       New layer
@@ -156,6 +187,6 @@ function NewMaskLayerButton(props: MasksOptionsBodyProps): JSX.Element {
   );
 }
 
-function addLayer(props: MasksOptionsBodyProps): MaskPanelState {
+function addLayer(props: MaskLayerListProps): MaskPanelState {
   return addNewMaskLayerToPanel(props.target.masks, props.target.width, props.target.height);
 }

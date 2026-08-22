@@ -486,6 +486,16 @@ export {
   renameMaskCategory,
 } from "./masks-panel";
 export {
+  enableMaskEraser,
+  maskBrushCategoryOption,
+  maskBrushSizeSlider,
+  maskEraserToggle,
+  paintMaskDotAtPagePoint,
+  paintMaskStrokeBetweenPixels,
+  selectMaskBrushCategory,
+  setMaskBrushSizeToOnePixel,
+} from "./mask-brush";
+export {
   exportMaskButton,
   exportSelectedMaskToPath,
   importMaskButton,

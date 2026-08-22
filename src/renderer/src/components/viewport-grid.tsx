@@ -8,7 +8,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Viewport } from "@/components/viewport";
+import { Viewport, type ViewportMaskPainting } from "@/components/viewport";
 import {
   getGridLayoutCellCount,
   getGridLayoutTailwindTrackClasses,
@@ -36,8 +36,14 @@ import {
   type ClickedImagePixel,
 } from "@/lib/image/roi-selection-lifecycle";
 import type { ViewportRoi } from "@/lib/image/viewport-roi";
+import { doesMaskLayerCoverDimensions, type MaskLayer } from "@/lib/masks/mask-layer";
+import {
+  findSelectedMaskLayerOrNull,
+  replaceSelectedMaskLayerValues,
+} from "@/lib/masks/mask-panel";
+import type { MaskBrushSettings } from "@/lib/masks/mask-brush";
 import { cn } from "@/lib/utils";
-import type { ViewportImageSource } from "@/lib/webgl/texture";
+import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import { useViewportClosing } from "@/state/closing-context";
 import { useViewportDuplication } from "@/state/duplication-context";
 import { useFalseColorPreview } from "@/state/false-color-preview-context";
@@ -49,6 +55,7 @@ import {
 } from "@/state/region-edit-preview-context";
 import { useRegionRequest } from "@/state/region-request-context";
 import { useRegionTool } from "@/state/region-tool-context";
+import { useMasksTool } from "@/state/masks-tool-context";
 import { useViewportBandRemoval } from "@/state/band-removal-context";
 import { useViewportReimport } from "@/state/reimport-context";
 import { useViewportRendering } from "@/state/viewport-rendering-context";
@@ -163,6 +170,7 @@ function renderViewportCellViewport(
       onPreviewRoiEdit={settings.handlePreviewRoiEdit}
       onCommitRoiEdit={settings.handleCommitRoiEdit}
       onRegionToolPlainClick={settings.handleRegionToolPlainClick}
+      maskPainting={settings.maskPainting}
       onPinPixelSpectrum={settings.handlePinPixelSpectrum}
       onOpenImage={props.onOpenImage}
       onClose={settings.handleClose}
@@ -207,6 +215,7 @@ interface ViewportCellInteractionSettings {
   handleCommitRoiEdit: (roi: ViewportRoi) => void;
   handleRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
   handlePinPixelSpectrum: (imageX: number, imageY: number) => void;
+  maskPainting: ViewportMaskPainting | null;
 }
 
 function useViewportCellInteractionSettings(
@@ -217,6 +226,7 @@ function useViewportCellInteractionSettings(
     useViewportSelection();
   const { getRenderingState, setRenderingState } = useViewportRendering();
   const { isRegionToolActive } = useRegionTool();
+  const masksTool = useMasksTool();
   const regionRequest = useRegionRequest();
   const { getPreviewSourceForViewport } = useFalseColorPreview();
   const { getLookupTableForViewport, getChannelLookupTablesForViewport } = useToneCurvePreview();
@@ -343,6 +353,14 @@ function useViewportCellInteractionSettings(
     (bandIndex: number) => removeBand(cellIndex, bandIndex),
     [cellIndex, removeBand],
   );
+  const handleCommitMaskStrokeValues = useCallback(
+    (values: Uint8Array) =>
+      setRenderingState(cellIndex, {
+        ...renderingState,
+        masks: replaceSelectedMaskLayerValues(renderingState.masks, values),
+      }),
+    [cellIndex, renderingState, setRenderingState],
+  );
   return {
     isSelected,
     handleClick,
@@ -369,6 +387,35 @@ function useViewportCellInteractionSettings(
     handleCommitRoiEdit,
     handleRegionToolPlainClick,
     handlePinPixelSpectrum,
+    maskPainting: buildMaskPaintingOrNull({
+      isMasksToolActive: masksTool.isMasksToolActive,
+      layer: findSelectedMaskLayerOrNull(renderingState.masks),
+      brush: masksTool.brush,
+      content,
+      onCommitStrokeValues: handleCommitMaskStrokeValues,
+    }),
+  };
+}
+
+// CT-304: painting exists only while the Masks tool is on, a layer is selected,
+// and that layer still covers the panel's stack - the same three conditions that
+// make the overlay meaningful.
+interface MaskPaintingInputs {
+  readonly isMasksToolActive: boolean;
+  readonly layer: MaskLayer | null;
+  readonly brush: MaskBrushSettings;
+  readonly content: ViewportCellContent | null;
+  readonly onCommitStrokeValues: (values: Uint8Array) => void;
+}
+
+function buildMaskPaintingOrNull(inputs: MaskPaintingInputs): ViewportMaskPainting | null {
+  if (!inputs.isMasksToolActive || !inputs.layer || !inputs.content) return null;
+  const dimensions = getImageSourceDimensions(inputs.content.source);
+  if (!doesMaskLayerCoverDimensions(inputs.layer, dimensions.width, dimensions.height)) return null;
+  return {
+    layer: inputs.layer,
+    brush: inputs.brush,
+    onCommitStrokeValues: inputs.onCommitStrokeValues,
   };
 }
 

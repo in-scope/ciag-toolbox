@@ -7,6 +7,14 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  DEFAULT_MASK_BRUSH_SETTINGS,
+  type MaskBrushSettings,
+} from "@/lib/masks/mask-brush";
+
+// CT-304 adds the BRUSH settings (category, eraser, size) here too: they are
+// tool state, the same shape as the mode flag, not per-panel mask data.
+
 // CT-302: the Masks tool is a mode toggle, the same shape as the Select Region
 // tool: one app-wide flag that decides whether the Masks options aside is open
 // for the active panel. The mask DATA is per panel and lives in that panel's
@@ -16,6 +24,8 @@ export interface MasksToolApi {
   readonly isMasksToolActive: boolean;
   readonly setMasksToolActive: (active: boolean) => void;
   readonly toggleMasksTool: () => void;
+  readonly brush: MaskBrushSettings;
+  readonly setBrush: (next: MaskBrushSettings) => void;
 }
 
 const MasksToolContext = createContext<MasksToolApi | null>(null);
@@ -39,10 +49,11 @@ export function useMasksTool(): MasksToolApi {
 
 function useMasksToolInternalState(): MasksToolApi {
   const [isMasksToolActive, setIsMasksToolActive] = useState(false);
+  const [brush, setBrush] = useState<MaskBrushSettings>(DEFAULT_MASK_BRUSH_SETTINGS);
   const setMasksToolActive = useCallback((next: boolean) => setIsMasksToolActive(next), []);
   const toggleMasksTool = useCallback(() => setIsMasksToolActive((prev) => !prev), []);
   return useMemo(
-    () => ({ isMasksToolActive, setMasksToolActive, toggleMasksTool }),
-    [isMasksToolActive, setMasksToolActive, toggleMasksTool],
+    () => ({ isMasksToolActive, setMasksToolActive, toggleMasksTool, brush, setBrush }),
+    [isMasksToolActive, setMasksToolActive, toggleMasksTool, brush],
   );
 }

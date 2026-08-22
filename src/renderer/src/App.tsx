@@ -295,6 +295,7 @@ import {
 } from "@/lib/actions/viewport-action";
 import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
 import type { MaskPanelState } from "@/lib/masks/mask-panel";
+import type { MaskBrushSettings } from "@/lib/masks/mask-brush";
 import { getImageSourceDimensions } from "@/lib/webgl/texture";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
@@ -591,6 +592,8 @@ function ApplicationShell(): JSX.Element {
                 onChangeMasks={(next) =>
                   writeMaskPanelStateAtViewport(singleSelectedSource?.index ?? null, next, renderingApi)
                 }
+                maskBrush={masksTool.brush}
+                onChangeMaskBrush={masksTool.setBrush}
                 onCloseMasks={() => masksTool.setMasksToolActive(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
@@ -687,6 +690,8 @@ interface ApplicationStageContentProps {
   isMasksToolActive: boolean;
   masksTarget: MasksOptionsTarget | null;
   onChangeMasks: (next: MaskPanelState) => void;
+  maskBrush: MaskBrushSettings;
+  onChangeMaskBrush: (next: MaskBrushSettings) => void;
   onCloseMasks: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
@@ -736,6 +741,8 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       <MasksOptionsPanel
         target={props.masksTarget}
         onChangeMasks={props.onChangeMasks}
+        brush={props.maskBrush}
+        onChangeBrush={props.onChangeMaskBrush}
         onClose={props.onCloseMasks}
       />
     );

@@ -37,8 +37,10 @@ export async function closeMasksOptions(page: Page): Promise<void> {
   await expect(masksOptionsPanel(page)).toBeHidden();
 }
 
+// Scoped to the layer list: CT-304 added a second single-choice ToggleGroup
+// (the brush category), whose items are radios in the same aside.
 export function maskLayerOptions(page: Page): Locator {
-  return masksOptionsPanel(page).getByRole("radio");
+  return masksOptionsPanel(page).locator('[aria-label="Mask layers"]').getByRole("radio");
 }
 
 export function maskLayerNameField(page: Page): Locator {

@@ -9,6 +9,7 @@ import {
   panelHasMaskLayers,
   renameMaskLayerInPanel,
   replaceMaskLayerInPanel,
+  replaceSelectedMaskLayerValues,
   selectMaskLayerInPanel,
   type MaskPanelState,
 } from "./mask-panel";
@@ -90,5 +91,19 @@ describe("mask panel layers", () => {
     expect(panel.layers.map((layer) => layer.id)).toEqual(["mask-1", "mask-2", "mask-3"]);
     expect(panel.selectedLayerId).toBe("mask-3");
     expect(panel.layers[2]).toEqual({ id: "mask-3", ...imported });
+  });
+
+  it("replaces only the selected layer's painted values", () => {
+    const panel = selectMaskLayerInPanel(buildPanelWithLayers(2), "mask-2");
+    const painted = Uint8Array.from(new Array(12).fill(2));
+    const next = replaceSelectedMaskLayerValues(panel, painted);
+    expect(next.layers[1]?.values).toBe(painted);
+    expect(Array.from(next.layers[0]?.values ?? [])).toEqual(new Array(12).fill(0));
+  });
+
+  it("leaves the panel untouched when no layer is selected", () => {
+    expect(replaceSelectedMaskLayerValues(EMPTY_MASK_PANEL_STATE, new Uint8Array(4))).toBe(
+      EMPTY_MASK_PANEL_STATE,
+    );
   });
 });

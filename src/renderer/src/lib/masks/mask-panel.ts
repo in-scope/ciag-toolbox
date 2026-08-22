@@ -90,6 +90,16 @@ export function replaceMaskLayerInPanel(
   return { ...panel, layers };
 }
 
+// CT-304: a committed brush stroke replaces the selected layer's painted
+// values wholesale (the stroke owns the array it hands over).
+export function replaceSelectedMaskLayerValues(
+  panel: MaskPanelState,
+  values: Uint8Array,
+): MaskPanelState {
+  if (!panel.selectedLayerId) return panel;
+  return replaceMaskLayerInPanel(panel, panel.selectedLayerId, (layer) => ({ ...layer, values }));
+}
+
 export function deleteMaskLayerFromPanel(
   panel: MaskPanelState,
   layerId: string,
