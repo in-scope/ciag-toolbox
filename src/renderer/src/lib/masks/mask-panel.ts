@@ -1,5 +1,9 @@
 import { buildNextPrefixedIdentifier, findNextFreeNumberForPrefix } from "@/lib/masks/mask-identifiers";
-import { createMaskLayer, type MaskLayer } from "@/lib/masks/mask-layer";
+import {
+  createMaskLayer,
+  type MaskLayer,
+  type MaskLayerContent,
+} from "@/lib/masks/mask-layer";
 
 // CT-302: a panel holds any number of mask layers (no fixed cap; the renderer's
 // memory budget governs) and exactly one of them is selected at a time. Only
@@ -30,7 +34,26 @@ export function addNewMaskLayerToPanel(
   width: number,
   height: number,
 ): MaskPanelState {
-  const added = buildNextMaskLayerForPanel(panel, width, height);
+  return appendMaskLayerSelectingIt(panel, buildNextMaskLayerForPanel(panel, width, height));
+}
+
+// CT-303: an imported mask arrives with its own name, categories, and painted
+// values; only its id belongs to the panel.
+export function addImportedMaskLayerToPanel(
+  panel: MaskPanelState,
+  content: MaskLayerContent,
+): MaskPanelState {
+  const id = buildNextPrefixedIdentifier(
+    MASK_LAYER_ID_PREFIX,
+    panel.layers.map((layer) => layer.id),
+  );
+  return appendMaskLayerSelectingIt(panel, { id, ...content });
+}
+
+function appendMaskLayerSelectingIt(
+  panel: MaskPanelState,
+  added: MaskLayer,
+): MaskPanelState {
   return { layers: [...panel.layers, added], selectedLayerId: added.id };
 }
 

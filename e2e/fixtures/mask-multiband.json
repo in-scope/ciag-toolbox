@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "name": "Parchment mask",
+  "width": 4,
+  "height": 4,
+  "categories": [
+    {
+      "index": 1,
+      "name": "Parchment",
+      "color": "#ef4444"
+    },
+    {
+      "index": 2,
+      "name": "Substrate",
+      "color": "#3b82f6"
+    }
+  ],
+  "opacity": 60
+}

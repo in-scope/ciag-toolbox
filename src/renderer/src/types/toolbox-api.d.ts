@@ -102,6 +102,16 @@ interface ToolboxPng16DecodeAbortRequest {
   token: string;
 }
 
+// CT-303: the mask import dialog reply is metadata plus the small JSON
+// sidecar (mirrors MaskImportDialogResult in src/preload/index.ts).
+type ToolboxMaskImportDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      file: ToolboxOpenImagesDialogFileMetadataEntry;
+      sidecarText: string | null;
+    };
+
 interface ToolboxSaveImageFileFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -417,6 +427,7 @@ interface ToolboxApi {
     request: ToolboxSaveImageFinishRequest,
   ) => Promise<ToolboxSaveImageFinishResult>;
   releaseSaveImage: (request: ToolboxSaveImageReleaseRequest) => Promise<void>;
+  importMaskDialog: () => Promise<ToolboxMaskImportDialogResult>;
   openProjectBundleDialog: () => Promise<ToolboxOpenBundleDialogResult>;
   resolveProjectBundleAsset: (
     request: ToolboxResolveBundleAssetRequest,

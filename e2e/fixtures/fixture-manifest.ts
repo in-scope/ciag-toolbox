@@ -52,6 +52,25 @@ export interface NoisyGrayFixture extends SingleFileFixture {
   readonly spikes: ReadonlyArray<NoisyGraySpike>;
 }
 
+// CT-303: a mask fixture is an 8-bit grayscale PNG of CATEGORY INDEXES (0 =
+// unlabeled) plus, when it has one, the JSON sidecar naming its categories.
+export interface MaskFixtureCategory {
+  readonly index: number;
+  readonly name: string;
+  readonly color: string;
+}
+
+export interface MaskFixture {
+  readonly fileName: string;
+  readonly sidecarFileName?: string;
+  readonly width: number;
+  readonly height: number;
+  readonly name?: string;
+  readonly opacity?: number;
+  readonly categories?: ReadonlyArray<MaskFixtureCategory>;
+  readonly values: ReadonlyArray<number>;
+}
+
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
 // CT-272: written by generate-png16-fixture.mjs (sharp/libvips, an external
@@ -82,6 +101,8 @@ export const paletteColorTiff = manifestJson.paletteColorTiff as SingleFileFixtu
 export const untaggedRgbTiff = manifestJson.untaggedRgbTiff as SingleFileFixture;
 export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
+export const maskMultibandPng = manifestJson.maskMultibandPng as MaskFixture;
+export const maskEightBySquarePng = manifestJson.maskEightBySquarePng as MaskFixture;
 
 export function fixturePath(fileName: string): string {
   return join(FIXTURES_DIRECTORY, fileName);

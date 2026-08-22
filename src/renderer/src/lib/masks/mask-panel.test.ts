@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addImportedMaskLayerToPanel,
   addNewMaskLayerToPanel,
   deleteMaskLayerFromPanel,
   EMPTY_MASK_PANEL_STATE,
@@ -11,7 +12,7 @@ import {
   selectMaskLayerInPanel,
   type MaskPanelState,
 } from "./mask-panel";
-import { setMaskLayerOpacityPercent } from "./mask-layer";
+import { setMaskLayerOpacityPercent, type MaskLayerContent } from "./mask-layer";
 
 function buildPanelWithLayers(count: number): MaskPanelState {
   let panel = EMPTY_MASK_PANEL_STATE;
@@ -74,5 +75,20 @@ describe("mask panel layers", () => {
     const afterDelete = deleteMaskLayerFromPanel(buildPanelWithLayers(2), "mask-1");
     const readded = addNewMaskLayerToPanel(afterDelete, 4, 3);
     expect(readded.layers.map((layer) => layer.id)).toEqual(["mask-2", "mask-3"]);
+  });
+
+  it("adds an imported layer with its own name, categories, and values, and selects it", () => {
+    const imported: MaskLayerContent = {
+      name: "Parchment mask",
+      width: 4,
+      height: 3,
+      values: Uint8Array.from(new Array(12).fill(1)),
+      categories: [{ id: "category-1", name: "Parchment", color: "#111111" }],
+      opacityPercent: 60,
+    };
+    const panel = addImportedMaskLayerToPanel(buildPanelWithLayers(2), imported);
+    expect(panel.layers.map((layer) => layer.id)).toEqual(["mask-1", "mask-2", "mask-3"]);
+    expect(panel.selectedLayerId).toBe("mask-3");
+    expect(panel.layers[2]).toEqual({ id: "mask-3", ...imported });
   });
 });

@@ -17,6 +17,7 @@ import {
   buildMemoryBudgetPreloadArgumentOrNull,
   E2E_MEMORY_BUDGET_ENVIRONMENT_VARIABLE,
 } from "../shared/e2e-memory-budget-argument";
+import { registerMaskImportDialogIpcHandler } from "./mask-import-dialog";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
@@ -201,6 +202,7 @@ app.whenReady().then(() => {
   registerChunkedOpenedImageReadIpcHandlers();
   registerChunkedPng16DecodeIpcHandlers();
   registerSaveImageDialogIpcHandlers();
+  registerMaskImportDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandlers();
   registerConfirmCloseIpcHandler();

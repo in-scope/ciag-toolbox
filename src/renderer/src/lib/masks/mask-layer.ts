@@ -26,6 +26,10 @@ export interface MaskLayer {
   readonly opacityPercent: number;
 }
 
+// A layer's data without the panel-assigned id: what an import produces and
+// what the panel turns into a layer.
+export type MaskLayerContent = Omit<MaskLayer, "id">;
+
 export const MAX_MASK_CATEGORY_COUNT = 5;
 export const MIN_MASK_CATEGORY_COUNT = 1;
 export const UNLABELED_MASK_VALUE = 0;
@@ -64,11 +68,21 @@ export function createMaskLayer(
 }
 
 function buildDefaultMaskCategoryAtIndex(name: string, index: number): MaskCategory {
-  return {
-    id: `${MASK_CATEGORY_ID_PREFIX}-${index + 1}`,
-    name,
-    color: pickDefaultMaskCategoryColor(index),
-  };
+  return buildMaskCategoryAtIndex(index, name, pickDefaultMaskCategoryColor(index));
+}
+
+// The category at a given 0-based position, named and coloured by the caller
+// (an imported mask names its own; a new layer takes the defaults).
+export function buildMaskCategoryAtIndex(
+  index: number,
+  name: string,
+  color: string,
+): MaskCategory {
+  return { id: `${MASK_CATEGORY_ID_PREFIX}-${index + 1}`, name, color };
+}
+
+export function pickDefaultMaskCategoryName(index: number): string {
+  return DEFAULT_MASK_CATEGORY_NAMES[index] ?? `Category ${index + 1}`;
 }
 
 export function pickDefaultMaskCategoryColor(index: number): string {
@@ -96,7 +110,7 @@ function buildNextCategoryForLayer(layer: MaskLayer): MaskCategory {
       MASK_CATEGORY_ID_PREFIX,
       layer.categories.map((category) => category.id),
     ),
-    name: `Category ${index + 1}`,
+    name: pickDefaultMaskCategoryName(index),
     color: pickDefaultMaskCategoryColor(index),
   };
 }

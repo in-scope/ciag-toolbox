@@ -485,5 +485,12 @@ export {
   openMasksOptions,
   renameMaskCategory,
 } from "./masks-panel";
+export {
+  exportMaskButton,
+  exportSelectedMaskToPath,
+  importMaskButton,
+  importMaskFromPath,
+  maskToastContaining,
+} from "./mask-file-transfer";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";

@@ -1,3 +1,5 @@
+import { sanitizeExportBaseName } from "@/lib/image/export-base-name";
+
 // CT-273: file naming for the PNG stack folder export. Band files are named
 // <sourceBaseName>_band_001.png, zero-padded to the band-count width with a
 // three-digit floor so a typical stack reads uniformly (band 7 of 49 ->
@@ -5,16 +7,8 @@
 
 const MINIMUM_BAND_NUMBER_PAD_WIDTH = 3;
 
-// eslint-disable-next-line no-control-regex -- control characters are exactly what a file name must not contain
-const CHARACTERS_INVALID_IN_FILE_NAMES = /[\\/:*?"<>|\u0000-\u001f]/g;
-
 export function sanitizePngStackBaseName(originalFileName: string): string {
-  const stem = stripExtensionFromFileName(originalFileName);
-  const cleaned = stem
-    .replace(CHARACTERS_INVALID_IN_FILE_NAMES, "-")
-    .replace(/[. ]+$/, "")
-    .trim();
-  return cleaned.length > 0 ? cleaned : "stack";
+  return sanitizeExportBaseName(stripExtensionFromFileName(originalFileName), "stack");
 }
 
 export function buildPngStackBandFileName(

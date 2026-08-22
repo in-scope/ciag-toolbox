@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 
+import { MaskFileTransferButtons } from "@/components/mask-file-transfer-buttons";
 import { MaskLayerEditor } from "@/components/mask-layer-editor";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -17,6 +18,7 @@ import {
 // CT-302: the Masks tool's aside. It lists the ACTIVE panel's mask layers with
 // New / Rename / Delete, keeps exactly one of them selected (only the selected
 // layer renders as an overlay), and edits that layer's categories and opacity.
+// CT-303 added the Import/Export row (components/mask-file-transfer-buttons.tsx).
 
 export interface MasksOptionsTarget {
   readonly viewportNumber: number;
@@ -96,6 +98,12 @@ function MasksOptionsBody(props: MasksOptionsBodyProps): JSX.Element {
     <>
       <MaskLayerList target={props.target} onChangeMasks={props.onChangeMasks} />
       <NewMaskLayerButton target={props.target} onChangeMasks={props.onChangeMasks} />
+      <MaskFileTransferButtons
+        width={props.target.width}
+        height={props.target.height}
+        masks={props.target.masks}
+        onChangeMasks={props.onChangeMasks}
+      />
       {selected ? (
         <MaskLayerEditor
           layer={selected}

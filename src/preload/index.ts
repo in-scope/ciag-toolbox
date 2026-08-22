@@ -105,6 +105,16 @@ export interface OpenedImagesFileEntry {
   mtimeMs: number;
 }
 
+// CT-303: the mask import dialog reply is metadata plus the small JSON
+// sidecar; the PNG bytes stream through the chunked opened-image read.
+export type MaskImportDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      file: OpenImagesDialogFileMetadataEntry;
+      sidecarText: string | null;
+    };
+
 export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
@@ -142,6 +152,7 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
+const MASK_IMPORT_DIALOG_CHANNEL = "mask:import-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const RESOLVE_BUNDLE_ASSET_CHANNEL = "project:resolve-bundle-asset";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
@@ -296,6 +307,10 @@ function releaseSaveImageInMainProcess(
     SAVE_IMAGE_RELEASE_CHANNEL,
     request,
   ) as Promise<void>;
+}
+
+function showMaskImportDialogThroughMainProcess(): Promise<MaskImportDialogResult> {
+  return ipcRenderer.invoke(MASK_IMPORT_DIALOG_CHANNEL) as Promise<MaskImportDialogResult>;
 }
 
 function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
@@ -551,6 +566,7 @@ const apiBridge = {
   sendSaveImageChunk: sendSaveImageChunkToMainProcess,
   finishSaveImage: finishSaveImageInMainProcess,
   releaseSaveImage: releaseSaveImageInMainProcess,
+  importMaskDialog: showMaskImportDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   resolveProjectBundleAsset: resolveBundleAssetThroughMainProcess,
   beginSaveProjectBundle: beginSaveBundleThroughMainProcess,
