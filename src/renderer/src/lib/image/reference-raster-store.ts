@@ -46,6 +46,13 @@ export function readRememberedReferenceRasterOrNull(token: string): RasterImage 
   return referenceRastersByToken.get(token) ?? null;
 }
 
+// CT-290: the buffer-release flush must treat every remembered raster (panel
+// entries AND panel-independent file-path entries) as live so a replaced or
+// closed panel that shares bands with one never gets those buffers detached.
+export function listRememberedReferenceRasters(): RasterImage[] {
+  return [...referenceRastersByToken.values()];
+}
+
 export function forgetAllReferenceRasters(): void {
   referenceRastersByToken.clear();
 }

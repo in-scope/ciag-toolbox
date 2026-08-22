@@ -14,6 +14,7 @@ import {
   planPngStackExportUpload,
   type PngStackFileUploadPlan,
 } from "@/lib/image/plan-png-stack-export";
+import { holdSourceBuffersWhileInUse } from "@/lib/image/raster-buffer-release";
 import {
   findSaveImageFormatOptionOrThrow,
   isPngStackSaveFormat,
@@ -59,10 +60,25 @@ export interface SaveImageFlowApi {
   releaseSaveImage(request: ToolboxSaveImageReleaseRequest): Promise<void>;
 }
 
+// CT-290: the exported source is held for the flow's duration so an apply that
+// replaces the panel mid-export cannot detach the buffers being encoded.
 export async function runSaveImageFlowThroughMainProcess(
   input: SaveImageFlowInput,
   api: SaveImageFlowApi = window.toolboxApi,
   chunkBytes: number = SAVE_IMAGE_CHUNK_BYTES,
+): Promise<SaveImageFlowResult> {
+  const releaseSourceHold = holdSourceBuffersWhileInUse(input.source);
+  try {
+    return await runSaveImageFlowWhileSourceIsHeld(input, api, chunkBytes);
+  } finally {
+    releaseSourceHold();
+  }
+}
+
+async function runSaveImageFlowWhileSourceIsHeld(
+  input: SaveImageFlowInput,
+  api: SaveImageFlowApi,
+  chunkBytes: number,
 ): Promise<SaveImageFlowResult> {
   if (isPngStackSaveFormat(input.formatId)) {
     return runPngStackFolderSaveFlow(input, api, chunkBytes);

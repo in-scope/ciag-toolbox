@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Dispatch,
   type MouseEvent,
   type MutableRefObject,
@@ -60,8 +61,11 @@ import {
   createInFlightApplyRunStore,
   type InFlightApplyRunStore,
 } from "@/lib/actions/in-flight-apply-run-store";
-import { formatCloseRefusedWhileOperationReadsPanel } from "@/lib/actions/in-flight-apply-runs";
 import { BAND_SELECTION_ACTION } from "@/lib/actions/band-selection-action";
+import {
+  buildViewportClosingApi,
+  type ViewportClosingApiBindings,
+} from "@/lib/actions/close-viewport-flow";
 import {
   BAND_SUBSET_ACTION,
   GEOMETRIC_TRANSFORM_PARAMETER_ID,
@@ -120,13 +124,22 @@ import {
   type RasterImage,
 } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
-import { replaceRememberedPanelReferenceRasters } from "@/lib/image/reference-raster-store";
+import {
+  listRememberedReferenceRasters,
+  replaceRememberedPanelReferenceRasters,
+} from "@/lib/image/reference-raster-store";
+import {
+  readRasterBufferReleaseWorkVersion,
+  releaseQueuedRasterBuffersSkippingShared,
+  subscribeToRasterBufferReleaseWork,
+} from "@/lib/image/raster-buffer-release";
+import { listRememberedBandSelectionResultBuffers } from "@/lib/image/band-ops/band-selection-result-store";
 import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
+  type LoadedReferenceCandidate,
   type ReferencePickerOption,
 } from "@/lib/image/reference-token";
-import { compactIndexedMapAfterRemovingIndex } from "@/lib/grid/compact-indexed-map";
 import { isSelectableGridLayout } from "@shared/grid-layouts";
 import {
   getGridLayoutCellCount,
@@ -134,7 +147,6 @@ import {
   getViewportNumberFromIndex,
   type GridLayout,
 } from "@/lib/grid/grid-layout";
-import { planCloseViewport } from "@/lib/grid/plan-close-viewport";
 import { planOpenImagePlacement } from "@/lib/grid/plan-open-image";
 import {
   planOpenImagesPlacement,
@@ -1627,22 +1639,6 @@ function describeUnknownError(error: unknown): string {
   return String(error);
 }
 
-interface ViewportClosingApiBindings {
-  gridLayout: GridLayout;
-  selectedIndices: ReadonlySet<number>;
-  imagesByIndex: ImagesByIndexMap;
-  setGridLayout: SetGridLayout;
-  setImagesByIndex: SetImagesByIndex;
-  pruneRenderingStateToCellCount: (cellCount: number) => void;
-  compactRenderingStateAfterRemovingIndex: (removedIndex: number) => void;
-  pruneSelectionToCellCount: (cellCount: number) => void;
-  compactSelectionAfterRemovingIndex: (removedIndex: number) => void;
-  pruneLinkGroupsToCellCount: (cellCount: number) => void;
-  compactLinkGroupsAfterRemovingIndex: (removedIndex: number) => void;
-  replaceSelection: (indices: ReadonlySet<number>) => void;
-  inFlightApplyRuns: InFlightApplyRunStore;
-}
-
 function useViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
   const {
     gridLayout,
@@ -1774,115 +1770,6 @@ async function replaceViewportSourceWithReimportedFile(
   } finally {
     handle.clear();
   }
-}
-
-function buildViewportClosingApi(bindings: ViewportClosingApiBindings): ViewportClosingApi {
-  return {
-    canClose: (index) =>
-      bindings.imagesByIndex.has(index) ||
-      bindings.inFlightApplyRuns.hasApplyRunReservingTargetIndex(index),
-    closeViewport: (index) => closeViewportRespectingInFlightApplies(index, bindings),
-  };
-}
-
-// CT-269: closing interacts with in-flight applies in two ways. A panel some
-// running operation READS is refused (closing it would pull the cube out from
-// under the transform). A panel reserved as a running operation's TARGET
-// cancels that operation instead: the run's stop controller aborts it at the
-// next chunk boundary and the cancellation mark discards a result that
-// completes anyway, so the closed panel can never reappear.
-function closeViewportRespectingInFlightApplies(
-  index: number,
-  bindings: ViewportClosingApiBindings,
-): void {
-  if (reportCloseRefusedWhileOperationReadsPanel(index, bindings)) return;
-  bindings.inFlightApplyRuns.cancelAndStopApplyRunsTargetingIndex(index);
-  closeViewportAndCompactRemainingIndices(index, bindings);
-}
-
-function reportCloseRefusedWhileOperationReadsPanel(
-  index: number,
-  bindings: ViewportClosingApiBindings,
-): boolean {
-  const operationLabel = bindings.inFlightApplyRuns.findRunningOperationLabelReadingSourceIndex(index);
-  if (operationLabel === null) return false;
-  notifyError(
-    formatCloseRefusedWhileOperationReadsPanel(getViewportNumberFromIndex(index), operationLabel),
-  );
-  return true;
-}
-
-function closeViewportAndCompactRemainingIndices(
-  index: number,
-  bindings: ViewportClosingApiBindings,
-): void {
-  const content = bindings.imagesByIndex.get(index);
-  if (!content) return;
-  const closeContext = captureCloseContextBeforeMutation(index, bindings);
-  bindings.setImagesByIndex((previous) => compactIndexedMapAfterRemovingIndex(previous, index));
-  bindings.compactRenderingStateAfterRemovingIndex(index);
-  bindings.compactSelectionAfterRemovingIndex(index);
-  bindings.compactLinkGroupsAfterRemovingIndex(index);
-  bindings.inFlightApplyRuns.shiftApplyRunIndexesAfterViewportRemoved(index);
-  collapseGridLayoutAndRestoreSelectionAfterClose(closeContext, bindings);
-  toast.info(formatClosedSingleViewportMessage(index, content.fileName));
-}
-
-interface CloseContextBeforeMutation {
-  readonly currentLayout: GridLayout;
-  readonly closedIndex: number;
-  readonly closedIndexWasOnlySelection: boolean;
-  readonly populatedCellCountBeforeClose: number;
-}
-
-function captureCloseContextBeforeMutation(
-  closedIndex: number,
-  bindings: ViewportClosingApiBindings,
-): CloseContextBeforeMutation {
-  return {
-    currentLayout: bindings.gridLayout,
-    closedIndex,
-    closedIndexWasOnlySelection: isClosedIndexTheOnlySelectedViewport(
-      bindings.selectedIndices,
-      closedIndex,
-    ),
-    // CT-269: empty cells reserved by in-flight applies count as populated so
-    // the post-close layout collapse can never prune a reserved result panel.
-    populatedCellCountBeforeClose:
-      bindings.imagesByIndex.size + countReservedEmptyTargetCells(bindings),
-  };
-}
-
-function countReservedEmptyTargetCells(bindings: ViewportClosingApiBindings): number {
-  const reservedTargets = bindings.inFlightApplyRuns.listReservedResultTargetIndexes();
-  return [...reservedTargets].filter((index) => !bindings.imagesByIndex.has(index)).length;
-}
-
-function isClosedIndexTheOnlySelectedViewport(
-  selectedIndices: ReadonlySet<number>,
-  closedIndex: number,
-): boolean {
-  return selectedIndices.size === 1 && selectedIndices.has(closedIndex);
-}
-
-function collapseGridLayoutAndRestoreSelectionAfterClose(
-  context: CloseContextBeforeMutation,
-  bindings: ViewportClosingApiBindings,
-): void {
-  const plan = planCloseViewport(context);
-  if (plan.collapsedLayout === null) return;
-  const newCellCount = getGridLayoutCellCount(plan.collapsedLayout);
-  bindings.setGridLayout(plan.collapsedLayout);
-  bindings.pruneRenderingStateToCellCount(newCellCount);
-  bindings.pruneSelectionToCellCount(newCellCount);
-  bindings.pruneLinkGroupsToCellCount(newCellCount);
-  if (plan.fallbackSelectionIndex !== null) {
-    bindings.replaceSelection(new Set([plan.fallbackSelectionIndex]));
-  }
-}
-
-function formatClosedSingleViewportMessage(index: number, fileName: string): string {
-  return `Closed panel ${getViewportNumberFromIndex(index)} (${fileName})`;
 }
 
 interface ToolPanelRegionRequestHandlerInputs {
@@ -2080,12 +1967,31 @@ function useLoadedReferenceCandidates(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],
   );
+  const releaseWorkVersion = useSyncExternalStore(
+    subscribeToRasterBufferReleaseWork,
+    readRasterBufferReleaseWorkVersion,
+  );
   // CT-239: SYNC the store (evicting closed panels' entries) instead of
   // accumulating - the remember-only loop pinned every closed panel's cube.
+  // CT-290: the flush runs AFTER the sync in the same post-commit effect, so a
+  // replaced/closed raster is only detached once no component renders it and
+  // the store no longer remembers it; queue/hold changes re-run the effect.
   useEffect(() => {
-    replaceRememberedPanelReferenceRasters(candidates);
-  }, [candidates]);
+    syncReferenceStoreThenReleaseDeadRasterBuffers(candidates, imagesByIndex);
+  }, [candidates, imagesByIndex, releaseWorkVersion]);
   return candidates;
+}
+
+function syncReferenceStoreThenReleaseDeadRasterBuffers(
+  candidates: ReadonlyArray<LoadedReferenceCandidate>,
+  imagesByIndex: ImagesByIndexMap,
+): void {
+  replaceRememberedPanelReferenceRasters(candidates);
+  releaseQueuedRasterBuffersSkippingShared({
+    liveSources: [...imagesByIndex.values()].map((content) => content.source),
+    rememberedRasters: listRememberedReferenceRasters(),
+    rememberedBuffers: listRememberedBandSelectionResultBuffers(),
+  });
 }
 
 function listLoadedRasterPanelEntries(imagesByIndex: ImagesByIndexMap): LoadedPanelReferenceEntry[] {

@@ -30,3 +30,10 @@ export function readRememberedBandSelectionResultOrNull(
 export function forgetAllBandSelectionResults(): void {
   resultsByToken.clear();
 }
+
+// CT-290: an applied custom band aliases its remembered Float32Array into the
+// result panel's raster, so the buffer-release flush must treat remembered
+// results as live or a replaced result panel would detach the stored band.
+export function listRememberedBandSelectionResultBuffers(): ArrayBufferLike[] {
+  return [...resultsByToken.values()].map((result) => result.values.buffer);
+}

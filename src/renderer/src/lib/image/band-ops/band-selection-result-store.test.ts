@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   forgetAllBandSelectionResults,
+  listRememberedBandSelectionResultBuffers,
   readRememberedBandSelectionResultOrNull,
   rememberBandSelectionResult,
 } from "./band-selection-result-store";
@@ -23,5 +24,11 @@ describe("band selection result store", () => {
 
   it("returns null for an unknown token", () => {
     expect(readRememberedBandSelectionResultOrNull("band-selection-does-not-exist")).toBeNull();
+  });
+
+  it("lists each remembered result's backing buffer for the CT-290 release flush", () => {
+    const values = Float32Array.from([1, 2, 3, 4]);
+    rememberBandSelectionResult({ values, width: 2, height: 2 });
+    expect(listRememberedBandSelectionResultBuffers()).toEqual([values.buffer]);
   });
 });

@@ -9,6 +9,11 @@ import {
 } from "@/lib/image/spectrum-entry";
 import { reportCompletedUnitAndYieldSoProgressCanPaint } from "@/lib/image/unit-progress";
 import { buildErrorToastOptions } from "@/lib/notifications/toast-options";
+import {
+  queueOutgoingRasterSourceForBufferRelease,
+  releaseQueuedRasterBuffersSkippingShared,
+  resetRasterBufferReleaseStateForTests,
+} from "@/lib/image/raster-buffer-release";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import {
@@ -1180,6 +1185,127 @@ function buildCropLikeActionWithNewPanelHint(): RegisteredViewportAction {
     apply: (state: ViewportRenderingState) => state,
     transformSource: () => buildSinglePixelSource(),
   } as unknown as RegisteredViewportAction;
+}
+
+describe("deterministic buffer release on replace (CT-290)", () => {
+  beforeEach(() => {
+    resetRasterBufferReleaseStateForTests();
+    vi.mocked(toast.success).mockClear();
+  });
+
+  it("in-place apply queues the replaced raster; flush detaches unshared bands and skips carried-over ones", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    applyActionInPlaceAtSourceIndex(
+      buildActionThatCarriesBandZeroThroughByReference(sourceRaster),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    flushBufferReleasesTreatingHarnessPanelsAsLive(harness);
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(8);
+    expect(sourceRaster.bandPixels[1]!.buffer.byteLength).toBe(0);
+    expect(sourceRaster.bandPixels[2]!.buffer.byteLength).toBe(0);
+  });
+
+  it("holds the captured source while the transform runs, so a concurrent release cannot detach it", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    const transformGate = buildManuallyResolvedTransformGate();
+    applyActionInPlaceAtSourceIndex(
+      transformGate.action,
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(transformGate.transformHasStarted()).toBe(true));
+    queueOutgoingRasterSourceForBufferRelease(content.source);
+    releaseQueuedRasterBuffersSkippingShared({ liveSources: [], rememberedRasters: [] });
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(8);
+    transformGate.resolveWithFreshSinglePixelSource();
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    releaseQueuedRasterBuffersSkippingShared({ liveSources: [], rememberedRasters: [] });
+    expect(sourceRaster.bandPixels[0]!.buffer.byteLength).toBe(0);
+  });
+
+  it("duplicate path pointed back at the source panel (replace picker) queues the replaced raster", async () => {
+    const content = buildThreeBandUint16RasterCellContent();
+    const sourceRaster = readRasterFromCellContentOrThrow(content);
+    const harness = buildRasterDuplicateFlowHarness(content);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeActionThatTransforms(),
+      NO_PARAMETER_VALUES,
+      content,
+      SOURCE_INDEX,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    flushBufferReleasesTreatingHarnessPanelsAsLive(harness);
+    sourceRaster.bandPixels.forEach((band) => expect(band.buffer.byteLength).toBe(0));
+  });
+});
+
+function flushBufferReleasesTreatingHarnessPanelsAsLive(harness: RasterDuplicateFlowHarness): void {
+  const liveSources = [SOURCE_INDEX, TARGET_INDEX]
+    .map((index) => harness.readContentAtIndex(index)?.source)
+    .filter((source): source is ViewportImageSource => source !== undefined);
+  releaseQueuedRasterBuffersSkippingShared({ liveSources, rememberedRasters: [] });
+}
+
+function buildActionThatCarriesBandZeroThroughByReference(
+  sourceRaster: RasterImage,
+): RegisteredViewportAction {
+  return {
+    id: "carry-band-zero",
+    label: "Carry",
+    loadingMessage: "Carrying...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Carried",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => ({
+      kind: "raster",
+      raster: {
+        ...sourceRaster,
+        bandPixels: [sourceRaster.bandPixels[0]!, new Uint16Array(4), new Uint16Array(4)],
+      },
+    }),
+  } as unknown as RegisteredViewportAction;
+}
+
+interface ManuallyResolvedTransformGate {
+  readonly action: RegisteredViewportAction;
+  readonly transformHasStarted: () => boolean;
+  readonly resolveWithFreshSinglePixelSource: () => void;
+}
+
+function buildManuallyResolvedTransformGate(): ManuallyResolvedTransformGate {
+  let resolveTransform: (source: ViewportImageSource) => void = () => undefined;
+  let started = false;
+  const pendingSource = new Promise<ViewportImageSource>((resolve) => {
+    resolveTransform = resolve;
+  });
+  const action = {
+    id: "gated",
+    label: "Gated",
+    loadingMessage: "Running...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Gated",
+    apply: (state: ViewportRenderingState) => state,
+    transformSourceAsync: () => {
+      started = true;
+      return pendingSource;
+    },
+  } as unknown as RegisteredViewportAction;
+  return {
+    action,
+    transformHasStarted: () => started,
+    resolveWithFreshSinglePixelSource: () => resolveTransform(buildSinglePixelSource()),
+  };
 }
 
 void EMPTY_OPERATION_HISTORY;

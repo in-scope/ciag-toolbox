@@ -1,5 +1,6 @@
 import { SAVE_BUNDLE_CHUNK_BYTES } from "@shared/chunked-save-bundle-protocol";
 
+import { holdSourcesBuffersWhileInUse } from "@/lib/image/raster-buffer-release";
 import { describeElectronInvokeFailure } from "@/lib/ipc/electron-invoke-error";
 
 import { PROJECT_FILE_FORMAT_VERSION } from "./project-schema";
@@ -60,10 +61,27 @@ export interface SaveBundleFlowApi {
   releaseSaveProjectBundle(request: ToolboxSaveBundleReleaseRequest): Promise<void>;
 }
 
+// CT-290: every snapshotted source is held for the save's duration so an apply
+// that replaces a panel mid-save cannot detach the buffers being baked.
 export async function runSaveProjectBundleFlowThroughMainProcess(
   input: SaveBundleFlowInput,
   api: SaveBundleFlowApi = window.toolboxApi,
   chunkBytes: number = SAVE_BUNDLE_CHUNK_BYTES,
+): Promise<SaveBundleFlowResult> {
+  const releaseSourceHolds = holdSourcesBuffersWhileInUse(
+    input.snapshot.viewports.map((viewport) => viewport.source),
+  );
+  try {
+    return await runSaveBundleFlowWhileSourcesAreHeld(input, api, chunkBytes);
+  } finally {
+    releaseSourceHolds();
+  }
+}
+
+async function runSaveBundleFlowWhileSourcesAreHeld(
+  input: SaveBundleFlowInput,
+  api: SaveBundleFlowApi,
+  chunkBytes: number,
 ): Promise<SaveBundleFlowResult> {
   const draft = await buildDraftBundleWithIncrementalProgressReporting(
     input.snapshot,

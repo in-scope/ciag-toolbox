@@ -1,4 +1,3 @@
-import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 // CT-239: the renderer-wide raster memory budget.
@@ -66,24 +65,20 @@ function sumSourceBytesSkippingCountedBuffers(
   source: ViewportImageSource,
   countedBuffers: Set<ArrayBufferLike>,
 ): number {
-  if (source.kind === "raster") {
-    return sumRasterBytesSkippingCountedBuffers(source.raster, countedBuffers);
-  }
-  if (source.kind === "pixels") {
-    return sumBufferBytesOnce(source.pixels.buffer, countedBuffers);
-  }
-  return 0;
-}
-
-function sumRasterBytesSkippingCountedBuffers(
-  raster: RasterImage,
-  countedBuffers: Set<ArrayBufferLike>,
-): number {
   let totalBytes = 0;
-  for (const band of raster.bandPixels) {
-    totalBytes += sumBufferBytesOnce(band.buffer, countedBuffers);
+  for (const buffer of listSourceBackingBuffers(source)) {
+    totalBytes += sumBufferBytesOnce(buffer, countedBuffers);
   }
   return totalBytes;
+}
+
+// The backing buffers a source contributes to the live set. Shared with the
+// CT-290 buffer-release flush so "counts toward the budget" and "must not be
+// detached" enumerate buffers identically.
+export function listSourceBackingBuffers(source: ViewportImageSource): ArrayBufferLike[] {
+  if (source.kind === "raster") return source.raster.bandPixels.map((band) => band.buffer);
+  if (source.kind === "pixels") return [source.pixels.buffer];
+  return [];
 }
 
 function sumBufferBytesOnce(

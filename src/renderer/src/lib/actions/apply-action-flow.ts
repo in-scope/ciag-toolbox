@@ -43,6 +43,10 @@ import {
   OPERATION_MEMORY_REFUSAL_MESSAGE,
   sumLiveRasterBytesAcrossSources,
 } from "@/lib/image/raster-memory-budget";
+import {
+  holdSourceBuffersWhileInUse,
+  queueOutgoingRasterSourceForBufferRelease,
+} from "@/lib/image/raster-buffer-release";
 import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-context";
 
 export interface ApplyActionFlowBindings {
@@ -263,6 +267,11 @@ function yieldOnceSoBusyOverlayCanPaint(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// CT-290: the captured source is HELD for the transform's duration (a
+// concurrent replace of the same panel must not detach it mid-read), and the
+// replaced raster is QUEUED for deterministic buffer release once the write
+// lands; App's post-commit flush detaches whatever the result did not carry
+// over by reference.
 async function replaceSourceContentWithTransformedSource(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
@@ -273,6 +282,23 @@ async function replaceSourceContentWithTransformedSource(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (!actionTransformsSource(action)) return;
+  const releaseSourceHold = holdSourceBuffersWhileInUse(content.source);
+  try {
+    await transformAndReplaceHeldSourceContent(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
+  } finally {
+    releaseSourceHold();
+  }
+}
+
+async function transformAndReplaceHeldSourceContent(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  content: ViewportCellContent,
+  reservation: InFlightApplyRunReservation,
+  bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle,
+  abortSignal?: AbortSignal,
+): Promise<void> {
   const nextSource = await runActionSourceTransform(
     action,
     content.source,
@@ -285,6 +311,7 @@ async function replaceSourceContentWithTransformedSource(
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, writeIndex, { ...content, source: nextSource }),
   );
+  queueOutgoingRasterSourceForBufferRelease(content.source);
 }
 
 // CT-221: async transforms report per-band progress; forwarding it to the busy
@@ -517,7 +544,26 @@ export async function runDuplicateAndApplyAtTargetIndex(
   }
 }
 
+// CT-290: the captured source is held while the run reads it, so a concurrent
+// in-place apply on the same panel cannot detach its buffers mid-transform.
 async function placeDuplicateOutputAtReservedTarget(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceContent: ViewportCellContent,
+  reservation: InFlightApplyRunReservation,
+  bindings: ApplyActionFlowBindings,
+  busyHandle: BusyEntryHandle | null,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const releaseSourceHold = holdSourceBuffersWhileInUse(sourceContent.source);
+  try {
+    await placeDuplicateOutputWhileSourceIsHeld(action, parameterValues, sourceContent, reservation, bindings, busyHandle, abortSignal);
+  } finally {
+    releaseSourceHold();
+  }
+}
+
+async function placeDuplicateOutputWhileSourceIsHeld(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
@@ -622,6 +668,10 @@ async function placeTransformedDuplicateAtReservedTarget(
   );
   throwStoppedWhenApplyRunIsCancelled(reservation);
   const writeIndex = reservation.currentTargetIndex();
+  // CT-290/CT-276: the replace-target picker can point this write at an
+  // occupied panel; queue whatever raster it held. Queueing is always safe -
+  // the flush skips any buffer a live panel still references.
+  queueOutgoingRasterSourceForBufferRelease(bindings.imagesByIndex.get(writeIndex)?.source);
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, writeIndex, transformedContent),
   );
