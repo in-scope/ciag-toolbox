@@ -7,6 +7,10 @@ export interface RopCandidate {
   readonly seed: number;
   readonly values: Float32Array;
   readonly score: number | null;
+  // CT-310: set when this candidate WON a search of that many projections,
+  // which is what its History entry says instead of a seed nobody could
+  // re-roll into this band.
+  readonly searchedProjectionCount?: number | null;
 }
 
 // An unscored candidate (objective "None", or a scoring run that was stopped)

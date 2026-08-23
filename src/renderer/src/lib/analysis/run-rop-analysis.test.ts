@@ -192,7 +192,7 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
     const outcome = await scoreRopCandidateShowingPanelBusy(
       buildScoreRequest({
         objectiveKind: "custom",
-        customScript: { filePath: "C:/objective.py", fileName: "objective.py" },
+        customScript: { filePath: "C:/objective.py", fileName: "objective.py", source: "" },
       }),
       rollBindings(),
       api,
@@ -213,7 +213,7 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
     const outcome = await scoreRopCandidateShowingPanelBusy(
       buildScoreRequest({
         objectiveKind: "custom",
-        customScript: { filePath: "C:/objective.py", fileName: "objective.py" },
+        customScript: { filePath: "C:/objective.py", fileName: "objective.py", source: "" },
       }),
       rollBindings(),
       api,

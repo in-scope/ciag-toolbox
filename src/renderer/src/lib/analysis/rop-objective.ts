@@ -18,6 +18,12 @@ export type RopObjectiveKind = "none" | "npc" | "cnr" | "custom";
 export interface RopCustomObjectiveScript {
   readonly filePath: string;
   readonly fileName: string;
+  // CT-310: the script's own source, read at import. A press scores the
+  // candidate by running the FILE, but a search has to evaluate the objective
+  // per candidate INSIDE its single Python run, so the source travels as a run
+  // parameter. Keeping both on one object is what stops the two paths from
+  // scoring with different code.
+  readonly source: string;
 }
 
 export const ROP_OBJECTIVES_NEED_TWO_PAINTED_CATEGORIES =

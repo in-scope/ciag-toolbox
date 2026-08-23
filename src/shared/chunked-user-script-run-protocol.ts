@@ -19,6 +19,10 @@
 // limit) -> for cube results, N result-chunk pulls -> release.
 
 export const USER_SCRIPT_PICK_SCRIPT_CHANNEL = "user-script:pick-script";
+// CT-310: reads a PICKED single-module script's source so the renderer can
+// hand it to a built-in algorithm as a parameter (the ROP search evaluates a
+// custom objective per candidate inside its own run). Reading stays in TS.
+export const USER_SCRIPT_READ_SOURCE_CHANNEL = "user-script:read-source";
 export const USER_SCRIPT_RUN_BEGIN_CHANNEL = "user-script:run-begin";
 export const USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL = "user-script:run-cube-chunk";
 export const USER_SCRIPT_RUN_EXECUTE_CHANNEL = "user-script:run-execute";
@@ -42,6 +46,7 @@ export const USER_SCRIPT_RUN_CHUNK_BYTES = 64 * 1024 * 1024;
 export const BUILTIN_SCRIPT_NAMES = [
   "npc",
   "rop",
+  "rop_search",
   "local_pca",
   "local_mnf",
   "l2_minimization",
@@ -82,6 +87,10 @@ export interface UserScriptRunProgressEvent {
   readonly token: string;
   readonly fraction: number;
 }
+
+export type UserScriptReadSourceResult =
+  | { readonly status: "read"; readonly source: string }
+  | { readonly status: "failed"; readonly message: string };
 
 export type UserScriptPickScriptResult =
   | { readonly canceled: true }

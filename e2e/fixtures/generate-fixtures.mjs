@@ -10,7 +10,7 @@
 // than magic constants. Do NOT depend on the large captures in test-images/.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
@@ -951,6 +951,14 @@ function createDeterministicNoiseGenerator(seed) {
 const REPO_ROOT_DIRECTORY = join(FIXTURES_DIRECTORY, "..", "..");
 const BUILTIN_SCRIPTS_DIRECTORY = join(REPO_ROOT_DIRECTORY, "resources", "builtin-python");
 const ROP_REFERENCE_SEED = 20260822;
+const ROP_SEARCH_REFERENCE_PROJECTION_COUNT = 50;
+const ROP_SEARCH_OBJECTIVE_SCRIPT_FILE_NAME = "mask-contrast-objective.py";
+
+// The committed objective fixture the app imports in the CT-310 spec; the
+// reference run must score with the SAME source the app sends as a param.
+function readObjectiveScriptSource() {
+  return readFileSync(join(FIXTURES_DIRECTORY, ROP_SEARCH_OBJECTIVE_SCRIPT_FILE_NAME), "utf8");
+}
 
 const REFERENCE_RUNNER_PYTHON_SOURCE = `
 import json, sys
@@ -1050,6 +1058,34 @@ function listBuiltinScriptReferenceRequests(fixtures) {
       params: { seed: ROP_REFERENCE_SEED, count: 1 },
       request: { cube: multibandCube, params: { seed: ROP_REFERENCE_SEED, count: 1 } },
     },
+    // CT-310: the same seed searched over 50 candidates, scored by the
+    // committed custom objective. Every band of multiband-12bit.tif is the SAME
+    // ramp at a different offset, so every projection is an affine transform of
+    // that one ramp and every scale-invariant objective (CNR, NPC) scores all
+    // 50 candidates identically - the winner would be decided by float noise.
+    // mask-contrast-objective.py deliberately does NOT normalize by the spread,
+    // so the scores really differ and the pinned winner is stable.
+    ropSearch: {
+      script: "rop_search",
+      fixture: fixtures.multiBandTiff.fileName,
+      maskFixture: fixtures.maskMultibandPng.fileName,
+      objectiveScript: ROP_SEARCH_OBJECTIVE_SCRIPT_FILE_NAME,
+      params: {
+        seed: ROP_REFERENCE_SEED,
+        count: ROP_SEARCH_REFERENCE_PROJECTION_COUNT,
+        objective: "custom",
+      },
+      request: {
+        cube: multibandCube,
+        masks: multibandMasks,
+        params: {
+          seed: ROP_REFERENCE_SEED,
+          count: ROP_SEARCH_REFERENCE_PROJECTION_COUNT,
+          objective: "custom",
+          objective_source: readObjectiveScriptSource(),
+        },
+      },
+    },
     l2Minimization: {
       script: "l2_minimization",
       fixture: fixtures.multiBandTiff.fileName,
@@ -1081,7 +1117,28 @@ function computeBuiltinScriptReferenceOutputs(fixtures) {
   }
   references.ropCnr = describeRopCnrReference(references.rop, fixtures.maskMultibandPng);
   process.stdout.write(`pinned builtin reference ropCnr (computed in JS from rop)\n`);
+  references.ropSearchScore = describeRopSearchScoreReference(
+    references.ropSearch,
+    fixtures.maskMultibandPng,
+  );
+  process.stdout.write(`pinned builtin reference ropSearchScore (computed in JS from ropSearch)\n`);
   return references;
+}
+
+// CT-310: the score the app records in History for the pinned search - the
+// custom objective (mean of text pixels - mean of background pixels) evaluated
+// in JS over the float32 winning candidate.
+function describeRopSearchScoreReference(searchReference, maskFixture) {
+  const winner = Float32Array.from(searchReference.values);
+  const text = collectMaskCategoryValues(winner, maskFixture.values, 1);
+  const background = collectMaskCategoryValues(winner, maskFixture.values, 2);
+  return {
+    script: searchReference.script,
+    fixture: searchReference.fixture,
+    maskFixture: maskFixture.fileName,
+    params: searchReference.params,
+    value: meanOf(text) - meanOf(background),
+  };
 }
 
 // CT-309: the app computes the CNR objective in TS (not Python), so its
@@ -1095,7 +1152,7 @@ function describeRopCnrReference(ropReference, maskFixture) {
   const value =
     (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
   return {
-    script: "rop",
+    script: ropReference.script,
     fixture: ropReference.fixture,
     maskFixture: maskFixture.fileName,
     params: { seed: ROP_REFERENCE_SEED, textCategory: 1, backgroundCategory: 2 },

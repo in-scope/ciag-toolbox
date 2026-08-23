@@ -20,6 +20,9 @@ export interface RopKeepRequest {
   readonly height: number;
   readonly score: number | null;
   readonly objectiveLabel: string | null;
+  // CT-310: set when the candidate won a SEARCH of that many projections; the
+  // History entry then names the search instead of a seed (see rop-format.ts).
+  readonly searchedProjectionCount?: number | null;
 }
 
 export function buildRopKeepAction(request: RopKeepRequest): RegisteredViewportAction {

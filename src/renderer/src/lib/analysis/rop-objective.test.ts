@@ -94,7 +94,7 @@ describe("describeRopObjectiveForHistory", () => {
     expect(describeRopObjectiveForHistory("npc", null)).toBe("NPC");
     expect(describeRopObjectiveForHistory("cnr", null)).toBe("CNR");
     expect(
-      describeRopObjectiveForHistory("custom", { filePath: "C:/o.py", fileName: "o.py" }),
+      describeRopObjectiveForHistory("custom", { filePath: "C:/o.py", fileName: "o.py", source: "" }),
     ).toBe("o.py");
     expect(describeRopObjectiveForHistory("none", null)).toBeNull();
   });

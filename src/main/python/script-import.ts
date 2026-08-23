@@ -43,6 +43,24 @@ async function prepareSingleModuleScriptFromFile(filePath: string): Promise<Prep
   return { input: { kind: "script", scriptSource }, releaseResources: releaseNothing };
 }
 
+// CT-310: a built-in algorithm that evaluates a user script MANY times inside
+// one run (the ROP search's per-candidate objective) needs the source as a run
+// parameter rather than as the run's own input. Single-module only: a .zip tool
+// has no single source to pass, and a huge file is a picked-the-wrong-file
+// mistake rather than a script.
+export const MAX_INLINE_USER_SCRIPT_SOURCE_BYTES = 1024 * 1024;
+
+export async function readSingleModuleUserScriptSource(filePath: string): Promise<string> {
+  if (path.extname(filePath).toLowerCase() !== ".py") {
+    throw new ScriptImportError("An objective must be a single .py file.");
+  }
+  const { size } = await fs.stat(filePath);
+  if (size > MAX_INLINE_USER_SCRIPT_SOURCE_BYTES) {
+    throw new ScriptImportError("That .py file is too large to run as an objective.");
+  }
+  return fs.readFile(filePath, "utf8");
+}
+
 async function prepareMultiModulePackageFromZipArchive(
   zipPath: string,
 ): Promise<PreparedImportedScript> {

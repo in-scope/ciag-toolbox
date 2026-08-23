@@ -79,7 +79,9 @@ export interface BuiltinScriptReferenceBase {
   readonly script: string;
   readonly fixture: string;
   readonly maskFixture?: string;
-  readonly params: Readonly<Record<string, number | boolean | null>>;
+  // CT-310: the committed .py the app imports as the search objective.
+  readonly objectiveScript?: string;
+  readonly params: Readonly<Record<string, string | number | boolean | null>>;
 }
 
 export interface BuiltinScriptValueReference extends BuiltinScriptReferenceBase {
@@ -103,6 +105,12 @@ export interface BuiltinScriptReferences {
   // generator in JS over the float32 reference values with the exact locked
   // formula, since the app computes CNR in TS rather than in Python.
   readonly ropCnr: BuiltinScriptValueReference;
+  // CT-310: the best of 50 seeded candidates under the committed custom
+  // objective (mask-contrast-objective.py), and that winner's score computed in
+  // JS. The winner is NOT the first draw, so a search that ignored its
+  // objective - or never looped - cannot match it.
+  readonly ropSearch: BuiltinScriptCubeReference;
+  readonly ropSearchScore: BuiltinScriptValueReference;
   readonly l2Minimization: BuiltinScriptCubeReference;
   readonly localPca: BuiltinScriptCubeReference;
   readonly localMnf: BuiltinScriptCubeReference;

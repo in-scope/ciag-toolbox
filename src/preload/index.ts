@@ -54,6 +54,7 @@ import {
 } from "../shared/chunked-save-image-protocol";
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
+  USER_SCRIPT_READ_SOURCE_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
@@ -62,6 +63,7 @@ import {
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
   USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
   type UserScriptPickScriptResult,
+  type UserScriptReadSourceResult,
   type UserScriptRunBeginRequest,
   type UserScriptRunBeginResult,
   type UserScriptRunCancelRequest,
@@ -457,6 +459,17 @@ function pickUserScriptFileThroughMainProcess(): Promise<UserScriptPickScriptRes
   return ipcRenderer.invoke(USER_SCRIPT_PICK_SCRIPT_CHANNEL) as Promise<UserScriptPickScriptResult>;
 }
 
+// CT-310: a picked objective script's source, read in main, so the ROP search
+// can pass it as a run parameter and score every candidate with it.
+function readUserScriptSourceThroughMainProcess(
+  filePath: string,
+): Promise<UserScriptReadSourceResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_READ_SOURCE_CHANNEL,
+    filePath,
+  ) as Promise<UserScriptReadSourceResult>;
+}
+
 function beginUserScriptRunThroughMainProcess(
   request: UserScriptRunBeginRequest,
 ): Promise<UserScriptRunBeginResult> {
@@ -601,6 +614,7 @@ const apiBridge = {
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
   pickUserScriptFile: pickUserScriptFileThroughMainProcess,
+  readUserScriptSource: readUserScriptSourceThroughMainProcess,
   beginUserScriptRun: beginUserScriptRunThroughMainProcess,
   sendUserScriptRunCubeChunk: sendUserScriptRunCubeChunkToMainProcess,
   executeUserScriptRun: executeUserScriptRunInMainProcess,

@@ -232,9 +232,21 @@ class PythonWorkerRunObserver {
   private routeWorkerResponse(response: PythonWorkerResponse): void {
     if (response.type === "progress") {
       if (!this.hasSettled) this.onProgress?.(response.fraction);
+      this.restartWallClockAfterProgress();
       return;
     }
     this.settle(outcomeFromWorkerResponse(response, this.cubeSpoolPath));
+  }
+
+  // CT-310: progress is a liveness heartbeat. The wall clock exists to kill a
+  // WEDGED worker, and a script still reporting progress is not wedged - so
+  // each report buys another full budget. Without this a healthy long search
+  // (the ROP panel's default is ten thousand projections) dies at the cube
+  // run's 120-second limit; the user's Stop remains the way to end it early.
+  private restartWallClockAfterProgress(): void {
+    if (this.hasSettled) return;
+    if (this.timeoutTimer !== undefined) clearTimeout(this.timeoutTimer);
+    this.timeoutTimer = setTimeout(() => this.handleWallClockTimeout(), this.timeoutMs);
   }
 
   private collectStderrChunk(chunk: Buffer): void {

@@ -726,3 +726,164 @@ async function readFloatsFromSpool(spoolPath: string): Promise<number[]> {
   const bytes = await fs.readFile(spoolPath);
   return Array.from(new Float32Array(new Uint8Array(bytes).buffer));
 }
+
+// CT-310: the ROP optimization search. These run the PACKAGED rop_search.py
+// under the bundled sandbox, which is also what proves its sibling imports
+// (rop, npc) survive the sandbox's import allowlist.
+describe.skipIf(interpreterPath === null)("python worker CT-310 additions (bundled runtime)", () => {
+  const searchCube: CubeForUserScript = {
+    bands: [Float32Array.from([1, 2, 3, 4]), Float32Array.from([10, 20, 30, 40])],
+    height: 2,
+    width: 2,
+    wavelengths: null,
+  };
+
+  const textThenBackgroundMasks = {
+    categories: [Uint8Array.from([1, 1, 0, 0]), Uint8Array.from([0, 0, 1, 1])],
+    height: 2,
+    width: 2,
+  };
+
+  function runSearch(
+    params: Record<string, string | number>,
+    extras: Partial<PythonWorkerRunRequest> = {},
+  ): ReturnType<typeof runUserScriptInPythonSubprocess> {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    return runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: {
+        kind: "builtin",
+        directory: path.join(process.cwd(), "resources", "builtin-python"),
+        moduleName: "rop_search",
+      },
+      cube: encodeCubeAsFloat32Payload(searchCube),
+      masks: encodeMaskCategoriesAsUint8Payload(textThenBackgroundMasks),
+      params,
+      resultKind: "cube",
+      cubeResultSpoolPath: nextSpoolPathForCt307(),
+      sandbox: true,
+      timeoutMs: 120_000,
+      ...extras,
+    });
+  }
+
+  // A single-candidate search must land on exactly the candidate rop.py draws
+  // with the same seed: that shared draw is what lets the panel's presses and
+  // its search explore one sequence.
+  it("draws its candidates through rop.py, so a one-candidate search equals one press", async () => {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const searched = await runSearch({ seed: 4242, count: 1, objective: "cnr", text_mask_index: 0, background_mask_index: 1 });
+    const pressed = await runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: {
+        kind: "builtin",
+        directory: path.join(process.cwd(), "resources", "builtin-python"),
+        moduleName: "rop",
+      },
+      cube: encodeCubeAsFloat32Payload(searchCube),
+      params: { seed: 4242, count: 1 },
+      resultKind: "cube",
+      cubeResultSpoolPath: nextSpoolPathForCt307(),
+      sandbox: true,
+      timeoutMs: 120_000,
+    });
+    expect(searched.kind).toBe("completed-cube");
+    expect(pressed.kind).toBe("completed-cube");
+    if (searched.kind !== "completed-cube" || pressed.kind !== "completed-cube") return;
+    expect(searched.shape).toEqual([1, 2, 2]);
+    expect(await readFloatsFromSpool(searched.spoolPath)).toEqual(
+      await readFloatsFromSpool(pressed.spoolPath),
+    );
+  }, 240_000);
+
+  it("keeps the best-scoring candidate of a many-candidate CNR search", async () => {
+    const winner = await runSearch({
+      seed: 99,
+      count: 25,
+      objective: "cnr",
+      text_mask_index: 0,
+      background_mask_index: 1,
+    });
+    expect(winner.kind).toBe("completed-cube");
+    if (winner.kind !== "completed-cube") return;
+    const values = await readFloatsFromSpool(winner.spoolPath);
+    // Text = the top row, background = the bottom row: the winner of a CNR
+    // search must score above zero (the top row reads higher than the bottom).
+    const cnrSign = Math.sign((values[0]! + values[1]!) / 2 - (values[2]! + values[3]!) / 2);
+    expect(cnrSign).toBe(1);
+  }, 240_000);
+
+  it("scores every candidate with a custom objective script's source, in-sandbox", async () => {
+    const objectiveSource = [
+      "import numpy as np",
+      "",
+      "",
+      "def run(cube, wavelengths, params):",
+      "    return float(np.mean(cube[0]))",
+      "",
+    ].join("\n");
+    const winner = await runSearch({
+      seed: 7,
+      count: 25,
+      objective: "custom",
+      objective_source: objectiveSource,
+    });
+    expect(winner.kind).toBe("completed-cube");
+    if (winner.kind !== "completed-cube") return;
+    const values = await readFloatsFromSpool(winner.spoolPath);
+    const mean = values.reduce((total, value) => total + value, 0) / values.length;
+    expect(mean).toBeGreaterThan(0);
+  }, 240_000);
+
+  it("scores candidates with the built-in NPC objective through its sibling module", async () => {
+    const winner = await runSearch({ seed: 11, count: 5, objective: "npc", bins: 2 });
+    expect(winner.kind).toBe("completed-cube");
+    if (winner.kind !== "completed-cube") return;
+    expect(winner.shape).toEqual([1, 2, 2]);
+  }, 240_000);
+
+  // The wall clock exists to kill a WEDGED worker. A long search reports
+  // progress the whole time, and each report buys it another full budget.
+  it("keeps a progress-reporting script alive past its wall-clock budget", async () => {
+    if (interpreterPath === null) throw new Error("unreachable: suite is skipped");
+    const outcome = await runUserScriptInPythonSubprocess({
+      interpreterPath,
+      input: {
+        kind: "script",
+        scriptSource: [
+          "import time",
+          "",
+          "",
+          "def run(cube, wavelengths, params):",
+          "    report = params['report_progress']",
+          "    for step in range(12):",
+          "        time.sleep(0.25)",
+          "        report((step + 1) / 12)",
+          "    return 'survived'",
+          "",
+        ].join("\n"),
+      },
+      cube: encodeCubeAsFloat32Payload(searchCube),
+      resultKind: "value",
+      sandbox: false,
+      timeoutMs: 1_500,
+    });
+    expect(outcome).toEqual({ kind: "completed", value: "survived" });
+  }, 60_000);
+
+  it("reports determinate progress while it loops and refuses an unknown objective", async () => {
+    const fractions: number[] = [];
+    const progressed = await runSearch(
+      { seed: 5, count: 300, objective: "cnr", text_mask_index: 0, background_mask_index: 1 },
+      { onProgress: (fraction) => fractions.push(fraction) },
+    );
+    expect(progressed.kind).toBe("completed-cube");
+    expect(fractions.length).toBeGreaterThan(1);
+    expect(fractions[fractions.length - 1]).toBe(1);
+
+    const refused = await runSearch({ seed: 5, count: 2, objective: "mystery" });
+    expect(refused.kind).toBe("failed");
+    if (refused.kind !== "failed") return;
+    expect(refused.userFacingMessage).toContain("objective");
+  }, 240_000);
+});

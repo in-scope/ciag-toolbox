@@ -22,6 +22,7 @@ import {
 } from "./interpreter-resolver";
 import {
   prepareImportedUserScriptFromFilePath,
+  readSingleModuleUserScriptSource,
   type PreparedImportedScript,
 } from "./script-import";
 import {
@@ -33,6 +34,7 @@ import { describeUserScriptRunMemoryRefusalOrNull } from "./user-script-run-memo
 import { wallClockTimeoutMsForUserScriptRun } from "./user-script-timeouts";
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
+  USER_SCRIPT_READ_SOURCE_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
@@ -50,6 +52,7 @@ import {
   type UserScriptRunReleaseRequest,
   type UserScriptRunResultChunkRequest,
   type UserScriptPickScriptResult,
+  type UserScriptReadSourceResult,
   type UserScriptRunResultKind,
   type UserScriptRunSource,
 } from "../../shared/chunked-user-script-run-protocol";
@@ -81,6 +84,9 @@ export function registerRunUserScriptIpcHandler(): void {
   const sessions = createChunkedUserScriptRunSessionStore();
   ipcMain.handle(USER_SCRIPT_PICK_SCRIPT_CHANNEL, (event) =>
     handlePickUserScriptFile(findWindowForIpcEvent(event)),
+  );
+  ipcMain.handle(USER_SCRIPT_READ_SOURCE_CHANNEL, (_event, filePath: string) =>
+    handleReadUserScriptSource(filePath),
   );
   ipcMain.handle(USER_SCRIPT_RUN_BEGIN_CHANNEL, (event, request: UserScriptRunBeginRequest) =>
     handleBeginUserScriptRun(sessions, event, request),
@@ -206,6 +212,17 @@ async function prepareImportedUserScriptFromKnownPath(
     prepared: await prepareImportedUserScriptFromFilePath(scriptPath),
     sourceName: basename(scriptPath),
   };
+}
+
+// CT-310: the renderer reads a picked objective script's source so it can ride
+// a built-in run's params; a read failure is a plain message, never a throw
+// across the bridge.
+async function handleReadUserScriptSource(filePath: string): Promise<UserScriptReadSourceResult> {
+  try {
+    return { status: "read", source: await readSingleModuleUserScriptSource(filePath) };
+  } catch (error) {
+    return { status: "failed", message: describeUserScriptFailure(error) };
+  }
 }
 
 async function handlePickUserScriptFile(

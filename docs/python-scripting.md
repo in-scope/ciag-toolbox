@@ -103,6 +103,8 @@ Each limit grows with the stack: on top of its base, a run gets 60 seconds per g
 
 A run whose stack would not fit in the machine's memory is refused before any data moves.
 
+The limit measures SILENCE, not total run time. A script that takes a third `params` argument can call `params["report_progress"](fraction)` as it works, which both drives the progress bar and starts its time budget again, so a long run that keeps reporting is never stopped for taking its time. Use Stop to end one early.
+
 ## Your own Python environment (opt-in)
 
 For a tool with arbitrary third-party dependencies, point the toolbox at your own interpreter or virtual environment under View > Python Environment. This own environment is trusted and unsandboxed, so only run code you trust; the wall-clock and memory limits still apply. The toolbox never installs packages.

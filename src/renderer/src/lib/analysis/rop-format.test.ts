@@ -29,3 +29,40 @@ describe("formatRopKeptHistoryLabel", () => {
     );
   });
 });
+
+describe("formatRopKeptHistoryLabel for a search winner (CT-310)", () => {
+  it("names the number of projections searched, the objective, and the best score", () => {
+    expect(
+      formatRopKeptHistoryLabel({
+        seed: 20260822,
+        objectiveLabel: "CNR",
+        score: 10.733,
+        searchedProjectionCount: 50,
+      }),
+    ).toBe("ROP search (50 projections, CNR: 10.73)");
+  });
+
+  it("names a custom objective by its file name", () => {
+    expect(
+      formatRopKeptHistoryLabel({
+        seed: 1,
+        objectiveLabel: "objective.py",
+        score: 200.5863,
+        searchedProjectionCount: 10000,
+      }),
+    ).toBe("ROP search (10000 projections, objective.py: 200.6)");
+  });
+
+  // The seed drew the whole sequence, not the winning candidate, so it would be
+  // a lie in a search entry even when the winner ended up unscored.
+  it("never claims a seed for an unscored winner", () => {
+    expect(
+      formatRopKeptHistoryLabel({
+        seed: 9,
+        objectiveLabel: null,
+        score: null,
+        searchedProjectionCount: 50,
+      }),
+    ).toBe("ROP search (50 projections)");
+  });
+});

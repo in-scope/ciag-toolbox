@@ -88,3 +88,38 @@ export async function pressNewProjectionUntilScoreShows(
 }
 
 const ROP_RUN_TIMEOUT_MS = 60_000;
+
+// CT-310: the search section. "Search" runs every candidate inside ONE Python
+// run and delivers the best one as a new stack, so the completion signal is the
+// kept-projection toast, not a readout.
+
+export function ropProjectionCountField(page: Page): Locator {
+  return ropOptionsPanel(page).getByRole("spinbutton", { name: "Projections" });
+}
+
+export function ropSearchButton(page: Page): Locator {
+  return ropOptionsPanel(page).getByRole("button", { name: /^(Search|Searching)/ });
+}
+
+export function ropImportObjectiveScriptButton(page: Page): Locator {
+  return ropOptionsPanel(page).getByRole("button", { name: "Import script..." });
+}
+
+export async function setRopProjectionCount(page: Page, projectionCount: number): Promise<void> {
+  await runAsStoryboardStep(page, `Search ${projectionCount} projections`, async () => {
+    await ropProjectionCountField(page).fill(String(projectionCount));
+  });
+}
+
+export async function importRopObjectiveScript(page: Page, fileName: string): Promise<void> {
+  await runAsStoryboardStep(page, `Import the ${fileName} objective`, async () => {
+    await ropImportObjectiveScriptButton(page).click();
+    await expect(ropOptionsPanel(page)).toContainText(`Objective loaded: ${fileName}.`);
+  });
+}
+
+export async function startRopProjectionSearch(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Start the projection search", async () => {
+    await ropSearchButton(page).click();
+  });
+}

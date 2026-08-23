@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 
 import { PANEL_SELECT_CLASSES } from "@/components/form-control-classes";
+import { RopSearchSection } from "@/components/rop-search-section";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ROP_PANEL_ICON } from "@/lib/actions/operation-command-bindings";
@@ -27,6 +28,13 @@ import {
   readForcedRopSeedFromE2eBridgeOrNull,
 } from "@/lib/analysis/rop-run-request";
 import { listNonEmptyCategoryValuesInMaskLayer } from "@/lib/analysis/npc-qualification";
+import { DEFAULT_NPC_BIN_COUNT } from "@/lib/analysis/npc-run-request";
+import {
+  DEFAULT_ROP_SEARCH_PROJECTION_COUNT,
+  parseRopSearchProjectionCountOrNull,
+  type RopSearchRunRequest,
+} from "@/lib/analysis/rop-search-request";
+import { searchBestRopProjectionShowingPanelBusy } from "@/lib/analysis/run-rop-search";
 import {
   createRopProjectionSessionHolder,
   scoreRopCandidateShowingPanelBusy,
@@ -121,7 +129,7 @@ interface RopPanelBodyProps {
 }
 
 function RopPanelBody(props: RopPanelBodyProps): JSX.Element {
-  const controller = useRopPanelController(props.target);
+  const controller = useRopPanelController(props.target, props.onKeepCandidate);
   return (
     <>
       <RopExplanation />
@@ -129,6 +137,14 @@ function RopPanelBody(props: RopPanelBodyProps): JSX.Element {
       <RopNewProjectionButton controller={controller} />
       <RopCandidateReadout controller={controller} onKeepCandidate={props.onKeepCandidate} />
       <RopBestCandidateReadout controller={controller} onKeepCandidate={props.onKeepCandidate} />
+      <RopSearchSection
+        projectionCountText={controller.projectionCountText}
+        onChangeProjectionCountText={controller.changeProjectionCountText}
+        isObjectiveChosen={controller.isObjectiveChosen}
+        canSearchNow={controller.canSearchNow}
+        isSearching={controller.isSearching}
+        onSearch={() => void controller.runProjectionSearch()}
+      />
     </>
   );
 }
@@ -363,6 +379,8 @@ interface RopPanelState {
   readonly current: RopCandidate | null;
   readonly best: RopCandidate | null;
   readonly isRolling: boolean;
+  readonly isSearching: boolean;
+  readonly projectionCountText: string;
   readonly objectiveKind: RopObjectiveKind;
   readonly chosenCnrText: number | null;
   readonly chosenCnrBackground: number | null;
@@ -373,6 +391,8 @@ const INITIAL_ROP_PANEL_STATE: RopPanelState = {
   current: null,
   best: null,
   isRolling: false,
+  isSearching: false,
+  projectionCountText: String(DEFAULT_ROP_SEARCH_PROJECTION_COUNT),
   objectiveKind: "none",
   chosenCnrText: null,
   chosenCnrBackground: null,
@@ -383,6 +403,12 @@ interface RopPanelController {
   readonly current: RopCandidate | null;
   readonly best: RopCandidate | null;
   readonly isRolling: boolean;
+  readonly isSearching: boolean;
+  readonly projectionCountText: string;
+  readonly isObjectiveChosen: boolean;
+  readonly canSearchNow: boolean;
+  readonly changeProjectionCountText: (text: string) => void;
+  readonly runProjectionSearch: () => Promise<void>;
   readonly objectiveKind: RopObjectiveKind;
   readonly qualifyingLayer: MaskLayer | null;
   readonly maskObjectivesAvailable: boolean;
@@ -399,7 +425,10 @@ interface RopPanelController {
   readonly buildKeepRequestOrNull: (candidate: RopCandidate | null) => RopKeepRequest | null;
 }
 
-function useRopPanelController(target: RopPanelTarget | null): RopPanelController {
+function useRopPanelController(
+  target: RopPanelTarget | null,
+  onKeepCandidate: (request: RopKeepRequest) => void,
+): RopPanelController {
   const [state, setState] = useState<RopPanelState>(INITIAL_ROP_PANEL_STATE);
   const busyRegistrar = useBusyEntryRegistrar();
   const sessionRef = useRopSessionHolderResetOnRasterChange(target, setState);
@@ -408,7 +437,11 @@ function useRopPanelController(target: RopPanelTarget | null): RopPanelControlle
   return {
     ...derived,
     ...buildRopObjectiveChoiceHandlers(setState),
+    changeProjectionCountText: (text) =>
+      setState((previous) => ({ ...previous, projectionCountText: text })),
     rollNewProjection: () => rollNewRopProjection(target, derived, sessionRef, busyRegistrar, setState),
+    runProjectionSearch: () =>
+      runRopProjectionSearch({ target, derived, sessionRef, busyRegistrar, setState, onKeepCandidate }),
     buildKeepRequestOrNull: (candidate) => buildRopKeepRequestOrNull(candidate, target, derived),
   };
 }
@@ -478,6 +511,10 @@ interface RopControllerReadouts {
   readonly current: RopCandidate | null;
   readonly best: RopCandidate | null;
   readonly isRolling: boolean;
+  readonly isSearching: boolean;
+  readonly projectionCountText: string;
+  readonly isObjectiveChosen: boolean;
+  readonly canSearchNow: boolean;
   readonly objectiveKind: RopObjectiveKind;
   readonly qualifyingLayer: MaskLayer | null;
   readonly maskObjectivesAvailable: boolean;
@@ -495,16 +532,21 @@ function deriveRopControllerReadouts(
   const qualifyingLayer = target ? findQualifyingRopMaskLayerOrNull(target.masks) : null;
   const objectiveKind = clampObjectiveKindToAvailability(state.objectiveKind, qualifyingLayer);
   const cnrChoice = resolveCnrCategoryChoice(state, qualifyingLayer);
+  const canRollNow = canRollNewProjectionNow(state, target, objectiveKind, cnrChoice);
   return {
     current: state.current,
     best: state.best,
     isRolling: state.isRolling,
+    isSearching: state.isSearching,
+    projectionCountText: state.projectionCountText,
     objectiveKind,
     qualifyingLayer,
     maskObjectivesAvailable: qualifyingLayer !== null,
     ...cnrChoice,
     customScript: state.customScript,
-    canRollNow: canRollNewProjectionNow(state, target, objectiveKind, cnrChoice),
+    canRollNow,
+    isObjectiveChosen: objectiveKind !== "none",
+    canSearchNow: canRollNow && objectiveKind !== "none" && hasUsableProjectionCount(state),
     isObjectiveAvailable: (kind) =>
       target !== null && isRopObjectiveKindAvailable(kind, target.masks),
   };
@@ -554,10 +596,14 @@ function canRollNewProjectionNow(
   objectiveKind: RopObjectiveKind,
   cnrChoice: CnrCategoryChoice,
 ): boolean {
-  if (target === null || state.isRolling) return false;
+  if (target === null || state.isRolling || state.isSearching) return false;
   if (objectiveKind === "custom" && state.customScript === null) return false;
   if (objectiveKind === "cnr") return canScoreCnrWithChoice(cnrChoice);
   return true;
+}
+
+function hasUsableProjectionCount(state: RopPanelState): boolean {
+  return parseRopSearchProjectionCountOrNull(state.projectionCountText) !== null;
 }
 
 function canScoreCnrWithChoice(choice: CnrCategoryChoice): boolean {
@@ -594,19 +640,32 @@ function resetScoresForNewObjective(
   };
 }
 
+// CT-310: the source is read at import, not at run time, because the search
+// sends it as a run parameter and scores every candidate with it. A file whose
+// source cannot be read (a .zip tool) is refused here rather than half-set: a
+// press and a search must always score with the same objective code.
 async function importRopObjectiveScript(setState: RopPanelStateWriter): Promise<void> {
   try {
     const picked = await window.toolboxApi.pickUserScriptFile();
     if (picked.canceled) return;
-    setState((previous) =>
-      resetScoresForNewObjective(
-        { ...previous, customScript: { filePath: picked.filePath, fileName: picked.fileName } },
-        previous.objectiveKind,
-      ),
-    );
+    const read = await window.toolboxApi.readUserScriptSource(picked.filePath);
+    if (read.status !== "read") {
+      notifyError(read.message);
+      return;
+    }
+    setState((previous) => rememberImportedObjectiveScript(previous, picked, read.source));
   } catch (error) {
     notifyError(error instanceof Error ? error.message : String(error));
   }
+}
+
+function rememberImportedObjectiveScript(
+  previous: RopPanelState,
+  picked: { readonly filePath: string; readonly fileName: string },
+  source: string,
+): RopPanelState {
+  const customScript = { filePath: picked.filePath, fileName: picked.fileName, source };
+  return resetScoresForNewObjective({ ...previous, customScript }, previous.objectiveKind);
 }
 
 // --- The press ---------------------------------------------------------------
@@ -730,9 +789,99 @@ function buildRopKeepRequestOrNull(
     width: target.raster.width,
     height: target.raster.height,
     score: candidate.score,
+    searchedProjectionCount: candidate.searchedProjectionCount ?? null,
     objectiveLabel:
       candidate.score === null
         ? null
         : describeRopObjectiveForHistory(derived.objectiveKind, derived.customScript),
   };
+}
+
+// --- The search ---------------------------------------------------------------
+
+interface RopSearchRun {
+  readonly target: RopPanelTarget | null;
+  readonly derived: RopControllerReadouts;
+  readonly sessionRef: React.MutableRefObject<RopSessionSlot | null>;
+  readonly busyRegistrar: BusyEntryRegistrar;
+  readonly setState: RopPanelStateWriter;
+  readonly onKeepCandidate: (request: RopKeepRequest) => void;
+}
+
+async function runRopProjectionSearch(run: RopSearchRun): Promise<void> {
+  const request = buildRopSearchRunRequestOrNull(run.target, run.derived);
+  if (run.target === null || request === null || !run.derived.canSearchNow) return;
+  run.setState((previous) => ({ ...previous, isSearching: true }));
+  // The press session's retained spool holds a whole copy of the cube and a
+  // search is long: dropping it keeps one cube on disk instead of two, at the
+  // cost of re-uploading on the next press.
+  releaseRopSessionSlot(run.sessionRef);
+  try {
+    await searchAndDeliverBestProjection(run, run.target, request);
+  } finally {
+    run.setState((previous) => ({ ...previous, isSearching: false }));
+  }
+}
+
+function buildRopSearchRunRequestOrNull(
+  target: RopPanelTarget | null,
+  derived: RopControllerReadouts,
+): RopSearchRunRequest | null {
+  const projectionCount = parseRopSearchProjectionCountOrNull(derived.projectionCountText);
+  if (target === null || projectionCount === null || derived.objectiveKind === "none") return null;
+  return {
+    seed: drawRopSeed(readForcedRopSeedFromE2eBridgeOrNull()),
+    projectionCount,
+    objectiveKind: derived.objectiveKind,
+    maskLayer: derived.qualifyingLayer,
+    npcBinCount: DEFAULT_NPC_BIN_COUNT,
+    cnrTextCategoryValue: derived.cnrTextCategoryValue,
+    cnrBackgroundCategoryValue: derived.cnrBackgroundCategoryValue,
+    customObjectiveSource: derived.customScript?.source ?? null,
+  };
+}
+
+async function searchAndDeliverBestProjection(
+  run: RopSearchRun,
+  target: RopPanelTarget,
+  request: RopSearchRunRequest,
+): Promise<void> {
+  const outcome = await searchBestRopProjectionShowingPanelBusy(request, target.raster, {
+    busyRegistrar: run.busyRegistrar,
+    viewportIndex: target.viewportIndex,
+    stopController: new AbortController(),
+  });
+  if (outcome.status !== "searched") {
+    reportRollProblem(outcome);
+    return;
+  }
+  await scoreAndDeliverSearchWinner(run, target, request, outcome.values);
+}
+
+// The winner is scored the same way a press is, so the number History records
+// is measured on the stack that was actually delivered.
+async function scoreAndDeliverSearchWinner(
+  run: RopSearchRun,
+  target: RopPanelTarget,
+  request: RopSearchRunRequest,
+  values: Float32Array,
+): Promise<void> {
+  const score = await scoreRolledCandidateOrNull(values, target, run.derived, run.busyRegistrar);
+  const winner: RopCandidate = {
+    seed: request.seed,
+    values,
+    score,
+    searchedProjectionCount: request.projectionCount,
+  };
+  commitSearchWinner(winner, run.setState);
+  const keepRequest = buildRopKeepRequestOrNull(winner, target, run.derived);
+  if (keepRequest !== null) run.onKeepCandidate(keepRequest);
+}
+
+function commitSearchWinner(winner: RopCandidate, setState: RopPanelStateWriter): void {
+  setState((previous) => ({
+    ...previous,
+    current: winner,
+    best: retainBestScoringRopCandidate(previous.best, winner),
+  }));
 }

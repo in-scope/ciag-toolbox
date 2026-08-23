@@ -317,7 +317,13 @@ interface ToolboxPythonEnvironmentSnapshot {
 
 // CT-307: builtin names mirror BUILTIN_SCRIPT_NAMES in
 // src/shared/chunked-user-script-run-protocol.ts; keep in sync.
-type ToolboxBuiltinScriptName = "npc" | "rop" | "local_pca" | "local_mnf" | "l2_minimization";
+type ToolboxBuiltinScriptName =
+  | "npc"
+  | "rop"
+  | "rop_search"
+  | "local_pca"
+  | "local_mnf"
+  | "l2_minimization";
 
 type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
@@ -327,6 +333,10 @@ type ToolboxRunUserScriptSource =
 type ToolboxUserScriptPickResult =
   | { canceled: true }
   | { canceled: false; filePath: string; fileName: string };
+
+type ToolboxUserScriptReadSourceResult =
+  | { status: "read"; source: string }
+  | { status: "failed"; message: string };
 
 type ToolboxRunUserScriptResultKind = "value" | "cube";
 
@@ -514,6 +524,7 @@ interface ToolboxApi {
     ownInterpreterPath: string | null,
   ) => Promise<ToolboxPythonEnvironmentSnapshot>;
   pickUserScriptFile: () => Promise<ToolboxUserScriptPickResult>;
+  readUserScriptSource: (filePath: string) => Promise<ToolboxUserScriptReadSourceResult>;
   beginUserScriptRun: (
     request: ToolboxUserScriptRunBeginRequest,
   ) => Promise<ToolboxUserScriptRunBeginResult>;

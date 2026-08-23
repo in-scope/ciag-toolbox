@@ -516,6 +516,7 @@ export {
 } from "./npc-panel";
 export {
   chooseRopObjective,
+  importRopObjectiveScript,
   pressNewProjectionUntilScoreShows,
   pressNewProjectionUntilSeedShows,
   ropBestScoreReadout,
@@ -526,10 +527,14 @@ export {
   ropNewProjectionButton,
   ropObjectivePicker,
   ropOptionsPanel,
+  ropProjectionCountField,
   ropScoreReadout,
+  ropSearchButton,
   ropSeedReadout,
   ROP_NO_CANDIDATE_TEXT,
   ROP_PANEL_LABEL,
+  setRopProjectionCount,
+  startRopProjectionSearch,
 } from "./rop-panel";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";
