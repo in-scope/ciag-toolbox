@@ -1,4 +1,4 @@
-# Python scripting in MSI Toolbox
+# Python scripting in CHARM Toolbox
 
 Three operations in the toolbox can run your own Python against the current stack:
 

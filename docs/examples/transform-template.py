@@ -1,4 +1,4 @@
-# Custom transform template for MSI Toolbox.
+# Custom transform template for CHARM Toolbox.
 #
 # The toolbox calls run(cube, wavelengths=None):
 #   cube        - numpy array of shape (bands, height, width); cube[k] is band k
