@@ -8,6 +8,7 @@ import {
   type WindowBounds,
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
+import { chooseAppUserModelIdForTaskbarGrouping } from "./app-user-model-id";
 import {
   E2E_TEST_MODE_PRELOAD_ARGUMENT,
   isE2eTestModeEnabled,
@@ -74,7 +75,9 @@ function resolveDevelopmentModeWindowIconPath(): string | undefined {
 
 function setWindowsAppUserModelIdForTaskbarGrouping(): void {
   if (process.platform !== "win32") return;
-  app.setAppUserModelId("sh.inscope.ciag.toolbox");
+  app.setAppUserModelId(
+    chooseAppUserModelIdForTaskbarGrouping(isRunningInDevelopment()),
+  );
 }
 
 function loadRendererIntoWindow(window: BrowserWindow): void {
