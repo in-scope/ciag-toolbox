@@ -153,6 +153,41 @@ test("paints the pixel under the cursor after the view is zoomed in", async () =
   );
 });
 
+// The brush ghost: hovering with the Masks tool active outlines the exact
+// footprint a click would paint, BEFORE any button is pressed. At brush size 1
+// the footprint is a single image pixel, so the ghost's box must span the
+// distance between adjacent pixel centres and centre itself on the hovered
+// pixel. Without the tool, hovering shows nothing.
+test("shows a ghost of the brush footprint under the cursor before painting", async () => {
+  const page = launched.window;
+  const ghost = page.getByTestId("mask-brush-ghost");
+  const hoverPoint = await pagePointForImagePixelCentre(page, PAINTED_PIXEL);
+
+  await runAsStoryboardStep(page, "Hover without the Masks tool: no ghost", async () => {
+    await page.mouse.move(hoverPoint.x, hoverPoint.y);
+    await expect(ghost).toHaveCount(0);
+  });
+
+  await openMasksOptions(page);
+  await createMaskLayer(page);
+  await setMaskBrushSizeToOnePixel(page);
+
+  await runAsStoryboardStep(page, "Hover with the tool active: the ghost appears", async () => {
+    await page.mouse.move(hoverPoint.x, hoverPoint.y);
+    await expect(ghost).toBeVisible();
+  });
+
+  await runAsStoryboardStep(page, "The ghost outlines exactly one image pixel", async () => {
+    const neighbourPoint = await pagePointForImagePixelCentre(page, STROKE_END_PIXEL);
+    const pixelSpanOnScreen = neighbourPoint.x - hoverPoint.x;
+    const box = await ghost.boundingBox();
+    expect(box).not.toBeNull();
+    expect(Math.abs(box!.width - pixelSpanOnScreen)).toBeLessThanOrEqual(2);
+    expect(Math.abs(box!.x + box!.width / 2 - hoverPoint.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(box!.y + box!.height / 2 - hoverPoint.y)).toBeLessThanOrEqual(2);
+  });
+});
+
 async function pagePointForImagePixelCentre(
   page: Page,
   pixel: { readonly x: number; readonly y: number },

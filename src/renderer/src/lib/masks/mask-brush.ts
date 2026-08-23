@@ -66,6 +66,15 @@ export function resolveMaskBrushPaintValue(
   return clampSelectedMaskCategoryIndex(settings.selectedCategoryIndex, categoryCount);
 }
 
+// The width in IMAGE pixels a stamp covers across its centre row: an odd size
+// covers exactly that many pixels, an even size covers one more (size 8 spans
+// 9). The hover ghost draws a circle of this diameter so the user sees the
+// exact footprint a click would paint.
+export function maskBrushGhostFootprintDiameterPx(brushSizePx: number): number {
+  const size = clampMaskBrushSizePx(brushSizePx);
+  return size % 2 === 0 ? size + 1 : size;
+}
+
 export function listPixelIndexesUnderBrushStamp(
   center: MaskImagePoint,
   brushSizePx: number,

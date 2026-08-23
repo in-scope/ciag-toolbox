@@ -6,6 +6,7 @@ import { notifyError } from "@/lib/notifications/notify";
 import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
+import { ViewportMaskBrushGhost } from "@/components/viewport-mask-brush-ghost";
 import { ViewportMaskOverlay } from "@/components/viewport-mask-overlay";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -31,6 +32,7 @@ import {
   writeMaskValueAtPixelIndexes,
   type MaskBrushSegment,
   type MaskBrushSettings,
+  type MaskImagePoint,
 } from "@/lib/masks/mask-brush";
 import type { MaskLayer } from "@/lib/masks/mask-layer";
 import {
@@ -40,6 +42,7 @@ import {
   type MaskBrushCanvasSegment,
 } from "@/lib/webgl/mask-brush-input";
 import type { CanvasPixelPoint } from "@/lib/webgl/canvas-to-image-pixel";
+import { attachBrushGhostHoverEventHandlers } from "@/lib/webgl/brush-ghost-hover-input";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import { attachPixelClickEventHandlers } from "@/lib/webgl/pixel-click-input";
 import {
@@ -179,6 +182,11 @@ export function Viewport(props: ViewportProps): JSX.Element {
     onPinPixelSpectrum: props.onPinPixelSpectrum,
   });
   const transformVersion = useRendererViewTransformVersion(rendererRef);
+  const hoveredBrushPixel = useMaskBrushHoverImagePixel(
+    canvasRef,
+    rendererRef,
+    props.maskPainting ?? null,
+  );
   const isLinkedForPanZoom = linkGroupIndex !== null && panelLink.isPanelLinked(linkGroupIndex);
   const cursorClassName = shouldShowCrosshairCursor(props) ? "cursor-crosshair" : "";
 
@@ -217,6 +225,14 @@ export function Viewport(props: ViewportProps): JSX.Element {
           transformVersion={transformVersion}
           paintVersion={maskStroke.paintVersion}
         />
+        {props.maskPainting ? (
+          <ViewportMaskBrushGhost
+            renderer={rendererRef.current}
+            hoveredImagePixel={hoveredBrushPixel}
+            brushSizePx={props.maskPainting.brush.brushSizePx}
+            transformVersion={transformVersion}
+          />
+        ) : null}
         <ViewportRoiOverlay
           renderer={rendererRef.current}
           committedRoi={inProgressEditRoi ?? props.roi}
@@ -1059,6 +1075,56 @@ function useViewportMaskBrushAttachment(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return stroke;
+}
+
+// The hover pixel behind the brush ghost. It tracks pointer moves over the
+// canvas while painting is enabled and clears when the pointer leaves or the
+// Masks tool closes, so the ghost never lingers.
+function useMaskBrushHoverImagePixel(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  painting: ViewportMaskPainting | null,
+): MaskImagePoint | null {
+  const [hoveredPixel, setHoveredPixel] = useState<MaskImagePoint | null>(null);
+  const paintingRef = useLatestValueRef(painting);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return attachBrushGhostHoverEventHandlers(canvas, {
+      isBrushGhostEnabled: () => paintingRef.current !== null,
+      onHoverAtCanvasPoint: (point) =>
+        setHoveredPixel((previous) =>
+          reuseHoveredPixelWhenUnchanged(
+            previous,
+            convertHoverCanvasPointToImagePixelOrNull(point, rendererRef.current),
+          ),
+        ),
+    });
+    // canvasRef and rendererRef are stable refs; latest-value ref holds painting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!painting) setHoveredPixel(null);
+  }, [painting]);
+  return hoveredPixel;
+}
+
+function convertHoverCanvasPointToImagePixelOrNull(
+  point: CanvasPixelPoint | null,
+  renderer: ViewportRenderer | null,
+): MaskImagePoint | null {
+  if (!point || !renderer) return null;
+  return renderer.getImagePixelAtCanvasPoint(point.x, point.y);
+}
+
+// Keeping the previous object while the hovered pixel is unchanged means a
+// pointer gliding within one image pixel re-renders nothing.
+function reuseHoveredPixelWhenUnchanged(
+  previous: MaskImagePoint | null,
+  next: MaskImagePoint | null,
+): MaskImagePoint | null {
+  if (previous && next && previous.x === next.x && previous.y === next.y) return previous;
+  return next;
 }
 
 function useDiscardInProgressStrokeWhenPaintingStops(

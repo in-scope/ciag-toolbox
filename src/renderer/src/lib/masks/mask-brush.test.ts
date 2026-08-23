@@ -7,6 +7,7 @@ import {
   DEFAULT_MASK_BRUSH_SIZE_PX,
   listPixelIndexesUnderBrushSegment,
   listPixelIndexesUnderBrushStamp,
+  maskBrushGhostFootprintDiameterPx,
   MAX_MASK_BRUSH_SIZE_PX,
   MIN_MASK_BRUSH_SIZE_PX,
   resolveMaskBrushPaintValue,
@@ -121,5 +122,32 @@ describe("writeMaskValueAtPixelIndexes", () => {
     const values = new Uint8Array(4);
     writeMaskValueAtPixelIndexes(values, [-1, 9], 3);
     expect(Array.from(values)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe("maskBrushGhostFootprintDiameterPx", () => {
+  it("covers exactly the brush size for an odd size", () => {
+    expect(maskBrushGhostFootprintDiameterPx(1)).toBe(1);
+    expect(maskBrushGhostFootprintDiameterPx(3)).toBe(3);
+  });
+
+  it("covers one extra pixel for an even size, matching the stamp", () => {
+    expect(maskBrushGhostFootprintDiameterPx(8)).toBe(9);
+    expect(maskBrushGhostFootprintDiameterPx(2)).toBe(3);
+  });
+
+  it("matches the widest row the stamp actually paints", () => {
+    for (const size of [1, 2, 3, 4, 8, 15, 64]) {
+      const grid = { width: 200, height: 200 };
+      const indexes = listPixelIndexesUnderBrushStamp({ x: 100, y: 100 }, size, grid);
+      const columns = indexes.map((index) => index % grid.width);
+      const widest = Math.max(...columns) - Math.min(...columns) + 1;
+      expect(maskBrushGhostFootprintDiameterPx(size)).toBe(widest);
+    }
+  });
+
+  it("clamps like the brush itself", () => {
+    expect(maskBrushGhostFootprintDiameterPx(0)).toBe(MIN_MASK_BRUSH_SIZE_PX);
+    expect(maskBrushGhostFootprintDiameterPx(999)).toBe(MAX_MASK_BRUSH_SIZE_PX + 1);
   });
 });
