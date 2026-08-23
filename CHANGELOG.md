@@ -1,6 +1,6 @@
 # Changelog
 
-## [5.1.0](https://github.com/in-scope/ciag-toolbox/compare/v0.5.0...v5.1.0) (2026-08-22)
+## [0.5.1](https://github.com/in-scope/ciag-toolbox/compare/v0.5.0...v0.5.1) (2026-08-22)
 
 
 ### Features

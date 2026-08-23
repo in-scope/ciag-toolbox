@@ -4,7 +4,6 @@
     ".": {
       "release-type": "node",
       "package-name": "ciag-toolbox",
-      "release-as": "5.1.0",
       "include-v-in-tag": true,
       "include-component-in-tag": false,
       "changelog-sections": [
