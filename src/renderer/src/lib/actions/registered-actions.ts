@@ -33,12 +33,16 @@ import {
   brightnessDeltaForRangeFractionOfBand,
 } from "@/lib/image/apply-brightness";
 import { applyContrastToRasterBandsReportingProgress } from "@/lib/image/apply-contrast";
-import { applyCropToRasterImageReportingProgress } from "@/lib/image/apply-crop-to-roi";
+import {
+  applyCropToRasterImageReportingProgress,
+  cropPlaneToRoi,
+} from "@/lib/image/apply-crop-to-roi";
 import {
   buildFalseColorComposite,
   type FalseColorBandAssignment,
 } from "@/lib/image/apply-false-color-composite";
 import {
+  applyGeometricTransformToPlane,
   applyGeometricTransformToRasterImageReportingProgress,
   GEOMETRIC_TRANSFORM_LABELS,
   isGeometricTransform,
@@ -110,6 +114,7 @@ import {
   type SliderParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValue, ParameterValuesById } from "./parameter-schema";
+import type { MaskPlaneTransform } from "@/lib/masks/mask-geometry-transform";
 import {
   clearOperationRegionFromState,
   injectOperationRegionCorners,
@@ -185,11 +190,20 @@ export interface RegisteredViewportAction extends ViewportAction {
   readonly requiresOperationRegion?: boolean;
   /**
    * CT-302: the operation moves or resizes the stack's spatial grid (crop,
-   * rotate, flip), so an in-place apply drops the panel's mask layers. Set it
-   * even when width and height survive the operation (a flip, or rotating a
-   * square stack) - the pixels still move under the masks.
+   * rotate, flip), so an in-place apply must reconcile the panel's mask
+   * layers. Set it even when width and height survive the operation (a flip,
+   * or rotating a square stack) - the pixels still move under the masks.
    */
   readonly changesStackGeometry?: boolean;
+  /**
+   * The spatial mapping the operation applies, so an in-place apply moves the
+   * panel's mask layers WITH the pixels they annotate (crop crops them,
+   * rotate rotates them, flip flips them). A geometry-changing action without
+   * this drops the masks instead, with the info toast.
+   */
+  readonly describeMaskGeometryTransform?: (
+    parameterValues: ParameterValuesById,
+  ) => MaskPlaneTransform | null;
   /**
    * The operation can optionally be limited to an area; the user opts in via the
    * "Apply to" scope selector and then selects the region (CT-095).
@@ -302,6 +316,7 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   appliedLabel: "Crop to region",
   requiresOperationRegion: true,
   changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskCropTransform,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
   prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
   apply: clearRegionAndStaleInspectionRoiAfterCrop,
@@ -369,6 +384,11 @@ function readIntegerParameterOrThrow(
     throw new Error(`Crop to Region missing parameter ${parameterId}.`);
   }
   return Math.round(raw);
+}
+
+function describeMaskCropTransform(parameterValues: ParameterValuesById): MaskPlaneTransform {
+  const roi = readRoiFromCropParameterValues(parameterValues);
+  return (plane) => cropPlaneToRoi(plane.values, plane.width, plane.height, roi);
 }
 
 function formatCropToRegionAppliedLabel(parameterValues: ParameterValuesById): string {
@@ -1626,6 +1646,7 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   successMessage: "Rotation applied",
   appliedLabel: "Rotate",
   changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskGeometricTransform,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
@@ -1642,6 +1663,7 @@ export const REFLECT_ACTION: RegisteredViewportAction = {
   successMessage: "Flip applied",
   appliedLabel: "Flip",
   changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskGeometricTransform,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
@@ -1676,6 +1698,11 @@ function readGeometricTransformChoice(parameterValues: ParameterValuesById): Geo
 
 function formatGeometricTransformAppliedLabel(parameterValues: ParameterValuesById): string {
   return GEOMETRIC_TRANSFORM_LABELS[readGeometricTransformChoice(parameterValues)];
+}
+
+function describeMaskGeometricTransform(parameterValues: ParameterValuesById): MaskPlaneTransform {
+  const transform = readGeometricTransformChoice(parameterValues);
+  return (plane) => applyGeometricTransformToPlane(plane.values, plane.width, plane.height, transform);
 }
 
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [

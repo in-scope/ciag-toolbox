@@ -32,11 +32,11 @@ import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import { toast } from "sonner";
 import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
 import {
-  dropMasksWhenStackGeometryChanged,
   MASKS_REMOVED_BY_GEOMETRY_CHANGE_MESSAGE,
   wereMasksDroppedByGeometryChange,
   type StackGeometryComparison,
 } from "@/lib/masks/mask-geometry-change";
+import { carryMasksAcrossStackGeometryChange } from "@/lib/masks/mask-geometry-transform";
 import { EMPTY_MASK_PANEL_STATE } from "@/lib/masks/mask-panel";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
@@ -371,7 +371,9 @@ interface InPlaceResultGeometry {
 }
 
 // CT-302: masks are pinned to the panel's spatial grid, so an in-place apply
-// that moved or resized the stack drops them and says so.
+// that moved or resized the stack carries them through the action's own
+// spatial mapping (crop crops them, rotate rotates them, flip flips them);
+// only a geometry change with no mapping drops them, and says so.
 function writeAppliedRenderingStateForInPlaceResult(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
@@ -380,7 +382,7 @@ function writeAppliedRenderingStateForInPlaceResult(
   bindings: ApplyActionFlowBindings,
 ): void {
   const inherited = bindings.getRenderingState(index);
-  const reconciled = withMasksDroppedWhenGeometryChanged(action, inherited, geometry);
+  const reconciled = withMasksCarriedAcrossGeometryChange(action, parameterValues, inherited, geometry);
   notifyWhenGeometryChangeRemovedMasks(inherited, reconciled);
   bindings.setRenderingState(
     index,
@@ -388,14 +390,16 @@ function writeAppliedRenderingStateForInPlaceResult(
   );
 }
 
-function withMasksDroppedWhenGeometryChanged(
+function withMasksCarriedAcrossGeometryChange(
   action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
   state: ViewportRenderingState,
   geometry: InPlaceResultGeometry,
 ): ViewportRenderingState {
   if (!geometry.nextSource) return state;
   const comparison = compareStackGeometryAcrossApply(action, geometry.previousSource, geometry.nextSource);
-  return { ...state, masks: dropMasksWhenStackGeometryChanged(state.masks, comparison) };
+  const transform = action.describeMaskGeometryTransform?.(parameterValues) ?? null;
+  return { ...state, masks: carryMasksAcrossStackGeometryChange(state.masks, comparison, transform) };
 }
 
 function compareStackGeometryAcrossApply(

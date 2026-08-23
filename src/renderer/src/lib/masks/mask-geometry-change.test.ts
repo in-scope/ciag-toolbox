@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   didStackGeometryChange,
-  dropMasksWhenStackGeometryChanged,
   wereMasksDroppedByGeometryChange,
   type StackGeometryComparison,
 } from "./mask-geometry-change";
@@ -42,27 +41,22 @@ describe("stack geometry change detection", () => {
   });
 });
 
-describe("dropping masks after a geometry change", () => {
-  it("keeps the panel's masks when nothing about the geometry changed", () => {
-    expect(dropMasksWhenStackGeometryChanged(PANEL_WITH_ONE_LAYER, buildComparison())).toBe(
-      PANEL_WITH_ONE_LAYER,
+describe("reporting a mask drop", () => {
+  it("reports a drop when a populated panel became empty", () => {
+    expect(wereMasksDroppedByGeometryChange(PANEL_WITH_ONE_LAYER, EMPTY_MASK_PANEL_STATE)).toBe(
+      true,
     );
   });
 
-  it("drops every layer when the geometry changed", () => {
-    const dropped = dropMasksWhenStackGeometryChanged(
-      PANEL_WITH_ONE_LAYER,
-      buildComparison({ actionChangesStackGeometry: true }),
+  it("reports no drop when the layers survived", () => {
+    expect(wereMasksDroppedByGeometryChange(PANEL_WITH_ONE_LAYER, PANEL_WITH_ONE_LAYER)).toBe(
+      false,
     );
-    expect(dropped).toEqual(EMPTY_MASK_PANEL_STATE);
-    expect(wereMasksDroppedByGeometryChange(PANEL_WITH_ONE_LAYER, dropped)).toBe(true);
   });
 
   it("reports no drop when the panel had no masks to begin with", () => {
-    const dropped = dropMasksWhenStackGeometryChanged(
-      EMPTY_MASK_PANEL_STATE,
-      buildComparison({ actionChangesStackGeometry: true }),
-    );
-    expect(wereMasksDroppedByGeometryChange(EMPTY_MASK_PANEL_STATE, dropped)).toBe(false);
+    expect(
+      wereMasksDroppedByGeometryChange(EMPTY_MASK_PANEL_STATE, EMPTY_MASK_PANEL_STATE),
+    ).toBe(false);
   });
 });

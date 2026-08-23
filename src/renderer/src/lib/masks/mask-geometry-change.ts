@@ -1,7 +1,10 @@
-import { EMPTY_MASK_PANEL_STATE, type MaskPanelState } from "@/lib/masks/mask-panel";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
 
 // CT-302: masks are pinned to the stack's spatial grid, so an in-place apply
-// that changes the stack's geometry invalidates every layer of that panel.
+// that changes the stack's geometry has to reconcile the panel's layers.
+// Actions with a known spatial mapping (crop, rotate, flip) carry the masks
+// through it (mask-geometry-transform.ts); a change with no mapping drops
+// them, with the info toast below.
 //
 // "Geometry change" is BOTH declared and measured: crop, rotate, and flip
 // declare it through the action flag (a flip, and a rotation of a square stack,
@@ -25,14 +28,6 @@ export function didStackGeometryChange(comparison: StackGeometryComparison): boo
     comparison.previousWidth !== comparison.nextWidth ||
     comparison.previousHeight !== comparison.nextHeight
   );
-}
-
-export function dropMasksWhenStackGeometryChanged(
-  panel: MaskPanelState,
-  comparison: StackGeometryComparison,
-): MaskPanelState {
-  if (!didStackGeometryChange(comparison)) return panel;
-  return EMPTY_MASK_PANEL_STATE;
 }
 
 export function wereMasksDroppedByGeometryChange(

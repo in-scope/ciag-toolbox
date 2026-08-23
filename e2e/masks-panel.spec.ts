@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
 
-import { multiBandTiff } from "./fixtures/fixture-manifest";
+import { maskMultibandPng, multiBandTiff, fixturePath } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
@@ -9,6 +11,9 @@ import {
   applyOperationInPlace,
   applyQuickGeometricTransform,
   createMaskLayer,
+  createTemporaryExportDirectory,
+  exportSelectedMaskToPath,
+  importMaskFromPath,
   loadFixtureAsStack,
   maskCategoryNameField,
   maskCategoryNameFields,
@@ -21,15 +26,17 @@ import {
   openOperation,
   selectPanel,
 } from "./support/page-objects";
+import { runAsStoryboardStep } from "./support/storyboard-step";
 
 // CT-302: mask layers annotate a stack's spatial grid. This spec drives the
 // Masks options aside on multiband-12bit.tif (4x4, 3 bands): create a layer,
 // rename a category, fill the category list to its cap of five, then check the
 // two survival rules through REAL applies - a value operation (Invert, in
 // place) leaves the layer alone, while a geometry change (Rotate 90 clockwise,
-// in place) drops every layer and says so in a toast. The 4x4 fixture is
-// square on purpose: rotating it keeps the reported width and height, so only
-// the operation's own geometry declaration can drive the drop.
+// in place) carries every layer through the SAME rotation, proven by exporting
+// the rotated mask and decoding it in the spec. The 4x4 fixture is square on
+// purpose: rotating it keeps the reported width and height, so only the
+// operation's own geometry declaration can drive the mask reconciliation.
 
 const PANEL = 1;
 const INVERT = "Invert";
@@ -86,16 +93,36 @@ test("keeps the panel's masks through an in-place value operation", async () => 
   await expect(masksRemovedToast(page)).toHaveCount(0);
 });
 
-test("drops the panel's masks when an in-place apply changes the stack's geometry", async () => {
+// The fixture mask paints row 0 with category 1 and row 3 with category 2, so
+// rotating 90 clockwise must land category 2 in column 0 and category 1 in
+// column 3: every row of the rotated mask reads [2, 0, 0, 1].
+const ROTATED_MASK_ROW = [2, 0, 0, 1];
+const EXPECTED_ROTATED_MASK_VALUES = [
+  ...ROTATED_MASK_ROW,
+  ...ROTATED_MASK_ROW,
+  ...ROTATED_MASK_ROW,
+  ...ROTATED_MASK_ROW,
+];
+
+test("rotates the panel's masks with an in-place apply that rotates the stack", async () => {
   const page = launched.window;
 
   await openMasksOptions(page);
-  await createMaskLayer(page);
+  await importMaskFromPath(page, fixturePath(maskMultibandPng.fileName));
   await expect(maskLayerOptions(page)).toHaveCount(1);
 
   await applyQuickGeometricTransform(page, "rotate-90-cw");
 
-  await expect(masksRemovedToast(page)).toBeVisible();
-  await expect(maskLayerOptions(page)).toHaveCount(0);
-  await expect(maskCategoryNameFields(page)).toHaveCount(0);
+  await expect(masksRemovedToast(page)).toHaveCount(0);
+  await expect(maskLayerOptions(page)).toHaveCount(1);
+
+  const exportPath = join(await createTemporaryExportDirectory(), "rotated-mask.png");
+  await exportSelectedMaskToPath(page, exportPath);
+  await runAsStoryboardStep(page, "Decode the exported mask in Node", async () => {
+    const decoded = await sharp(exportPath)
+      .toColourspace("b-w")
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(Array.from(decoded.data)).toEqual(EXPECTED_ROTATED_MASK_VALUES);
+  });
 });

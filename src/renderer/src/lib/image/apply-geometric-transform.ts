@@ -113,6 +113,29 @@ export async function applyGeometricTransformToRasterImageReportingProgress(
   return { ...raster, bandPixels, width: destinationWidth, height: destinationHeight };
 }
 
+// A single width x height plane (a mask layer's values) remapped by the same
+// tight loops as a raster band, so masks move exactly like the pixels they
+// annotate. 90/270 rotations swap the returned width and height.
+export interface TransformedPlane<T extends RasterTypedArray> {
+  readonly values: T;
+  readonly width: number;
+  readonly height: number;
+}
+
+export function applyGeometricTransformToPlane<T extends RasterTypedArray>(
+  values: T,
+  width: number,
+  height: number,
+  transform: GeometricTransform,
+): TransformedPlane<T> {
+  const definition = GEOMETRIC_TRANSFORM_DEFINITIONS[transform];
+  return {
+    values: remapBandToDestination(values, width, height, definition) as T,
+    width: definition.swapsDimensions ? height : width,
+    height: definition.swapsDimensions ? width : height,
+  };
+}
+
 function remapBandToDestination(
   band: RasterTypedArray,
   width: number,

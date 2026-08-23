@@ -17,6 +17,7 @@ import {
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 import { addNewMaskLayerToPanel, EMPTY_MASK_PANEL_STATE } from "@/lib/masks/mask-panel";
 import { MASKS_REMOVED_BY_GEOMETRY_CHANGE_MESSAGE } from "@/lib/masks/mask-geometry-change";
+import { applyGeometricTransformToPlane } from "@/lib/image/apply-geometric-transform";
 
 import {
   applyActionInPlaceAtSourceIndex,
@@ -1345,8 +1346,10 @@ function buildManuallyResolvedTransformGate(): ManuallyResolvedTransformGate {
 void EMPTY_OPERATION_HISTORY;
 
 // CT-302: masks are pinned to the panel's spatial grid. A value operation
-// leaves them alone; an apply that moves or resizes the grid drops them with an
-// info toast; a result delivered to another panel never carries them.
+// leaves them alone; an apply whose action maps the geometry change (crop,
+// rotate, flip) carries them through that mapping; a geometry change with no
+// mapping drops them with an info toast; a result delivered to another panel
+// never carries them.
 describe("mask layers across an apply (CT-302)", () => {
   beforeEach(() => {
     vi.mocked(toast.info).mockClear();
@@ -1366,7 +1369,22 @@ describe("mask layers across an apply (CT-302)", () => {
     expect(toast.info).not.toHaveBeenCalled();
   });
 
-  it("drops the panel's masks and says so when an in-place apply changes the geometry", async () => {
+  it("carries the panel's masks through an action that maps the geometry change", async () => {
+    const harness = buildMaskFlowHarness(buildRenderingStateWithPaintedMaskLayer());
+    applyActionInPlaceAtSourceIndex(
+      buildGeometryChangingActionCarryingMasksFlippedHorizontally(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const masks = harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).masks;
+    expect(masks.layers).toHaveLength(1);
+    expect(Array.from(masks.layers[0]!.values)).toEqual([0, 1, 2, 0]);
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it("drops the panel's masks and says so when an in-place apply changes the geometry with no mapping", async () => {
     const harness = buildMaskFlowHarness();
     applyActionInPlaceAtSourceIndex(
       buildGeometryChangingTransformAction(),
@@ -1402,8 +1420,10 @@ interface MaskFlowHarness {
   readonly findLatestRenderingStateWriteAtIndex: (index: number) => ViewportRenderingState;
 }
 
-function buildMaskFlowHarness(): MaskFlowHarness {
-  const bindings = buildMaskFlowBindings();
+function buildMaskFlowHarness(
+  sourceRenderingState: ViewportRenderingState = buildRenderingStateWithOneMaskLayer(),
+): MaskFlowHarness {
+  const bindings = buildMaskFlowBindings(sourceRenderingState);
   return {
     bindings,
     findLatestRenderingStateWriteAtIndex: (index) =>
@@ -1411,9 +1431,11 @@ function buildMaskFlowHarness(): MaskFlowHarness {
   };
 }
 
-function buildMaskFlowBindings(): ApplyActionFlowBindings {
+function buildMaskFlowBindings(
+  sourceRenderingState: ViewportRenderingState,
+): ApplyActionFlowBindings {
   const renderingByIndex = new Map<number, ViewportRenderingState>([
-    [SOURCE_INDEX, buildRenderingStateWithOneMaskLayer()],
+    [SOURCE_INDEX, sourceRenderingState],
   ]);
   let imagesByIndex: ReadonlyMap<number, ViewportCellContent> = new Map([
     [SOURCE_INDEX, buildThreeBandUint16RasterCellContent()],
@@ -1462,4 +1484,21 @@ function buildGeometryChangingTransformAction(): RegisteredViewportAction {
     label: "Geometry Changing",
     changesStackGeometry: true,
   } as unknown as RegisteredViewportAction;
+}
+
+function buildGeometryChangingActionCarryingMasksFlippedHorizontally(): RegisteredViewportAction {
+  return {
+    ...buildGeometryChangingTransformAction(),
+    id: "geometry-mapping",
+    label: "Geometry Mapping",
+    describeMaskGeometryTransform: () => (plane: { values: Uint8Array; width: number; height: number }) =>
+      applyGeometricTransformToPlane(plane.values, plane.width, plane.height, "flip-horizontal"),
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildRenderingStateWithPaintedMaskLayer(): ViewportRenderingState {
+  const state = buildRenderingStateWithOneMaskLayer();
+  const layer = state.masks.layers[0]!;
+  const painted = { ...layer, values: Uint8Array.from([1, 0, 0, 2]) };
+  return { ...state, masks: { ...state.masks, layers: [painted] } };
 }
