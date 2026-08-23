@@ -149,6 +149,7 @@ import { BAND_SELECTION_ACTION } from "./band-selection-action";
 import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
 import { CONCATENATE_STACKS_ACTION } from "./concatenate-stacks-action";
 import { LOCAL_PCA_ACTION } from "./local-pca-action";
+import { LOCAL_MNF_ACTION } from "./local-mnf-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1704,4 +1705,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   CUSTOM_TRANSFORM_ACTION,
   CONCATENATE_STACKS_ACTION,
   LOCAL_PCA_ACTION,
+  LOCAL_MNF_ACTION,
 ];

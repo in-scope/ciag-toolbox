@@ -185,8 +185,9 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
     buildMenuOnlyActionCommand("pca", "PCA"),
     buildMenuOnlyActionCommand("mnf", "MNF"),
     buildMenuOnlyActionCommand("ica", "ICA"),
-    // CT-311: spatially adaptive PCA, running the client Python built-in.
+    // CT-311/CT-312: spatially adaptive PCA/MNF, running the client Python built-ins.
     buildMenuOnlyActionCommand("local-pca", "Local PCA"),
+    buildMenuOnlyActionCommand("local-mnf", "Local MNF"),
   ],
 };
 

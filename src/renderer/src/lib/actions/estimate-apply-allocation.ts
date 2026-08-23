@@ -15,6 +15,7 @@ import {
   readDuplicatedBandNumbersFromParameterValues,
 } from "@/lib/actions/duplicate-bands-action";
 import { LOCAL_PCA_ACTION_ID } from "@/lib/actions/local-pca-action";
+import { LOCAL_MNF_ACTION_ID } from "@/lib/actions/local-mnf-action";
 import { ROP_KEEP_ACTION_ID } from "@/lib/actions/rop-keep-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
@@ -116,10 +117,11 @@ function estimateAllocationBytesForRasterApply(
   // dimensions (the same as the unlisted-action default, pinned explicitly so
   // a future default change cannot silently reprice it).
   if (action.id === ROP_KEEP_ACTION_ID) return singleFloatBandBytes(raster);
-  // CT-311: the spatially adaptive projections return exactly one float band
-  // at source dimensions; the cube itself streams to the Python worker band by
-  // band, so no second copy of the stack lives in the renderer.
+  // CT-311/CT-312: the spatially adaptive projections return exactly one float
+  // band at source dimensions; the cube itself streams to the Python worker
+  // band by band, so no second copy of the stack lives in the renderer.
   if (action.id === LOCAL_PCA_ACTION_ID) return singleFloatBandBytes(raster);
+  if (action.id === LOCAL_MNF_ACTION_ID) return singleFloatBandBytes(raster);
   return singleFloatBandBytes(raster);
 }
 

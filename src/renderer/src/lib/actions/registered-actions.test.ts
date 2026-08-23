@@ -67,6 +67,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "custom-transform",
       "concatenate-stacks",
       "local-pca",
+      "local-mnf",
     ]);
   });
 
