@@ -155,8 +155,6 @@ function renderViewportCellViewport(
       fileName={props.content?.fileName ?? null}
       normalizationEnabled={settings.normalizationEnabled}
       onToggleNormalizedViewing={settings.handleToggleNormalizedViewing}
-      floatDisplayUsesFixedUnitWindow={settings.floatDisplayUsesFixedUnitWindow}
-      onToggleFixedUnitFloatView={settings.handleToggleFixedUnitFloatView}
       viewChannelsSeparately={settings.viewChannelsSeparately}
       onToggleViewChannelsSeparately={settings.handleToggleViewChannelsSeparately}
       selectedBandIndex={settings.selectedBandIndex}
@@ -199,8 +197,6 @@ interface ViewportCellInteractionSettings {
   toneCurvePreviewChannelLookupTables: ToneCurveChannelPreviewLuts | null;
   normalizationEnabled: boolean;
   handleToggleNormalizedViewing: () => void;
-  floatDisplayUsesFixedUnitWindow: boolean;
-  handleToggleFixedUnitFloatView: () => void;
   viewChannelsSeparately: boolean;
   handleToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
@@ -324,14 +320,6 @@ function useViewportCellInteractionSettings(
       }),
     [cellIndex, renderingState, setRenderingState],
   );
-  const handleToggleFixedUnitFloatView = useCallback(
-    () =>
-      setRenderingState(cellIndex, {
-        ...renderingState,
-        floatDisplayUsesFixedUnitWindow: !renderingState.floatDisplayUsesFixedUnitWindow,
-      }),
-    [cellIndex, renderingState, setRenderingState],
-  );
   // CT-248: display-only channel view for a colour photo. Both directions land
   // on band 0 so entering starts at Red and leaving restores the composite's
   // untouched readout state exactly as it was before the toggle.
@@ -371,8 +359,6 @@ function useViewportCellInteractionSettings(
     toneCurvePreviewChannelLookupTables: getChannelLookupTablesForViewport(cellIndex),
     normalizationEnabled: renderingState.normalizationEnabled,
     handleToggleNormalizedViewing,
-    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
-    handleToggleFixedUnitFloatView,
     viewChannelsSeparately: renderingState.viewChannelsSeparately,
     handleToggleViewChannelsSeparately,
     selectedBandIndex: renderingState.selectedBandIndex,

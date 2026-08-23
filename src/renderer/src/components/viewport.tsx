@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
+import { Contrast, FolderOpen, Link2, X } from "lucide-react";
 import { notifyError } from "@/lib/notifications/notify";
 
 import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
@@ -87,8 +87,6 @@ interface ViewportProps {
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
-  floatDisplayUsesFixedUnitWindow: boolean;
-  onToggleFixedUnitFloatView: () => void;
   viewChannelsSeparately: boolean;
   onToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
@@ -132,7 +130,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
   useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
-  useFixedUnitFloatViewEffect(rendererRef, props.floatDisplayUsesFixedUnitWindow);
   useToneCurvePreviewLutEffect(rendererRef, props.toneCurvePreviewLookupTable ?? null);
   useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
@@ -202,8 +199,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
         normalizationEnabled={props.normalizationEnabled}
         onToggleNormalizedViewing={props.onToggleNormalizedViewing}
         showNormalizedViewingToggle={imageSource !== null}
-        floatDisplayUsesFixedUnitWindow={props.floatDisplayUsesFixedUnitWindow}
-        onToggleFixedUnitFloatView={props.onToggleFixedUnitFloatView}
         showChannelViewToggle={canViewCompositeChannelsSeparately(compositeSource)}
         channelViewEnabled={isChannelViewActive}
         onToggleChannelView={props.onToggleViewChannelsSeparately}
@@ -302,8 +297,6 @@ interface ViewportHeaderStripProps {
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
   showNormalizedViewingToggle: boolean;
-  floatDisplayUsesFixedUnitWindow: boolean;
-  onToggleFixedUnitFloatView: () => void;
   showChannelViewToggle: boolean;
   channelViewEnabled: boolean;
   onToggleChannelView: () => void;
@@ -333,12 +326,6 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
         <NormalizedViewingToggleButton
           enabled={props.normalizationEnabled}
           onToggle={props.onToggleNormalizedViewing}
-        />
-      ) : null}
-      {shouldShowFixedUnitFloatViewToggle(props.raster) ? (
-        <FixedUnitFloatViewToggleButton
-          enabled={props.floatDisplayUsesFixedUnitWindow}
-          onToggle={props.onToggleFixedUnitFloatView}
         />
       ) : null}
       {props.showChannelViewToggle ? (
@@ -387,47 +374,6 @@ function stopPropagationThenToggle(
     event.stopPropagation();
     onToggle();
   };
-}
-
-// CT-193: the fixed [0, 1] float-view toggle is only meaningful for float rasters,
-// whose default auto-stretch it overrides. Integer stacks already map their type
-// range to [0, 1], so the control would be a no-op and is hidden for them.
-function shouldShowFixedUnitFloatViewToggle(raster: RasterImage | null): boolean {
-  return raster !== null && raster.sampleFormat === "float";
-}
-
-interface FixedUnitFloatViewToggleButtonProps {
-  enabled: boolean;
-  onToggle: () => void;
-}
-
-// CT-259: the tooltip explains what the toggle does in each state; the aria-label stays
-// the stable "Fixed [0,1] float view" name so selectors and screen-reader identity hold.
-const AUTO_STRETCH_ACTIVE_TOOLTIP =
-  "Display is stretched to this band's own value range. Click to switch to the fixed 0 to 1 scale: 0 shows black, 1 shows white, values outside clip. Display only, data never changes.";
-const FIXED_SCALE_ACTIVE_TOOLTIP =
-  "Fixed 0 to 1 display scale: 0 shows black, 1 shows white, values outside clip. Click to stretch the display to this band's own value range. Display only, data never changes.";
-
-function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonProps): JSX.Element {
-  const label = props.enabled ? "Fixed [0,1] float view (on)" : "Fixed [0,1] float view";
-  const tooltip = props.enabled ? FIXED_SCALE_ACTIVE_TOOLTIP : AUTO_STRETCH_ACTIVE_TOOLTIP;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
-          aria-label={label}
-          aria-pressed={props.enabled}
-          onClick={stopPropagationThenToggle(props.onToggle)}
-        >
-          <Brackets className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
 }
 
 // CT-248/CT-295: a true-colour photo can be flipped into a display-only channel
@@ -664,17 +610,6 @@ function useNormalizationToggleEffect(
 ): void {
   useEffect(() => {
     rendererRef.current?.setNormalizationEnabled(enabled);
-  }, [rendererRef, enabled]);
-}
-
-// CT-193: pin out-of-range float data to the fixed [0, 1] display window instead of
-// auto-stretching it on open. Display-only; the data readout never changes.
-function useFixedUnitFloatViewEffect(
-  rendererRef: MutableRefObject<ViewportRenderer | null>,
-  enabled: boolean,
-): void {
-  useEffect(() => {
-    rendererRef.current?.setFloatDisplayUsesFixedUnitWindow(enabled);
   }, [rendererRef, enabled]);
 }
 

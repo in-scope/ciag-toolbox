@@ -1210,7 +1210,6 @@ function readDisplayMappingStateForSaving(
 ): ViewportDisplayMappingState {
   return {
     normalizationEnabled: renderingState.normalizationEnabled,
-    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
   };
 }
 

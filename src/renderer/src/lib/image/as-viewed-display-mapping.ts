@@ -27,22 +27,20 @@ import type { ViewportImageSource } from "@/lib/webgl/texture";
 // mapped to the value the renderer UPLOADS (integer bands pre-scaled over their
 // data-type range, float bands raw), the effective normalization is resolved
 // from the panel's display state (explicit normalized viewing, or the CT-161
-// float auto-fit unless the CT-193 fixed window pins it), and the shader's
-// normalize/clamp block runs per channel before quantizing to a byte.
+// float auto-fit), and the shader's normalize/clamp block runs per channel
+// before quantizing to a byte.
 //
 // Data formats (TIFF, ENVI, 16-bit PNG) never come through here - they write
 // raw data and must stay byte-identical.
 
 // The display state of the panel being saved (ViewportRenderingState's display
-// fields). Nothing here is data: both toggles are display-only.
+// fields). Nothing here is data: the toggle is display-only.
 export interface ViewportDisplayMappingState {
   readonly normalizationEnabled: boolean;
-  readonly floatDisplayUsesFixedUnitWindow: boolean;
 }
 
 export const DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE: ViewportDisplayMappingState = {
   normalizationEnabled: false,
-  floatDisplayUsesFixedUnitWindow: false,
 };
 
 const RGBA_BYTES_PER_PIXEL = 4;
@@ -58,7 +56,6 @@ export function resolveAsViewedNormalizationForSource(
   return resolveEffectiveFloatDisplayNormalization(
     { enabled: displayState.normalizationEnabled, extents },
     floatSourceDataFallsOutsideUnitDisplayWindow(source, extents),
-    displayState.floatDisplayUsesFixedUnitWindow,
   );
 }
 

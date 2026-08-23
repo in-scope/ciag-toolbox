@@ -339,7 +339,6 @@ function buildRenderingStateWithHistory(
 ): ViewportRenderingState {
   return {
     normalizationEnabled: false,
-    floatDisplayUsesFixedUnitWindow: false,
     viewChannelsSeparately: false,
     lastAppliedOperationLabel: null,
     selectedBandIndex: 0,

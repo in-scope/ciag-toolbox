@@ -16,12 +16,6 @@ import type { RasterImage } from "@/lib/image/raster-image";
 
 const NORMALIZED_VIEWING: ViewportDisplayMappingState = {
   normalizationEnabled: true,
-  floatDisplayUsesFixedUnitWindow: false,
-};
-
-const FIXED_UNIT_FLOAT_WINDOW: ViewportDisplayMappingState = {
-  normalizationEnabled: false,
-  floatDisplayUsesFixedUnitWindow: true,
 };
 
 describe("buildAsViewedRgbaBytesFromRaster for an integer composite", () => {
@@ -93,12 +87,6 @@ describe("buildAsViewedRgbaBytesFromRaster for a float band", () => {
     expect(Array.from(rgba)).toEqual([0, 0, 0, 255, 64, 64, 64, 255, 255, 255, 255, 255]);
   });
 
-  it("clamps to the fixed [0, 1] window when the user pins it", () => {
-    const raster = buildFloat32SingleBandRaster([-4, 0.5, 12]);
-    const rgba = buildAsViewedRgbaBytesFromRaster(raster, 0, FIXED_UNIT_FLOAT_WINDOW);
-    expect(Array.from(rgba)).toEqual([0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255]);
-  });
-
   it("passes an in-range float band through the fixed window untouched", () => {
     const raster = buildFloat32SingleBandRaster([0, 0.5, 1]);
     const rgba = buildAsViewedRgbaBytesFromRaster(
@@ -121,15 +109,12 @@ describe("resolveAsViewedNormalizationForSource", () => {
     expect(normalization.enabled).toBe(false);
   });
 
-  it("auto-enables for out-of-range float data unless the fixed window is pinned", () => {
+  it("auto-enables for out-of-range float data", () => {
     const source = { kind: "raster", raster: buildFloat32SingleBandRaster([-4, 12]) } as const;
     expect(
       resolveAsViewedNormalizationForSource(source, 0, DEFAULT_VIEWPORT_DISPLAY_MAPPING_STATE)
         .enabled,
     ).toBe(true);
-    expect(resolveAsViewedNormalizationForSource(source, 0, FIXED_UNIT_FLOAT_WINDOW).enabled).toBe(
-      false,
-    );
   });
 });
 
