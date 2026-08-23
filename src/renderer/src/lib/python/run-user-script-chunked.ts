@@ -73,16 +73,110 @@ export async function runUserScriptOverCubeInChunks(
   chunkBytes: number = USER_SCRIPT_RUN_CHUNK_BYTES,
   extras: UserScriptRunExtras = {},
 ): Promise<ToolboxRunUserScriptResult> {
+  const opened = await openSessionMappingTransferFailure(api, cube, source, resultKind, callbacks, chunkBytes, extras);
+  if (opened.status !== "open") return opened;
+  try {
+    return await executeSessionMappingTransferFailure(opened.session, extras.params, callbacks);
+  } finally {
+    await opened.session.release();
+  }
+}
+
+// CT-309: a retained run session. The cube (and any masks) upload ONCE at open;
+// each execute reuses the retained spool in main, so repeated runs (the ROP
+// panel's presses) never re-upload the source stack. release() drops the spool.
+export interface UserScriptRunSession {
+  execute(
+    params: Record<string, unknown> | undefined,
+    callbacks?: ChunkedUserScriptRunCallbacks,
+  ): Promise<ToolboxRunUserScriptResult>;
+  release(): Promise<void>;
+}
+
+export type UserScriptRunSessionOpenResult =
+  | { readonly status: "open"; readonly session: UserScriptRunSession }
+  | { readonly status: "canceled" }
+  | { readonly status: "failed"; readonly message: string };
+
+// Throws OperationStoppedError on an aborted upload and rethrows transport
+// errors (releasing the begun run first); callers map those like the one-shot
+// wrappers below do.
+export async function openUserScriptRunSessionOverCube(
+  api: UserScriptRunChunkedApi,
+  cube: UserScriptRunCubeInput,
+  source: ToolboxRunUserScriptSource,
+  resultKind: ToolboxRunUserScriptResultKind,
+  callbacks: ChunkedUserScriptRunCallbacks = {},
+  chunkBytes: number = USER_SCRIPT_RUN_CHUNK_BYTES,
+  extras: UserScriptRunExtras = {},
+): Promise<UserScriptRunSessionOpenResult> {
   const begun = await api.beginUserScriptRun(buildBeginRequest(cube, source, resultKind, extras));
   if (begun.status !== "ready") return begun;
   callbacks.onRunReady?.();
+  await uploadCubeAndMasksReleasingRunOnFailure(api, cube, begun.token, callbacks, chunkBytes, extras);
+  return { status: "open", session: buildOpenUserScriptRunSession(api, begun.token, begun.sourceName) };
+}
+
+async function uploadCubeAndMasksReleasingRunOnFailure(
+  api: UserScriptRunChunkedApi,
+  cube: UserScriptRunCubeInput,
+  token: string,
+  callbacks: ChunkedUserScriptRunCallbacks,
+  chunkBytes: number,
+  extras: UserScriptRunExtras,
+): Promise<void> {
   try {
-    return await transferCubeAndExecuteRun(api, cube, begun.token, begun.sourceName, callbacks, chunkBytes, extras);
+    await uploadCubeBandsInChunks(api, cube, token, chunkBytes, callbacks.onUploadProgress, callbacks.abortSignal);
+    await uploadMaskCategoryBytes(api, cube, token, extras.masks, callbacks.abortSignal);
+    callbacks.onUploadProgress?.(null);
+  } catch (error) {
+    await api.releaseUserScriptRun({ token }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function buildOpenUserScriptRunSession(
+  api: UserScriptRunChunkedApi,
+  token: string,
+  sourceName: string | null,
+): UserScriptRunSession {
+  return {
+    execute: async (params, callbacks = {}) => {
+      const executed = await executeRunKillingWorkerOnAbort(api, token, callbacks, params);
+      throwIfOperationStopped(callbacks.abortSignal);
+      return assembleExecutedRunResult(api, token, executed, sourceName);
+    },
+    release: () => api.releaseUserScriptRun({ token }).catch(() => undefined),
+  };
+}
+
+async function openSessionMappingTransferFailure(
+  api: UserScriptRunChunkedApi,
+  cube: UserScriptRunCubeInput,
+  source: ToolboxRunUserScriptSource,
+  resultKind: ToolboxRunUserScriptResultKind,
+  callbacks: ChunkedUserScriptRunCallbacks,
+  chunkBytes: number,
+  extras: UserScriptRunExtras,
+): Promise<UserScriptRunSessionOpenResult> {
+  try {
+    return await openUserScriptRunSessionOverCube(api, cube, source, resultKind, callbacks, chunkBytes, extras);
   } catch (error) {
     if (isOperationStoppedError(error)) throw error;
     return { status: "failed", message: describeUserScriptRunTransferFailure(error) };
-  } finally {
-    await api.releaseUserScriptRun({ token: begun.token }).catch(() => undefined);
+  }
+}
+
+async function executeSessionMappingTransferFailure(
+  session: UserScriptRunSession,
+  params: Record<string, unknown> | undefined,
+  callbacks: ChunkedUserScriptRunCallbacks,
+): Promise<ToolboxRunUserScriptResult> {
+  try {
+    return await session.execute(params, callbacks);
+  } catch (error) {
+    if (isOperationStoppedError(error)) throw error;
+    return { status: "failed", message: describeUserScriptRunTransferFailure(error) };
   }
 }
 
@@ -108,23 +202,6 @@ function describeCube(cube: UserScriptRunCubeInput): ToolboxUserScriptRunCubeDes
     width: cube.width,
     wavelengths: cube.wavelengths,
   };
-}
-
-async function transferCubeAndExecuteRun(
-  api: UserScriptRunChunkedApi,
-  cube: UserScriptRunCubeInput,
-  token: string,
-  sourceName: string | null,
-  callbacks: ChunkedUserScriptRunCallbacks,
-  chunkBytes: number,
-  extras: UserScriptRunExtras,
-): Promise<ToolboxRunUserScriptResult> {
-  await uploadCubeBandsInChunks(api, cube, token, chunkBytes, callbacks.onUploadProgress, callbacks.abortSignal);
-  await uploadMaskCategoryBytes(api, cube, token, extras.masks, callbacks.abortSignal);
-  callbacks.onUploadProgress?.(null);
-  const executed = await executeRunKillingWorkerOnAbort(api, token, callbacks, extras.params);
-  throwIfOperationStopped(callbacks.abortSignal);
-  return assembleExecutedRunResult(api, token, executed, sourceName);
 }
 
 // CT-307: category mask bytes follow the cube bytes on the same chunk channel;

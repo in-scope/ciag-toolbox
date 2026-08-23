@@ -38,6 +38,12 @@ import {
   NpcOptionsPanel,
   type NpcPanelTarget,
 } from "@/components/npc-options-panel";
+import {
+  RopOptionsPanel,
+  type RopPanelTarget,
+} from "@/components/rop-options-panel";
+import { keepRopCandidateAsNewStack } from "@/lib/analysis/rop-keep-flow";
+import type { RopKeepRequest } from "@/lib/actions/rop-keep-action";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
@@ -380,6 +386,7 @@ function ApplicationShell(): JSX.Element {
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [isNpcPanelOpen, setIsNpcPanelOpen] = useState(false);
+  const [isRopPanelOpen, setIsRopPanelOpen] = useState(false);
   const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
     useState<PendingOpenImagesReplace | null>(null);
   const [pendingOpenImagesReview, setPendingOpenImagesReview] =
@@ -517,7 +524,10 @@ function ApplicationShell(): JSX.Element {
     masksTool,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     openActionPanel: regionRequestHandlers.openActionPanel,
-    openNpcPanel: () => openNpcPanelClosingAnyToolPanel(regionRequestHandlers, setIsNpcPanelOpen),
+    openNpcPanel: () =>
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsNpcPanelOpen, setIsRopPanelOpen),
+    openRopPanel: () =>
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsRopPanelOpen, setIsNpcPanelOpen),
     singleSelectedSource,
     applyActionFlowBindings,
   });
@@ -612,6 +622,12 @@ function ApplicationShell(): JSX.Element {
                   )
                 }
                 onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
+                isRopPanelOpen={isRopPanelOpen}
+                ropTarget={deriveRopPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onKeepRopCandidate={(request) =>
+                  keepRopCandidateFromActivePanel(request, singleSelectedSource, applyActionFlowBindings)
+                }
+                onCloseRopPanel={() => setIsRopPanelOpen(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
@@ -714,6 +730,10 @@ interface ApplicationStageContentProps {
   npcTarget: NpcPanelTarget | null;
   onRecordNpcScore: (appliedLabel: string) => void;
   onCloseNpcPanel: () => void;
+  isRopPanelOpen: boolean;
+  ropTarget: RopPanelTarget | null;
+  onKeepRopCandidate: (request: RopKeepRequest) => void;
+  onCloseRopPanel: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
@@ -754,6 +774,15 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
         onParametersChange={props.onActiveActionParametersChange}
         onBeginRegionRequest={props.onBeginRegionRequest}
         onClearOperationRegion={props.onClearOperationRegion}
+      />
+    );
+  }
+  if (props.isRopPanelOpen) {
+    return (
+      <RopOptionsPanel
+        target={props.ropTarget}
+        onKeepCandidate={props.onKeepRopCandidate}
+        onClose={props.onCloseRopPanel}
       />
     );
   }
@@ -817,6 +846,33 @@ function deriveNpcPanelTargetOrNull(
     raster: content.source.raster,
     masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
   };
+}
+
+// CT-309: ROP reads the ACTIVE panel's cube exactly like NPC; the masks feed
+// the optional scoring objectives.
+function deriveRopPanelTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): RopPanelTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return {
+    viewportIndex: singleSelectedSource.index,
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    raster: content.source.raster,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+function keepRopCandidateFromActivePanel(
+  request: RopKeepRequest,
+  singleSelectedSource: SingleSelectedSource | null,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!singleSelectedSource) return;
+  keepRopCandidateAsNewStack(request, singleSelectedSource.index, bindings);
 }
 
 // The score is not an operation on the stack, so nothing about the panel
@@ -1006,6 +1062,7 @@ interface OperationCommandHandlerBindings {
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
   readonly openNpcPanel: () => void;
+  readonly openRopPanel: () => void;
   readonly singleSelectedSource: SingleSelectedSource | null;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
 }
@@ -1019,6 +1076,7 @@ function buildOperationCommandHandlers(
     toggleBandSubset: bindings.bandSubsetToggle.onToggle,
     openActionPanel: bindings.openActionPanel,
     openNpcPanel: bindings.openNpcPanel,
+    openRopPanel: bindings.openRopPanel,
     applyGeometricTransform: (transform) =>
       applyQuickGeometricTransformToActiveSource(
         transform,
@@ -1946,15 +2004,18 @@ interface ToolPanelRegionRequestHandlers {
   readonly clearOperationRegion: () => void;
 }
 
-// CT-308: the NPC aside and the tool-options panel compete for the same
-// right-side slot, so opening NPC from the menu closes any open operation panel
-// (and its pending region request) instead of hiding behind it.
-function openNpcPanelClosingAnyToolPanel(
+// CT-308/CT-309: the analysis asides and the tool-options panel compete for
+// the same right-side slot, so opening one from the menu closes any open
+// operation panel (and its pending region request) AND the other analysis
+// aside instead of hiding behind either.
+function openAnalysisPanelClosingCompetingPanels(
   regionRequestHandlers: ToolPanelRegionRequestHandlers,
-  setIsNpcPanelOpen: (open: boolean) => void,
+  setThisPanelOpen: (open: boolean) => void,
+  setCompetingPanelOpen: (open: boolean) => void,
 ): void {
   regionRequestHandlers.closeActionPanel();
-  setIsNpcPanelOpen(true);
+  setCompetingPanelOpen(false);
+  setThisPanelOpen(true);
 }
 
 function buildToolPanelRegionRequestHandlers(

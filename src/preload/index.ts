@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import { readMemoryBudgetOverrideBytesFromArguments } from "../shared/e2e-memory-budget-argument";
+import { readRopSeedOverrideFromArguments } from "../shared/e2e-rop-seed-argument";
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
   OPENED_IMAGE_READ_ABORT_CHANNEL,
@@ -644,6 +645,9 @@ const e2eTestBridge = {
   // CT-260: a lowered raster-memory budget (see src/shared/e2e-memory-budget-argument.ts)
   // so e2e can trigger memory refusals with tiny fixtures.
   memoryBudgetOverrideBytes: readMemoryBudgetOverrideBytesFromArguments(process.argv),
+  // CT-309: a forced ROP seed (see src/shared/e2e-rop-seed-argument.ts) so a
+  // projection press is reproducible against the pinned reference output.
+  ropForcedSeedOverride: readRopSeedOverrideFromArguments(process.argv),
 } as const;
 
 export type ToolboxE2eBridge = typeof e2eTestBridge;

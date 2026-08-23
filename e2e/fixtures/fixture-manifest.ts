@@ -98,6 +98,11 @@ export interface BuiltinScriptReferences {
   // classes share bins, so the pinned value is not the trivially separable 1.
   readonly npcCoarseBins: BuiltinScriptValueReference;
   readonly rop: BuiltinScriptCubeReference;
+  // CT-309: the CNR objective score of the pinned rop candidate against the
+  // mask fixture (text = category 1, background = category 2), computed by the
+  // generator in JS over the float32 reference values with the exact locked
+  // formula, since the app computes CNR in TS rather than in Python.
+  readonly ropCnr: BuiltinScriptValueReference;
   readonly l2Minimization: BuiltinScriptCubeReference;
   readonly localPca: BuiltinScriptCubeReference;
   readonly localMnf: BuiltinScriptCubeReference;

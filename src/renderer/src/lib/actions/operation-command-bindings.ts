@@ -1,6 +1,7 @@
 import {
   BoxSelect,
   Brush,
+  Dices,
   FlipHorizontal,
   FlipVertical,
   Gauge,
@@ -41,6 +42,7 @@ export interface OperationCommandHandlers {
   readonly toggleBandSubset: () => void;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
   readonly openNpcPanel: () => void;
+  readonly openRopPanel: () => void;
   readonly applyGeometricTransform: (transform: GeometricTransform) => void;
 }
 
@@ -67,6 +69,8 @@ function runOperationCommandBehavior(
       return openActionPanelForCommand(command, handlers);
     case "open-npc-panel":
       return handlers.openNpcPanel();
+    case "open-rop-panel":
+      return handlers.openRopPanel();
     case "apply-geometric-transform":
       return applyGeometricTransformForCommand(command, handlers);
   }
@@ -154,6 +158,11 @@ export const MASKS_TOGGLE_ICON: LucideIcon = Brush;
 // assignment for the score analysis (CT-308).
 export const NPC_PANEL_ICON: LucideIcon = Gauge;
 
+// Exported so the icon-uniqueness test, the ROP aside header, and the kept
+// projection's action share one icon assignment (CT-309); the aside and the
+// keep action are the same operation, so sharing is deliberate (CT-295 rule).
+export const ROP_PANEL_ICON: LucideIcon = Dices;
+
 const SUBSET_BANDS_UNAVAILABLE_HINT = "select a multi-band stack";
 
 export function buildToolbarOperationGroups(
@@ -188,8 +197,11 @@ function buildToolbarOperationItem(
       return buildBandSubsetToggleItem(command, context);
     case "open-action-panel":
       return buildActionItem(command, context);
-    // CT-308: NPC is menu-only, so it projects no toolbar item.
+    // CT-308/CT-309: the analysis panels are menu-only, so they project no
+    // toolbar items.
     case "open-npc-panel":
+      return null;
+    case "open-rop-panel":
       return null;
     case "apply-geometric-transform":
       return buildQuickTransformItem(command, context);

@@ -33,6 +33,7 @@ import {
   STANDARDIZE_ACTION,
   TONE_CURVE_ACTION,
 } from "./registered-actions";
+import { buildRopKeepAction } from "./rop-keep-action";
 import { SPATIAL_FILTER_ACTION } from "./spatial-filter-action";
 import { SPECTRAL_DERIVATIVE_ACTION } from "./spectral-derivative-action";
 import { THRESHOLD_ACTION } from "./threshold-action";
@@ -179,6 +180,18 @@ describe("estimateApplyAllocationBytesForAction", () => {
     expect(estimateApplyAllocationBytesForAction(FALSE_COLOR_ACTION, uint16Source(), {})).toBe(PIXELS * 4);
     const browserSource = { kind: "html-image", image: {} } as unknown as ViewportImageSource;
     expect(estimateApplyAllocationBytesForAction(FALSE_COLOR_ACTION, browserSource, {})).toBe(0);
+  });
+
+  it("bills a kept ROP projection exactly one float band at source dimensions (CT-309)", () => {
+    const keepAction = buildRopKeepAction({
+      seed: 1,
+      values: new Float32Array(PIXELS),
+      width: WIDTH,
+      height: HEIGHT,
+      score: null,
+      objectiveLabel: null,
+    });
+    expect(estimateApplyAllocationBytesForAction(keepAction, uint16Source(), {})).toBe(PIXELS * 4);
   });
 
   describe("CONCATENATE_STACKS_ACTION (CT-300)", () => {

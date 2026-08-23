@@ -514,6 +514,23 @@ export {
   NPC_PANEL_LABEL,
   setNpcBinCount,
 } from "./npc-panel";
+export {
+  chooseRopObjective,
+  pressNewProjectionUntilScoreShows,
+  pressNewProjectionUntilSeedShows,
+  ropBestScoreReadout,
+  ropCnrBackgroundCategoryPicker,
+  ropCnrTextCategoryPicker,
+  ropKeepBestButton,
+  ropKeepButton,
+  ropNewProjectionButton,
+  ropObjectivePicker,
+  ropOptionsPanel,
+  ropScoreReadout,
+  ropSeedReadout,
+  ROP_NO_CANDIDATE_TEXT,
+  ROP_PANEL_LABEL,
+} from "./rop-panel";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";
 export {

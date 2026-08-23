@@ -1170,6 +1170,17 @@
         0.008027997799217701,
         0.014012745581567287
       ]
+    },
+    "ropCnr": {
+      "script": "rop",
+      "fixture": "multiband-12bit.tif",
+      "maskFixture": "mask-multiband.png",
+      "params": {
+        "seed": 20260822,
+        "textCategory": 1,
+        "backgroundCategory": 2
+      },
+      "value": 10.73312629199899
     }
   }
 }

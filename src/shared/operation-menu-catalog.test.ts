@@ -67,6 +67,7 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
       "NPC",
       "PCA",
       "RGB Color Composite",
+      "ROP",
       "Spectral Derivative",
       "Weighted Sum",
     ]);

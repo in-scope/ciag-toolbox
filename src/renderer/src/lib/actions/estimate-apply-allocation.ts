@@ -14,6 +14,7 @@ import {
   DUPLICATE_BANDS_PARAMETER_ID_BAND_NUMBERS,
   readDuplicatedBandNumbersFromParameterValues,
 } from "@/lib/actions/duplicate-bands-action";
+import { ROP_KEEP_ACTION_ID } from "@/lib/actions/rop-keep-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
 import { readRasterReferenceTokenOrEmpty, NO_RASTER_REFERENCE_SELECTED } from "@/lib/actions/parameter-schema";
@@ -110,6 +111,10 @@ function estimateAllocationBytesForRasterApply(
   if (action.id === DUPLICATE_BANDS_ACTION_ID) {
     return estimateDuplicateBandsAllocationBytes(raster, parameterValues);
   }
+  // CT-309: a kept ROP projection is exactly one float band at source
+  // dimensions (the same as the unlisted-action default, pinned explicitly so
+  // a future default change cannot silently reprice it).
+  if (action.id === ROP_KEEP_ACTION_ID) return singleFloatBandBytes(raster);
   return singleFloatBandBytes(raster);
 }
 

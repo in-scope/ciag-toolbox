@@ -6,6 +6,7 @@ import {
   MASKS_TOGGLE_ICON,
   NPC_PANEL_ICON,
   QUICK_TRANSFORM_ICONS,
+  ROP_PANEL_ICON,
   type ToolbarOperationGroupContext,
 } from "./operation-command-bindings";
 import {
@@ -30,6 +31,9 @@ const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIc
   ["toggle-region-tool", BoxSelect],
   ["toggle-masks", MASKS_TOGGLE_ICON],
   ["npc", NPC_PANEL_ICON],
+  // CT-309: the ROP aside and the kept-projection action share this icon on
+  // purpose (same operation); the uniqueness sweep tracks it once under "rop".
+  ["rop", ROP_PANEL_ICON],
 ];
 
 function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
@@ -60,6 +64,7 @@ function buildIdleToolbarContext(): ToolbarOperationGroupContext {
       toggleBandSubset: () => {},
       openActionPanel: () => {},
       openNpcPanel: () => {},
+      openRopPanel: () => {},
       applyGeometricTransform: () => {},
     },
     getActionAvailability: () => ({ isAvailable: true }),

@@ -27,6 +27,7 @@ export type OperationCommandBehavior =
   | "toggle-subset-bands"
   | "open-action-panel"
   | "open-npc-panel"
+  | "open-rop-panel"
   | "apply-geometric-transform";
 
 export interface OperationCommand {
@@ -212,6 +213,14 @@ const ANALYSIS_GROUP: OperationGroup = {
       id: "npc",
       label: "NPC",
       behavior: "open-npc-panel",
+      showInMenu: true,
+      showInToolbar: false,
+    },
+    // CT-309: random orthogonal projections with press-to-reroll previews.
+    {
+      id: "rop",
+      label: "ROP",
+      behavior: "open-rop-panel",
       showInMenu: true,
       showInToolbar: false,
     },

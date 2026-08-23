@@ -1079,7 +1079,46 @@ function computeBuiltinScriptReferenceOutputs(fixtures) {
     references[key] = describeReferenceOutput(definition, interpreterPath);
     process.stdout.write(`pinned builtin reference ${key} (${definition.script})\n`);
   }
+  references.ropCnr = describeRopCnrReference(references.rop, fixtures.maskMultibandPng);
+  process.stdout.write(`pinned builtin reference ropCnr (computed in JS from rop)\n`);
   return references;
+}
+
+// CT-309: the app computes the CNR objective in TS (not Python), so its
+// reference is computed here the same way, over the float32 rop reference
+// values: (mean(text px) - mean(background px)) / population std(background px)
+// with ddof = 0; text = mask category 1, background = category 2.
+function describeRopCnrReference(ropReference, maskFixture) {
+  const candidate = Float32Array.from(ropReference.values);
+  const text = collectMaskCategoryValues(candidate, maskFixture.values, 1);
+  const background = collectMaskCategoryValues(candidate, maskFixture.values, 2);
+  const value =
+    (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
+  return {
+    script: "rop",
+    fixture: ropReference.fixture,
+    maskFixture: maskFixture.fileName,
+    params: { seed: ROP_REFERENCE_SEED, textCategory: 1, backgroundCategory: 2 },
+    value,
+  };
+}
+
+function collectMaskCategoryValues(candidate, maskValues, categoryIndex) {
+  const collected = [];
+  for (let index = 0; index < maskValues.length; index += 1) {
+    if (maskValues[index] === categoryIndex) collected.push(candidate[index]);
+  }
+  return collected;
+}
+
+function meanOf(values) {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function populationStandardDeviationOf(values) {
+  const mean = meanOf(values);
+  const meanSquaredDeviation = meanOf(values.map((value) => (value - mean) ** 2));
+  return Math.sqrt(meanSquaredDeviation);
 }
 
 function describeReferenceOutput(definition, interpreterPath) {
