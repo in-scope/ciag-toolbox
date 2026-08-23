@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.6.0](https://github.com/in-scope/ciag-toolbox/compare/v0.5.1...v0.6.0) (2026-08-23)
+
+
+### Features
+
+* **CT-300:** concatenate two open stacks with matching dimensions ([25443f8](https://github.com/in-scope/ciag-toolbox/commit/25443f8960f691c9deb06ce7a4588a29e86d83ad))
+* **CT-301:** duplicate selected bands inside subset bands ([e5bf94c](https://github.com/in-scope/ciag-toolbox/commit/e5bf94cdd0ef2d3e7fd7b75cc3c366bf824ef3d4))
+* **CT-302:** add mask layers and the Masks options panel ([445a71e](https://github.com/in-scope/ciag-toolbox/commit/445a71e533ead497fff43fc00cece58fe8c2352f))
+* **CT-303:** export and import mask layers as png files with a json sidecar ([25fb8ff](https://github.com/in-scope/ciag-toolbox/commit/25fb8ffb41c085ff05ffb72e01869df191c282b3))
+* **CT-304:** paint mask layers with a brush and render them as an overlay ([391844e](https://github.com/in-scope/ciag-toolbox/commit/391844e14b5533d89e5b7ed2b4ffc2ce39f737af))
+* **CT-305:** promote a threshold result to a mask category ([f59d8ba](https://github.com/in-scope/ciag-toolbox/commit/f59d8ba2eb8bec197b5b6fcf0d6c3620e430e29f))
+* **CT-306:** persist mask layers in the project bundle ([04e375c](https://github.com/in-scope/ciag-toolbox/commit/04e375c25f56811c188945c28cd3bd9cf783bbdc))
+* **CT-307:** run built-in client python algorithms with params, masks, wavelengths, and progress ([78cad5c](https://github.com/in-scope/ciag-toolbox/commit/78cad5c9627ef71bac3f504fc366c977437cd7d2))
+* **CT-308:** compute an npc score for a mask layer and record it in history ([0e44477](https://github.com/in-scope/ciag-toolbox/commit/0e444773fda6ef79a1e0d4de1cbcbc5abe693d2d))
+* **CT-309:** preview random orthogonal projections per press with keep and best-so-far ([f55f065](https://github.com/in-scope/ciag-toolbox/commit/f55f0654a6282f19f0ffa4430db48742a7005b5c))
+* **CT-310:** search many random projections in one run and keep the best ([dc308c7](https://github.com/in-scope/ciag-toolbox/commit/dc308c7bf84cde1efb837e930a65abadd9872c10))
+* **CT-311:** run local pca over the whole cube with tunable stride, kernel radius, and mean centring ([3789800](https://github.com/in-scope/ciag-toolbox/commit/3789800c252b1b64fb6ae428234f8c3563c45817))
+* **CT-312:** add local mnf, the spatially adaptive noise-fraction reduction, to multi-band ([3336d05](https://github.com/in-scope/ciag-toolbox/commit/3336d05bc700a6f6ed0707c550488c33a052bad0))
+* **CT-313:** drive the client's l2 binarization approximation from a mask layer ([6f468b2](https://github.com/in-scope/ciag-toolbox/commit/6f468b2e843b97c249e6f3b91c1eca44bda5ee26))
+* **masks:** carry mask layers through crop, rotate, and flip instead of dropping them ([6187d68](https://github.com/in-scope/ciag-toolbox/commit/6187d688b45b834effefa17f2c6108b1d9100bee))
+* **masks:** show a brush ghost outlining the stamp footprint under the cursor ([95485c9](https://github.com/in-scope/ciag-toolbox/commit/95485c94e416fb40148a92e4f9bf96a997f7c71a))
+
+
+### Bug Fixes
+
+* **branding:** use a dev-only appusermodelid so the taskbar shows the live window icon ([a0e32ca](https://github.com/in-scope/ciag-toolbox/commit/a0e32cadb4828c52e09f6bf8602c696a71980469))
+
+
+### Refactors
+
+* **viewport:** remove the fixed [0,1] float view header toggle ([6f9afad](https://github.com/in-scope/ciag-toolbox/commit/6f9afad09804e098a2565b79fdd10f970e848123))
+
 ## [0.5.1](https://github.com/in-scope/ciag-toolbox/compare/v0.5.0...v0.5.1) (2026-08-22)
 
 
