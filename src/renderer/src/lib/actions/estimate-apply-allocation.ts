@@ -16,6 +16,7 @@ import {
 } from "@/lib/actions/duplicate-bands-action";
 import { LOCAL_PCA_ACTION_ID } from "@/lib/actions/local-pca-action";
 import { LOCAL_MNF_ACTION_ID } from "@/lib/actions/local-mnf-action";
+import { L2_MINIMIZATION_ACTION_ID } from "@/lib/actions/l2-minimization-action";
 import { ROP_KEEP_ACTION_ID } from "@/lib/actions/rop-keep-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
@@ -122,6 +123,11 @@ function estimateAllocationBytesForRasterApply(
   // band by band, so no second copy of the stack lives in the renderer.
   if (action.id === LOCAL_PCA_ACTION_ID) return singleFloatBandBytes(raster);
   if (action.id === LOCAL_MNF_ACTION_ID) return singleFloatBandBytes(raster);
+  // CT-313: the L2 binarization approximation also returns exactly one float
+  // band at source dimensions; pinned explicitly for the same reason the ROP
+  // keep entry is (so a future unlisted-action default change cannot silently
+  // reprice it).
+  if (action.id === L2_MINIMIZATION_ACTION_ID) return singleFloatBandBytes(raster);
   return singleFloatBandBytes(raster);
 }
 

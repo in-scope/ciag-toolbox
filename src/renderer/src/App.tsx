@@ -2186,6 +2186,7 @@ function deriveSingleSelectedSource(
       isTrueColorComposite: readIsTrueColorPhotoFromContent(content),
       sourceWidth: content.source.kind === "raster" ? content.source.raster.width : null,
       sourceHeight: content.source.kind === "raster" ? content.source.raster.height : null,
+      maskPanelState: renderingState.masks,
     },
   };
 }

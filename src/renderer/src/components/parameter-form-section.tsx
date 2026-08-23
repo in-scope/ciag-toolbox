@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { notifyError } from "@/lib/notifications/notify";
 
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ import {
   readBandRangeTextOrEmpty,
   readClipBoundOrDefault,
   readCubeScopeChoiceOrDefault,
+  readMaskLayerIdOrEmpty,
   readRasterReferenceTokenOrEmpty,
   shouldShowCubeScopeControl,
   NO_RASTER_REFERENCE_SELECTED,
@@ -51,6 +52,7 @@ import {
   type CubeScopeParameterSchema,
   type EnumParameterSchema,
   type IntegerParameterSchema,
+  type MaskLayerParameterSchema,
   type NumberParameterSchema,
   type ParameterSchema,
   type RasterReferenceParameterSchema,
@@ -58,6 +60,10 @@ import {
   type ParameterValue,
   type ParameterValuesById,
 } from "@/lib/actions/parameter-schema";
+import { listMaskLayersQualifyingForL2 } from "@/lib/analysis/l2-minimization-qualification";
+import type { MaskLayer } from "@/lib/masks/mask-layer";
+import { EMPTY_MASK_PANEL_STATE, type MaskPanelState } from "@/lib/masks/mask-panel";
+import { syncRememberedMaskLayers } from "@/lib/masks/mask-layer-reference-store";
 
 interface ParameterFormSectionProps {
   schemas: ReadonlyArray<ParameterSchema>;
@@ -69,6 +75,7 @@ interface ParameterFormSectionProps {
   sourceHeight?: number | null;
   sourceOwnLoadedPanelToken?: string | null;
   loadedReferenceCandidates?: ReadonlyArray<LoadedReferenceCandidate>;
+  maskPanelState?: MaskPanelState | null;
 }
 
 export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Element {
@@ -87,6 +94,7 @@ export function ParameterFormSection(props: ParameterFormSectionProps): JSX.Elem
           sourceHeight={props.sourceHeight ?? null}
           sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken ?? null}
           loadedReferenceCandidates={props.loadedReferenceCandidates ?? EMPTY_REFERENCE_CANDIDATES}
+          maskPanelState={props.maskPanelState ?? null}
           onChangeValue={(next) => props.onChangeValue(schema.id, next)}
           onChangeValueAtId={props.onChangeValue}
         />
@@ -114,6 +122,7 @@ interface ParameterFieldRowProps {
   sourceHeight: number | null;
   sourceOwnLoadedPanelToken: string | null;
   loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
+  maskPanelState: MaskPanelState | null;
   onChangeValue: (next: ParameterValue) => void;
   onChangeValueAtId: (id: string, next: ParameterValue) => void;
 }
@@ -136,6 +145,7 @@ function ParameterFieldRow(props: ParameterFieldRowProps): JSX.Element | null {
         sourceHeight={props.sourceHeight}
         sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken}
         loadedReferenceCandidates={props.loadedReferenceCandidates}
+        maskPanelState={props.maskPanelState}
         onChangeValue={props.onChangeValue}
         onChangeValueAtId={props.onChangeValueAtId}
       />
@@ -200,6 +210,16 @@ function ParameterFieldInput(props: ParameterFieldRowProps): JSX.Element {
         sourceWidth={props.sourceWidth}
         sourceHeight={props.sourceHeight}
         sourceOwnLoadedPanelToken={props.sourceOwnLoadedPanelToken}
+        onChangeValue={props.onChangeValue}
+      />
+    );
+  }
+  if (props.schema.kind === "mask-layer") {
+    return (
+      <MaskLayerParameterField
+        schema={props.schema}
+        value={readMaskLayerIdOrEmpty(props.value)}
+        maskPanelState={props.maskPanelState}
         onChangeValue={props.onChangeValue}
       />
     );
@@ -710,6 +730,102 @@ function LoadedPanelReferenceMenu(props: LoadedPanelReferenceMenuProps): JSX.Ele
         {props.candidates.map((candidate) => (
           <DropdownMenuItem key={candidate.token} onSelect={() => props.onSelectToken(candidate.token)}>
             {candidate.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface MaskLayerParameterFieldProps {
+  schema: MaskLayerParameterSchema;
+  value: string;
+  maskPanelState: MaskPanelState | null;
+  onChangeValue: (next: string) => void;
+}
+
+// CT-313: L2 minimization's mask layer picker. The candidate list is the
+// panel's own qualifying layers (>= 2 painted categories, the same rule NPC
+// uses); every render syncs them into the mask-layer reference store so
+// transformSourceAsync can resolve the CHOSEN one synchronously at Apply time
+// (ParameterValuesById can only carry the layer's id, never its pixel data).
+function MaskLayerParameterField(props: MaskLayerParameterFieldProps): JSX.Element {
+  const qualifyingLayers = listMaskLayersQualifyingForL2(props.maskPanelState ?? EMPTY_MASK_PANEL_STATE);
+  useSyncQualifyingMaskLayersIntoReferenceStore(qualifyingLayers);
+  useAutoSelectDefaultMaskLayer(
+    props.value,
+    qualifyingLayers,
+    props.maskPanelState?.selectedLayerId ?? null,
+    props.onChangeValue,
+  );
+  const selectedLayer = qualifyingLayers.find((layer) => layer.id === props.value) ?? null;
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <span className="text-foreground">{props.schema.label}</span>
+      {qualifyingLayers.length === 0 ? (
+        <span className="text-xs text-muted-foreground">
+          No usable mask layer. Add one with the Masks tool and paint at least two categories.
+        </span>
+      ) : (
+        <MaskLayerReferenceMenu
+          selectedLayer={selectedLayer}
+          qualifyingLayers={qualifyingLayers}
+          onSelectLayerId={props.onChangeValue}
+        />
+      )}
+    </div>
+  );
+}
+
+function useSyncQualifyingMaskLayersIntoReferenceStore(layers: ReadonlyArray<MaskLayer>): void {
+  useEffect(() => {
+    syncRememberedMaskLayers(layers);
+  }, [layers]);
+}
+
+// The field defaults to the Masks tool's own selected layer (when it
+// qualifies) and otherwise to the first usable one, so opening the panel
+// needs no click in the common case; an explicit choice that still qualifies
+// is left alone.
+function useAutoSelectDefaultMaskLayer(
+  value: string,
+  qualifyingLayers: ReadonlyArray<MaskLayer>,
+  preferredLayerId: string | null,
+  onChangeValue: (next: string) => void,
+): void {
+  useEffect(() => {
+    if (qualifyingLayers.some((layer) => layer.id === value)) return;
+    const next = findMaskLayerById(qualifyingLayers, preferredLayerId) ?? qualifyingLayers[0] ?? null;
+    if (next && next.id !== value) onChangeValue(next.id);
+  }, [value, qualifyingLayers, preferredLayerId, onChangeValue]);
+}
+
+function findMaskLayerById(
+  layers: ReadonlyArray<MaskLayer>,
+  layerId: string | null,
+): MaskLayer | null {
+  if (layerId === null) return null;
+  return layers.find((layer) => layer.id === layerId) ?? null;
+}
+
+interface MaskLayerReferenceMenuProps {
+  selectedLayer: MaskLayer | null;
+  qualifyingLayers: ReadonlyArray<MaskLayer>;
+  onSelectLayerId: (layerId: string) => void;
+}
+
+function MaskLayerReferenceMenu(props: MaskLayerReferenceMenuProps): JSX.Element {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          {props.selectedLayer?.name ?? "Choose a mask layer..."}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {props.qualifyingLayers.map((layer) => (
+          <DropdownMenuItem key={layer.id} onSelect={() => props.onSelectLayerId(layer.id)}>
+            {layer.name}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -150,6 +150,7 @@ import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
 import { CONCATENATE_STACKS_ACTION } from "./concatenate-stacks-action";
 import { LOCAL_PCA_ACTION } from "./local-pca-action";
 import { LOCAL_MNF_ACTION } from "./local-mnf-action";
+import { L2_MINIMIZATION_ACTION } from "./l2-minimization-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -1706,4 +1707,5 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   CONCATENATE_STACKS_ACTION,
   LOCAL_PCA_ACTION,
   LOCAL_MNF_ACTION,
+  L2_MINIMIZATION_ACTION,
 ];

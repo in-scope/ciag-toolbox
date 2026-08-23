@@ -68,6 +68,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "concatenate-stacks",
       "local-pca",
       "local-mnf",
+      "l2-minimization",
     ]);
   });
 

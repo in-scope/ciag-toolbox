@@ -18,6 +18,7 @@ import {
   type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type IntegerParameterSchema,
+  type MaskLayerParameterSchema,
   type NumberParameterSchema,
   type ParameterSchema,
   type RasterReferenceParameterSchema,
@@ -318,7 +319,35 @@ describe("describeBlockingParameterErrorOrNull", () => {
     };
     expect(describeBlockingParameterErrorOrNull([schema], {}, null)).toBeNull();
   });
+
+  it("blocks a mask-layer field when no layer qualifies", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 0]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, undefined, counts)).not.toBeNull();
+  });
+
+  it("blocks a mask-layer field while layers qualify but none is chosen", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 1]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, undefined, counts)).not.toBeNull();
+  });
+
+  it("allows a mask-layer field once a qualifying layer is chosen", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 1]]);
+    const values = { [schema.id]: "mask-1" };
+    expect(describeBlockingParameterErrorOrNull([schema], values, null, undefined, counts)).toBeNull();
+  });
 });
+
+function buildMaskLayerSchema(): MaskLayerParameterSchema {
+  return {
+    kind: "mask-layer",
+    id: "l2MaskLayer",
+    label: "Mask layer",
+    defaultValue: "",
+  };
+}
 
 function buildRestrictedRasterReferenceSchema(): RasterReferenceParameterSchema {
   return {

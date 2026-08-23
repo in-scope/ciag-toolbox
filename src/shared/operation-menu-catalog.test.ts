@@ -63,6 +63,7 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
     expect(listMenuItemLabels(findMenuByLabel("Multi-band"))).toEqual([
       "Concatenate Stacks",
       "ICA",
+      "L2 Minimization",
       "Local MNF",
       "Local PCA",
       "MNF",

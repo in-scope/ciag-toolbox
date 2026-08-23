@@ -188,6 +188,8 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
     // CT-311/CT-312: spatially adaptive PCA/MNF, running the client Python built-ins.
     buildMenuOnlyActionCommand("local-pca", "Local PCA"),
     buildMenuOnlyActionCommand("local-mnf", "Local MNF"),
+    // CT-313: the client's L2 binarization approximation, driven by masks.
+    buildMenuOnlyActionCommand("l2-minimization", "L2 Minimization"),
   ],
 };
 

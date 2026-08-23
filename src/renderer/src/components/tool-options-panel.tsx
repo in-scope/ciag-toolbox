@@ -29,6 +29,8 @@ import {
   filterLoadedReferenceCandidatesByDimensions,
   type LoadedReferenceCandidate,
 } from "@/lib/image/reference-token";
+import { listMaskLayersQualifyingForL2 } from "@/lib/analysis/l2-minimization-qualification";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
 
 export interface ToolOptionsApplyOptions {
   readonly openInNewViewport: boolean;
@@ -45,6 +47,7 @@ export interface ToolOptionsSourceViewport {
   readonly isTrueColorComposite: boolean;
   readonly sourceWidth: number | null;
   readonly sourceHeight: number | null;
+  readonly maskPanelState: MaskPanelState | null;
 }
 
 interface ToolOptionsPanelProps {
@@ -235,7 +238,37 @@ function hasBlockingParameterValueError(
     loadedReferenceCandidates,
     sourceViewport,
   );
-  return describeBlockingParameterErrorOrNull(parameterSchemas, parameterValues, bandCount, qualifyingCounts) !== null;
+  const qualifyingMaskLayerCounts = buildQualifyingMaskLayerCountsById(
+    parameterSchemas,
+    sourceViewport?.maskPanelState ?? null,
+  );
+  return (
+    describeBlockingParameterErrorOrNull(
+      parameterSchemas,
+      parameterValues,
+      bandCount,
+      qualifyingCounts,
+      qualifyingMaskLayerCounts,
+    ) !== null
+  );
+}
+
+// CT-313: for each mask-layer field, count how many of the active panel's
+// mask layers actually qualify (>= 2 painted categories) - mirrors
+// buildQualifyingReferenceCandidateCountsById's shape for restricted
+// raster-reference fields.
+function buildQualifyingMaskLayerCountsById(
+  parameterSchemas: ReadonlyArray<ParameterSchema>,
+  maskPanelState: MaskPanelState | null,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  const qualifyingCount =
+    maskPanelState === null ? 0 : listMaskLayersQualifyingForL2(maskPanelState).length;
+  for (const schema of parameterSchemas) {
+    if (schema.kind !== "mask-layer") continue;
+    counts.set(schema.id, qualifyingCount);
+  }
+  return counts;
 }
 
 // CT-300: for each raster-reference field restricted to dimension-matching
@@ -379,6 +412,7 @@ function ToolOptionsPanelBody(props: PanelBodyProps): JSX.Element {
           sourceHeight={props.sourceViewport?.sourceHeight ?? null}
           sourceOwnLoadedPanelToken={resolveSourceOwnLoadedPanelTokenOrNull(props.sourceViewport)}
           loadedReferenceCandidates={props.loadedReferenceCandidates}
+          maskPanelState={props.sourceViewport?.maskPanelState ?? null}
           onChangeValue={props.onChangeParameterValue}
         />
       ) : null}

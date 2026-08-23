@@ -12,6 +12,7 @@ import {
   sumRasterBandBytes,
 } from "./estimate-apply-allocation";
 import { ICA_ACTION } from "./ica-action";
+import { L2_MINIMIZATION_ACTION } from "./l2-minimization-action";
 import {
   describeFastIcaFitSampling,
   MAX_FAST_ICA_FIT_SAMPLES,
@@ -192,6 +193,12 @@ describe("estimateApplyAllocationBytesForAction", () => {
       objectiveLabel: null,
     });
     expect(estimateApplyAllocationBytesForAction(keepAction, uint16Source(), {})).toBe(PIXELS * 4);
+  });
+
+  it("bills L2 minimization exactly one float band at source dimensions (CT-313)", () => {
+    expect(estimateApplyAllocationBytesForAction(L2_MINIMIZATION_ACTION, uint16Source(), {})).toBe(
+      PIXELS * 4,
+    );
   });
 
   describe("CONCATENATE_STACKS_ACTION (CT-300)", () => {
