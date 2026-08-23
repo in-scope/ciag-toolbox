@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  CONCATENATE_STACKS_ACTION,
+  CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID,
+} from "./concatenate-stacks-action";
 import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
 import { DENOISE_ACTION } from "./denoise-action";
 import {
@@ -8,6 +12,7 @@ import {
   sumRasterBandBytes,
 } from "./estimate-apply-allocation";
 import { ICA_ACTION } from "./ica-action";
+import { L2_MINIMIZATION_ACTION } from "./l2-minimization-action";
 import {
   describeFastIcaFitSampling,
   MAX_FAST_ICA_FIT_SAMPLES,
@@ -29,11 +34,17 @@ import {
   STANDARDIZE_ACTION,
   TONE_CURVE_ACTION,
 } from "./registered-actions";
+import { buildRopKeepAction } from "./rop-keep-action";
 import { SPATIAL_FILTER_ACTION } from "./spatial-filter-action";
 import { SPECTRAL_DERIVATIVE_ACTION } from "./spectral-derivative-action";
 import { THRESHOLD_ACTION } from "./threshold-action";
 import { TONE_CURVE_SCOPE_PARAMETER_ID, WHOLE_STACK_TONE_CURVE_SCOPE_VALUE } from "./tone-curve-scope";
 import type { RasterImage } from "@/lib/image/raster-image";
+import {
+  forgetAllReferenceRasters,
+  rememberReferenceRaster,
+} from "@/lib/image/reference-raster-store";
+import { buildLoadedPanelReferenceToken } from "@/lib/image/reference-token";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 const WIDTH = 4;
@@ -170,6 +181,54 @@ describe("estimateApplyAllocationBytesForAction", () => {
     expect(estimateApplyAllocationBytesForAction(FALSE_COLOR_ACTION, uint16Source(), {})).toBe(PIXELS * 4);
     const browserSource = { kind: "html-image", image: {} } as unknown as ViewportImageSource;
     expect(estimateApplyAllocationBytesForAction(FALSE_COLOR_ACTION, browserSource, {})).toBe(0);
+  });
+
+  it("bills a kept ROP projection exactly one float band at source dimensions (CT-309)", () => {
+    const keepAction = buildRopKeepAction({
+      seed: 1,
+      values: new Float32Array(PIXELS),
+      width: WIDTH,
+      height: HEIGHT,
+      score: null,
+      objectiveLabel: null,
+    });
+    expect(estimateApplyAllocationBytesForAction(keepAction, uint16Source(), {})).toBe(PIXELS * 4);
+  });
+
+  it("bills L2 minimization exactly one float band at source dimensions (CT-313)", () => {
+    expect(estimateApplyAllocationBytesForAction(L2_MINIMIZATION_ACTION, uint16Source(), {})).toBe(
+      PIXELS * 4,
+    );
+  });
+
+  describe("CONCATENATE_STACKS_ACTION (CT-300)", () => {
+    afterEach(() => {
+      forgetAllReferenceRasters();
+    });
+
+    it("falls back to the active stack's own bytes before a second stack is chosen", () => {
+      expect(estimateApplyAllocationBytesForAction(CONCATENATE_STACKS_ACTION, uint16Source(), {})).toBe(
+        UINT16_CUBE_BYTES,
+      );
+    });
+
+    it("bills pixelCount x total band count x the widened type's byte width once a second stack resolves", () => {
+      const token = buildLoadedPanelReferenceToken(2, "ir.tif");
+      const secondRaster: RasterImage = {
+        bandPixels: [new Uint8Array(PIXELS)],
+        width: WIDTH,
+        height: HEIGHT,
+        bitsPerSample: 8,
+        sampleFormat: "uint",
+        bandCount: 1,
+      };
+      rememberReferenceRaster(token, secondRaster);
+      const bytes = estimateApplyAllocationBytesForAction(CONCATENATE_STACKS_ACTION, uint16Source(), {
+        [CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID]: token,
+      });
+      // uint8 + uint16 widens to uint16 (2 bytes); total bands = 5 + 1.
+      expect(bytes).toBe(PIXELS * (BAND_COUNT + 1) * 2);
+    });
   });
 });
 

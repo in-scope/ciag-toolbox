@@ -15,9 +15,18 @@ export function buildUserScriptRunCubeInputFromRaster(raster: RasterImage): User
     bandCount: raster.bandCount,
     height: raster.height,
     width: raster.width,
-    wavelengths: null,
+    wavelengths: listRasterBandWavelengthsOrNull(raster),
     getBandAsFloat32: (bandIndex) => rasterBandAsFloat32(raster, bandIndex),
   };
+}
+
+// CT-307: band wavelengths reach the script when the stack carries a full
+// per-band set; a partial or absent set stays null, matching the scripting
+// doc's "wavelengths ... is None otherwise" contract.
+function listRasterBandWavelengthsOrNull(raster: RasterImage): number[] | null {
+  const wavelengths = raster.bandWavelengths;
+  if (wavelengths === undefined || wavelengths.length !== raster.bandCount) return null;
+  return [...wavelengths];
 }
 
 function rasterBandAsFloat32(raster: RasterImage, bandIndex: number): Float32Array {

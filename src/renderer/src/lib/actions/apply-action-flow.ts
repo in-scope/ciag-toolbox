@@ -30,7 +30,14 @@ import {
 } from "@/lib/image/operation-stop";
 import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 import { toast } from "sonner";
-import type { ViewportImageSource } from "@/lib/webgl/texture";
+import { getImageSourceDimensions, type ViewportImageSource } from "@/lib/webgl/texture";
+import {
+  MASKS_REMOVED_BY_GEOMETRY_CHANGE_MESSAGE,
+  wereMasksDroppedByGeometryChange,
+  type StackGeometryComparison,
+} from "@/lib/masks/mask-geometry-change";
+import { carryMasksAcrossStackGeometryChange } from "@/lib/masks/mask-geometry-transform";
+import { EMPTY_MASK_PANEL_STATE } from "@/lib/masks/mask-panel";
 import { getNextLargerGridLayout, type GridLayout } from "@/lib/grid/grid-layout";
 import { findLowestIndexEmptyViewport } from "@/lib/image/find-empty-viewport";
 import {
@@ -257,9 +264,10 @@ async function transformSourceInPlaceAndFinishBookkeeping(
 ): Promise<void> {
   const content = bindings.imagesByIndex.get(sourceIndex);
   if (!content) throw new Error(`No source loaded at viewport index ${sourceIndex}`);
-  await replaceSourceContentWithTransformedSource(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
+  const nextSource = await replaceSourceContentWithTransformedSource(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
   const currentIndex = reservation.currentSourceIndex();
-  writeAppliedRenderingStateInheritingFromSource(action, parameterValues, currentIndex, currentIndex, bindings);
+  const geometry = { previousSource: content.source, nextSource };
+  writeAppliedRenderingStateForInPlaceResult(action, parameterValues, currentIndex, geometry, bindings);
   placeSecondaryActionOutputsInFreshViewports(action, parameterValues, content, currentIndex, currentIndex, bindings);
 }
 
@@ -280,11 +288,11 @@ async function replaceSourceContentWithTransformedSource(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
   abortSignal?: AbortSignal,
-): Promise<void> {
-  if (!actionTransformsSource(action)) return;
+): Promise<ViewportImageSource | null> {
+  if (!actionTransformsSource(action)) return null;
   const releaseSourceHold = holdSourceBuffersWhileInUse(content.source);
   try {
-    await transformAndReplaceHeldSourceContent(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
+    return await transformAndReplaceHeldSourceContent(action, parameterValues, content, reservation, bindings, busyHandle, abortSignal);
   } finally {
     releaseSourceHold();
   }
@@ -298,7 +306,7 @@ async function transformAndReplaceHeldSourceContent(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
   abortSignal?: AbortSignal,
-): Promise<void> {
+): Promise<ViewportImageSource> {
   const nextSource = await runActionSourceTransform(
     action,
     content.source,
@@ -312,6 +320,7 @@ async function transformAndReplaceHeldSourceContent(
     writeViewportContentAtIndex(previous, writeIndex, { ...content, source: nextSource }),
   );
   queueOutgoingRasterSourceForBufferRelease(content.source);
+  return nextSource;
 }
 
 // CT-221: async transforms report per-band progress; forwarding it to the busy
@@ -334,6 +343,87 @@ function writeAppliedRenderingStateInheritingFromSource(
     targetIndex,
     applyActionAndTagOperationLabel(action, parameterValues, inherited),
   );
+}
+
+// CT-302: a result delivered to ANOTHER panel never carries the source panel's
+// mask layers; the masks stay with the stack they were painted on.
+function writeAppliedRenderingStateForResultInAnotherPanel(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  sourceIndex: number,
+  targetIndex: number,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const inherited = withoutMaskLayers(bindings.getRenderingState(sourceIndex));
+  bindings.setRenderingState(
+    targetIndex,
+    applyActionAndTagOperationLabel(action, parameterValues, inherited),
+  );
+}
+
+function withoutMaskLayers(state: ViewportRenderingState): ViewportRenderingState {
+  return { ...state, masks: EMPTY_MASK_PANEL_STATE };
+}
+
+interface InPlaceResultGeometry {
+  readonly previousSource: ViewportImageSource;
+  readonly nextSource: ViewportImageSource | null;
+}
+
+// CT-302: masks are pinned to the panel's spatial grid, so an in-place apply
+// that moved or resized the stack carries them through the action's own
+// spatial mapping (crop crops them, rotate rotates them, flip flips them);
+// only a geometry change with no mapping drops them, and says so.
+function writeAppliedRenderingStateForInPlaceResult(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  index: number,
+  geometry: InPlaceResultGeometry,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const inherited = bindings.getRenderingState(index);
+  const reconciled = withMasksCarriedAcrossGeometryChange(action, parameterValues, inherited, geometry);
+  notifyWhenGeometryChangeRemovedMasks(inherited, reconciled);
+  bindings.setRenderingState(
+    index,
+    applyActionAndTagOperationLabel(action, parameterValues, reconciled),
+  );
+}
+
+function withMasksCarriedAcrossGeometryChange(
+  action: RegisteredViewportAction,
+  parameterValues: ParameterValuesById,
+  state: ViewportRenderingState,
+  geometry: InPlaceResultGeometry,
+): ViewportRenderingState {
+  if (!geometry.nextSource) return state;
+  const comparison = compareStackGeometryAcrossApply(action, geometry.previousSource, geometry.nextSource);
+  const transform = action.describeMaskGeometryTransform?.(parameterValues) ?? null;
+  return { ...state, masks: carryMasksAcrossStackGeometryChange(state.masks, comparison, transform) };
+}
+
+function compareStackGeometryAcrossApply(
+  action: RegisteredViewportAction,
+  previousSource: ViewportImageSource,
+  nextSource: ViewportImageSource,
+): StackGeometryComparison {
+  const previous = getImageSourceDimensions(previousSource);
+  const next = getImageSourceDimensions(nextSource);
+  return {
+    actionChangesStackGeometry: Boolean(action.changesStackGeometry),
+    previousWidth: previous.width,
+    previousHeight: previous.height,
+    nextWidth: next.width,
+    nextHeight: next.height,
+  };
+}
+
+function notifyWhenGeometryChangeRemovedMasks(
+  previous: ViewportRenderingState,
+  next: ViewportRenderingState,
+): void {
+  if (!wereMasksDroppedByGeometryChange(previous.masks, next.masks)) return;
+  toast.info(MASKS_REMOVED_BY_GEOMETRY_CHANGE_MESSAGE);
 }
 
 // CT-097: after the primary result lands, place each secondary output (e.g. the
@@ -417,7 +507,7 @@ function writeAppliedRenderingStateWithExplicitLabel(
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
 ): void {
-  const inherited = bindings.getRenderingState(sourceIndex);
+  const inherited = withoutMaskLayers(bindings.getRenderingState(sourceIndex));
   bindings.setRenderingState(
     targetIndex,
     applyActionAndTagWithExplicitLabel(action, parameterValues, appliedLabel, inherited),
@@ -597,7 +687,7 @@ function finishDuplicateApplyBookkeeping(
 ): void {
   const sourceIndex = reservation.currentSourceIndex();
   const targetIndex = reservation.currentTargetIndex();
-  writeAppliedRenderingStateInheritingFromSource(action, parameterValues, sourceIndex, targetIndex, bindings);
+  writeAppliedRenderingStateForResultInAnotherPanel(action, parameterValues, sourceIndex, targetIndex, bindings);
   clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
   placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, targetIndex, bindings);
   selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);

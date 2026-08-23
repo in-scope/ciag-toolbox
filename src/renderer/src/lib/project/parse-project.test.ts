@@ -132,6 +132,116 @@ describe("parseProjectFileFromJsonString", () => {
   });
 });
 
+// CT-306: version 3 added mask layers. Version 2 stays readable and simply has
+// no masks, so a project saved before this story opens exactly as before.
+describe("parseProjectFileFromJsonString mask layers", () => {
+  it("accepts a version 2 bundle and reads it with no mask layers", () => {
+    const project = parseProjectFileFromJsonString(buildProjectJsonAtVersion(2, {}));
+    expect(project.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
+    expect(project.viewports[0]?.masks).toEqual([]);
+    expect(project.viewports[0]?.selectedMaskIndex).toBeNull();
+  });
+
+  it("parses a version 3 mask layer with its asset path, categories, and opacity", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonAtVersion(3, { masks: [buildManifestMaskLayer()], selectedMaskIndex: 0 }),
+    );
+    expect(project.viewports[0]?.masks).toEqual([
+      {
+        name: "Parchment mask",
+        relativePath: "assets/viewport-0-mask-0.png",
+        width: 4,
+        height: 4,
+        categories: [
+          { name: "Parchment", color: "#ef4444" },
+          { name: "Substrate", color: "#3b82f6" },
+        ],
+        opacityPercent: 60,
+      },
+    ]);
+    expect(project.viewports[0]?.selectedMaskIndex).toBe(0);
+  });
+
+  it("drops a selected mask position that no mask layer occupies", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonAtVersion(3, { masks: [buildManifestMaskLayer()], selectedMaskIndex: 7 }),
+    );
+    expect(project.viewports[0]?.selectedMaskIndex).toBeNull();
+  });
+
+  it("defaults a missing mask opacity rather than failing the open", () => {
+    const project = parseProjectFileFromJsonString(
+      buildProjectJsonAtVersion(3, { masks: [buildMaskLayerWithout("opacityPercent")] }),
+    );
+    expect(project.viewports[0]?.masks[0]?.opacityPercent).toBe(50);
+  });
+
+  it("rejects a mask layer with no asset path", () => {
+    expect(() =>
+      parseProjectFileFromJsonString(
+        buildProjectJsonAtVersion(3, { masks: [buildMaskLayerWithout("relativePath")] }),
+      ),
+    ).toThrow(/masks\.relativePath must be a non-empty string/);
+  });
+
+  it("rejects a mask layer with no categories", () => {
+    expect(() =>
+      parseProjectFileFromJsonString(
+        buildProjectJsonAtVersion(3, {
+          masks: [{ ...buildManifestMaskLayer(), categories: [] }],
+        }),
+      ),
+    ).toThrow(/masks\.categories must be a non-empty array/);
+  });
+});
+
+function buildMaskLayerWithout(
+  droppedField: keyof ReturnType<typeof buildManifestMaskLayer>,
+): Record<string, unknown> {
+  const layer: Record<string, unknown> = { ...buildManifestMaskLayer() };
+  delete layer[droppedField];
+  return layer;
+}
+
+function buildManifestMaskLayer() {
+  return {
+    name: "Parchment mask",
+    relativePath: "assets/viewport-0-mask-0.png",
+    width: 4,
+    height: 4,
+    categories: [
+      { name: "Parchment", color: "#ef4444" },
+      { name: "Substrate", color: "#3b82f6" },
+    ],
+    opacityPercent: 60,
+  };
+}
+
+function buildProjectJsonAtVersion(
+  formatVersion: number,
+  viewportFields: Record<string, unknown>,
+): string {
+  return JSON.stringify({
+    formatVersion,
+    gridLayout: "1x1",
+    selectedViewportIndices: [0],
+    viewports: [
+      {
+        index: 0,
+        source: { relativePath: "assets/viewport-0.tif", fileName: "sample.tif" },
+        renderingState: {
+          normalizationEnabled: false,
+          selectedBandIndex: 0,
+          lastAppliedOperationLabel: null,
+        },
+        operationHistory: [],
+        roi: null,
+        ...viewportFields,
+      },
+    ],
+  });
+}
+
 function buildProjectJsonWithSingleHistoryEntry(): string {
   return JSON.stringify({
     formatVersion: PROJECT_FILE_FORMAT_VERSION,

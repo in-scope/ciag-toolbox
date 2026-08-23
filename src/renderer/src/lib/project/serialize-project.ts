@@ -5,8 +5,14 @@ import {
 } from "@/lib/image/encode-bundle-asset";
 import type { RasterColorInterpretation } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
+import { EMPTY_MASK_PANEL_STATE, type MaskPanelState } from "@/lib/masks/mask-panel";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
+import {
+  planMaskBundleAssetsForPanel,
+  type DraftBundleMaskLayer,
+} from "./plan-mask-bundle-assets";
+import { findSelectedMaskLayerPositionOrNull } from "./project-mask-layers";
 import {
   IDENTITY_PROJECT_VIEWPORT_VIEW_TRANSFORM,
   PROJECT_FILE_FORMAT_VERSION,
@@ -39,6 +45,8 @@ export interface DraftBundleViewportEntry {
   readonly renderingState: ProjectViewportRenderingState;
   readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
   readonly colorInterpretation?: RasterColorInterpretation;
+  readonly masks: ReadonlyArray<DraftBundleMaskLayer>;
+  readonly selectedMaskIndex: number | null;
 }
 
 export interface DraftBundleFile {
@@ -55,6 +63,9 @@ export interface SaveableViewportSnapshot {
   readonly originalFilePath: string | null;
   readonly renderingState: ProjectViewportRenderingState;
   readonly operationHistory: ReadonlyArray<ProjectOperationHistoryEntry>;
+  // CT-306: the panel's mask layers, absent for a snapshot taken before masks
+  // existed and empty for a panel the user never annotated.
+  readonly masks?: MaskPanelState;
 }
 
 export interface SaveableProjectSnapshot {
@@ -63,20 +74,25 @@ export interface SaveableProjectSnapshot {
   readonly viewports: ReadonlyArray<SaveableViewportSnapshot>;
 }
 
-export function buildDraftBundleFromSnapshot(
+export async function buildDraftBundleFromSnapshot(
   snapshot: SaveableProjectSnapshot,
-): DraftBundleFile {
+): Promise<DraftBundleFile> {
   return {
     formatVersion: PROJECT_FILE_FORMAT_VERSION,
     gridLayout: snapshot.gridLayout,
     selectedViewportIndices: [...snapshot.selectedViewportIndices].sort((a, b) => a - b),
-    viewports: snapshot.viewports.map(buildDraftBundleViewportEntryOrThrow),
+    viewports: await Promise.all(
+      snapshot.viewports.map(buildDraftBundleViewportEntryOrThrow),
+    ),
   };
 }
 
-export function buildDraftBundleViewportEntryOrThrow(
+// CT-306: async only because a mask layer's PNG is encoded here (see
+// plan-mask-bundle-assets.ts); the stack asset itself is still plan-only.
+export async function buildDraftBundleViewportEntryOrThrow(
   viewport: SaveableViewportSnapshot,
-): DraftBundleViewportEntry {
+): Promise<DraftBundleViewportEntry> {
+  const masks = viewport.masks ?? EMPTY_MASK_PANEL_STATE;
   return {
     index: viewport.index,
     fileName: viewport.fileName,
@@ -84,6 +100,8 @@ export function buildDraftBundleViewportEntryOrThrow(
     renderingState: viewport.renderingState,
     operationHistory: viewport.operationHistory,
     colorInterpretation: readPersistableColorInterpretationFromSource(viewport.source),
+    masks: await planMaskBundleAssetsForPanel(masks),
+    selectedMaskIndex: findSelectedMaskLayerPositionOrNull(masks),
   };
 }
 

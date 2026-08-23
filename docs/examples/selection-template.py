@@ -1,4 +1,4 @@
-# Band selection template for MSI Toolbox.
+# Band selection template for CHARM Toolbox.
 #
 # The toolbox calls run(cube, wavelengths=None):
 #   cube        - numpy array of shape (bands, height, width); cube[k] is band k

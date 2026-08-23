@@ -8,6 +8,7 @@ import {
   type WindowBounds,
 } from "./window-state";
 import { registerAppInfoIpcHandler } from "./app-info";
+import { chooseAppUserModelIdForTaskbarGrouping } from "./app-user-model-id";
 import {
   E2E_TEST_MODE_PRELOAD_ARGUMENT,
   isE2eTestModeEnabled,
@@ -17,6 +18,11 @@ import {
   buildMemoryBudgetPreloadArgumentOrNull,
   E2E_MEMORY_BUDGET_ENVIRONMENT_VARIABLE,
 } from "../shared/e2e-memory-budget-argument";
+import {
+  buildRopSeedPreloadArgumentOrNull,
+  E2E_ROP_SEED_ENVIRONMENT_VARIABLE,
+} from "../shared/e2e-rop-seed-argument";
+import { registerMaskImportDialogIpcHandler } from "./mask-import-dialog";
 import { registerOpenBundleDialogIpcHandlers } from "./open-bundle-dialog";
 import { registerOpenImageDialogIpcHandler } from "./open-image-dialog";
 import { registerChunkedOpenedImageReadIpcHandlers } from "./chunked-opened-image-read-ipc";
@@ -69,7 +75,9 @@ function resolveDevelopmentModeWindowIconPath(): string | undefined {
 
 function setWindowsAppUserModelIdForTaskbarGrouping(): void {
   if (process.platform !== "win32") return;
-  app.setAppUserModelId("sh.inscope.ciag.toolbox");
+  app.setAppUserModelId(
+    chooseAppUserModelIdForTaskbarGrouping(isRunningInDevelopment()),
+  );
 }
 
 function loadRendererIntoWindow(window: BrowserWindow): void {
@@ -111,7 +119,21 @@ function buildBrowserWindowOptionsFrom(
 
 function buildPreloadAdditionalArguments(): string[] {
   if (!isE2eTestModeEnabled()) return [];
-  return [E2E_TEST_MODE_PRELOAD_ARGUMENT, ...listMemoryBudgetOverrideArguments()];
+  return [
+    E2E_TEST_MODE_PRELOAD_ARGUMENT,
+    ...listMemoryBudgetOverrideArguments(),
+    ...listRopSeedOverrideArguments(),
+  ];
+}
+
+// CT-309 e2e test surface: forward a forced ROP seed into the preload so a
+// "New projection" press is reproducible against the pinned reference output.
+// Only ever reached under MSI_E2E, so production launches carry no override.
+function listRopSeedOverrideArguments(): string[] {
+  const argument = buildRopSeedPreloadArgumentOrNull(
+    process.env[E2E_ROP_SEED_ENVIRONMENT_VARIABLE],
+  );
+  return argument === null ? [] : [argument];
 }
 
 // CT-260 e2e test surface: forward a lowered raster-memory budget into the
@@ -201,6 +223,7 @@ app.whenReady().then(() => {
   registerChunkedOpenedImageReadIpcHandlers();
   registerChunkedPng16DecodeIpcHandlers();
   registerSaveImageDialogIpcHandlers();
+  registerMaskImportDialogIpcHandler();
   registerOpenBundleDialogIpcHandlers();
   registerSaveBundleDialogIpcHandlers();
   registerConfirmCloseIpcHandler();

@@ -3,13 +3,22 @@ import { open, unlink, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { BundleDraft, BundleDraftAsset, BundleDraftViewportEntry } from "./bundle-writer";
 import type {
-  SaveBundleAssetPart,
-  SaveBundleBakedPartDescriptor,
-  SaveBundleDraftHeader,
-  SaveBundleViewportHeaderEntry,
+  BundleDraft,
+  BundleDraftAsset,
+  BundleDraftMaskAsset,
+  BundleDraftViewportEntry,
+} from "./bundle-writer";
+import {
+  buildMaskAssetPartKey,
+  type SaveBundleAssetPart,
+  type SaveBundleBakedPartDescriptor,
+  type SaveBundleDraftHeader,
+  type SaveBundleMaskLayerDescriptor,
+  type SaveBundleViewportHeaderEntry,
 } from "../shared/chunked-save-bundle-protocol";
+
+const MASK_ASSET_EXTENSION = "png";
 
 // CT-219e: electron-free session bookkeeping for the chunked project-save
 // protocol (see src/shared/chunked-save-bundle-protocol.ts for why the old
@@ -96,7 +105,15 @@ async function openSpoolFilesForBakedParts(
   return parts;
 }
 
+// CT-306: a viewport spools its stack parts (when baked) AND one part per mask
+// layer, so a panel whose stack streams from disk unchanged still spools masks.
 function listBakedPartDescriptors(
+  viewport: SaveBundleViewportHeaderEntry,
+): ReadonlyArray<[SaveBundleAssetPart, SaveBundleBakedPartDescriptor]> {
+  return [...listStackPartDescriptors(viewport), ...listMaskPartDescriptors(viewport)];
+}
+
+function listStackPartDescriptors(
   viewport: SaveBundleViewportHeaderEntry,
 ): ReadonlyArray<[SaveBundleAssetPart, SaveBundleBakedPartDescriptor]> {
   if (viewport.asset.kind !== "baked") return [];
@@ -105,6 +122,18 @@ function listBakedPartDescriptors(
   ];
   if (viewport.asset.sidecar) parts.push(["sidecar", assertValidPartDescriptor(viewport.asset.sidecar)]);
   return parts;
+}
+
+function listMaskPartDescriptors(
+  viewport: SaveBundleViewportHeaderEntry,
+): ReadonlyArray<[SaveBundleAssetPart, SaveBundleBakedPartDescriptor]> {
+  return (viewport.masks ?? []).map((mask, position) => [
+    buildMaskAssetPartKey(position),
+    assertValidPartDescriptor({
+      extension: MASK_ASSET_EXTENSION,
+      byteLength: mask.byteLength,
+    }),
+  ]);
 }
 
 function assertValidPartDescriptor(
@@ -258,7 +287,34 @@ function buildWriterViewportEntry(
     asset: buildWriterAssetForViewport(session, viewport),
     renderingState: viewport.renderingState,
     operationHistory: viewport.operationHistory,
+    masks: buildWriterMaskAssets(session, viewport),
+    selectedMaskIndex: viewport.selectedMaskIndex ?? null,
     ...(viewport.colorInterpretation ? { colorInterpretation: viewport.colorInterpretation } : {}),
+  };
+}
+
+function buildWriterMaskAssets(
+  session: SaveBundleSession,
+  viewport: SaveBundleViewportHeaderEntry,
+): ReadonlyArray<BundleDraftMaskAsset> {
+  return (viewport.masks ?? []).map((mask, position) =>
+    buildWriterMaskAssetAtPosition(session, viewport.index, mask, position),
+  );
+}
+
+function buildWriterMaskAssetAtPosition(
+  session: SaveBundleSession,
+  viewportIndex: number,
+  mask: SaveBundleMaskLayerDescriptor,
+  position: number,
+): BundleDraftMaskAsset {
+  return {
+    absolutePath: spoolPathOrThrow(session, viewportIndex, buildMaskAssetPartKey(position)),
+    name: mask.name,
+    width: mask.width,
+    height: mask.height,
+    categories: mask.categories,
+    opacityPercent: mask.opacityPercent,
   };
 }
 

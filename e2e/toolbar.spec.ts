@@ -30,6 +30,7 @@ const EXPECTED_TOOLBAR_BUTTON_LABELS = [
   "Grid layout",
   "Select Region",
   "Subset Bands",
+  "Masks",
   "Crop to Region",
   "Rotate 90° clockwise",
   "Rotate 90° counterclockwise",

@@ -1,10 +1,14 @@
 import { SELECTABLE_GRID_LAYOUTS, type GridLayout } from "@/lib/grid/grid-layout";
 import type { RasterColorInterpretation } from "@/lib/image/raster-image";
+import { DEFAULT_MASK_LAYER_OPACITY_PERCENT as DEFAULT_MASK_OPACITY_PERCENT } from "@/lib/masks/mask-layer";
 
 import {
   IDENTITY_PROJECT_VIEWPORT_VIEW_TRANSFORM,
   PROJECT_FILE_FORMAT_VERSION,
+  SUPPORTED_PROJECT_FILE_FORMAT_VERSIONS,
   type ProjectFile,
+  type ProjectMaskCategory,
+  type ProjectMaskLayer,
   type ProjectOperationHistoryEntry,
   type ProjectOperationHistoryParameterValue,
   type ProjectOperationHistoryParameterValuesById,
@@ -30,10 +34,13 @@ function validateParsedRootIsProjectFile(value: unknown): ProjectFile {
   };
 }
 
+// A supported older bundle is read into the CURRENT in-memory shape (missing
+// fields take their defaults), so nothing downstream branches on the version.
 function ensureFormatVersionIsSupported(value: unknown): void {
-  if (value !== PROJECT_FILE_FORMAT_VERSION) {
+  if (typeof value !== "number" || !SUPPORTED_PROJECT_FILE_FORMAT_VERSIONS.includes(value)) {
     throw new Error(
-      `Unsupported project file format version: ${String(value)} (expected ${PROJECT_FILE_FORMAT_VERSION})`,
+      `Unsupported project file format version: ${String(value)} ` +
+        `(expected one of ${SUPPORTED_PROJECT_FILE_FORMAT_VERSIONS.join(", ")})`,
     );
   }
 }
@@ -65,6 +72,7 @@ function parseViewportsOrThrow(value: unknown): ReadonlyArray<ProjectViewportEnt
 
 function parseViewportEntryOrThrow(value: unknown): ProjectViewportEntry {
   const entry = expectRecordOrThrow(value, "viewport entry");
+  const masks = parseMaskLayersOrEmpty(entry["masks"]);
   return {
     index: expectFiniteNonNegativeIntegerOrThrow(entry["index"]),
     source: parseSourceReferenceOrThrow(entry["source"]),
@@ -72,8 +80,61 @@ function parseViewportEntryOrThrow(value: unknown): ProjectViewportEntry {
     viewTransform: parseViewTransformOrIdentity(entry["viewTransform"]),
     operationHistory: parseOperationHistoryOrEmpty(entry["operationHistory"]),
     roi: null,
+    masks,
+    selectedMaskIndex: parseSelectedMaskIndexOrNull(entry["selectedMaskIndex"], masks.length),
     ...parseColorInterpretationFieldOrOmit(entry["colorInterpretation"]),
   };
+}
+
+// CT-306: a version 2 entry has no masks key at all, which reads as "this panel
+// was never annotated" rather than as a malformed bundle.
+function parseMaskLayersOrEmpty(value: unknown): ReadonlyArray<ProjectMaskLayer> {
+  if (!Array.isArray(value)) return [];
+  return value.map(parseMaskLayerOrThrow);
+}
+
+function parseMaskLayerOrThrow(value: unknown): ProjectMaskLayer {
+  const layer = expectRecordOrThrow(value, "mask layer");
+  return {
+    name: expectNonEmptyStringOrThrow(layer["name"], "masks.name"),
+    relativePath: expectNonEmptyStringOrThrow(layer["relativePath"], "masks.relativePath"),
+    width: expectPositiveIntegerOrThrow(layer["width"], "masks.width"),
+    height: expectPositiveIntegerOrThrow(layer["height"], "masks.height"),
+    categories: parseMaskCategoriesOrThrow(layer["categories"]),
+    opacityPercent: parseOpacityPercentOrDefault(layer["opacityPercent"]),
+  };
+}
+
+function parseMaskCategoriesOrThrow(value: unknown): ReadonlyArray<ProjectMaskCategory> {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("masks.categories must be a non-empty array");
+  }
+  return value.map(parseMaskCategoryOrThrow);
+}
+
+function parseMaskCategoryOrThrow(value: unknown): ProjectMaskCategory {
+  const category = expectRecordOrThrow(value, "mask category");
+  return {
+    name: expectNonEmptyStringOrThrow(category["name"], "masks.categories.name"),
+    color: expectNonEmptyStringOrThrow(category["color"], "masks.categories.color"),
+  };
+}
+
+function parseSelectedMaskIndexOrNull(value: unknown, maskCount: number): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= 0 && value < maskCount ? value : null;
+}
+
+function parseOpacityPercentOrDefault(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_MASK_OPACITY_PERCENT;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function expectPositiveIntegerOrThrow(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return value;
 }
 
 // CT-174: only the "rgb" tag is recognised; anything else (or its absence) leaves

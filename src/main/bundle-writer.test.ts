@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  planBundleAssetRelativePathsForViewports,
   writeProjectBundleAtPath,
   type BundleDraft,
   type BundleDraftViewportEntry,
@@ -264,3 +265,133 @@ describe("writeProjectBundleAtPath round-trip", () => {
     }
   });
 });
+
+// CT-306: a viewport's assets are no longer "one primary plus at most one
+// sidecar" - it also carries one PNG per mask layer, so the path planner has to
+// name an open-ended list of assets under the same viewport stem.
+describe("planBundleAssetRelativePathsForViewports with mask layers", () => {
+  it("names one mask asset per layer under the viewport's stem", () => {
+    const viewport = withMaskLayers(
+      buildExternalAssetViewport(2, "photo.png", "/abs/photo.png"),
+      ["Mask 1", "Mask 2"],
+    );
+    const [paths] = planBundleAssetRelativePathsForViewports([viewport]);
+    expect(paths?.primaryRelativePath).toBe("assets/viewport-2.png");
+    expect(paths?.maskRelativePaths).toEqual([
+      "assets/viewport-2-mask-0.png",
+      "assets/viewport-2-mask-1.png",
+    ]);
+  });
+
+  it("plans no mask assets for a viewport that was never annotated", () => {
+    const viewport = buildExternalAssetViewport(0, "photo.png", "/abs/photo.png");
+    const [paths] = planBundleAssetRelativePathsForViewports([viewport]);
+    expect(paths?.maskRelativePaths).toEqual([]);
+  });
+
+  it("keeps mask paths clear of the ENVI .bin sidecar sharing the same stem", () => {
+    const viewport = withMaskLayers(
+      buildExternalAssetViewport(0, "scene.hdr", "/abs/scene.hdr"),
+      ["Mask 1"],
+    );
+    const [paths] = planBundleAssetRelativePathsForViewports([viewport]);
+    expect(paths?.sidecarRelativePath).toBe("assets/viewport-0.bin");
+    expect(paths?.maskRelativePaths).toEqual(["assets/viewport-0-mask-0.png"]);
+  });
+});
+
+describe("writeProjectBundleAtPath with mask layers", () => {
+  it("writes each mask PNG into assets and records it in the manifest", async () => {
+    const maskBytes = new TextEncoder().encode("fake-mask-png");
+    const maskSpool = await writeSpoolPartFixture("mask-0.png", maskBytes);
+    const source = await writeExternalSourceFixture("masked.png", "with-mask");
+    const draft = buildDraftFromViewports([
+      {
+        ...buildExternalAssetViewport(0, "masked.png", source.absolutePath),
+        masks: [
+          {
+            absolutePath: maskSpool,
+            name: "Parchment mask",
+            width: 4,
+            height: 4,
+            categories: [{ name: "Parchment", color: "#ef4444" }],
+            opacityPercent: 60,
+          },
+        ],
+        selectedMaskIndex: 0,
+      },
+    ]);
+    const bundlePath = join(workspaceDir, "masked.ctbundle");
+    await writeProjectBundleAtPath(bundlePath, draft);
+    const extractedDir = await extractProjectBundleToFreshTempDirectory(bundlePath);
+    try {
+      const maskBack = await readFile(join(extractedDir, "assets", "viewport-0-mask-0.png"));
+      expect(new Uint8Array(maskBack)).toEqual(maskBytes);
+      const manifest = await readManifestFromExtractedBundle(extractedDir);
+      expect(manifest.formatVersion).toBe(3);
+      expect(manifest.viewports[0]!.selectedMaskIndex).toBe(0);
+      expect(manifest.viewports[0]!.masks).toEqual([
+        {
+          name: "Parchment mask",
+          relativePath: "assets/viewport-0-mask-0.png",
+          width: 4,
+          height: 4,
+          categories: [{ name: "Parchment", color: "#ef4444" }],
+          opacityPercent: 60,
+        },
+      ]);
+    } finally {
+      await rm(extractedDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records an empty masks array for a viewport that was never annotated", async () => {
+    const source = await writeExternalSourceFixture("plain.png", "no-mask");
+    const draft = buildDraftFromViewports([
+      buildExternalAssetViewport(0, "plain.png", source.absolutePath),
+    ]);
+    const bundlePath = join(workspaceDir, "plain.ctbundle");
+    await writeProjectBundleAtPath(bundlePath, draft);
+    const extractedDir = await extractProjectBundleToFreshTempDirectory(bundlePath);
+    try {
+      const manifest = await readManifestFromExtractedBundle(extractedDir);
+      expect(manifest.viewports[0]!.masks).toEqual([]);
+      expect(manifest.viewports[0]!.selectedMaskIndex).toBeNull();
+    } finally {
+      await rm(extractedDir, { recursive: true, force: true });
+    }
+  });
+});
+
+interface ExtractedBundleManifest {
+  readonly formatVersion: number;
+  readonly viewports: ReadonlyArray<{
+    masks: ReadonlyArray<unknown>;
+    selectedMaskIndex: number | null;
+  }>;
+}
+
+async function readManifestFromExtractedBundle(
+  extractedDir: string,
+): Promise<ExtractedBundleManifest> {
+  const text = await readFile(join(extractedDir, "project.json"), "utf-8");
+  return JSON.parse(text) as ExtractedBundleManifest;
+}
+
+function withMaskLayers(
+  viewport: BundleDraftViewportEntry,
+  layerNames: ReadonlyArray<string>,
+): BundleDraftViewportEntry {
+  return {
+    ...viewport,
+    masks: layerNames.map((name, position) => ({
+      absolutePath: `/abs/spool-mask-${position}.png`,
+      name,
+      width: 4,
+      height: 4,
+      categories: [{ name: "Foreground", color: "#ef4444" }],
+      opacityPercent: 50,
+    })),
+    selectedMaskIndex: 0,
+  };
+}

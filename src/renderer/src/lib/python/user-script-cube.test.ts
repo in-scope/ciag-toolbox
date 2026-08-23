@@ -42,4 +42,15 @@ describe("buildUserScriptRunCubeInputFromRaster", () => {
     const cube = buildUserScriptRunCubeInputFromRaster(makeUint16Raster());
     expect(() => cube.getBandAsFloat32(2)).toThrow(/no band at the requested index/);
   });
+
+  // CT-307: wavelengths are no longer hardcoded to null.
+  it("passes the raster's full per-band wavelength set through to the script", () => {
+    const raster: RasterImage = { ...makeUint16Raster(), bandWavelengths: [450, 550] };
+    expect(buildUserScriptRunCubeInputFromRaster(raster).wavelengths).toEqual([450, 550]);
+  });
+
+  it("stays null when the wavelength set does not cover every band", () => {
+    const raster: RasterImage = { ...makeUint16Raster(), bandWavelengths: [450] };
+    expect(buildUserScriptRunCubeInputFromRaster(raster).wavelengths).toBeNull();
+  });
 });

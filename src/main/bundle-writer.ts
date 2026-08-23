@@ -3,10 +3,12 @@ import { ZipFile } from "yazl";
 
 import { findEnviBinarySiblingPathOrNull } from "./envi-binary-sibling";
 
-const BUNDLE_FORMAT_VERSION = 2;
+// CT-306: version 3 added the per-viewport masks array and its PNG assets.
+const BUNDLE_FORMAT_VERSION = 3;
 
 const ENVI_HEADER_ASSET_EXTENSION = "hdr";
 const ENVI_BINARY_SIDECAR_EXTENSION = "bin";
+const MASK_ASSET_EXTENSION = "png";
 
 export type BundleDraftOperationHistoryParameterValue = number | string | boolean;
 
@@ -48,6 +50,23 @@ export interface BundleDraftExternalAsset {
 
 export type BundleDraftAsset = BundleDraftBakedAsset | BundleDraftExternalAsset;
 
+export interface BundleDraftMaskCategory {
+  readonly name: string;
+  readonly color: string;
+}
+
+// CT-306: one mask layer. Its category indexes arrive as a spooled 8-bit PNG
+// (the same encoding the CT-303 mask export writes); everything else here is
+// the labelling the manifest records beside it.
+export interface BundleDraftMaskAsset {
+  readonly absolutePath: string;
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly categories: ReadonlyArray<BundleDraftMaskCategory>;
+  readonly opacityPercent: number;
+}
+
 export interface BundleDraftViewportEntry {
   readonly index: number;
   readonly fileName: string;
@@ -57,6 +76,8 @@ export interface BundleDraftViewportEntry {
   // CT-174: preserved in the manifest so a baked true-colour photo reopens as a
   // colour composite (the baked ENVI/TIFF asset cannot carry this itself).
   readonly colorInterpretation?: "rgb";
+  readonly masks?: ReadonlyArray<BundleDraftMaskAsset>;
+  readonly selectedMaskIndex?: number | null;
 }
 
 export interface BundleDraft {
@@ -66,10 +87,14 @@ export interface BundleDraft {
   readonly viewports: ReadonlyArray<BundleDraftViewportEntry>;
 }
 
+// CT-306: a viewport no longer has a fixed primary-plus-sidecar asset shape, so
+// the plan carries the stack's paths AND one path per mask layer, indexed by
+// the layer's position.
 interface ResolvedBundleAssetPaths {
   readonly viewportIndex: number;
   readonly primaryRelativePath: string;
   readonly sidecarRelativePath: string | null;
+  readonly maskRelativePaths: ReadonlyArray<string>;
 }
 
 export async function writeProjectBundleAtPath(
@@ -94,7 +119,15 @@ function buildAssetPathsForViewport(
     viewportIndex: viewport.index,
     primaryRelativePath: `assets/${stem}.${primaryExtensionOfAsset(viewport.asset)}`,
     sidecarRelativePath: pickSidecarRelativePathOrNull(stem, viewport.asset),
+    maskRelativePaths: buildMaskRelativePaths(stem, viewport.masks ?? []),
   };
+}
+
+function buildMaskRelativePaths(
+  stem: string,
+  masks: ReadonlyArray<BundleDraftMaskAsset>,
+): ReadonlyArray<string> {
+  return masks.map((_, position) => `assets/${stem}-mask-${position}.${MASK_ASSET_EXTENSION}`);
 }
 
 function primaryExtensionOfAsset(asset: BundleDraftAsset): string {
@@ -168,11 +201,28 @@ async function appendAssetEntriesForViewport(
   viewport: BundleDraftViewportEntry,
   paths: ResolvedBundleAssetPaths,
 ): Promise<void> {
+  await appendStackAssetEntriesForViewport(zip, viewport, paths);
+  appendMaskAssetEntriesToZip(zip, viewport.masks ?? [], paths.maskRelativePaths);
+}
+
+async function appendStackAssetEntriesForViewport(
+  zip: ZipFile,
+  viewport: BundleDraftViewportEntry,
+  paths: ResolvedBundleAssetPaths,
+): Promise<void> {
   if (viewport.asset.kind === "baked") {
     appendBakedAssetEntriesToZip(zip, viewport.asset, paths);
     return;
   }
   await appendExternalAssetEntriesToZip(zip, viewport.asset, paths);
+}
+
+function appendMaskAssetEntriesToZip(
+  zip: ZipFile,
+  masks: ReadonlyArray<BundleDraftMaskAsset>,
+  maskRelativePaths: ReadonlyArray<string>,
+): void {
+  masks.forEach((mask, position) => zip.addFile(mask.absolutePath, maskRelativePaths[position]!));
 }
 
 async function appendExternalAssetEntriesToZip(
@@ -237,5 +287,21 @@ function buildBundleViewportEntryWithRewrittenPath(
     // Dropped from the JSON by JSON.stringify when undefined, so a scientific
     // stack leaves no colour tag in the manifest.
     colorInterpretation: viewport.colorInterpretation,
+    masks: describeMaskLayersForManifest(viewport.masks ?? [], paths.maskRelativePaths),
+    selectedMaskIndex: viewport.selectedMaskIndex ?? null,
   };
+}
+
+function describeMaskLayersForManifest(
+  masks: ReadonlyArray<BundleDraftMaskAsset>,
+  maskRelativePaths: ReadonlyArray<string>,
+): ReadonlyArray<unknown> {
+  return masks.map((mask, position) => ({
+    name: mask.name,
+    relativePath: maskRelativePaths[position]!,
+    width: mask.width,
+    height: mask.height,
+    categories: mask.categories,
+    opacityPercent: mask.opacityPercent,
+  }));
 }

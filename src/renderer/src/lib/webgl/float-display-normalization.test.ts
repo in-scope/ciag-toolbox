@@ -4,7 +4,6 @@ import type { RgbChannelExtents } from "@/lib/image/compute-image-channel-extent
 import { VIEWPORT_FRAGMENT_SHADER_SOURCE } from "@/lib/webgl/shaders";
 
 import {
-  autoStretchAppliesToFloatDisplayWindow,
   floatSourceDataFallsOutsideUnitDisplayWindow,
   mapSampleThroughDisplayNormalization,
   quantizeDisplayUnitToByte,
@@ -21,50 +20,24 @@ function disabledNormalization(extents: RgbChannelExtents): NormalizationState {
   return { enabled: false, extents };
 }
 
-describe("autoStretchAppliesToFloatDisplayWindow", () => {
-  it("auto-stretches out-of-range float only while the fixed-unit window is off", () => {
-    expect(autoStretchAppliesToFloatDisplayWindow(true, false)).toBe(true);
-  });
-
-  it("does not auto-stretch once the fixed-unit window is on", () => {
-    expect(autoStretchAppliesToFloatDisplayWindow(true, true)).toBe(false);
-  });
-
-  it("never auto-stretches in-range data regardless of the fixed-unit toggle", () => {
-    expect(autoStretchAppliesToFloatDisplayWindow(false, false)).toBe(false);
-    expect(autoStretchAppliesToFloatDisplayWindow(false, true)).toBe(false);
-  });
-});
-
 describe("resolveEffectiveFloatDisplayNormalization", () => {
-  it("stretches out-of-range float to its extents when auto-fit is on (default)", () => {
+  it("stretches out-of-range float to its extents", () => {
     const resolved = resolveEffectiveFloatDisplayNormalization(
       disabledNormalization(OUT_OF_RANGE_EXTENTS),
       true,
-      false,
     );
     expect(resolved).toEqual({ enabled: true, extents: OUT_OF_RANGE_EXTENTS });
   });
 
-  it("leaves the fixed [0,1] window (disabled) when auto-fit is off", () => {
-    const resolved = resolveEffectiveFloatDisplayNormalization(
-      disabledNormalization(OUT_OF_RANGE_EXTENTS),
-      true,
-      true,
-    );
-    expect(resolved.enabled).toBe(false);
-  });
-
-  it("honors an explicit normalized-viewing toggle even when the fixed-unit window is on", () => {
+  it("honors an explicit normalized-viewing toggle", () => {
     const userEnabled: NormalizationState = { enabled: true, extents: OUT_OF_RANGE_EXTENTS };
-    const resolved = resolveEffectiveFloatDisplayNormalization(userEnabled, true, true);
+    const resolved = resolveEffectiveFloatDisplayNormalization(userEnabled, true);
     expect(resolved).toBe(userEnabled);
   });
 
-  it("leaves in-range float untouched whether or not the fixed-unit window is on", () => {
+  it("leaves in-range float untouched", () => {
     const inRange = disabledNormalization({ min: [0, 0, 0], max: [1, 1, 1] });
-    expect(resolveEffectiveFloatDisplayNormalization(inRange, false, false).enabled).toBe(false);
-    expect(resolveEffectiveFloatDisplayNormalization(inRange, false, true).enabled).toBe(false);
+    expect(resolveEffectiveFloatDisplayNormalization(inRange, false).enabled).toBe(false);
   });
 });
 

@@ -5,8 +5,24 @@ import {
   readRoiFromCropParameterValues,
   type RegisteredViewportAction,
 } from "@/lib/actions/registered-actions";
+import {
+  CONCATENATE_STACKS_ACTION_ID,
+  CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID,
+} from "@/lib/actions/concatenate-stacks-action";
+import {
+  DUPLICATE_BANDS_ACTION_ID,
+  DUPLICATE_BANDS_PARAMETER_ID_BAND_NUMBERS,
+  readDuplicatedBandNumbersFromParameterValues,
+} from "@/lib/actions/duplicate-bands-action";
+import { LOCAL_PCA_ACTION_ID } from "@/lib/actions/local-pca-action";
+import { LOCAL_MNF_ACTION_ID } from "@/lib/actions/local-mnf-action";
+import { L2_MINIMIZATION_ACTION_ID } from "@/lib/actions/l2-minimization-action";
+import { ROP_KEEP_ACTION_ID } from "@/lib/actions/rop-keep-action";
 import { resolveComponentCount } from "@/lib/image/dimension-reduction/component-count";
 import { describeFastIcaFitSampling } from "@/lib/image/dimension-reduction/ica";
+import { readRasterReferenceTokenOrEmpty, NO_RASTER_REFERENCE_SELECTED } from "@/lib/actions/parameter-schema";
+import { widenSampleType } from "@/lib/image/concatenate-stacks";
+import { readRememberedReferenceRasterOrNull } from "@/lib/image/reference-raster-store";
 import { TONE_CURVE_SCOPE_PARAMETER_ID, WHOLE_STACK_TONE_CURVE_SCOPE_VALUE } from "@/lib/actions/tone-curve-scope";
 import type { RasterImage } from "@/lib/image/raster-image";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
@@ -92,7 +108,71 @@ function estimateAllocationBytesForRasterApply(
   if (action.id === "invert") return estimateInvertAllocationBytes(raster, parameterValues);
   if (action.id === "threshold") return thresholdCubeBytes(raster);
   if (action.id === "crop-to-region") return estimateCropAllocationBytes(raster, parameterValues);
+  if (action.id === CONCATENATE_STACKS_ACTION_ID) {
+    return estimateConcatenateStacksAllocationBytes(raster, parameterValues);
+  }
+  if (action.id === DUPLICATE_BANDS_ACTION_ID) {
+    return estimateDuplicateBandsAllocationBytes(raster, parameterValues);
+  }
+  // CT-309: a kept ROP projection is exactly one float band at source
+  // dimensions (the same as the unlisted-action default, pinned explicitly so
+  // a future default change cannot silently reprice it).
+  if (action.id === ROP_KEEP_ACTION_ID) return singleFloatBandBytes(raster);
+  // CT-311/CT-312: the spatially adaptive projections return exactly one float
+  // band at source dimensions; the cube itself streams to the Python worker
+  // band by band, so no second copy of the stack lives in the renderer.
+  if (action.id === LOCAL_PCA_ACTION_ID) return singleFloatBandBytes(raster);
+  if (action.id === LOCAL_MNF_ACTION_ID) return singleFloatBandBytes(raster);
+  // CT-313: the L2 binarization approximation also returns exactly one float
+  // band at source dimensions; pinned explicitly for the same reason the ROP
+  // keep entry is (so a future unlisted-action default change cannot silently
+  // reprice it).
+  if (action.id === L2_MINIMIZATION_ACTION_ID) return singleFloatBandBytes(raster);
   return singleFloatBandBytes(raster);
+}
+
+// CT-301: the output keeps the source's own byte count PLUS one band's worth
+// of bytes per duplicated band (same type as the source, never widened).
+function estimateDuplicateBandsAllocationBytes(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): number {
+  const duplicatedCount = tryCountDuplicatedBands(parameterValues);
+  const bytesPerBand = pixelCountOf(raster) * (raster.bitsPerSample / 8);
+  return sumRasterBandBytes(raster) + duplicatedCount * bytesPerBand;
+}
+
+function tryCountDuplicatedBands(parameterValues: ParameterValuesById): number {
+  if (typeof parameterValues[DUPLICATE_BANDS_PARAMETER_ID_BAND_NUMBERS] !== "string") return 0;
+  try {
+    return readDuplicatedBandNumbersFromParameterValues(parameterValues).length;
+  } catch {
+    return 0;
+  }
+}
+
+// CT-300: pixelCount x totalBandCount x the widened type's byte width, using
+// the actual resolved second stack when one is chosen; falls back to the
+// active stack's own byte count (a conservative floor) before a second stack
+// is picked.
+function estimateConcatenateStacksAllocationBytes(
+  raster: RasterImage,
+  parameterValues: ParameterValuesById,
+): number {
+  const second = tryResolveConcatenateStacksSecondStack(parameterValues);
+  if (!second) return sumRasterBandBytes(raster);
+  const widened = widenSampleType(
+    { sampleFormat: raster.sampleFormat, bitsPerSample: raster.bitsPerSample },
+    { sampleFormat: second.sampleFormat, bitsPerSample: second.bitsPerSample },
+  );
+  const totalBandCount = raster.bandCount + second.bandCount;
+  return pixelCountOf(raster) * totalBandCount * (widened.bitsPerSample / 8);
+}
+
+function tryResolveConcatenateStacksSecondStack(parameterValues: ParameterValuesById): RasterImage | null {
+  const token = readRasterReferenceTokenOrEmpty(parameterValues[CONCATENATE_STACKS_SECOND_STACK_PARAMETER_ID]);
+  if (token === NO_RASTER_REFERENCE_SELECTED) return null;
+  return readRememberedReferenceRasterOrNull(token);
 }
 
 function pixelCountOf(raster: RasterImage): number {

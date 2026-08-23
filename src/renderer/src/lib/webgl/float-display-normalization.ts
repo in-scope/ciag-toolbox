@@ -9,28 +9,16 @@ export interface NormalizationState {
   extents: RgbChannelExtents;
 }
 
-// CT-193: out-of-range float data auto-stretches on open UNLESS the user pins the
-// display to the fixed [0, 1] window. The auto-stretch only kicks in while the user
-// keeps the fixed-unit window off; turning it on hands the shader its fixed clamp.
-export function autoStretchAppliesToFloatDisplayWindow(
-  sourceFallsOutsideUnitWindow: boolean,
-  fixedUnitWindowEnabled: boolean,
-): boolean {
-  return sourceFallsOutsideUnitWindow && !fixedUnitWindowEnabled;
-}
-
 // Resolve the normalization the shader should use, given the user's explicit
-// normalized-viewing toggle, whether the source's float data leaves [0, 1], and
-// whether the user pinned the display to the fixed [0, 1] window. An explicit
-// normalized-viewing toggle always wins; otherwise auto-stretch fills the gap only
-// while the fixed-unit window is off.
+// normalized-viewing toggle and whether the source's float data leaves [0, 1].
+// An explicit normalized-viewing toggle always wins; otherwise out-of-range
+// float data auto-stretches to its own extents (CT-161).
 export function resolveEffectiveFloatDisplayNormalization(
   userNormalization: NormalizationState,
   sourceFallsOutsideUnitWindow: boolean,
-  fixedUnitWindowEnabled: boolean,
 ): NormalizationState {
   if (userNormalization.enabled) return userNormalization;
-  if (autoStretchAppliesToFloatDisplayWindow(sourceFallsOutsideUnitWindow, fixedUnitWindowEnabled)) {
+  if (sourceFallsOutsideUnitWindow) {
     return { enabled: true, extents: userNormalization.extents };
   }
   return userNormalization;

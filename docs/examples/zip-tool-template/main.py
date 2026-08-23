@@ -1,4 +1,4 @@
-# Multi-module .zip tool template for MSI Toolbox.
+# Multi-module .zip tool template for CHARM Toolbox.
 #
 # A .zip tool must contain a top-level main.py that defines
 # run(cube, wavelengths=None). The archive is extracted with its folder on

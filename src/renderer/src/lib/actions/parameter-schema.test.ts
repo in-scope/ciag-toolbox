@@ -18,8 +18,10 @@ import {
   type ClipBoundsParameterSchema,
   type CubeScopeParameterSchema,
   type IntegerParameterSchema,
+  type MaskLayerParameterSchema,
   type NumberParameterSchema,
   type ParameterSchema,
+  type RasterReferenceParameterSchema,
 } from "./parameter-schema";
 
 describe("buildDefaultParameterValuesForSchemas", () => {
@@ -287,7 +289,76 @@ describe("describeBlockingParameterErrorOrNull", () => {
     const values = { scope: "band-wise", bandRange: "99" };
     expect(describeBlockingParameterErrorOrNull([buildCubeScopeSchema()], values, 10)).toMatch(/out of range/i);
   });
+
+  it("blocks a restricted raster-reference field when no candidate qualifies", () => {
+    const schema = buildRestrictedRasterReferenceSchema();
+    const counts = new Map([[schema.id, 0]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, counts)).not.toBeNull();
+  });
+
+  it("blocks a restricted raster-reference field while candidates qualify but none is chosen", () => {
+    const schema = buildRestrictedRasterReferenceSchema();
+    const counts = new Map([[schema.id, 2]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, counts)).not.toBeNull();
+  });
+
+  it("allows a restricted raster-reference field once a candidate is chosen", () => {
+    const schema = buildRestrictedRasterReferenceSchema();
+    const counts = new Map([[schema.id, 2]]);
+    const values = { [schema.id]: "panel::Panel 2 (file.tif)" };
+    expect(describeBlockingParameterErrorOrNull([schema], values, null, counts)).toBeNull();
+  });
+
+  it("ignores an unrestricted raster-reference field with no candidates map", () => {
+    const schema: RasterReferenceParameterSchema = {
+      kind: "raster-reference",
+      id: "lightReferenceToken",
+      label: "Light reference",
+      optional: false,
+      defaultValue: "",
+    };
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null)).toBeNull();
+  });
+
+  it("blocks a mask-layer field when no layer qualifies", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 0]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, undefined, counts)).not.toBeNull();
+  });
+
+  it("blocks a mask-layer field while layers qualify but none is chosen", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 1]]);
+    expect(describeBlockingParameterErrorOrNull([schema], {}, null, undefined, counts)).not.toBeNull();
+  });
+
+  it("allows a mask-layer field once a qualifying layer is chosen", () => {
+    const schema = buildMaskLayerSchema();
+    const counts = new Map([[schema.id, 1]]);
+    const values = { [schema.id]: "mask-1" };
+    expect(describeBlockingParameterErrorOrNull([schema], values, null, undefined, counts)).toBeNull();
+  });
 });
+
+function buildMaskLayerSchema(): MaskLayerParameterSchema {
+  return {
+    kind: "mask-layer",
+    id: "l2MaskLayer",
+    label: "Mask layer",
+    defaultValue: "",
+  };
+}
+
+function buildRestrictedRasterReferenceSchema(): RasterReferenceParameterSchema {
+  return {
+    kind: "raster-reference",
+    id: "secondStackToken",
+    label: "Second stack",
+    optional: false,
+    defaultValue: "",
+    restrictToLoadedPanelsMatchingSourceDimensions: true,
+  };
+}
 
 function buildClipBoundsSchema(): ClipBoundsParameterSchema {
   return {

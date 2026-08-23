@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { MutableRefObject, RefObject } from "react";
-import { Brackets, Contrast, FolderOpen, Link2, X } from "lucide-react";
+import { Contrast, FolderOpen, Link2, X } from "lucide-react";
 import { notifyError } from "@/lib/notifications/notify";
 
 import { RgbCompositeIcon } from "@/components/rgb-composite-icon";
 import { ViewportBandNavigator } from "@/components/viewport-band-navigator";
 import { formatViewportHeaderLabel } from "@/components/viewport-header-label";
+import { ViewportMaskBrushGhost } from "@/components/viewport-mask-brush-ghost";
+import { ViewportMaskOverlay } from "@/components/viewport-mask-overlay";
 import { ViewportRoiOverlay } from "@/components/viewport-roi-overlay";
 import type { RasterImage } from "@/lib/image/raster-image";
 import { shouldRenderRasterAsRgbComposite } from "@/lib/image/raster-color-interpretation";
@@ -24,6 +26,23 @@ import {
   isViewportRoiLargerThanMinimumSide,
   type ViewportRoi,
 } from "@/lib/image/viewport-roi";
+import {
+  listPixelIndexesUnderBrushSegment,
+  resolveMaskBrushPaintValue,
+  writeMaskValueAtPixelIndexes,
+  type MaskBrushSegment,
+  type MaskBrushSettings,
+  type MaskImagePoint,
+} from "@/lib/masks/mask-brush";
+import type { MaskLayer } from "@/lib/masks/mask-layer";
+import {
+  attachMaskBrushEventHandlers,
+  type MaskBrushAttachment,
+  type MaskBrushCallbacks,
+  type MaskBrushCanvasSegment,
+} from "@/lib/webgl/mask-brush-input";
+import type { CanvasPixelPoint } from "@/lib/webgl/canvas-to-image-pixel";
+import { attachBrushGhostHoverEventHandlers } from "@/lib/webgl/brush-ghost-hover-input";
 import { attachPanZoomEventHandlers } from "@/lib/webgl/pan-zoom-input";
 import { attachPixelClickEventHandlers } from "@/lib/webgl/pixel-click-input";
 import {
@@ -50,6 +69,15 @@ import {
   type ViewportPixelReadoutSnapshot,
 } from "@/state/pixel-readout-context";
 
+// CT-304: what the panel needs to paint and show the SELECTED mask layer. It is
+// null whenever the Masks tool is off or no layer is selected, which is exactly
+// when neither the overlay nor the brush should exist.
+export interface ViewportMaskPainting {
+  readonly layer: MaskLayer;
+  readonly brush: MaskBrushSettings;
+  readonly onCommitStrokeValues: (values: Uint8Array) => void;
+}
+
 interface ViewportProps {
   imageSource?: ViewportImageSource | null;
   previewImageSource?: ViewportImageSource | null;
@@ -59,8 +87,6 @@ interface ViewportProps {
   viewportNumber?: number | null;
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
-  floatDisplayUsesFixedUnitWindow: boolean;
-  onToggleFixedUnitFloatView: () => void;
   viewChannelsSeparately: boolean;
   onToggleViewChannelsSeparately: () => void;
   selectedBandIndex: number;
@@ -74,6 +100,7 @@ interface ViewportProps {
   onPreviewRoiEdit: (roi: ViewportRoi | null) => void;
   onCommitRoiEdit: (roi: ViewportRoi) => void;
   onRegionToolPlainClick: (clickedImagePixel: ClickedImagePixel | null) => void;
+  maskPainting?: ViewportMaskPainting | null;
   onPinPixelSpectrum: (imageX: number, imageY: number) => void;
   onOpenImage: () => void;
   onClose?: () => void;
@@ -84,6 +111,7 @@ export function Viewport(props: ViewportProps): JSX.Element {
   const readoutContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ViewportRenderer | null>(null);
   const roiDrawAttachmentRef = useRef<RoiDrawAttachment | null>(null);
+  const maskBrushAttachmentRef = useRef<MaskBrushAttachment | null>(null);
   const compositeSource = props.imageSource ?? null;
   const imageSource = resolveImageSourceForChannelView(
     compositeSource,
@@ -102,10 +130,19 @@ export function Viewport(props: ViewportProps): JSX.Element {
   useImageSourceUploadEffect(rendererRef, displaySource, props.selectedBandIndex);
   useSelectedBandIndexEffect(rendererRef, displaySource, props.selectedBandIndex);
   useNormalizationToggleEffect(rendererRef, props.normalizationEnabled);
-  useFixedUnitFloatViewEffect(rendererRef, props.floatDisplayUsesFixedUnitWindow);
   useToneCurvePreviewLutEffect(rendererRef, props.toneCurvePreviewLookupTable ?? null);
   useToneCurvePreviewChannelLutsEffect(rendererRef, props.toneCurvePreviewChannelLookupTables ?? null);
   useCanvasResizeObserverEffect(canvasRef, rendererRef);
+  // CT-304: registered FIRST of all the pointer attachments. A brush stroke
+  // claims the gesture outright, so painting can never also move the committed
+  // region box, start a region draw, or pan the view.
+  const maskStroke = useViewportMaskBrushAttachment(
+    canvasRef,
+    maskBrushAttachmentRef,
+    rendererRef,
+    props.maskPainting ?? null,
+  );
+  useDiscardInProgressStrokeWhenPaintingStops(maskBrushAttachmentRef, props.maskPainting ?? null);
   // CT-275: registered BEFORE the pan-zoom and draw attachments so a pointer-down
   // on the committed box claims the gesture ahead of both.
   useViewportRoiBoxEditing(canvasRef, {
@@ -142,8 +179,13 @@ export function Viewport(props: ViewportProps): JSX.Element {
     onPinPixelSpectrum: props.onPinPixelSpectrum,
   });
   const transformVersion = useRendererViewTransformVersion(rendererRef);
+  const hoveredBrushPixel = useMaskBrushHoverImagePixel(
+    canvasRef,
+    rendererRef,
+    props.maskPainting ?? null,
+  );
   const isLinkedForPanZoom = linkGroupIndex !== null && panelLink.isPanelLinked(linkGroupIndex);
-  const cursorClassName = props.isRegionToolActive ? "cursor-crosshair" : "";
+  const cursorClassName = shouldShowCrosshairCursor(props) ? "cursor-crosshair" : "";
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md border bg-card">
@@ -157,8 +199,6 @@ export function Viewport(props: ViewportProps): JSX.Element {
         normalizationEnabled={props.normalizationEnabled}
         onToggleNormalizedViewing={props.onToggleNormalizedViewing}
         showNormalizedViewingToggle={imageSource !== null}
-        floatDisplayUsesFixedUnitWindow={props.floatDisplayUsesFixedUnitWindow}
-        onToggleFixedUnitFloatView={props.onToggleFixedUnitFloatView}
         showChannelViewToggle={canViewCompositeChannelsSeparately(compositeSource)}
         channelViewEnabled={isChannelViewActive}
         onToggleChannelView={props.onToggleViewChannelsSeparately}
@@ -173,6 +213,21 @@ export function Viewport(props: ViewportProps): JSX.Element {
           className={`block h-full w-full touch-none select-none ${cursorClassName}`}
           aria-label={viewportAriaLabel}
         />
+        <ViewportMaskOverlay
+          renderer={rendererRef.current}
+          layer={props.maskPainting?.layer ?? null}
+          values={maskStroke.values}
+          transformVersion={transformVersion}
+          paintVersion={maskStroke.paintVersion}
+        />
+        {props.maskPainting ? (
+          <ViewportMaskBrushGhost
+            renderer={rendererRef.current}
+            hoveredImagePixel={hoveredBrushPixel}
+            brushSizePx={props.maskPainting.brush.brushSizePx}
+            transformVersion={transformVersion}
+          />
+        ) : null}
         <ViewportRoiOverlay
           renderer={rendererRef.current}
           committedRoi={inProgressEditRoi ?? props.roi}
@@ -242,8 +297,6 @@ interface ViewportHeaderStripProps {
   normalizationEnabled: boolean;
   onToggleNormalizedViewing: () => void;
   showNormalizedViewingToggle: boolean;
-  floatDisplayUsesFixedUnitWindow: boolean;
-  onToggleFixedUnitFloatView: () => void;
   showChannelViewToggle: boolean;
   channelViewEnabled: boolean;
   onToggleChannelView: () => void;
@@ -273,12 +326,6 @@ function ViewportHeaderStrip(props: ViewportHeaderStripProps): JSX.Element {
         <NormalizedViewingToggleButton
           enabled={props.normalizationEnabled}
           onToggle={props.onToggleNormalizedViewing}
-        />
-      ) : null}
-      {shouldShowFixedUnitFloatViewToggle(props.raster) ? (
-        <FixedUnitFloatViewToggleButton
-          enabled={props.floatDisplayUsesFixedUnitWindow}
-          onToggle={props.onToggleFixedUnitFloatView}
         />
       ) : null}
       {props.showChannelViewToggle ? (
@@ -327,47 +374,6 @@ function stopPropagationThenToggle(
     event.stopPropagation();
     onToggle();
   };
-}
-
-// CT-193: the fixed [0, 1] float-view toggle is only meaningful for float rasters,
-// whose default auto-stretch it overrides. Integer stacks already map their type
-// range to [0, 1], so the control would be a no-op and is hidden for them.
-function shouldShowFixedUnitFloatViewToggle(raster: RasterImage | null): boolean {
-  return raster !== null && raster.sampleFormat === "float";
-}
-
-interface FixedUnitFloatViewToggleButtonProps {
-  enabled: boolean;
-  onToggle: () => void;
-}
-
-// CT-259: the tooltip explains what the toggle does in each state; the aria-label stays
-// the stable "Fixed [0,1] float view" name so selectors and screen-reader identity hold.
-const AUTO_STRETCH_ACTIVE_TOOLTIP =
-  "Display is stretched to this band's own value range. Click to switch to the fixed 0 to 1 scale: 0 shows black, 1 shows white, values outside clip. Display only, data never changes.";
-const FIXED_SCALE_ACTIVE_TOOLTIP =
-  "Fixed 0 to 1 display scale: 0 shows black, 1 shows white, values outside clip. Click to stretch the display to this band's own value range. Display only, data never changes.";
-
-function FixedUnitFloatViewToggleButton(props: FixedUnitFloatViewToggleButtonProps): JSX.Element {
-  const label = props.enabled ? "Fixed [0,1] float view (on)" : "Fixed [0,1] float view";
-  const tooltip = props.enabled ? FIXED_SCALE_ACTIVE_TOOLTIP : AUTO_STRETCH_ACTIVE_TOOLTIP;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("size-6", props.enabled && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary")}
-          aria-label={label}
-          aria-pressed={props.enabled}
-          onClick={stopPropagationThenToggle(props.onToggle)}
-        >
-          <Brackets className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
 }
 
 // CT-248/CT-295: a true-colour photo can be flipped into a display-only channel
@@ -604,17 +610,6 @@ function useNormalizationToggleEffect(
 ): void {
   useEffect(() => {
     rendererRef.current?.setNormalizationEnabled(enabled);
-  }, [rendererRef, enabled]);
-}
-
-// CT-193: pin out-of-range float data to the fixed [0, 1] display window instead of
-// auto-stretching it on open. Display-only; the data readout never changes.
-function useFixedUnitFloatViewEffect(
-  rendererRef: MutableRefObject<ViewportRenderer | null>,
-  enabled: boolean,
-): void {
-  useEffect(() => {
-    rendererRef.current?.setFloatDisplayUsesFixedUnitWindow(enabled);
   }, [rendererRef, enabled]);
 }
 
@@ -968,4 +963,195 @@ function useRendererViewTransformVersion(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return version;
+}
+
+function shouldShowCrosshairCursor(props: ViewportProps): boolean {
+  return props.isRegionToolActive || Boolean(props.maskPainting);
+}
+
+// CT-304: an in-progress stroke paints into a PRIVATE copy of the layer's values
+// (one allocation per stroke, not per pointer sample) and only commits it to the
+// panel's rendering state on release. `paintVersion` is what tells the overlay to
+// repaint, since the buffer's identity never changes while the stroke runs.
+interface MaskStrokeSnapshot {
+  readonly values: Uint8Array | null;
+  readonly paintVersion: number;
+}
+
+const NO_MASK_STROKE: MaskStrokeSnapshot = { values: null, paintVersion: 0 };
+
+type MaskStrokeSetter = (update: (previous: MaskStrokeSnapshot) => MaskStrokeSnapshot) => void;
+
+interface MaskBrushInputs {
+  readonly painting: ViewportMaskPainting | null;
+  readonly rendererRef: MutableRefObject<ViewportRenderer | null>;
+}
+
+function useViewportMaskBrushAttachment(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  attachmentRef: MutableRefObject<MaskBrushAttachment | null>,
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  painting: ViewportMaskPainting | null,
+): MaskStrokeSnapshot {
+  const [stroke, setStroke] = useState<MaskStrokeSnapshot>(NO_MASK_STROKE);
+  const strokeValuesRef = useRef<Uint8Array | null>(null);
+  const inputsRef = useLatestValueRef<MaskBrushInputs>({ painting, rendererRef });
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const callbacks = buildMaskBrushCallbacks(inputsRef, strokeValuesRef, setStroke);
+    const attachment = attachMaskBrushEventHandlers(canvas, callbacks);
+    attachmentRef.current = attachment;
+    return () => {
+      attachmentRef.current = null;
+      attachment.detach();
+    };
+    // canvasRef is stable; latest-value ref holds dynamic inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return stroke;
+}
+
+// The hover pixel behind the brush ghost. It tracks pointer moves over the
+// canvas while painting is enabled and clears when the pointer leaves or the
+// Masks tool closes, so the ghost never lingers.
+function useMaskBrushHoverImagePixel(
+  canvasRef: RefObject<HTMLCanvasElement>,
+  rendererRef: MutableRefObject<ViewportRenderer | null>,
+  painting: ViewportMaskPainting | null,
+): MaskImagePoint | null {
+  const [hoveredPixel, setHoveredPixel] = useState<MaskImagePoint | null>(null);
+  const paintingRef = useLatestValueRef(painting);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return attachBrushGhostHoverEventHandlers(canvas, {
+      isBrushGhostEnabled: () => paintingRef.current !== null,
+      onHoverAtCanvasPoint: (point) =>
+        setHoveredPixel((previous) =>
+          reuseHoveredPixelWhenUnchanged(
+            previous,
+            convertHoverCanvasPointToImagePixelOrNull(point, rendererRef.current),
+          ),
+        ),
+    });
+    // canvasRef and rendererRef are stable refs; latest-value ref holds painting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!painting) setHoveredPixel(null);
+  }, [painting]);
+  return hoveredPixel;
+}
+
+function convertHoverCanvasPointToImagePixelOrNull(
+  point: CanvasPixelPoint | null,
+  renderer: ViewportRenderer | null,
+): MaskImagePoint | null {
+  if (!point || !renderer) return null;
+  return renderer.getImagePixelAtCanvasPoint(point.x, point.y);
+}
+
+// Keeping the previous object while the hovered pixel is unchanged means a
+// pointer gliding within one image pixel re-renders nothing.
+function reuseHoveredPixelWhenUnchanged(
+  previous: MaskImagePoint | null,
+  next: MaskImagePoint | null,
+): MaskImagePoint | null {
+  if (previous && next && previous.x === next.x && previous.y === next.y) return previous;
+  return next;
+}
+
+function useDiscardInProgressStrokeWhenPaintingStops(
+  attachmentRef: MutableRefObject<MaskBrushAttachment | null>,
+  painting: ViewportMaskPainting | null,
+): void {
+  useEffect(() => {
+    if (painting) return;
+    attachmentRef.current?.cancelInProgressStroke();
+  }, [attachmentRef, painting]);
+}
+
+function buildMaskBrushCallbacks(
+  inputsRef: MutableRefObject<MaskBrushInputs>,
+  strokeValuesRef: MutableRefObject<Uint8Array | null>,
+  setStroke: MaskStrokeSetter,
+): MaskBrushCallbacks {
+  return {
+    isMaskPaintingEnabled: () => inputsRef.current.painting !== null,
+    onStrokeBegin: (point) =>
+      beginMaskStrokeAtCanvasPoint(point, inputsRef.current, strokeValuesRef, setStroke),
+    onStrokeExtend: (segment) =>
+      extendMaskStrokeAlongCanvasSegment(segment, inputsRef.current, strokeValuesRef, setStroke),
+    onStrokeCommit: () => commitMaskStroke(inputsRef.current, strokeValuesRef, setStroke),
+    onStrokeCancel: () => discardMaskStroke(strokeValuesRef, setStroke),
+  };
+}
+
+function beginMaskStrokeAtCanvasPoint(
+  point: CanvasPixelPoint,
+  inputs: MaskBrushInputs,
+  strokeValuesRef: MutableRefObject<Uint8Array | null>,
+  setStroke: MaskStrokeSetter,
+): void {
+  if (!inputs.painting) return;
+  strokeValuesRef.current = new Uint8Array(inputs.painting.layer.values);
+  extendMaskStrokeAlongCanvasSegment({ from: point, to: point }, inputs, strokeValuesRef, setStroke);
+}
+
+function extendMaskStrokeAlongCanvasSegment(
+  segment: MaskBrushCanvasSegment,
+  inputs: MaskBrushInputs,
+  strokeValuesRef: MutableRefObject<Uint8Array | null>,
+  setStroke: MaskStrokeSetter,
+): void {
+  const values = strokeValuesRef.current;
+  const imageSegment = convertCanvasSegmentToImageSegmentOrNull(segment, inputs.rendererRef.current);
+  if (!values || !inputs.painting || !imageSegment) return;
+  paintBrushSegmentIntoStrokeValues(values, imageSegment, inputs.painting);
+  setStroke((previous) => ({ values, paintVersion: previous.paintVersion + 1 }));
+}
+
+// A sample that falls outside the image (the letterbox around a fitted stack)
+// has no image pixel; a stroke that starts there simply begins where it first
+// crosses back onto the image.
+function convertCanvasSegmentToImageSegmentOrNull(
+  segment: MaskBrushCanvasSegment,
+  renderer: ViewportRenderer | null,
+): MaskBrushSegment | null {
+  if (!renderer) return null;
+  const to = renderer.getImagePixelAtCanvasPoint(segment.to.x, segment.to.y);
+  if (!to) return null;
+  const from = renderer.getImagePixelAtCanvasPoint(segment.from.x, segment.from.y);
+  return { from: from ?? to, to };
+}
+
+function paintBrushSegmentIntoStrokeValues(
+  values: Uint8Array,
+  segment: MaskBrushSegment,
+  painting: ViewportMaskPainting,
+): void {
+  const { layer, brush } = painting;
+  const grid = { width: layer.width, height: layer.height };
+  const pixelIndexes = listPixelIndexesUnderBrushSegment(segment, brush.brushSizePx, grid);
+  const value = resolveMaskBrushPaintValue(brush, layer.categories.length);
+  writeMaskValueAtPixelIndexes(values, pixelIndexes, value);
+}
+
+function commitMaskStroke(
+  inputs: MaskBrushInputs,
+  strokeValuesRef: MutableRefObject<Uint8Array | null>,
+  setStroke: MaskStrokeSetter,
+): void {
+  const values = strokeValuesRef.current;
+  if (values && inputs.painting) inputs.painting.onCommitStrokeValues(values);
+  discardMaskStroke(strokeValuesRef, setStroke);
+}
+
+function discardMaskStroke(
+  strokeValuesRef: MutableRefObject<Uint8Array | null>,
+  setStroke: MaskStrokeSetter,
+): void {
+  strokeValuesRef.current = null;
+  setStroke((previous) => ({ values: null, paintVersion: previous.paintVersion + 1 }));
 }

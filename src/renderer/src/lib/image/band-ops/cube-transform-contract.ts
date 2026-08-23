@@ -9,7 +9,7 @@ import { UserScriptReturnContractError } from "@/lib/image/band-ops/user-script-
 // bands, and that all dimensions are present and >= 1.
 
 export interface TransformedCubeResult {
-  readonly shape: ReadonlyArray<number>;
+  readonly shape: readonly [number, number, number];
   readonly bands: ReadonlyArray<Float32Array>;
 }
 
@@ -23,7 +23,7 @@ export function validateTransformedCubeAgainstSource(
   rejectFewerThanOneBand(bandCount);
   rejectSpatialDimensionsTooSmall(height, width);
   rejectBandListInconsistentWithShape(bands, bandCount, height * width);
-  return { shape, bands };
+  return { shape: [bandCount, height, width], bands };
 }
 
 function readThreeDimensionalShapeOrThrow(

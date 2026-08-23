@@ -23,8 +23,11 @@
 
 export type OperationCommandBehavior =
   | "toggle-region-tool"
+  | "toggle-masks"
   | "toggle-subset-bands"
   | "open-action-panel"
+  | "open-npc-panel"
+  | "open-rop-panel"
   | "apply-geometric-transform";
 
 export interface OperationCommand {
@@ -79,6 +82,9 @@ const SELECTION_GROUP: OperationGroup = {
   commands: [
     buildMenuAndToolbarCommand("toggle-region-tool", "Select Region", "toggle-region-tool"),
     buildMenuAndToolbarCommand("toggle-subset-bands", "Subset Bands", "toggle-subset-bands"),
+    // CT-302: mask layers annotate the active panel; the toggle opens the Masks
+    // options aside, the same mode-toggle shape as Select Region.
+    buildMenuAndToolbarCommand("toggle-masks", "Masks", "toggle-masks"),
   ],
 };
 
@@ -179,6 +185,11 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
     buildMenuOnlyActionCommand("pca", "PCA"),
     buildMenuOnlyActionCommand("mnf", "MNF"),
     buildMenuOnlyActionCommand("ica", "ICA"),
+    // CT-311/CT-312: spatially adaptive PCA/MNF, running the client Python built-ins.
+    buildMenuOnlyActionCommand("local-pca", "Local PCA"),
+    buildMenuOnlyActionCommand("local-mnf", "Local MNF"),
+    // CT-313: the client's L2 binarization approximation, driven by masks.
+    buildMenuOnlyActionCommand("l2-minimization", "L2 Minimization"),
   ],
 };
 
@@ -191,7 +202,34 @@ const DIMENSION_REDUCTION_GROUP: OperationGroup = {
 // id stays "band-weighting".
 const BAND_OPS_GROUP: OperationGroup = {
   key: "band-ops",
-  commands: [buildMenuOnlyActionCommand("band-weighting", "Weighted Sum")],
+  commands: [
+    buildMenuOnlyActionCommand("band-weighting", "Weighted Sum"),
+    // CT-300: concatenate two open stacks' bands into one wider stack.
+    buildMenuOnlyActionCommand("concatenate-stacks", "Concatenate Stacks"),
+  ],
+};
+
+// Stage 6 analyses that produce a SCORE rather than a raster, so they open
+// their own panel instead of the shared tool-options panel (CT-308).
+const ANALYSIS_GROUP: OperationGroup = {
+  key: "analysis",
+  commands: [
+    {
+      id: "npc",
+      label: "NPC",
+      behavior: "open-npc-panel",
+      showInMenu: true,
+      showInToolbar: false,
+    },
+    // CT-309: random orthogonal projections with press-to-reroll previews.
+    {
+      id: "rop",
+      label: "ROP",
+      behavior: "open-rop-panel",
+      showInMenu: true,
+      showInToolbar: false,
+    },
+  ],
 };
 
 // Whole-cube user scripting (CT-216).
@@ -228,6 +266,7 @@ export const MULTI_BAND_MENU: OperationMenu = {
     SPECTRAL_DERIVATIVE_GROUP,
     DIMENSION_REDUCTION_GROUP,
     BAND_OPS_GROUP,
+    ANALYSIS_GROUP,
   ],
 };
 

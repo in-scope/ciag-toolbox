@@ -3,7 +3,10 @@ import { BoxSelect, FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 
 import {
   buildToolbarOperationGroups,
+  MASKS_TOGGLE_ICON,
+  NPC_PANEL_ICON,
   QUICK_TRANSFORM_ICONS,
+  ROP_PANEL_ICON,
   type ToolbarOperationGroupContext,
 } from "./operation-command-bindings";
 import {
@@ -11,6 +14,7 @@ import {
   REGISTERED_VIEWPORT_ACTIONS,
   type RegisteredActionIcon,
 } from "./registered-actions";
+import { DUPLICATE_BANDS_ACTION } from "./duplicate-bands-action";
 
 // One icon, one meaning, app-wide: two different operations must never share an
 // icon component, even when only one of them currently shows a toolbar button
@@ -25,6 +29,11 @@ const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIc
   ["open-project", FolderInput],
   ["grid-layout", Grid2x2],
   ["toggle-region-tool", BoxSelect],
+  ["toggle-masks", MASKS_TOGGLE_ICON],
+  ["npc", NPC_PANEL_ICON],
+  // CT-309: the ROP aside and the kept-projection action share this icon on
+  // purpose (same operation); the uniqueness sweep tracks it once under "rop".
+  ["rop", ROP_PANEL_ICON],
 ];
 
 function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
@@ -33,6 +42,7 @@ function listEveryIconAssignment(): Array<[string, RegisteredActionIcon]> {
       (action): [string, RegisteredActionIcon] => [action.id, action.icon],
     ),
     [BAND_SUBSET_ACTION.id, BAND_SUBSET_ACTION.icon],
+    [DUPLICATE_BANDS_ACTION.id, DUPLICATE_BANDS_ACTION.icon],
     ...Object.entries(QUICK_TRANSFORM_ICONS),
     ...TOOLBAR_CHROME_AND_TOGGLE_ICONS,
   ];
@@ -50,12 +60,16 @@ function buildIdleToolbarContext(): ToolbarOperationGroupContext {
   return {
     handlers: {
       toggleRegionTool: () => {},
+      toggleMasks: () => {},
       toggleBandSubset: () => {},
       openActionPanel: () => {},
+      openNpcPanel: () => {},
+      openRopPanel: () => {},
       applyGeometricTransform: () => {},
     },
     getActionAvailability: () => ({ isAvailable: true }),
     regionToolActive: false,
+    masksToolActive: false,
     bandSubsetToggle: { isAvailable: true, isActive: false, onToggle: () => {} },
     isQuickTransformAvailable: true,
   };

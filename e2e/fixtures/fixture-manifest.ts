@@ -52,6 +52,70 @@ export interface NoisyGrayFixture extends SingleFileFixture {
   readonly spikes: ReadonlyArray<NoisyGraySpike>;
 }
 
+// CT-303: a mask fixture is an 8-bit grayscale PNG of CATEGORY INDEXES (0 =
+// unlabeled) plus, when it has one, the JSON sidecar naming its categories.
+export interface MaskFixtureCategory {
+  readonly index: number;
+  readonly name: string;
+  readonly color: string;
+}
+
+export interface MaskFixture {
+  readonly fileName: string;
+  readonly sidecarFileName?: string;
+  readonly width: number;
+  readonly height: number;
+  readonly name?: string;
+  readonly opacity?: number;
+  readonly categories?: ReadonlyArray<MaskFixtureCategory>;
+  readonly values: ReadonlyArray<number>;
+}
+
+// CT-307: reference outputs pinned by the generate-fixtures.mjs reference
+// runner, which executes the built-in algorithm scripts with the bundled
+// Python runtime. The parity oracle for CT-308 through CT-313: app results
+// must match within 1e-4 relative tolerance.
+export interface BuiltinScriptReferenceBase {
+  readonly script: string;
+  readonly fixture: string;
+  readonly maskFixture?: string;
+  // CT-310: the committed .py the app imports as the search objective.
+  readonly objectiveScript?: string;
+  readonly params: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface BuiltinScriptValueReference extends BuiltinScriptReferenceBase {
+  readonly value: number;
+}
+
+export interface BuiltinScriptCubeReference extends BuiltinScriptReferenceBase {
+  readonly shape: ReadonlyArray<number>;
+  readonly values: ReadonlyArray<number>;
+}
+
+export interface BuiltinScriptReferences {
+  readonly ropSeed: number;
+  readonly npc: BuiltinScriptValueReference;
+  // CT-308: the same fixture scored with a coarse binning, where the two mask
+  // classes share bins, so the pinned value is not the trivially separable 1.
+  readonly npcCoarseBins: BuiltinScriptValueReference;
+  readonly rop: BuiltinScriptCubeReference;
+  // CT-309: the CNR objective score of the pinned rop candidate against the
+  // mask fixture (text = category 1, background = category 2), computed by the
+  // generator in JS over the float32 reference values with the exact locked
+  // formula, since the app computes CNR in TS rather than in Python.
+  readonly ropCnr: BuiltinScriptValueReference;
+  // CT-310: the best of 50 seeded candidates under the committed custom
+  // objective (mask-contrast-objective.py), and that winner's score computed in
+  // JS. The winner is NOT the first draw, so a search that ignored its
+  // objective - or never looped - cannot match it.
+  readonly ropSearch: BuiltinScriptCubeReference;
+  readonly ropSearchScore: BuiltinScriptValueReference;
+  readonly l2Minimization: BuiltinScriptCubeReference;
+  readonly localPca: BuiltinScriptCubeReference;
+  readonly localMnf: BuiltinScriptCubeReference;
+}
+
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
 // CT-272: written by generate-png16-fixture.mjs (sharp/libvips, an external
@@ -82,6 +146,11 @@ export const paletteColorTiff = manifestJson.paletteColorTiff as SingleFileFixtu
 export const untaggedRgbTiff = manifestJson.untaggedRgbTiff as SingleFileFixture;
 export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
+export const maskMultibandPng = manifestJson.maskMultibandPng as MaskFixture;
+export const maskEightBySquarePng = manifestJson.maskEightBySquarePng as MaskFixture;
+export const parityStackTiff = manifestJson.parityStackTiff as SingleFileFixture;
+export const builtinScriptReferences =
+  manifestJson.builtinScriptReferences as unknown as BuiltinScriptReferences;
 
 export function fixturePath(fileName: string): string {
   return join(FIXTURES_DIRECTORY, fileName);

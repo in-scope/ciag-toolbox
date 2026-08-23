@@ -33,12 +33,16 @@ import {
   brightnessDeltaForRangeFractionOfBand,
 } from "@/lib/image/apply-brightness";
 import { applyContrastToRasterBandsReportingProgress } from "@/lib/image/apply-contrast";
-import { applyCropToRasterImageReportingProgress } from "@/lib/image/apply-crop-to-roi";
+import {
+  applyCropToRasterImageReportingProgress,
+  cropPlaneToRoi,
+} from "@/lib/image/apply-crop-to-roi";
 import {
   buildFalseColorComposite,
   type FalseColorBandAssignment,
 } from "@/lib/image/apply-false-color-composite";
 import {
+  applyGeometricTransformToPlane,
   applyGeometricTransformToRasterImageReportingProgress,
   GEOMETRIC_TRANSFORM_LABELS,
   isGeometricTransform,
@@ -110,6 +114,7 @@ import {
   type SliderParameterSchema,
 } from "./parameter-schema";
 import type { ParameterValue, ParameterValuesById } from "./parameter-schema";
+import type { MaskPlaneTransform } from "@/lib/masks/mask-geometry-transform";
 import {
   clearOperationRegionFromState,
   injectOperationRegionCorners,
@@ -147,6 +152,10 @@ import { PERCENTILE_CLIP_ACTION } from "./percentile-clip-action";
 import { BAND_WEIGHTING_ACTION } from "./band-weighting-action";
 import { BAND_SELECTION_ACTION } from "./band-selection-action";
 import { CUSTOM_TRANSFORM_ACTION } from "./custom-transform-action";
+import { CONCATENATE_STACKS_ACTION } from "./concatenate-stacks-action";
+import { LOCAL_PCA_ACTION } from "./local-pca-action";
+import { LOCAL_MNF_ACTION } from "./local-mnf-action";
+import { L2_MINIMIZATION_ACTION } from "./l2-minimization-action";
 
 export type RegisteredActionIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -179,6 +188,22 @@ export interface RegisteredViewportAction extends ViewportAction {
    * one (CT-095) and Apply stays disabled until they do.
    */
   readonly requiresOperationRegion?: boolean;
+  /**
+   * CT-302: the operation moves or resizes the stack's spatial grid (crop,
+   * rotate, flip), so an in-place apply must reconcile the panel's mask
+   * layers. Set it even when width and height survive the operation (a flip,
+   * or rotating a square stack) - the pixels still move under the masks.
+   */
+  readonly changesStackGeometry?: boolean;
+  /**
+   * The spatial mapping the operation applies, so an in-place apply moves the
+   * panel's mask layers WITH the pixels they annotate (crop crops them,
+   * rotate rotates them, flip flips them). A geometry-changing action without
+   * this drops the masks instead, with the info toast.
+   */
+  readonly describeMaskGeometryTransform?: (
+    parameterValues: ParameterValuesById,
+  ) => MaskPlaneTransform | null;
   /**
    * The operation can optionally be limited to an area; the user opts in via the
    * "Apply to" scope selector and then selects the region (CT-095).
@@ -290,6 +315,8 @@ export const CROP_TO_REGION_ACTION: RegisteredViewportAction = {
   successHintWhenResultOpensNewPanel: "Closing the original panel frees its memory.",
   appliedLabel: "Crop to region",
   requiresOperationRegion: true,
+  changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskCropTransform,
   formatAppliedLabel: formatCropToRegionAppliedLabel,
   prepareParameterValuesForApply: prepareCropParameterValuesFromOperationRegion,
   apply: clearRegionAndStaleInspectionRoiAfterCrop,
@@ -359,6 +386,11 @@ function readIntegerParameterOrThrow(
   return Math.round(raw);
 }
 
+function describeMaskCropTransform(parameterValues: ParameterValuesById): MaskPlaneTransform {
+  const roi = readRoiFromCropParameterValues(parameterValues);
+  return (plane) => cropPlaneToRoi(plane.values, plane.width, plane.height, roi);
+}
+
 function formatCropToRegionAppliedLabel(parameterValues: ParameterValuesById): string {
   const canonical = canonicalizeViewportRoiCorners(readRoiFromCropParameterValues(parameterValues));
   return `Crop to (${canonical.imagePixelX0}, ${canonical.imagePixelY0}) - (${canonical.imagePixelX1}, ${canonical.imagePixelY1})`;
@@ -378,7 +410,9 @@ export const BAND_SUBSET_ACTION: RegisteredViewportAction = {
   transformSource: createBandSubsetSourceTransform(),
 };
 
-function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
+// Exported for CT-301's Duplicate Bands action, which lives on the same
+// Subset Bands editor surface and resets the same band-count-changing state.
+export function clearBandSubsetStateAfterApply(state: ViewportRenderingState): ViewportRenderingState {
   return clearPinnedSpectraFromState({
     ...state,
     removedBandIndexes: EMPTY_REMOVED_BAND_INDEXES,
@@ -387,7 +421,7 @@ function clearBandSubsetStateAfterApply(state: ViewportRenderingState): Viewport
   });
 }
 
-function clearBandSubsetEditModeFromSource(
+export function clearBandSubsetEditModeFromSource(
   state: ViewportRenderingState,
 ): ViewportRenderingState {
   return {
@@ -1611,6 +1645,8 @@ export const ROTATE_ACTION: RegisteredViewportAction = {
   parameters: [ROTATION_PARAMETER_SCHEMA],
   successMessage: "Rotation applied",
   appliedLabel: "Rotate",
+  changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskGeometricTransform,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
@@ -1626,6 +1662,8 @@ export const REFLECT_ACTION: RegisteredViewportAction = {
   parameters: [REFLECTION_PARAMETER_SCHEMA],
   successMessage: "Flip applied",
   appliedLabel: "Flip",
+  changesStackGeometry: true,
+  describeMaskGeometryTransform: describeMaskGeometricTransform,
   formatAppliedLabel: formatGeometricTransformAppliedLabel,
   apply: clearRegionAfterGeometricTransform,
   clearConsumedSourceStateAfterApply: clearRegionAfterGeometricTransform,
@@ -1662,6 +1700,11 @@ function formatGeometricTransformAppliedLabel(parameterValues: ParameterValuesBy
   return GEOMETRIC_TRANSFORM_LABELS[readGeometricTransformChoice(parameterValues)];
 }
 
+function describeMaskGeometricTransform(parameterValues: ParameterValuesById): MaskPlaneTransform {
+  const transform = readGeometricTransformChoice(parameterValues);
+  return (plane) => applyGeometricTransformToPlane(plane.values, plane.width, plane.height, transform);
+}
+
 export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction> = [
   BIT_SHIFT_ACTION,
   CROP_TO_REGION_ACTION,
@@ -1688,4 +1731,8 @@ export const REGISTERED_VIEWPORT_ACTIONS: ReadonlyArray<RegisteredViewportAction
   BAND_WEIGHTING_ACTION,
   BAND_SELECTION_ACTION,
   CUSTOM_TRANSFORM_ACTION,
+  CONCATENATE_STACKS_ACTION,
+  LOCAL_PCA_ACTION,
+  LOCAL_MNF_ACTION,
+  L2_MINIMIZATION_ACTION,
 ];

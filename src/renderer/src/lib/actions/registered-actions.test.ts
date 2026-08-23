@@ -65,6 +65,10 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "band-weighting",
       "band-selection",
       "custom-transform",
+      "concatenate-stacks",
+      "local-pca",
+      "local-mnf",
+      "l2-minimization",
     ]);
   });
 

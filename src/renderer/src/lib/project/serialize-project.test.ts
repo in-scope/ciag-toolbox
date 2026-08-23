@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { RasterImage } from "@/lib/image/raster-image";
+import type { MaskLayer } from "@/lib/masks/mask-layer";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
+import { decodeMaskPngBytes } from "@/lib/masks/mask-png-decode";
 import type { ViewportImageSource } from "@/lib/webgl/texture";
 
 import { PROJECT_FILE_FORMAT_VERSION } from "./project-schema";
@@ -11,13 +14,13 @@ import {
 } from "./serialize-project";
 
 describe("buildDraftBundleFromSnapshot", () => {
-  it("emits the supported format version constant", () => {
-    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
+  it("emits the supported format version constant", async () => {
+    const draft = await buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
     expect(draft.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
   });
 
-  it("bakes a modified raster source as a single-band TIFF encoding plan", () => {
-    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
+  it("bakes a modified raster source as a single-band TIFF encoding plan", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
@@ -26,8 +29,8 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(first.asset.primary.byteLength).toBeGreaterThan(0);
   });
 
-  it("bakes a modified multi-band raster source as an ENVI plan with a .bin sidecar", () => {
-    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
+  it("bakes a modified multi-band raster source as an ENVI plan with a .bin sidecar", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
@@ -36,8 +39,8 @@ describe("buildDraftBundleFromSnapshot", () => {
     expect(first.asset.sidecar?.byteLength).toBeGreaterThan(0);
   });
 
-  it("references an unmodified on-disk raster as an external asset instead of baking it", () => {
-    const draft = buildDraftBundleFromSnapshot(buildMultiBandRasterSnapshot());
+  it("references an unmodified on-disk raster as an external asset instead of baking it", async () => {
+    const draft = await buildDraftBundleFromSnapshot(buildMultiBandRasterSnapshot());
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("external");
     if (first?.asset.kind !== "external") return;
@@ -49,58 +52,58 @@ describe("buildDraftBundleFromSnapshot", () => {
   // memory or cloned across IPC. The external path declares the source by path
   // and reads no pixels, so a cube with huge declared dimensions packs without
   // allocating anything.
-  it("streams a large unmodified ENVI cube by reference without baking it", () => {
+  it("streams a large unmodified ENVI cube by reference without baking it", async () => {
     const snapshot = buildLargeUnmodifiedEnviSnapshot();
-    const draft = buildDraftBundleFromSnapshot(snapshot);
+    const draft = await buildDraftBundleFromSnapshot(snapshot);
     expect(draft.viewports[0]?.asset.kind).toBe("external");
   });
 
   // CT-235: the 1.8 GB bake cap is gone. A modified multi-gigabyte cube plans a
   // chunked bake (metadata only, nothing allocated) instead of being rejected.
-  it("plans a chunked bake for a modified raster beyond the old bake size limit", () => {
+  it("plans a chunked bake for a modified raster beyond the old bake size limit", async () => {
     const snapshot = withAppliedOperation(buildLargeUnmodifiedEnviSnapshot());
-    const draft = buildDraftBundleFromSnapshot(snapshot);
+    const draft = await buildDraftBundleFromSnapshot(snapshot);
     const [first] = draft.viewports;
     expect(first?.asset.kind).toBe("baked");
     if (first?.asset.kind !== "baked") return;
     expect(first.asset.sidecar?.byteLength).toBe(20_000 * 20_000 * 10 * 2);
   });
 
-  it("sorts the selected viewport indices ascending", () => {
+  it("sorts the selected viewport indices ascending", async () => {
     const snapshot: SaveableProjectSnapshot = {
       ...buildSingleViewportSnapshot(),
       selectedViewportIndices: [3, 1, 2],
     };
-    const draft = buildDraftBundleFromSnapshot(snapshot);
+    const draft = await buildDraftBundleFromSnapshot(snapshot);
     expect(draft.selectedViewportIndices).toEqual([1, 2, 3]);
   });
 
-  it("forwards rendering state values onto each viewport entry", () => {
-    const draft = buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
+  it("forwards rendering state values onto each viewport entry", async () => {
+    const draft = await buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
     const [first] = draft.viewports;
     expect(first?.renderingState.normalizationEnabled).toBe(true);
     expect(first?.renderingState.selectedBandIndex).toBe(0);
     expect(first?.renderingState.lastAppliedOperationLabel).toBeNull();
   });
 
-  it("tags a true-colour composite viewport with the rgb colour interpretation", () => {
-    const draft = buildDraftBundleFromSnapshot(
+  it("tags a true-colour composite viewport with the rgb colour interpretation", async () => {
+    const draft = await buildDraftBundleFromSnapshot(
       withAppliedOperation(buildRgbCompositeRasterSnapshot()),
     );
     expect(draft.viewports[0]?.colorInterpretation).toBe("rgb");
   });
 
-  it("leaves the colour interpretation absent for a scientific multi-band stack", () => {
-    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
+  it("leaves the colour interpretation absent for a scientific multi-band stack", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withAppliedOperation(buildMultiBandRasterSnapshot()));
     expect(draft.viewports[0]?.colorInterpretation).toBeUndefined();
   });
 
-  it("leaves the colour interpretation absent for a single-band raster", () => {
-    const draft = buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
+  it("leaves the colour interpretation absent for a single-band raster", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withAppliedOperation(buildSingleViewportSnapshot()));
     expect(draft.viewports[0]?.colorInterpretation).toBeUndefined();
   });
 
-  it("forwards each viewport's operationHistory entries unchanged", () => {
+  it("forwards each viewport's operationHistory entries unchanged", async () => {
     const snapshot: SaveableProjectSnapshot = {
       ...buildSingleViewportSnapshot(),
       viewports: [
@@ -118,12 +121,91 @@ describe("buildDraftBundleFromSnapshot", () => {
         },
       ],
     };
-    const draft = buildDraftBundleFromSnapshot(snapshot);
+    const draft = await buildDraftBundleFromSnapshot(snapshot);
     expect(draft.viewports[0]?.operationHistory).toHaveLength(1);
     expect(draft.viewports[0]?.operationHistory[0]?.actionId).toBe("bit-shift");
     expect(draft.viewports[0]?.operationHistory[0]?.parameterValues).toEqual({ shiftAmount: 4 });
   });
+
+  // CT-306: a panel with no masks must not add anything to the bundle, so a
+  // pre-mask project keeps saving exactly the assets it always did.
+  it("plans no mask assets for a panel that was never annotated", async () => {
+    const draft = await buildDraftBundleFromSnapshot(buildSingleViewportSnapshot());
+    expect(draft.viewports[0]?.masks).toEqual([]);
+    expect(draft.viewports[0]?.selectedMaskIndex).toBeNull();
+  });
+
+  it("plans one PNG asset per mask layer and records the selected layer's position", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withTwoMaskLayersSelectingTheSecond());
+    const masks = draft.viewports[0]?.masks ?? [];
+    expect(masks.map((mask) => [mask.name, mask.plan.extension])).toEqual([
+      ["Mask 1", "png"],
+      ["Mask 2", "png"],
+    ]);
+    expect(masks[0]?.categories).toEqual([{ name: "Foreground", color: "#ef4444" }]);
+    expect(masks[0]?.opacityPercent).toBe(75);
+    expect(draft.viewports[0]?.selectedMaskIndex).toBe(1);
+  });
+
+  it("plans mask asset bytes that decode back to the painted category indexes", async () => {
+    const draft = await buildDraftBundleFromSnapshot(withTwoMaskLayersSelectingTheSecond());
+    const plan = draft.viewports[0]!.masks[0]!.plan;
+    const decoded = await decodeMaskPngBytes(await collectPlanBytes(plan));
+    expect(Array.from(decoded.values)).toEqual([0, 1, 1, 0]);
+    expect([decoded.width, decoded.height]).toEqual([2, 2]);
+  });
 });
+
+function withTwoMaskLayersSelectingTheSecond(): SaveableProjectSnapshot {
+  const base = buildSingleViewportSnapshot();
+  return {
+    ...base,
+    viewports: [{ ...base.viewports[0]!, masks: buildTwoMaskLayerPanel() }],
+  };
+}
+
+function buildTwoMaskLayerPanel(): MaskPanelState {
+  return {
+    layers: [
+      buildMaskLayerFixture("mask-1", "Mask 1", Uint8Array.from([0, 1, 1, 0]), 75),
+      buildMaskLayerFixture("mask-2", "Mask 2", Uint8Array.from([2, 2, 0, 0]), 30),
+    ],
+    selectedLayerId: "mask-2",
+  };
+}
+
+function buildMaskLayerFixture(
+  id: string,
+  name: string,
+  values: Uint8Array,
+  opacityPercent: number,
+): MaskLayer {
+  return {
+    id,
+    name,
+    width: 2,
+    height: 2,
+    values,
+    categories: [{ id: "category-1", name: "Foreground", color: "#ef4444" }],
+    opacityPercent,
+  };
+}
+
+async function collectPlanBytes(plan: {
+  byteLength: number;
+  emitChunksInOrder: (
+    maxChunkBytes: number,
+    onChunk: (bytes: Uint8Array) => Promise<void>,
+  ) => Promise<void>;
+}): Promise<Uint8Array> {
+  const collected = new Uint8Array(plan.byteLength);
+  let offset = 0;
+  await plan.emitChunksInOrder(8, async (bytes) => {
+    collected.set(bytes, offset);
+    offset += bytes.byteLength;
+  });
+  return collected;
+}
 
 // CT-072: the save flow waits for the busy indicator to paint before the heavy
 // raster bake, but only when a bake will actually happen. An all-external save

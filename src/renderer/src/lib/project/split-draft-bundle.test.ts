@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { BundleAssetPartEncodingPlan } from "@/lib/image/encode-bundle-asset";
 
+import type { DraftBundleMaskLayer } from "./plan-mask-bundle-assets";
+import { PROJECT_FILE_FORMAT_VERSION } from "./project-schema";
 import type { DraftBundleFile, DraftBundleViewportEntry } from "./serialize-project";
 import { splitDraftBundleForChunkedSave } from "./split-draft-bundle";
 
@@ -34,6 +36,8 @@ function bakedEnviViewport(index: number): DraftBundleViewportEntry {
     },
     renderingState: RENDERING_STATE,
     operationHistory: [],
+    masks: [],
+    selectedMaskIndex: null,
   };
 }
 
@@ -44,6 +48,8 @@ function bakedTiffViewport(index: number): DraftBundleViewportEntry {
     asset: { kind: "baked", primary: partPlanOf("tif", Uint8Array.from([9, 9])) },
     renderingState: RENDERING_STATE,
     operationHistory: [],
+    masks: [],
+    selectedMaskIndex: null,
     colorInterpretation: "rgb",
   };
 }
@@ -55,12 +61,42 @@ function externalViewport(index: number): DraftBundleViewportEntry {
     asset: { kind: "external", absolutePath: `/abs/photo-${index}.png`, extension: "png" },
     renderingState: RENDERING_STATE,
     operationHistory: [],
+    masks: [],
+    selectedMaskIndex: null,
+  };
+}
+
+function maskLayerOf(
+  name: string,
+  categoryName: string,
+  color: string,
+  opacityPercent: number,
+  bytes: Uint8Array,
+): DraftBundleMaskLayer {
+  return {
+    name,
+    width: 2,
+    height: 2,
+    categories: [{ name: categoryName, color }],
+    opacityPercent,
+    plan: partPlanOf("png", bytes),
+  };
+}
+
+function viewportWithTwoMaskLayers(index: number): DraftBundleViewportEntry {
+  return {
+    ...externalViewport(index),
+    masks: [
+      maskLayerOf("Mask 1", "Foreground", "#ef4444", 60, Uint8Array.from([1, 2, 3])),
+      maskLayerOf("Mask 2", "Background", "#3b82f6", 40, Uint8Array.from([1, 2, 3, 4, 5])),
+    ],
+    selectedMaskIndex: 1,
   };
 }
 
 function draftOf(viewports: ReadonlyArray<DraftBundleViewportEntry>): DraftBundleFile {
   return {
-    formatVersion: 2,
+    formatVersion: PROJECT_FILE_FORMAT_VERSION,
     gridLayout: "2x2",
     selectedViewportIndices: [0, 2],
     viewports,
@@ -92,7 +128,7 @@ describe("splitDraftBundleForChunkedSave", () => {
       extension: "png",
     });
     expect(split.parts).toEqual([]);
-    expect(split.header.formatVersion).toBe(2);
+    expect(split.header.formatVersion).toBe(PROJECT_FILE_FORMAT_VERSION);
     expect(split.header.gridLayout).toBe("2x2");
     expect(split.header.selectedViewportIndices).toEqual([0, 2]);
   });
@@ -103,6 +139,29 @@ describe("splitDraftBundleForChunkedSave", () => {
     );
     expect(split.header.viewports[0]?.colorInterpretation).toBe("rgb");
     expect(split.header.viewports[1]).not.toHaveProperty("colorInterpretation");
+  });
+
+  // CT-306: mask PNGs are extra upload parts of the same shape as a baked
+  // stack part, keyed by the layer's position in the panel's mask list.
+  it("collects one mask upload part per layer and describes it in the header", () => {
+    const split = splitDraftBundleForChunkedSave(draftOf([viewportWithTwoMaskLayers(0)]));
+    expect(split.parts.map((part) => [part.viewportIndex, part.part])).toEqual([
+      [0, "mask-0"],
+      [0, "mask-1"],
+    ]);
+    expect(split.header.viewports[0]?.masks?.[1]).toEqual({
+      name: "Mask 2",
+      width: 2,
+      height: 2,
+      categories: [{ name: "Background", color: "#3b82f6" }],
+      opacityPercent: 40,
+      byteLength: 5,
+    });
+  });
+
+  it("carries the selected mask position in the header", () => {
+    const split = splitDraftBundleForChunkedSave(draftOf([viewportWithTwoMaskLayers(0)]));
+    expect(split.header.viewports[0]?.selectedMaskIndex).toBe(1);
   });
 
   it("keeps the exact bytes reachable through the collected part plans", async () => {

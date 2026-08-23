@@ -86,9 +86,27 @@ export interface RasterReferenceParameterSchema extends ParameterSchemaBase {
   readonly kind: "raster-reference";
   readonly optional: boolean;
   readonly defaultValue: string;
+  // CT-300: restrict the picker to already-loaded panels whose stack matches
+  // the active stack's width and height (no file-on-disk option, since an
+  // undecoded file's dimensions are unknown); Apply is blocked while no
+  // candidate qualifies or none is chosen.
+  readonly restrictToLoadedPanelsMatchingSourceDimensions?: boolean;
 }
 
 export const NO_RASTER_REFERENCE_SELECTED = "";
+
+// CT-313: a picker over the active panel's own mask layers (L2 minimization's
+// "Mask layer" field). The value is the chosen MaskLayer's id; the layer's
+// actual pixel data cannot travel through ParameterValuesById (number | string
+// | boolean only), so it is resolved separately at apply time through
+// lib/masks/mask-layer-reference-store.ts, the same token-indirection shape
+// pick-reference-raster.ts uses for a whole raster.
+export interface MaskLayerParameterSchema extends ParameterSchemaBase {
+  readonly kind: "mask-layer";
+  readonly defaultValue: string;
+}
+
+export const NO_MASK_LAYER_SELECTED = "";
 
 export interface BandNumberParameterSchema extends ParameterSchemaBase {
   readonly kind: "band-number";
@@ -128,7 +146,8 @@ export type ParameterSchema =
   | RasterReferenceParameterSchema
   | BandNumberParameterSchema
   | ComponentCountParameterSchema
-  | ClipBoundsParameterSchema;
+  | ClipBoundsParameterSchema
+  | MaskLayerParameterSchema;
 
 export type ResolvedCubeScopeSelection =
   | { readonly scope: "full-cube" }
@@ -191,6 +210,10 @@ export function readRasterReferenceTokenOrEmpty(value: ParameterValue | undefine
   return typeof value === "string" ? value : NO_RASTER_REFERENCE_SELECTED;
 }
 
+export function readMaskLayerIdOrEmpty(value: ParameterValue | undefined): string {
+  return typeof value === "string" ? value : NO_MASK_LAYER_SELECTED;
+}
+
 export function readBandRangeTextOrEmpty(value: ParameterValue | undefined): string {
   return typeof value === "string" ? value : "";
 }
@@ -226,10 +249,81 @@ export function describeBlockingParameterErrorOrNull(
   schemas: ReadonlyArray<ParameterSchema>,
   values: ParameterValuesById,
   bandCount: number | null,
+  qualifyingLoadedReferenceCandidateCountsById?: ReadonlyMap<string, number>,
+  qualifyingMaskLayerCountById?: ReadonlyMap<string, number>,
 ): string | null {
   const bandScopeError = describeBandScopeBlockingErrorOrNull(schemas, values, bandCount);
   if (bandScopeError) return bandScopeError;
-  return describeClipBoundsBlockingErrorOrNull(schemas, values);
+  const clipBoundsError = describeClipBoundsBlockingErrorOrNull(schemas, values);
+  if (clipBoundsError) return clipBoundsError;
+  const maskLayerError = describeMaskLayerBlockingErrorOrNull(schemas, values, qualifyingMaskLayerCountById);
+  if (maskLayerError) return maskLayerError;
+  return describeRasterReferenceBlockingErrorOrNull(
+    schemas,
+    values,
+    qualifyingLoadedReferenceCandidateCountsById,
+  );
+}
+
+// CT-313: a mask-layer field blocks Apply until the panel has a qualifying
+// layer AND one is chosen, mirroring the CT-300 restricted raster-reference
+// gate exactly.
+function describeMaskLayerBlockingErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  qualifyingCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  for (const schema of schemas) {
+    if (schema.kind !== "mask-layer") continue;
+    const error = describeMaskLayerErrorForSchemaOrNull(schema, values, qualifyingCountsById);
+    if (error) return error;
+  }
+  return null;
+}
+
+function describeMaskLayerErrorForSchemaOrNull(
+  schema: MaskLayerParameterSchema,
+  values: ParameterValuesById,
+  qualifyingCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  const qualifyingCount = qualifyingCountsById?.get(schema.id) ?? 0;
+  if (qualifyingCount === 0) {
+    return "This stack has no mask layer with at least two painted categories. Add one with the Masks tool.";
+  }
+  if (readMaskLayerIdOrEmpty(values[schema.id]) === NO_MASK_LAYER_SELECTED) {
+    return "Choose a mask layer to continue.";
+  }
+  return null;
+}
+
+// CT-300: a raster-reference field restricted to dimension-matching loaded
+// panels blocks Apply until a qualifying panel exists AND one is chosen.
+function describeRasterReferenceBlockingErrorOrNull(
+  schemas: ReadonlyArray<ParameterSchema>,
+  values: ParameterValuesById,
+  qualifyingCandidateCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  for (const schema of schemas) {
+    if (schema.kind !== "raster-reference" || !schema.restrictToLoadedPanelsMatchingSourceDimensions) continue;
+    const error = describeRestrictedRasterReferenceErrorForSchemaOrNull(schema, values, qualifyingCandidateCountsById);
+    if (error) return error;
+  }
+  return null;
+}
+
+function describeRestrictedRasterReferenceErrorForSchemaOrNull(
+  schema: RasterReferenceParameterSchema,
+  values: ParameterValuesById,
+  qualifyingCandidateCountsById?: ReadonlyMap<string, number>,
+): string | null {
+  const qualifyingCount = qualifyingCandidateCountsById?.get(schema.id) ?? 0;
+  if (qualifyingCount === 0) {
+    return "No open stack matches the active stack's width and height. Open a matching stack to continue.";
+  }
+  if (readRasterReferenceTokenOrEmpty(values[schema.id]) === NO_RASTER_REFERENCE_SELECTED) {
+    return "Choose a stack to continue.";
+  }
+  return null;
 }
 
 function describeClipBoundsBlockingErrorOrNull(

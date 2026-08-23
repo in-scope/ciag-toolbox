@@ -1,4 +1,4 @@
-# Python scripting in MSI Toolbox
+# Python scripting in CHARM Toolbox
 
 Three operations in the toolbox can run your own Python against the current stack:
 
@@ -102,6 +102,8 @@ Each limit grows with the stack: on top of its base, a run gets 60 seconds per g
 - Custom transform (cube) runs: 120 seconds, plus the transfer allowance in each direction.
 
 A run whose stack would not fit in the machine's memory is refused before any data moves.
+
+The limit measures SILENCE, not total run time. A script that takes a third `params` argument can call `params["report_progress"](fraction)` as it works, which both drives the progress bar and starts its time budget again, so a long run that keeps reporting is never stopped for taking its time. Use Stop to end one early.
 
 ## Your own Python environment (opt-in)
 

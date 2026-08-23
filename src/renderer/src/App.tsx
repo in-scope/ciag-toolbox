@@ -30,6 +30,20 @@ import {
   type ToolOptionsApplyOptions,
   type ToolOptionsSourceViewport,
 } from "@/components/tool-options-panel";
+import {
+  MasksOptionsPanel,
+  type MasksOptionsTarget,
+} from "@/components/masks-options-panel";
+import {
+  NpcOptionsPanel,
+  type NpcPanelTarget,
+} from "@/components/npc-options-panel";
+import {
+  RopOptionsPanel,
+  type RopPanelTarget,
+} from "@/components/rop-options-panel";
+import { keepRopCandidateAsNewStack } from "@/lib/analysis/rop-keep-flow";
+import type { RopKeepRequest } from "@/lib/actions/rop-keep-action";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
 import { ToolOptionsCustomTransformEditor } from "@/components/tool-options-custom-transform-editor";
@@ -62,6 +76,10 @@ import {
   type InFlightApplyRunStore,
 } from "@/lib/actions/in-flight-apply-run-store";
 import { BAND_SELECTION_ACTION } from "@/lib/actions/band-selection-action";
+import {
+  buildDuplicateBandsParameterValuesFromBandNumbers,
+  DUPLICATE_BANDS_ACTION,
+} from "@/lib/actions/duplicate-bands-action";
 import {
   buildViewportClosingApi,
   type ViewportClosingApiBindings,
@@ -138,7 +156,6 @@ import {
   buildLoadedReferenceCandidates,
   type LoadedPanelReferenceEntry,
   type LoadedReferenceCandidate,
-  type ReferencePickerOption,
 } from "@/lib/image/reference-token";
 import { isSelectableGridLayout } from "@shared/grid-layouts";
 import {
@@ -231,6 +248,7 @@ import {
   RegionToolProvider,
   useRegionTool,
 } from "@/state/region-tool-context";
+import { MasksToolProvider, useMasksTool } from "@/state/masks-tool-context";
 import {
   RegionRequestProvider,
   useRegionRequest,
@@ -286,6 +304,10 @@ import {
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
 import { NO_PARAMETER_VALUES, type ParameterValuesById } from "@/lib/actions/parameter-schema";
+import { appendOperationHistoryEntry } from "@/lib/actions/operation-history";
+import type { MaskPanelState } from "@/lib/masks/mask-panel";
+import type { MaskBrushSettings } from "@/lib/masks/mask-brush";
+import { getImageSourceDimensions } from "@/lib/webgl/texture";
 
 const DEFAULT_GRID_LAYOUT: GridLayout = "1x1";
 
@@ -322,6 +344,7 @@ export function App(): JSX.Element {
         <PanelLinkProvider>
         <ViewportRenderingProvider>
           <RegionToolProvider>
+            <MasksToolProvider>
             <RegionRequestProvider>
             <FalseColorPreviewProvider>
               <ToneCurvePreviewProvider>
@@ -341,6 +364,7 @@ export function App(): JSX.Element {
               </ToneCurvePreviewProvider>
             </FalseColorPreviewProvider>
             </RegionRequestProvider>
+            </MasksToolProvider>
           </RegionToolProvider>
         </ViewportRenderingProvider>
         </PanelLinkProvider>
@@ -361,6 +385,8 @@ function ApplicationShell(): JSX.Element {
   const [imagesByIndex, setImagesByIndex] = useState<ImagesByIndexMap>(createEmptyImagesMap);
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
+  const [isNpcPanelOpen, setIsNpcPanelOpen] = useState(false);
+  const [isRopPanelOpen, setIsRopPanelOpen] = useState(false);
   const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
     useState<PendingOpenImagesReplace | null>(null);
   const [pendingOpenImagesReview, setPendingOpenImagesReview] =
@@ -378,6 +404,7 @@ function ApplicationShell(): JSX.Element {
   const renderingApi = useViewportRendering();
   const panelLink = usePanelLink();
   const regionTool = useRegionTool();
+  const masksTool = useMasksTool();
   const regionRequest = useRegionRequest();
   const falseColorPreview = useFalseColorPreview();
   const toneCurvePreview = useToneCurvePreview();
@@ -494,8 +521,13 @@ function ApplicationShell(): JSX.Element {
   };
   const operationCommandHandlers = buildOperationCommandHandlers({
     regionTool,
+    masksTool,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     openActionPanel: regionRequestHandlers.openActionPanel,
+    openNpcPanel: () =>
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsNpcPanelOpen, setIsRopPanelOpen),
+    openRopPanel: () =>
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsRopPanelOpen, setIsNpcPanelOpen),
     singleSelectedSource,
     applyActionFlowBindings,
   });
@@ -504,6 +536,7 @@ function ApplicationShell(): JSX.Element {
     getActionAvailability: (action) =>
       deriveActionAvailabilityForActiveViewport(action, singleSelectedSource, renderingApi),
     regionToolActive: regionTool.isRegionToolActive,
+    masksToolActive: masksTool.isMasksToolActive,
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     isQuickTransformAvailable: deriveActionAvailabilityForActiveViewport(
       ROTATE_ACTION,
@@ -571,6 +604,30 @@ function ApplicationShell(): JSX.Element {
                   imagesByIndex,
                   activeActionParameterValues,
                 )}
+                isMasksToolActive={masksTool.isMasksToolActive}
+                masksTarget={deriveMasksOptionsTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onChangeMasks={(next) =>
+                  writeMaskPanelStateAtViewport(singleSelectedSource?.index ?? null, next, renderingApi)
+                }
+                maskBrush={masksTool.brush}
+                onChangeMaskBrush={masksTool.setBrush}
+                onCloseMasks={() => masksTool.setMasksToolActive(false)}
+                isNpcPanelOpen={isNpcPanelOpen}
+                npcTarget={deriveNpcPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onRecordNpcScore={(appliedLabel) =>
+                  appendNpcScoreToHistoryAtViewport(
+                    singleSelectedSource?.index ?? null,
+                    appliedLabel,
+                    renderingApi,
+                  )
+                }
+                onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
+                isRopPanelOpen={isRopPanelOpen}
+                ropTarget={deriveRopPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onKeepRopCandidate={(request) =>
+                  keepRopCandidateFromActivePanel(request, singleSelectedSource, applyActionFlowBindings)
+                }
+                onCloseRopPanel={() => setIsRopPanelOpen(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
                 onCancelAction={regionRequestHandlers.closeActionPanel}
                 onApplyAction={handleApplyAction}
@@ -661,8 +718,22 @@ interface ApplicationStageContentProps {
   onOpenImage: () => void;
   activeAction: RegisteredViewportAction | null;
   sourceViewport: ToolOptionsSourceViewport | null;
-  loadedReferenceCandidates: ReadonlyArray<ReferencePickerOption>;
+  loadedReferenceCandidates: ReadonlyArray<LoadedReferenceCandidate>;
   toolOptionsEmbeddedEditor: ReactNode;
+  isMasksToolActive: boolean;
+  masksTarget: MasksOptionsTarget | null;
+  onChangeMasks: (next: MaskPanelState) => void;
+  maskBrush: MaskBrushSettings;
+  onChangeMaskBrush: (next: MaskBrushSettings) => void;
+  onCloseMasks: () => void;
+  isNpcPanelOpen: boolean;
+  npcTarget: NpcPanelTarget | null;
+  onRecordNpcScore: (appliedLabel: string) => void;
+  onCloseNpcPanel: () => void;
+  isRopPanelOpen: boolean;
+  ropTarget: RopPanelTarget | null;
+  onKeepRopCandidate: (request: RopKeepRequest) => void;
+  onCloseRopPanel: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
   onApplyAction: (options: ToolOptionsApplyOptions) => void;
@@ -706,7 +777,135 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       />
     );
   }
+  if (props.isRopPanelOpen) {
+    return (
+      <RopOptionsPanel
+        target={props.ropTarget}
+        onKeepCandidate={props.onKeepRopCandidate}
+        onClose={props.onCloseRopPanel}
+      />
+    );
+  }
+  if (props.isNpcPanelOpen) {
+    return (
+      <NpcOptionsPanel
+        target={props.npcTarget}
+        onRecordScoreInHistory={props.onRecordNpcScore}
+        onClose={props.onCloseNpcPanel}
+      />
+    );
+  }
+  if (props.isMasksToolActive) {
+    return (
+      <MasksOptionsPanel
+        target={props.masksTarget}
+        onChangeMasks={props.onChangeMasks}
+        brush={props.maskBrush}
+        onChangeBrush={props.onChangeMaskBrush}
+        loadedReferenceCandidates={props.loadedReferenceCandidates}
+        onClose={props.onCloseMasks}
+      />
+    );
+  }
   return <ViewportRightPanel activeSource={props.rightPanelActiveSource} />;
+}
+
+// CT-302: the Masks aside always edits the ACTIVE panel: its spatial size fixes
+// the size of every new layer, and its rendering state holds the layers.
+function deriveMasksOptionsTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): MasksOptionsTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content) return null;
+  const dimensions = getImageSourceDimensions(content.source);
+  return {
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    fileName: content.fileName,
+    width: dimensions.width,
+    height: dimensions.height,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+// CT-308: NPC reads the ACTIVE panel's cube and that panel's mask layers, so it
+// is offered only for a raster stack (a browser-decoded photo has no cube).
+function deriveNpcPanelTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): NpcPanelTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return {
+    viewportIndex: singleSelectedSource.index,
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    raster: content.source.raster,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+// CT-309: ROP reads the ACTIVE panel's cube exactly like NPC; the masks feed
+// the optional scoring objectives.
+function deriveRopPanelTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): RopPanelTarget | null {
+  if (!singleSelectedSource) return null;
+  const content = imagesByIndex.get(singleSelectedSource.index);
+  if (!content || content.source.kind !== "raster") return null;
+  return {
+    viewportIndex: singleSelectedSource.index,
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+    raster: content.source.raster,
+    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+  };
+}
+
+function keepRopCandidateFromActivePanel(
+  request: RopKeepRequest,
+  singleSelectedSource: SingleSelectedSource | null,
+  bindings: ApplyActionFlowBindings,
+): void {
+  if (!singleSelectedSource) return;
+  keepRopCandidateAsNewStack(request, singleSelectedSource.index, bindings);
+}
+
+// The score is not an operation on the stack, so nothing about the panel
+// changes; only the audit trail records that it was measured.
+function appendNpcScoreToHistoryAtViewport(
+  viewportIndex: number | null,
+  appliedLabel: string,
+  renderingApi: ViewportRenderingApi,
+): void {
+  if (viewportIndex === null) return;
+  const previous = renderingApi.getRenderingState(viewportIndex);
+  renderingApi.setRenderingState(viewportIndex, {
+    ...previous,
+    operationHistory: appendOperationHistoryEntry(previous.operationHistory, {
+      actionId: NPC_ANALYSIS_ACTION_ID,
+      actionLabel: NPC_ANALYSIS_ACTION_LABEL,
+      appliedLabel,
+      parameterValues: NO_PARAMETER_VALUES,
+    }),
+  });
+}
+
+const NPC_ANALYSIS_ACTION_ID = "npc";
+const NPC_ANALYSIS_ACTION_LABEL = "NPC";
+
+function writeMaskPanelStateAtViewport(
+  viewportIndex: number | null,
+  masks: MaskPanelState,
+  renderingApi: ViewportRenderingApi,
+): void {
+  if (viewportIndex === null) return;
+  const previous = renderingApi.getRenderingState(viewportIndex);
+  renderingApi.setRenderingState(viewportIndex, { ...previous, masks });
 }
 
 function buildActiveOperationEmbeddedEditorOrNull(
@@ -859,8 +1058,11 @@ function useMenuSelectGridLayoutTriggersHandler(
 
 interface OperationCommandHandlerBindings {
   readonly regionTool: { readonly toggleRegionTool: () => void };
+  readonly masksTool: { readonly toggleMasksTool: () => void };
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly openNpcPanel: () => void;
+  readonly openRopPanel: () => void;
   readonly singleSelectedSource: SingleSelectedSource | null;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
 }
@@ -870,8 +1072,11 @@ function buildOperationCommandHandlers(
 ): OperationCommandHandlers {
   return {
     toggleRegionTool: bindings.regionTool.toggleRegionTool,
+    toggleMasks: bindings.masksTool.toggleMasksTool,
     toggleBandSubset: bindings.bandSubsetToggle.onToggle,
     openActionPanel: bindings.openActionPanel,
+    openNpcPanel: bindings.openNpcPanel,
+    openRopPanel: bindings.openRopPanel,
     applyGeometricTransform: (transform) =>
       applyQuickGeometricTransformToActiveSource(
         transform,
@@ -1005,7 +1210,6 @@ function readDisplayMappingStateForSaving(
 ): ViewportDisplayMappingState {
   return {
     normalizationEnabled: renderingState.normalizationEnabled,
-    floatDisplayUsesFixedUnitWindow: renderingState.floatDisplayUsesFixedUnitWindow,
   };
 }
 
@@ -1799,6 +2003,20 @@ interface ToolPanelRegionRequestHandlers {
   readonly clearOperationRegion: () => void;
 }
 
+// CT-308/CT-309: the analysis asides and the tool-options panel compete for
+// the same right-side slot, so opening one from the menu closes any open
+// operation panel (and its pending region request) AND the other analysis
+// aside instead of hiding behind either.
+function openAnalysisPanelClosingCompetingPanels(
+  regionRequestHandlers: ToolPanelRegionRequestHandlers,
+  setThisPanelOpen: (open: boolean) => void,
+  setCompetingPanelOpen: (open: boolean) => void,
+): void {
+  regionRequestHandlers.closeActionPanel();
+  setCompetingPanelOpen(false);
+  setThisPanelOpen(true);
+}
+
 function buildToolPanelRegionRequestHandlers(
   inputs: ToolPanelRegionRequestHandlerInputs,
 ): ToolPanelRegionRequestHandlers {
@@ -1965,6 +2183,9 @@ function deriveSingleSelectedSource(
       sourceBandCount: readRasterBandCountFromContentOrNull(content),
       selectedBandNumber: renderingState.selectedBandIndex + 1,
       isTrueColorComposite: readIsTrueColorPhotoFromContent(content),
+      sourceWidth: content.source.kind === "raster" ? content.source.raster.width : null,
+      sourceHeight: content.source.kind === "raster" ? content.source.raster.height : null,
+      maskPanelState: renderingState.masks,
     },
   };
 }
@@ -1975,7 +2196,7 @@ function readRasterBandCountFromContentOrNull(content: ViewportCellContent): num
 
 function useLoadedReferenceCandidates(
   imagesByIndex: ImagesByIndexMap,
-): ReadonlyArray<ReferencePickerOption> {
+): ReadonlyArray<LoadedReferenceCandidate> {
   const candidates = useMemo(
     () => buildLoadedReferenceCandidates(listLoadedRasterPanelEntries(imagesByIndex)),
     [imagesByIndex],
@@ -2351,6 +2572,14 @@ function buildRightPanelActiveSource(
         options.openInNewViewport,
         inputs.applyActionFlowBindings,
       ),
+    onApplyDuplicateBands: (options) =>
+      runApplyDuplicateBandsForViewport({
+        viewportIndex,
+        raster,
+        bandIndexesToDuplicate: options.bandIndexesToDuplicate,
+        openInNewViewport: options.openInNewViewport,
+        applyActionFlowBindings: inputs.applyActionFlowBindings,
+      }),
     operationHistory: renderingState.operationHistory,
     roi: renderingState.roi,
     onClearRoi: () =>
@@ -2451,6 +2680,58 @@ function runApplyFunctionDerivedBandForViewport(
     return;
   }
   applyActionInPlaceAtSourceIndex(BAND_SELECTION_ACTION, merged, sourceIndex, bindings);
+}
+
+interface ApplyDuplicateBandsInputs {
+  readonly viewportIndex: number;
+  readonly raster: ViewportRightPanelActiveSource["raster"];
+  readonly bandIndexesToDuplicate: ReadonlyArray<number>;
+  readonly openInNewViewport: boolean;
+  readonly applyActionFlowBindings: ApplyActionFlowBindings;
+}
+
+// CT-301: the Subset Bands editor's "Duplicate" mode. The editor works in
+// CURRENT band indexes; App resolves them to ORIGINAL band numbers (the same
+// indirection Subset Bands' own "keep bands" mode uses) before building the
+// action's audit parameters.
+function runApplyDuplicateBandsForViewport(inputs: ApplyDuplicateBandsInputs): void {
+  const bandNumbers = pickDuplicateBandOriginalNumbersOrNull(inputs);
+  if (bandNumbers === null) return;
+  invokeDuplicateBandsActionOnSourceViewport(
+    inputs.viewportIndex,
+    bandNumbers,
+    inputs.openInNewViewport,
+    inputs.applyActionFlowBindings,
+  );
+}
+
+function pickDuplicateBandOriginalNumbersOrNull(
+  inputs: ApplyDuplicateBandsInputs,
+): ReadonlyArray<number> | null {
+  const { raster, bandIndexesToDuplicate } = inputs;
+  if (!raster) {
+    notifyError("Subset Bands requires a raster source.");
+    return null;
+  }
+  if (bandIndexesToDuplicate.length === 0) {
+    notifyError("Enter at least one band to duplicate.");
+    return null;
+  }
+  return bandIndexesToDuplicate.map((bandIndex) => getRasterBandOriginalNumber(raster, bandIndex));
+}
+
+function invokeDuplicateBandsActionOnSourceViewport(
+  sourceIndex: number,
+  bandNumbersInOrder: ReadonlyArray<number>,
+  openInNewViewport: boolean,
+  bindings: ApplyActionFlowBindings,
+): void {
+  const parameterValues = buildDuplicateBandsParameterValuesFromBandNumbers(bandNumbersInOrder);
+  if (openInNewViewport) {
+    applyActionToDuplicateOfSource(DUPLICATE_BANDS_ACTION, parameterValues, sourceIndex, bindings);
+    return;
+  }
+  applyActionInPlaceAtSourceIndex(DUPLICATE_BANDS_ACTION, parameterValues, sourceIndex, bindings);
 }
 
 function useViewportBandRemovalApi(
@@ -2875,6 +3156,7 @@ function buildSaveableViewportEntry(
       parameterValues: { ...entry.parameterValues },
       timestampMs: entry.timestampMs,
     })),
+    masks: renderingState.masks,
   };
 }
 
@@ -2999,5 +3281,6 @@ function mapProjectRenderingStateToViewportRenderingState(
       parameterValues: Object.freeze({ ...entry.parameterValues }),
       timestampMs: entry.timestampMs,
     })),
+    masks: viewport.masks,
   };
 }

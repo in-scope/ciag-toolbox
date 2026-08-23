@@ -102,6 +102,16 @@ interface ToolboxPng16DecodeAbortRequest {
   token: string;
 }
 
+// CT-303: the mask import dialog reply is metadata plus the small JSON
+// sidecar (mirrors MaskImportDialogResult in src/preload/index.ts).
+type ToolboxMaskImportDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      file: ToolboxOpenImagesDialogFileMetadataEntry;
+      sidecarText: string | null;
+    };
+
 interface ToolboxSaveImageFileFilter {
   name: string;
   extensions: ReadonlyArray<string>;
@@ -192,7 +202,9 @@ interface ToolboxSaveBundleDraftOperationHistoryEntry {
 // Chunked project-save protocol (CT-219e), mirroring
 // src/shared/chunked-save-bundle-protocol.ts: baked asset bytes cross as
 // byte-length descriptors at begin and follow as small asset chunks.
-type ToolboxSaveBundleAssetPart = "primary" | "sidecar";
+// CT-306: mask layers add one "mask-<position>" part per layer on top of the
+// stack's primary part and its optional sidecar.
+type ToolboxSaveBundleAssetPart = "primary" | "sidecar" | `mask-${number}`;
 
 interface ToolboxSaveBundleBakedPartDescriptor {
   extension: string;
@@ -215,6 +227,20 @@ type ToolboxSaveBundleAssetDescriptor =
   | ToolboxSaveBundleBakedAssetDescriptor
   | ToolboxSaveBundleExternalAssetDescriptor;
 
+interface ToolboxSaveBundleMaskCategoryDescriptor {
+  name: string;
+  color: string;
+}
+
+interface ToolboxSaveBundleMaskLayerDescriptor {
+  name: string;
+  width: number;
+  height: number;
+  categories: ReadonlyArray<ToolboxSaveBundleMaskCategoryDescriptor>;
+  opacityPercent: number;
+  byteLength: number;
+}
+
 interface ToolboxSaveBundleViewportHeaderEntry {
   index: number;
   fileName: string;
@@ -222,6 +248,8 @@ interface ToolboxSaveBundleViewportHeaderEntry {
   renderingState: ToolboxSaveBundleDraftRenderingState;
   operationHistory: ReadonlyArray<ToolboxSaveBundleDraftOperationHistoryEntry>;
   colorInterpretation?: "rgb";
+  masks?: ReadonlyArray<ToolboxSaveBundleMaskLayerDescriptor>;
+  selectedMaskIndex?: number | null;
 }
 
 interface ToolboxSaveBundleDraftHeader {
@@ -287,13 +315,28 @@ interface ToolboxPythonEnvironmentSnapshot {
   pathExists: boolean;
 }
 
+// CT-307: builtin names mirror BUILTIN_SCRIPT_NAMES in
+// src/shared/chunked-user-script-run-protocol.ts; keep in sync.
+type ToolboxBuiltinScriptName =
+  | "npc"
+  | "rop"
+  | "rop_search"
+  | "local_pca"
+  | "local_mnf"
+  | "l2_minimization";
+
 type ToolboxRunUserScriptSource =
   | { mode: "formula"; expression: string }
-  | { mode: "import"; scriptPath?: string };
+  | { mode: "import"; scriptPath?: string }
+  | { mode: "builtin"; scriptName: ToolboxBuiltinScriptName };
 
 type ToolboxUserScriptPickResult =
   | { canceled: true }
   | { canceled: false; filePath: string; fileName: string };
+
+type ToolboxUserScriptReadSourceResult =
+  | { status: "read"; source: string }
+  | { status: "failed"; message: string };
 
 type ToolboxRunUserScriptResultKind = "value" | "cube";
 
@@ -318,6 +361,9 @@ interface ToolboxUserScriptRunBeginRequest {
   source: ToolboxRunUserScriptSource;
   resultKind: ToolboxRunUserScriptResultKind;
   cube: ToolboxUserScriptRunCubeDescriptor;
+  // CT-307: when present, count * height * width mask bytes follow the cube
+  // bytes on the chunk channel.
+  masks?: { count: number };
 }
 
 type ToolboxUserScriptRunBeginResult =
@@ -332,6 +378,14 @@ interface ToolboxUserScriptRunCubeChunkRequest {
 
 interface ToolboxUserScriptRunExecuteRequest {
   token: string;
+  // CT-307: per-execute parameters for the script's third positional argument.
+  params?: Record<string, unknown>;
+}
+
+// CT-307: in-script progress pushed from main while a run executes.
+interface ToolboxUserScriptRunProgressEvent {
+  token: string;
+  fraction: number;
 }
 
 type ToolboxUserScriptRunExecuteResult =
@@ -417,6 +471,7 @@ interface ToolboxApi {
     request: ToolboxSaveImageFinishRequest,
   ) => Promise<ToolboxSaveImageFinishResult>;
   releaseSaveImage: (request: ToolboxSaveImageReleaseRequest) => Promise<void>;
+  importMaskDialog: () => Promise<ToolboxMaskImportDialogResult>;
   openProjectBundleDialog: () => Promise<ToolboxOpenBundleDialogResult>;
   resolveProjectBundleAsset: (
     request: ToolboxResolveBundleAssetRequest,
@@ -469,6 +524,7 @@ interface ToolboxApi {
     ownInterpreterPath: string | null,
   ) => Promise<ToolboxPythonEnvironmentSnapshot>;
   pickUserScriptFile: () => Promise<ToolboxUserScriptPickResult>;
+  readUserScriptSource: (filePath: string) => Promise<ToolboxUserScriptReadSourceResult>;
   beginUserScriptRun: (
     request: ToolboxUserScriptRunBeginRequest,
   ) => Promise<ToolboxUserScriptRunBeginResult>;
@@ -487,6 +543,9 @@ interface ToolboxApi {
   cancelUserScriptRun: (
     request: ToolboxUserScriptRunCancelRequest,
   ) => Promise<void>;
+  onUserScriptRunProgress: (
+    listener: (event: ToolboxUserScriptRunProgressEvent) => void,
+  ) => () => void;
   initialTheme: ToolboxThemeSnapshot;
   onThemeChange: (
     listener: ToolboxThemeChangeListener,

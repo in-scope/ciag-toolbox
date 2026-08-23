@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import { readMemoryBudgetOverrideBytesFromArguments } from "../shared/e2e-memory-budget-argument";
+import { readRopSeedOverrideFromArguments } from "../shared/e2e-rop-seed-argument";
 import { readOpenedImageFileThroughChunkedProtocol } from "./chunked-opened-image-read-client";
 import {
   OPENED_IMAGE_READ_ABORT_CHANNEL,
@@ -53,19 +54,23 @@ import {
 } from "../shared/chunked-save-image-protocol";
 import {
   USER_SCRIPT_PICK_SCRIPT_CHANNEL,
+  USER_SCRIPT_READ_SOURCE_CHANNEL,
   USER_SCRIPT_RUN_BEGIN_CHANNEL,
   USER_SCRIPT_RUN_CANCEL_CHANNEL,
   USER_SCRIPT_RUN_CUBE_CHUNK_CHANNEL,
   USER_SCRIPT_RUN_EXECUTE_CHANNEL,
+  USER_SCRIPT_RUN_PROGRESS_CHANNEL,
   USER_SCRIPT_RUN_RELEASE_CHANNEL,
   USER_SCRIPT_RUN_RESULT_CHUNK_CHANNEL,
   type UserScriptPickScriptResult,
+  type UserScriptReadSourceResult,
   type UserScriptRunBeginRequest,
   type UserScriptRunBeginResult,
   type UserScriptRunCancelRequest,
   type UserScriptRunCubeChunkRequest,
   type UserScriptRunExecuteRequest,
   type UserScriptRunExecuteResult,
+  type UserScriptRunProgressEvent,
   type UserScriptRunReleaseRequest,
   type UserScriptRunResultChunkRequest,
   type UserScriptRunResultChunkResult,
@@ -105,6 +110,16 @@ export interface OpenedImagesFileEntry {
   mtimeMs: number;
 }
 
+// CT-303: the mask import dialog reply is metadata plus the small JSON
+// sidecar; the PNG bytes stream through the chunked opened-image read.
+export type MaskImportDialogResult =
+  | { canceled: true }
+  | {
+      canceled: false;
+      file: OpenImagesDialogFileMetadataEntry;
+      sidecarText: string | null;
+    };
+
 export type OpenBundleDialogResult =
   | { canceled: true }
   | { canceled: false; projectFilePath: string; bytes: Uint8Array };
@@ -142,6 +157,7 @@ export type UnsubscribeThemeListener = () => void;
 const GET_APP_INFO_CHANNEL = "app:get-info";
 const OPEN_IMAGE_DIALOG_CHANNEL = "image:open-dialog";
 const OPEN_IMAGES_DIALOG_CHANNEL = "image:open-images-dialog";
+const MASK_IMPORT_DIALOG_CHANNEL = "mask:import-dialog";
 const OPEN_BUNDLE_DIALOG_CHANNEL = "project:open-bundle-dialog";
 const RESOLVE_BUNDLE_ASSET_CHANNEL = "project:resolve-bundle-asset";
 const MENU_OPEN_IMAGE_CHANNEL = "menu:open-image";
@@ -298,6 +314,10 @@ function releaseSaveImageInMainProcess(
   ) as Promise<void>;
 }
 
+function showMaskImportDialogThroughMainProcess(): Promise<MaskImportDialogResult> {
+  return ipcRenderer.invoke(MASK_IMPORT_DIALOG_CHANNEL) as Promise<MaskImportDialogResult>;
+}
+
 function showOpenBundleDialogThroughMainProcess(): Promise<OpenBundleDialogResult> {
   return ipcRenderer.invoke(
     OPEN_BUNDLE_DIALOG_CHANNEL,
@@ -439,6 +459,17 @@ function pickUserScriptFileThroughMainProcess(): Promise<UserScriptPickScriptRes
   return ipcRenderer.invoke(USER_SCRIPT_PICK_SCRIPT_CHANNEL) as Promise<UserScriptPickScriptResult>;
 }
 
+// CT-310: a picked objective script's source, read in main, so the ROP search
+// can pass it as a run parameter and score every candidate with it.
+function readUserScriptSourceThroughMainProcess(
+  filePath: string,
+): Promise<UserScriptReadSourceResult> {
+  return ipcRenderer.invoke(
+    USER_SCRIPT_READ_SOURCE_CHANNEL,
+    filePath,
+  ) as Promise<UserScriptReadSourceResult>;
+}
+
 function beginUserScriptRunThroughMainProcess(
   request: UserScriptRunBeginRequest,
 ): Promise<UserScriptRunBeginResult> {
@@ -492,6 +523,17 @@ function cancelUserScriptRunInMainProcess(
     USER_SCRIPT_RUN_CANCEL_CHANNEL,
     request,
   ) as Promise<void>;
+}
+
+// CT-307: in-script progress frames pushed from main while a run executes;
+// the renderer filters by run token.
+function subscribeToUserScriptRunProgress(
+  listener: (event: UserScriptRunProgressEvent) => void,
+): () => void {
+  const handler = (_event: IpcRendererEvent, progress: UserScriptRunProgressEvent): void =>
+    listener(progress);
+  ipcRenderer.on(USER_SCRIPT_RUN_PROGRESS_CHANNEL, handler);
+  return () => ipcRenderer.removeListener(USER_SCRIPT_RUN_PROGRESS_CHANNEL, handler);
 }
 
 function subscribeToInvokeCommandMenuEvent(
@@ -551,6 +593,7 @@ const apiBridge = {
   sendSaveImageChunk: sendSaveImageChunkToMainProcess,
   finishSaveImage: finishSaveImageInMainProcess,
   releaseSaveImage: releaseSaveImageInMainProcess,
+  importMaskDialog: showMaskImportDialogThroughMainProcess,
   openProjectBundleDialog: showOpenBundleDialogThroughMainProcess,
   resolveProjectBundleAsset: resolveBundleAssetThroughMainProcess,
   beginSaveProjectBundle: beginSaveBundleThroughMainProcess,
@@ -571,12 +614,14 @@ const apiBridge = {
   getPythonEnvironment: fetchPythonEnvironmentFromMainProcess,
   setPythonEnvironment: setPythonEnvironmentThroughMainProcess,
   pickUserScriptFile: pickUserScriptFileThroughMainProcess,
+  readUserScriptSource: readUserScriptSourceThroughMainProcess,
   beginUserScriptRun: beginUserScriptRunThroughMainProcess,
   sendUserScriptRunCubeChunk: sendUserScriptRunCubeChunkToMainProcess,
   executeUserScriptRun: executeUserScriptRunInMainProcess,
   readUserScriptRunResultChunk: readUserScriptRunResultChunkFromMainProcess,
   releaseUserScriptRun: releaseUserScriptRunInMainProcess,
   cancelUserScriptRun: cancelUserScriptRunInMainProcess,
+  onUserScriptRunProgress: subscribeToUserScriptRunProgress,
   initialTheme,
   onThemeChange: subscribeToThemeChanges,
 } as const;
@@ -614,6 +659,9 @@ const e2eTestBridge = {
   // CT-260: a lowered raster-memory budget (see src/shared/e2e-memory-budget-argument.ts)
   // so e2e can trigger memory refusals with tiny fixtures.
   memoryBudgetOverrideBytes: readMemoryBudgetOverrideBytesFromArguments(process.argv),
+  // CT-309: a forced ROP seed (see src/shared/e2e-rop-seed-argument.ts) so a
+  // projection press is reproducible against the pinned reference output.
+  ropForcedSeedOverride: readRopSeedOverrideFromArguments(process.argv),
 } as const;
 
 export type ToolboxE2eBridge = typeof e2eTestBridge;

@@ -16,6 +16,7 @@ import {
 import {
   SubsetBandsSection,
   type SubsetBandsApplyOptions,
+  type SubsetBandsDuplicateApplyOptions,
   type SubsetBandsFunctionApplyOptions,
 } from "@/components/subset-bands-section";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,7 @@ export interface ViewportRightPanelActiveSource {
   readonly onExitBandSubsetEditMode: () => void;
   readonly onApplyBandSubset: (options: SubsetBandsApplyOptions) => void;
   readonly onApplyFunctionDerivedBand: (options: SubsetBandsFunctionApplyOptions) => void;
+  readonly onApplyDuplicateBands: (options: SubsetBandsDuplicateApplyOptions) => void;
   readonly operationHistory: ViewportOperationHistory;
   readonly roi: ViewportRoi | null;
   readonly onClearRoi: () => void;
@@ -205,6 +207,7 @@ function SubsetBandsSectionForActiveSource(
       onCancel={props.activeSource.onExitBandSubsetEditMode}
       onApply={props.activeSource.onApplyBandSubset}
       onApplyFunctionDerivedBand={props.activeSource.onApplyFunctionDerivedBand}
+      onApplyDuplicateBands={props.activeSource.onApplyDuplicateBands}
     />
   );
 }

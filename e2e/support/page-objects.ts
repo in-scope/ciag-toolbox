@@ -92,14 +92,6 @@ export {
   expectNormalizedViewingEnabled,
 } from "./normalized-viewing";
 export {
-  fixedUnitFloatViewToggle,
-  toggleFixedUnitFloatView,
-  expectFixedUnitFloatViewEnabled,
-  expectFixedUnitFloatViewTooltip,
-  FIXED_UNIT_FLOAT_VIEW_OFF_TOOLTIP,
-  FIXED_UNIT_FLOAT_VIEW_ON_TOOLTIP,
-} from "./fixed-unit-float-view";
-export {
   goToBandNumberInput,
   goToBandNumberInputInPanel,
   selectActiveBandNumber,
@@ -449,6 +441,12 @@ export {
   subsetBandsModeSelect,
 } from "./band-selection";
 export {
+  DUPLICATE_BANDS_OPERATION_LABEL,
+  openSubsetBandsDuplicateEditor,
+  subsetBandsDuplicateField,
+  typeSubsetBandsDuplicateRange,
+} from "./duplicate-bands";
+export {
   applyCustomTransformAwaitingRun,
   clickImportCustomTransformScript,
   CUSTOM_TRANSFORM_FORMULA_SET_STATUS,
@@ -461,5 +459,82 @@ export {
   loadedToolStatusText,
   setCustomTransformFormula,
 } from "./custom-transform";
+export {
+  addMaskCategoriesUntilTheControlDisables,
+  addMaskCategoryButton,
+  closeMasksOptions,
+  createMaskLayer,
+  maskCategoryNameField,
+  maskCategoryNameFields,
+  maskLayerNameField,
+  maskLayerOpacitySlider,
+  maskLayerOptions,
+  masksOptionsPanel,
+  masksRemovedToast,
+  MASKS_REMOVED_TOAST_TEXT,
+  MASKS_TOOL_LABEL,
+  MAX_MASK_CATEGORIES,
+  openMasksOptions,
+  renameMaskCategory,
+} from "./masks-panel";
+export {
+  enableMaskEraser,
+  maskBrushCategoryOption,
+  maskBrushSizeSlider,
+  maskEraserToggle,
+  paintMaskDotAtPagePoint,
+  paintMaskStrokeBetweenPixels,
+  selectMaskBrushCategory,
+  setMaskBrushSizeToOnePixel,
+} from "./mask-brush";
+export {
+  exportMaskButton,
+  exportSelectedMaskToPath,
+  importMaskButton,
+  importMaskFromPath,
+  maskToastContaining,
+} from "./mask-file-transfer";
+export {
+  computeNpcScore,
+  expectScoreWithinRelativeTolerance,
+  npcBinsField,
+  npcComputeButton,
+  npcMaskLayerPicker,
+  npcOptionsPanel,
+  npcScoreReadout,
+  NPC_NOT_COMPUTED_TEXT,
+  NPC_PANEL_LABEL,
+  setNpcBinCount,
+} from "./npc-panel";
+export {
+  chooseRopObjective,
+  importRopObjectiveScript,
+  pressNewProjectionUntilScoreShows,
+  pressNewProjectionUntilSeedShows,
+  ropBestScoreReadout,
+  ropCnrBackgroundCategoryPicker,
+  ropCnrTextCategoryPicker,
+  ropKeepBestButton,
+  ropKeepButton,
+  ropNewProjectionButton,
+  ropObjectivePicker,
+  ropOptionsPanel,
+  ropProjectionCountField,
+  ropScoreReadout,
+  ropSearchButton,
+  ropSeedReadout,
+  ROP_NO_CANDIDATE_TEXT,
+  ROP_PANEL_LABEL,
+  setRopProjectionCount,
+  startRopProjectionSearch,
+} from "./rop-panel";
 export { enqueueOpenDialogPaths } from "./dialog-stub-controls";
 export { reimportPanelSourceFromDisk, reimportSuccessToast } from "./reimport-source";
+export {
+  noQualifyingThresholdResultHint,
+  promoteFirstQualifyingThresholdResult,
+  promoteThresholdResultButton,
+  promoteThresholdResultSection,
+  sourceBandMenuTrigger,
+  sourcePanelMenuTrigger,
+} from "./mask-threshold-promotion";

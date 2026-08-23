@@ -1,7 +1,10 @@
 import {
   BoxSelect,
+  Brush,
+  Dices,
   FlipHorizontal,
   FlipVertical,
+  Gauge,
   RotateCcw,
   RotateCw,
   type LucideIcon,
@@ -35,8 +38,11 @@ import type {
 
 export interface OperationCommandHandlers {
   readonly toggleRegionTool: () => void;
+  readonly toggleMasks: () => void;
   readonly toggleBandSubset: () => void;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
+  readonly openNpcPanel: () => void;
+  readonly openRopPanel: () => void;
   readonly applyGeometricTransform: (transform: GeometricTransform) => void;
 }
 
@@ -55,10 +61,16 @@ function runOperationCommandBehavior(
   switch (command.behavior) {
     case "toggle-region-tool":
       return handlers.toggleRegionTool();
+    case "toggle-masks":
+      return handlers.toggleMasks();
     case "toggle-subset-bands":
       return handlers.toggleBandSubset();
     case "open-action-panel":
       return openActionPanelForCommand(command, handlers);
+    case "open-npc-panel":
+      return handlers.openNpcPanel();
+    case "open-rop-panel":
+      return handlers.openRopPanel();
     case "apply-geometric-transform":
       return applyGeometricTransformForCommand(command, handlers);
   }
@@ -124,6 +136,7 @@ export interface ToolbarOperationGroupContext {
     action: RegisteredViewportAction,
   ) => ActionAvailabilityForActiveViewport;
   readonly regionToolActive: boolean;
+  readonly masksToolActive: boolean;
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly isQuickTransformAvailable: boolean;
 }
@@ -136,6 +149,19 @@ export const QUICK_TRANSFORM_ICONS: Record<string, LucideIcon> = {
   "flip-horizontal": FlipHorizontal,
   "flip-vertical": FlipVertical,
 };
+
+// Exported so the icon-uniqueness test and the Masks aside header share one
+// icon assignment for the masks tool.
+export const MASKS_TOGGLE_ICON: LucideIcon = Brush;
+
+// Exported so the icon-uniqueness test and the NPC aside header share one icon
+// assignment for the score analysis (CT-308).
+export const NPC_PANEL_ICON: LucideIcon = Gauge;
+
+// Exported so the icon-uniqueness test, the ROP aside header, and the kept
+// projection's action share one icon assignment (CT-309); the aside and the
+// keep action are the same operation, so sharing is deliberate (CT-295 rule).
+export const ROP_PANEL_ICON: LucideIcon = Dices;
 
 const SUBSET_BANDS_UNAVAILABLE_HINT = "select a multi-band stack";
 
@@ -165,10 +191,18 @@ function buildToolbarOperationItem(
   switch (command.behavior) {
     case "toggle-region-tool":
       return buildRegionToggleItem(command, context);
+    case "toggle-masks":
+      return buildMasksToggleItem(command, context);
     case "toggle-subset-bands":
       return buildBandSubsetToggleItem(command, context);
     case "open-action-panel":
       return buildActionItem(command, context);
+    // CT-308/CT-309: the analysis panels are menu-only, so they project no
+    // toolbar items.
+    case "open-npc-panel":
+      return null;
+    case "open-rop-panel":
+      return null;
     case "apply-geometric-transform":
       return buildQuickTransformItem(command, context);
   }
@@ -186,6 +220,23 @@ function buildRegionToggleItem(
     isActive: context.regionToolActive,
     isAvailable: true,
     onToggle: context.handlers.toggleRegionTool,
+  };
+}
+
+// CT-302: the Masks toggle opens the Masks options aside for the active panel.
+// It is always offered; the aside itself explains when no panel is selected.
+function buildMasksToggleItem(
+  command: OperationCommand,
+  context: ToolbarOperationGroupContext,
+): ToolbarOperationItem {
+  return {
+    kind: "toggle",
+    id: command.id,
+    label: command.label,
+    icon: MASKS_TOGGLE_ICON,
+    isActive: context.masksToolActive,
+    isAvailable: true,
+    onToggle: context.handlers.toggleMasks,
   };
 }
 

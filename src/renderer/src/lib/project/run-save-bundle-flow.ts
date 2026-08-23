@@ -178,7 +178,7 @@ async function bakeViewportEntriesWithProgress(
   onProgress?.({ fraction: 0 });
   const baked: DraftBundleViewportEntry[] = [];
   for (let viewportPosition = 0; viewportPosition < totalAssetCount; viewportPosition++) {
-    baked.push(buildDraftBundleViewportEntryOrThrow(snapshot.viewports[viewportPosition]!));
+    baked.push(await buildDraftBundleViewportEntryOrThrow(snapshot.viewports[viewportPosition]!));
     onProgress?.({ fraction: bakeWindowFraction(viewportPosition + 1, totalAssetCount) });
     await yieldToMicrotaskQueue();
   }

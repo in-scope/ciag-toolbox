@@ -10,7 +10,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   IMPORTED_SCRIPT_DOCS_HINT,
+  MAX_INLINE_USER_SCRIPT_SOURCE_BYTES,
   prepareImportedUserScriptFromFilePath,
+  readSingleModuleUserScriptSource,
   resolveEntryDestinationWithinDirectory,
   ScriptImportError,
 } from "./script-import";
@@ -103,5 +105,32 @@ describe("prepareImportedUserScriptFromFilePath", () => {
   it("rejects a .zip entry whose path escapes the extraction directory (zip-slip)", () => {
     const root = path.join(tmpdir(), "extract-root");
     expect(() => resolveEntryDestinationWithinDirectory(root, "../escape.py")).toThrow(ScriptImportError);
+  });
+});
+
+// CT-310: the ROP search evaluates a custom objective per candidate inside its
+// own Python run, so the renderer needs the script's SOURCE, not a prepared run.
+describe("readSingleModuleUserScriptSource", () => {
+  it("returns a .py file's source verbatim", async () => {
+    const directory = await makeTemporaryWorkingDirectory();
+    const filePath = await writePythonFileWithSource(directory, "def run(cube):\n    return 1\n");
+    expect(await readSingleModuleUserScriptSource(filePath)).toBe("def run(cube):\n    return 1\n");
+  });
+
+  it("refuses a .zip tool, which has no single source to send", async () => {
+    const directory = await makeTemporaryWorkingDirectory();
+    const zipPath = await writeZipFileWithEntries(directory, { "main.py": "def run(cube):\n    return 1\n" });
+    await expect(readSingleModuleUserScriptSource(zipPath)).rejects.toBeInstanceOf(ScriptImportError);
+  });
+
+  it("refuses a file too large to be a script, with the docs hint", async () => {
+    const directory = await makeTemporaryWorkingDirectory();
+    const filePath = await writePythonFileWithSource(
+      directory,
+      "#".repeat(MAX_INLINE_USER_SCRIPT_SOURCE_BYTES + 1),
+    );
+    await expect(readSingleModuleUserScriptSource(filePath)).rejects.toThrow(
+      IMPORTED_SCRIPT_DOCS_HINT,
+    );
   });
 });

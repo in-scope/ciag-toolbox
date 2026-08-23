@@ -86,14 +86,88 @@ describe("chunked user-script run session store", () => {
     await store.release(token);
   });
 
-  it("refuses a second execution of the same run", async () => {
+  it("refuses a concurrent execution while one is still in flight", async () => {
     const store = buildStore();
     const token = await store.begin(
       buildBeginRequest({ cube: { bandCount: 1, height: 1, width: 1, wavelengths: null } }),
     );
     await store.appendCubeChunk(token, new Uint8Array(4));
     store.takeExecutableRun(token);
-    expect(() => store.takeExecutableRun(token)).toThrow(/already executed/);
+    expect(() => store.takeExecutableRun(token)).toThrow(/already executing/);
+    await store.release(token);
+  });
+
+  // CT-307: a session re-executes against the RETAINED spooled cube (ROP's
+  // press-to-reroll never re-uploads between presses).
+  it("re-executes against the retained spooled cube after the previous run settles", async () => {
+    const store = buildStore(10);
+    const token = await store.begin(buildBeginRequest());
+    const allBytes = float32BytesOf([1, 2, 3, 4, 5, 6, 10, 20, 30, 40, 50, 60]);
+    await store.appendCubeChunk(token, allBytes.slice(0, 10));
+    await store.appendCubeChunk(token, allBytes.slice(10));
+    const firstRun = store.takeExecutableRun(token);
+    expect(await collectSegments(firstRun.cube.readSegments())).toEqual(allBytes);
+    store.markExecutionSettled(token);
+    const secondRun = store.takeExecutableRun(token);
+    expect(await collectSegments(secondRun.cube.readSegments())).toEqual(allBytes);
+    await store.release(token);
+  });
+
+  it("refuses more uploaded bytes once the run has executed", async () => {
+    const store = buildStore();
+    const token = await store.begin(
+      buildBeginRequest({ cube: { bandCount: 1, height: 1, width: 1, wavelengths: null } }),
+    );
+    await store.appendCubeChunk(token, new Uint8Array(4));
+    store.takeExecutableRun(token);
+    await expect(store.appendCubeChunk(token, new Uint8Array(4))).rejects.toThrow(
+      /already executed/,
+    );
+    await store.release(token);
+  });
+
+  // CT-307: category mask bytes ride the same channel after the cube bytes and
+  // come back to the worker as their own framed payload.
+  it("frames uploaded mask bytes as a separate payload after the cube bytes", async () => {
+    const store = buildStore(10);
+    const token = await store.begin(
+      buildBeginRequest({
+        cube: { bandCount: 1, height: 2, width: 3, wavelengths: null },
+        maskCount: 2,
+      }),
+    );
+    const cubeBytes = float32BytesOf([1, 2, 3, 4, 5, 6]);
+    const maskBytes = new Uint8Array([1, 1, 0, 0, 0, 2, 0, 0, 2, 2, 0, 1]);
+    await store.appendCubeChunk(token, cubeBytes);
+    await store.appendCubeChunk(token, maskBytes);
+    const run = store.takeExecutableRun(token);
+    expect(run.masks?.header).toEqual({ count: 2, height: 2, width: 3 });
+    expect(run.masks?.totalByteLength).toBe(12);
+    expect(await collectSegments(run.cube.readSegments())).toEqual(new Uint8Array(cubeBytes));
+    expect(await collectSegments(run.masks!.readSegments())).toEqual(maskBytes);
+    await store.release(token);
+  });
+
+  it("refuses to execute a masked run before the mask bytes arrive", async () => {
+    const store = buildStore();
+    const token = await store.begin(
+      buildBeginRequest({
+        cube: { bandCount: 1, height: 1, width: 1, wavelengths: null },
+        maskCount: 1,
+      }),
+    );
+    await store.appendCubeChunk(token, new Uint8Array(4));
+    expect(() => store.takeExecutableRun(token)).toThrow(/did not match/);
+    await store.release(token);
+  });
+
+  it("describes no mask payload for a mask-free run", async () => {
+    const store = buildStore();
+    const token = await store.begin(
+      buildBeginRequest({ cube: { bandCount: 1, height: 1, width: 1, wavelengths: null } }),
+    );
+    await store.appendCubeChunk(token, new Uint8Array(4));
+    expect(store.takeExecutableRun(token).masks).toBeNull();
     await store.release(token);
   });
 
@@ -177,7 +251,9 @@ describe("chunked user-script run session store", () => {
     expect(existsSync(run.cubeResultSpoolPath)).toBe(false);
   });
 
-  it("releases input resources exactly once across run and release", async () => {
+  // CT-307: input resources are retained across executes and released exactly
+  // once, by release() - the execute handler no longer discards them.
+  it("releases input resources exactly once, at release, even after executing", async () => {
     let releaseCount = 0;
     const store = buildStore();
     const token = await store.begin(
@@ -191,7 +267,9 @@ describe("chunked user-script run session store", () => {
     );
     await store.appendCubeChunk(token, new Uint8Array(4));
     store.takeExecutableRun(token);
-    await store.releaseInputResourcesAfterRun(token);
+    store.markExecutionSettled(token);
+    expect(releaseCount).toBe(0);
+    await store.release(token);
     await store.release(token);
     expect(releaseCount).toBe(1);
   });

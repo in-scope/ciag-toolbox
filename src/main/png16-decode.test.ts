@@ -10,7 +10,8 @@ import {
   PNG16_ALPHA_UNSUPPORTED_MESSAGE,
 } from "../shared/png-header";
 import { createStreamingPng16GrayscaleEncoder } from "./png16-encode";
-import { createStreamingPng16Decoder, reconstructScanlineBytesInPlace } from "./png16-decode";
+import { reconstructScanlineBytesInPlace } from "../shared/png-scanline-filters";
+import { createStreamingPng16Decoder } from "./png16-decode";
 
 // CT-272 round-trip oracles: (1) the CT-271 encoder (filter 0), (2) hand-built
 // PNGs whose scanlines are filtered with a verbatim reference implementation of
