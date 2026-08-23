@@ -66,6 +66,7 @@ describe("REGISTERED_VIEWPORT_ACTIONS", () => {
       "band-selection",
       "custom-transform",
       "concatenate-stacks",
+      "local-pca",
     ]);
   });
 
