@@ -495,6 +495,23 @@ export {
   maskToastContaining,
 } from "./mask-file-transfer";
 export {
+  chooseCnrBackgroundCategory,
+  chooseCnrTextCategory,
+  cnrBackgroundCategoryPicker,
+  cnrComputeButton,
+  cnrMaskLayerPicker,
+  cnrOptionsPanel,
+  cnrScorePlot,
+  cnrScoresSection,
+  cnrTextCategoryPicker,
+  cnrTopBandRows,
+  computeCnrScores,
+  readCnrTopBandRows,
+  CNR_NOT_COMPUTED_TEXT,
+  CNR_PANEL_LABEL,
+  type CnrTopBandRowReadout,
+} from "./cnr-panel";
+export {
   computeNpcScores,
   expectScoreWithinRelativeTolerance,
   npcBinsField,

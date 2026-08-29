@@ -1213,6 +1213,20 @@
         0.014012745581567287
       ]
     },
+    "cnrPerBand": {
+      "script": "cnr",
+      "fixture": "multiband-12bit.tif",
+      "maskFixture": "mask-multiband.png",
+      "params": {
+        "textCategory": 1,
+        "backgroundCategory": 2
+      },
+      "value": [
+        -10.73312629199899,
+        -10.73312629199899,
+        -10.73312629199899
+      ]
+    },
     "ropCnr": {
       "script": "rop",
       "fixture": "multiband-12bit.tif",

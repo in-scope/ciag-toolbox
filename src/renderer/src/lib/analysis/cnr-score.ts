@@ -1,12 +1,19 @@
+import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
+
 // CT-309: Contrast-to-Noise Ratio of one candidate band against two mask
 // categories, computed exactly as the locked decision states:
 // (mean of text pixels - mean of background pixels) / population standard
 // deviation of background pixels (numpy std with ddof=0). The score is the ROP
 // panel's cheapest objective, so it runs in TS over the candidate values the
 // worker already returned instead of a second Python round trip.
+//
+// CT-320: CNR is also a Multi-band tool of its own, scoring every band of a
+// stack on its own, so a band is any RasterTypedArray (a uint16 cube band as
+// readily as a float32 candidate) and the per-band list is built from the ONE
+// request shape below, which the analysis flow reuses band by band.
 
 export interface CnrScoreRequest {
-  readonly candidateValues: Float32Array;
+  readonly candidateValues: RasterTypedArray;
   readonly maskValues: Uint8Array;
   readonly textCategoryValue: number;
   readonly backgroundCategoryValue: number;
@@ -62,4 +69,34 @@ function meanOfCategoryPixels(request: CnrScoreRequest, categoryValue: number): 
 // numpy population std: ddof = 0, so the divisor is the plain pixel count.
 function populationStandardDeviation(summary: CategoryPixelSummary): number {
   return Math.sqrt(summary.sumOfSquaredDeviations / summary.count);
+}
+
+// One request per band, in band order: the flow walks this list so it can
+// yield between bands, and computeCnrScorePerBand maps it in one go.
+export function listCnrScoreRequestsPerBand(
+  raster: RasterImage,
+  maskValues: Uint8Array,
+  textCategoryValue: number,
+  backgroundCategoryValue: number,
+): ReadonlyArray<CnrScoreRequest> {
+  return raster.bandPixels.map((candidateValues) => ({
+    candidateValues,
+    maskValues,
+    textCategoryValue,
+    backgroundCategoryValue,
+  }));
+}
+
+export function computeCnrScorePerBand(
+  raster: RasterImage,
+  maskValues: Uint8Array,
+  textCategoryValue: number,
+  backgroundCategoryValue: number,
+): ReadonlyArray<number> {
+  return listCnrScoreRequestsPerBand(
+    raster,
+    maskValues,
+    textCategoryValue,
+    backgroundCategoryValue,
+  ).map(computeCnrScore);
 }

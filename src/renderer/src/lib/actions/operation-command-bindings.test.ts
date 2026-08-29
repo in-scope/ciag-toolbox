@@ -27,6 +27,7 @@ function buildHandlerSpies(): OperationCommandHandlers & {
     toggleBandSubset: bump("toggleBandSubset"),
     openActionPanel: bump("openActionPanel"),
     openNpcPanel: bump("openNpcPanel"),
+    openCnrPanel: bump("openCnrPanel"),
     openRopPanel: bump("openRopPanel"),
     applyGeometricTransform: bump("applyGeometricTransform"),
   };

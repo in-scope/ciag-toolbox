@@ -39,6 +39,10 @@ import {
   type NpcPanelTarget,
 } from "@/components/npc-options-panel";
 import {
+  CnrOptionsPanel,
+  type CnrPanelTarget,
+} from "@/components/cnr-options-panel";
+import {
   RopOptionsPanel,
   type RopPanelTarget,
 } from "@/components/rop-options-panel";
@@ -396,6 +400,7 @@ function ApplicationShell(): JSX.Element {
   const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicateReplace | null>(null);
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [isNpcPanelOpen, setIsNpcPanelOpen] = useState(false);
+  const [isCnrPanelOpen, setIsCnrPanelOpen] = useState(false);
   const [isRopPanelOpen, setIsRopPanelOpen] = useState(false);
   const [pinnedRopPanel, setPinnedRopPanel] = useState<RopPinnedPanel | null>(null);
   const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
@@ -546,9 +551,20 @@ function ApplicationShell(): JSX.Element {
     bandSubsetToggle: deriveBandSubsetToggleStateForToolbar(singleSelectedSource, imagesByIndex, renderingApi),
     openActionPanel: regionRequestHandlers.openActionPanel,
     openNpcPanel: () =>
-      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsNpcPanelOpen, setIsRopPanelOpen),
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsNpcPanelOpen, [
+        setIsCnrPanelOpen,
+        setIsRopPanelOpen,
+      ]),
+    openCnrPanel: () =>
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsCnrPanelOpen, [
+        setIsNpcPanelOpen,
+        setIsRopPanelOpen,
+      ]),
     openRopPanel: () =>
-      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsRopPanelOpen, setIsNpcPanelOpen),
+      openAnalysisPanelClosingCompetingPanels(regionRequestHandlers, setIsRopPanelOpen, [
+        setIsNpcPanelOpen,
+        setIsCnrPanelOpen,
+      ]),
     singleSelectedSource,
     applyActionFlowBindings,
   });
@@ -636,13 +652,25 @@ function ApplicationShell(): JSX.Element {
                 isNpcPanelOpen={isNpcPanelOpen}
                 npcTarget={deriveNpcPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
                 onRecordNpcScore={(appliedLabel) =>
-                  appendNpcScoreToHistoryAtViewport(
+                  appendAnalysisScoreToHistoryAtViewport(
                     singleSelectedSource?.index ?? null,
+                    NPC_ANALYSIS_ENTRY,
                     appliedLabel,
                     renderingApi,
                   )
                 }
                 onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
+                isCnrPanelOpen={isCnrPanelOpen}
+                cnrTarget={deriveCnrPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                onRecordCnrScore={(appliedLabel) =>
+                  appendAnalysisScoreToHistoryAtViewport(
+                    singleSelectedSource?.index ?? null,
+                    CNR_ANALYSIS_ENTRY,
+                    appliedLabel,
+                    renderingApi,
+                  )
+                }
+                onCloseCnrPanel={() => setIsCnrPanelOpen(false)}
                 isRopPanelOpen={isRopPanelOpen}
                 ropTarget={deriveRopPanelTargetOrNull(ropPin, renderingApi)}
                 ropCandidateDelivery={buildRopCandidateDeliveryPort(
@@ -755,6 +783,10 @@ interface ApplicationStageContentProps {
   npcTarget: NpcPanelTarget | null;
   onRecordNpcScore: (appliedLabel: string) => void;
   onCloseNpcPanel: () => void;
+  isCnrPanelOpen: boolean;
+  cnrTarget: CnrPanelTarget | null;
+  onRecordCnrScore: (appliedLabel: string) => void;
+  onCloseCnrPanel: () => void;
   isRopPanelOpen: boolean;
   ropTarget: RopPanelTarget | null;
   ropCandidateDelivery: RopCandidateDeliveryPort;
@@ -822,6 +854,15 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       />
     );
   }
+  if (props.isCnrPanelOpen) {
+    return (
+      <CnrOptionsPanel
+        target={props.cnrTarget}
+        onRecordScoreInHistory={props.onRecordCnrScore}
+        onClose={props.onCloseCnrPanel}
+      />
+    );
+  }
   if (props.isMasksToolActive) {
     return (
       <MasksOptionsPanel
@@ -873,6 +914,16 @@ function deriveNpcPanelTargetOrNull(
     raster: content.source.raster,
     masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
   };
+}
+
+// CT-320: CNR reads exactly what NPC reads - the active panel's cube and that
+// panel's mask layers - so the two asides share one derivation.
+function deriveCnrPanelTargetOrNull(
+  singleSelectedSource: SingleSelectedSource | null,
+  imagesByIndex: ImagesByIndexMap,
+  renderingApi: ViewportRenderingApi,
+): CnrPanelTarget | null {
+  return deriveNpcPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi);
 }
 
 // CT-315: ROP reads the PINNED panel's cube (CT-309 read the active panel), so
@@ -941,8 +992,14 @@ function keepRopCandidateFromPinnedPanel(
 
 // The score is not an operation on the stack, so nothing about the panel
 // changes; only the audit trail records that it was measured.
-function appendNpcScoreToHistoryAtViewport(
+interface AnalysisHistoryEntryIdentity {
+  readonly actionId: string;
+  readonly actionLabel: string;
+}
+
+function appendAnalysisScoreToHistoryAtViewport(
   viewportIndex: number | null,
+  analysis: AnalysisHistoryEntryIdentity,
   appliedLabel: string,
   renderingApi: ViewportRenderingApi,
 ): void {
@@ -951,16 +1008,15 @@ function appendNpcScoreToHistoryAtViewport(
   renderingApi.setRenderingState(viewportIndex, {
     ...previous,
     operationHistory: appendOperationHistoryEntry(previous.operationHistory, {
-      actionId: NPC_ANALYSIS_ACTION_ID,
-      actionLabel: NPC_ANALYSIS_ACTION_LABEL,
+      ...analysis,
       appliedLabel,
       parameterValues: NO_PARAMETER_VALUES,
     }),
   });
 }
 
-const NPC_ANALYSIS_ACTION_ID = "npc";
-const NPC_ANALYSIS_ACTION_LABEL = "NPC";
+const NPC_ANALYSIS_ENTRY: AnalysisHistoryEntryIdentity = { actionId: "npc", actionLabel: "NPC" };
+const CNR_ANALYSIS_ENTRY: AnalysisHistoryEntryIdentity = { actionId: "cnr", actionLabel: "CNR" };
 
 function writeMaskPanelStateAtViewport(
   viewportIndex: number | null,
@@ -1126,6 +1182,7 @@ interface OperationCommandHandlerBindings {
   readonly bandSubsetToggle: BandSubsetToolbarToggleState;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
   readonly openNpcPanel: () => void;
+  readonly openCnrPanel: () => void;
   readonly openRopPanel: () => void;
   readonly singleSelectedSource: SingleSelectedSource | null;
   readonly applyActionFlowBindings: ApplyActionFlowBindings;
@@ -1140,6 +1197,7 @@ function buildOperationCommandHandlers(
     toggleBandSubset: bindings.bandSubsetToggle.onToggle,
     openActionPanel: bindings.openActionPanel,
     openNpcPanel: bindings.openNpcPanel,
+    openCnrPanel: bindings.openCnrPanel,
     openRopPanel: bindings.openRopPanel,
     applyGeometricTransform: (transform) =>
       applyQuickGeometricTransformToActiveSource(
@@ -2074,10 +2132,10 @@ interface ToolPanelRegionRequestHandlers {
 function openAnalysisPanelClosingCompetingPanels(
   regionRequestHandlers: ToolPanelRegionRequestHandlers,
   setThisPanelOpen: (open: boolean) => void,
-  setCompetingPanelOpen: (open: boolean) => void,
+  setCompetingPanelsOpen: ReadonlyArray<(open: boolean) => void>,
 ): void {
   regionRequestHandlers.closeActionPanel();
-  setCompetingPanelOpen(false);
+  for (const setCompetingPanelOpen of setCompetingPanelsOpen) setCompetingPanelOpen(false);
   setThisPanelOpen(true);
 }
 

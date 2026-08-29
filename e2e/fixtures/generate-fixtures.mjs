@@ -1119,6 +1119,11 @@ function computeBuiltinScriptReferenceOutputs(fixtures) {
     references[key] = describeReferenceOutput(definition, interpreterPath);
     process.stdout.write(`pinned builtin reference ${key} (${definition.script})\n`);
   }
+  references.cnrPerBand = describeCnrPerBandReference(
+    fixtures.multiBandTiff,
+    fixtures.maskMultibandPng,
+  );
+  process.stdout.write(`pinned builtin reference cnrPerBand (computed in JS per band)\n`);
   references.ropCnr = describeRopCnrReference(references.rop, fixtures.maskMultibandPng);
   process.stdout.write(`pinned builtin reference ropCnr (computed in JS from rop)\n`);
   references.ropSearchScore = describeRopSearchScoreReference(
@@ -1143,6 +1148,29 @@ function describeRopSearchScoreReference(searchReference, maskFixture) {
     params: searchReference.params,
     value: meanOf(text) - meanOf(background),
   };
+}
+
+// CT-320: CNR is a Multi-band tool of its own, scored BAND BY BAND with the
+// same locked formula. The app computes it in TS, so the reference is computed
+// here the same way, over each band's own values: text = mask category 1,
+// background = category 2. Every band of multiband-12bit.tif is the same ramp
+// at a different offset and the two mask classes are its top and bottom row, so
+// all three bands read the same score - what the pinned list still proves is one
+// score PER BAND, in band order, with the right sign and magnitude.
+function describeCnrPerBandReference(stackFixture, maskFixture) {
+  return {
+    script: 'cnr',
+    fixture: stackFixture.fileName,
+    maskFixture: maskFixture.fileName,
+    params: { textCategory: 1, backgroundCategory: 2 },
+    value: stackFixture.bands.map((band) => cnrScoreOfBand(band, maskFixture.values, 1, 2)),
+  };
+}
+
+function cnrScoreOfBand(band, maskValues, textCategory, backgroundCategory) {
+  const text = collectMaskCategoryValues(band, maskValues, textCategory);
+  const background = collectMaskCategoryValues(band, maskValues, backgroundCategory);
+  return (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
 }
 
 // CT-309: the app computes the CNR objective in TS (not Python), so its

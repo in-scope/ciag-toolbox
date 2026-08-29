@@ -27,6 +27,7 @@ export type OperationCommandBehavior =
   | "toggle-subset-bands"
   | "open-action-panel"
   | "open-npc-panel"
+  | "open-cnr-panel"
   | "open-rop-panel"
   | "apply-geometric-transform";
 
@@ -218,6 +219,15 @@ const ANALYSIS_GROUP: OperationGroup = {
       id: "npc",
       label: "NPC",
       behavior: "open-npc-panel",
+      showInMenu: true,
+      showInToolbar: false,
+    },
+    // CT-320: contrast-to-noise ratio of a chosen text category against a
+    // chosen background category, scored band by band like NPC.
+    {
+      id: "cnr",
+      label: "CNR",
+      behavior: "open-cnr-panel",
       showInMenu: true,
       showInToolbar: false,
     },

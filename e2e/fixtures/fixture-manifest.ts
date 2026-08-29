@@ -111,6 +111,10 @@ export interface BuiltinScriptReferences {
   // generator in JS over the float32 reference values with the exact locked
   // formula, since the app computes CNR in TS rather than in Python.
   readonly ropCnr: BuiltinScriptValueReference;
+  // CT-320: the CNR tool scores every band of multiband-12bit.tif against the
+  // mask fixture (text = category 1, background = category 2), computed by the
+  // generator in JS with the same locked formula the app runs in TS.
+  readonly cnrPerBand: BuiltinScriptValueListReference;
   // CT-310: the best of 50 seeded candidates under the committed custom
   // objective (mask-contrast-objective.py), and that winner's score computed in
   // JS. The winner is NOT the first draw, so a search that ignored its
