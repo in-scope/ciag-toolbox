@@ -351,7 +351,9 @@ async function runNpcComputationForForm(
 ): Promise<void> {
   const { target, selectedLayer, binCount } = inputs;
   if (target === null || selectedLayer === null || binCount === null) return;
-  setState((previous) => ({ ...previous, isComputing: true }));
+  // The readout returns to "Not computed yet" for the duration of the run: a
+  // stale score next to a running analysis reads as this run's answer.
+  setState((previous) => ({ ...previous, isComputing: true, score: null }));
   try {
     const outcome = await computeNpcScoreForTarget(inputs, target, selectedLayer, binCount);
     reportNpcOutcome(outcome, selectedLayer, binCount, { setState, recordScore });
@@ -395,6 +397,14 @@ function reportNpcOutcome(
     notifyError(outcome.message);
     return;
   }
-  reporters.setState((previous) => ({ ...previous, score: outcome.score }));
-  reporters.recordScore(formatNpcHistoryAppliedLabel(maskLayer.name, bins, outcome.score));
+  const score = firstBandScoreOrNull(outcome.scores);
+  reporters.setState((previous) => ({ ...previous, score }));
+  if (score === null) return;
+  reporters.recordScore(formatNpcHistoryAppliedLabel(maskLayer.name, bins, score));
+}
+
+// CT-318: the run now returns one score per band. The scalar readout keeps
+// showing the first band until CT-319 replaces it with the plot and top list.
+function firstBandScoreOrNull(scores: ReadonlyArray<number>): number | null {
+  return scores[0] ?? null;
 }

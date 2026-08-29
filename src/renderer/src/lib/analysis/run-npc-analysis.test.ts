@@ -80,9 +80,9 @@ function runNpcAgainst(
 describe("computeNpcScoreShowingPanelBusy", () => {
   it("runs the packaged npc script with the category masks and the bins parameter", async () => {
     const recorded = buildRecordedRun();
-    const api = buildRecordingApi({ status: "completed", value: 0.75 }, recorded);
+    const api = buildRecordingApi({ status: "completed", value: [0.75] }, recorded);
     const outcome = await runNpcAgainst(api, 64);
-    expect(outcome).toEqual({ status: "computed", score: 0.75 });
+    expect(outcome).toEqual({ status: "computed", scores: [0.75] });
     expect(recorded.begin?.source).toEqual({ mode: "builtin", scriptName: "npc" });
     expect(recorded.begin?.masks).toEqual({ count: 2 });
     expect(recorded.executeParams).toEqual({ bins: 64 });
@@ -91,7 +91,7 @@ describe("computeNpcScoreShowingPanelBusy", () => {
 
   it("uploads the two category masks after the cube bytes", async () => {
     const recorded = buildRecordedRun();
-    await runNpcAgainst(buildRecordingApi({ status: "completed", value: 1 }, recorded));
+    await runNpcAgainst(buildRecordingApi({ status: "completed", value: [1] }, recorded));
     expect(recorded.chunks).toHaveLength(3);
     expect(Array.from(recorded.chunks[1] ?? [])).toEqual([1, 0]);
     expect(Array.from(recorded.chunks[2] ?? [])).toEqual([0, 1]);
@@ -106,11 +106,32 @@ describe("computeNpcScoreShowingPanelBusy", () => {
     });
   });
 
-  it("refuses a run that came back without a finite score", async () => {
+  it("refuses a result that is not a list of scores", async () => {
     const recorded = buildRecordedRun();
-    const api = buildRecordingApi({ status: "completed", value: "not a score" }, recorded);
+    const api = buildRecordingApi({ status: "completed", value: 0.75 }, recorded);
     const outcome = await runNpcAgainst(api);
     expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") expect(outcome.message).toMatch(/must be an array/);
+  });
+
+  it("refuses a score list whose length is not the stack's band count", async () => {
+    const recorded = buildRecordedRun();
+    const api = buildRecordingApi({ status: "completed", value: [0.5, 0.6] }, recorded);
+    const outcome = await runNpcAgainst(api);
+    expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("one NPC score per band (expected 1, got 2)");
+    }
+  });
+
+  it("refuses a score list holding a non-finite entry", async () => {
+    const recorded = buildRecordedRun();
+    const api = buildRecordingApi({ status: "completed", value: [Number.NaN] }, recorded);
+    const outcome = await runNpcAgainst(api);
+    expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("NPC score 1 must be a finite number");
+    }
   });
 
   it("reports a user stop as stopped rather than as a failure", async () => {

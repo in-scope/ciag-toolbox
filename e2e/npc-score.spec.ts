@@ -36,14 +36,27 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //
 // ORACLE: manifest.json's builtinScriptReferences, pinned by the CT-307
 // reference runner executing the SAME packaged npc.py under the bundled Python
-// runtime, outside the app. The 255-bin score is exactly 1 (those classes never
-// share a value), so the spec also scores a COARSE 2-bin run, where the classes
-// do share bins and the reference is 0.25 - a value no stub can guess.
+// runtime, outside the app. CT-318 scores every band on its own, so each
+// reference is a LIST with one score per band and the readout shows the first
+// band; CT-319 extends this spec to every band once the panel plots them.
 
 const PANEL = 1;
 const MASK_LAYER_NAME = maskMultibandPng.name ?? "Parchment mask";
 const DEFAULT_BINS = builtinScriptReferences.npc.params.bins;
 const COARSE_BINS = builtinScriptReferences.npcCoarseBins.params.bins;
+const FINE_FIRST_BAND_SCORE = firstBandScoreOrThrow(builtinScriptReferences.npc.value);
+const COARSE_FIRST_BAND_SCORE = firstBandScoreOrThrow(builtinScriptReferences.npcCoarseBins.value);
+
+function firstBandScoreOrThrow(scores: ReadonlyArray<number>): number {
+  const first = scores[0];
+  if (first === undefined) throw new Error("The pinned NPC reference has no bands.");
+  return first;
+}
+
+// The panel shows a score to four significant figures, trailing zeros kept.
+function formatScoreAsThePanelDoes(score: number): string {
+  return score.toPrecision(4);
+}
 
 let launched: LaunchedApp;
 
@@ -65,11 +78,11 @@ test("scores the imported mask at both binnings and records each run in History"
   await expectPanelDefaultsToTheImportedLayer(page);
 
   const fineScore = await computeNpcScore(page);
-  expectScoreWithinRelativeTolerance(fineScore, builtinScriptReferences.npc.value);
+  expectScoreWithinRelativeTolerance(fineScore, FINE_FIRST_BAND_SCORE);
 
   await setNpcBinCount(page, Number(COARSE_BINS));
   const coarseScore = await computeNpcScore(page);
-  expectScoreWithinRelativeTolerance(coarseScore, builtinScriptReferences.npcCoarseBins.value);
+  expectScoreWithinRelativeTolerance(coarseScore, COARSE_FIRST_BAND_SCORE);
 
   await closeNpcOptions(page);
   await expectHistoryRecordsBothScores(page);
@@ -127,8 +140,8 @@ async function expectHistoryRecordsBothScores(page: Page): Promise<void> {
     const entries = await readHistoryEntries(page);
     const npcEntries = entries.filter((entry) => entry.actionLabel === NPC_PANEL_LABEL);
     expect(npcEntries.map((entry) => entry.detailLines.join(" "))).toEqual([
-      `NPC (${MASK_LAYER_NAME}, ${DEFAULT_BINS} bins): 1.000`,
-      `NPC (${MASK_LAYER_NAME}, ${COARSE_BINS} bins): 0.2500`,
+      `NPC (${MASK_LAYER_NAME}, ${DEFAULT_BINS} bins): ${formatScoreAsThePanelDoes(FINE_FIRST_BAND_SCORE)}`,
+      `NPC (${MASK_LAYER_NAME}, ${COARSE_BINS} bins): ${formatScoreAsThePanelDoes(COARSE_FIRST_BAND_SCORE)}`,
     ]);
   });
 }

@@ -976,6 +976,8 @@ value = module.run(cube, request.get("wavelengths"), params)
 if isinstance(value, np.ndarray):
     coerced = np.ascontiguousarray(np.asarray(value).astype("<f4", copy=False))
     out = {"kind": "cube", "shape": list(coerced.shape), "values": coerced.astype(np.float64).ravel().tolist()}
+elif isinstance(value, (list, tuple)):
+    out = {"kind": "value", "value": [float(entry) for entry in value]}
 else:
     out = {"kind": "value", "value": float(value)}
 sys.stdout.write(json.dumps(out))
@@ -1041,10 +1043,12 @@ function listBuiltinScriptReferenceRequests(fixtures) {
       params: { bins: 255 },
       request: { cube: multibandCube, masks: multibandMasks, params: { bins: 255 } },
     },
-    // CT-308: multiband-12bit's two mask classes are fully separable, so the
-    // 255-bin score is exactly 1 and a stub returning 1 would pass. A coarse
-    // binning forces the classes to share bins, pinning a score that only a
-    // real run can reproduce.
+    // CT-318: since NPC is scored BAND BY BAND over that band's own min-max,
+    // this coarse binning no longer separates the pinned values from the fine
+    // one. Each band of multiband-12bit is a ramp whose two mask classes sit in
+    // its lowest and highest quarter, so every band scores exactly 1 at every
+    // bin count and both references read [1, 1, 1]. What the pinned reference
+    // still proves is the SHAPE: one score per band, in band order.
     npcCoarseBins: {
       script: "npc",
       fixture: fixtures.multiBandTiff.fileName,

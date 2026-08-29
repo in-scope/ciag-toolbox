@@ -39,13 +39,17 @@ export async function setNpcBinCount(page: Page, bins: number): Promise<void> {
 }
 
 // Compute runs the packaged Python analysis out of process, so the readout only
-// settles once the worker returns; waiting on the text leaving its placeholder
-// (or changing) is the completion signal.
+// settles once the worker returns. CT-318 scores every band on its own, and two
+// runs of the same stack can legitimately read the SAME number, so "the text
+// changed" is no longer a completion signal: the run first clears the readout
+// back to its placeholder, and the score arriving there is what we wait on.
 export async function computeNpcScore(page: Page): Promise<number> {
   return runAsStoryboardStep(page, "Compute the NPC score and read it back", async () => {
-    const before = await npcScoreReadout(page).innerText();
     await npcComputeButton(page).click();
-    await expect(npcScoreReadout(page)).not.toHaveText(before, { timeout: NPC_RUN_TIMEOUT_MS });
+    await expect(npcScoreReadout(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
+    await expect(npcScoreReadout(page)).not.toHaveText(NPC_NOT_COMPUTED_TEXT, {
+      timeout: NPC_RUN_TIMEOUT_MS,
+    });
     return Number(await npcScoreReadout(page).innerText());
   });
 }

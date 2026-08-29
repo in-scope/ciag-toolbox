@@ -26,14 +26,39 @@ export interface CubeSpatialDimensions {
   width: number;
 }
 
-export function validateBandWeightVectorReturnValue(value: unknown, bandCount: number): number[] {
-  const vector = asArrayOrThrow(value, "The weight vector");
-  if (vector.length !== bandCount) {
+// CT-318: the one-number-per-band contract is shared by band weighting and by
+// the NPC analysis, so the consumer names the list and its elements rather than
+// inheriting the weighting vocabulary.
+export interface PerBandNumberListSubject {
+  readonly listName: string;
+  readonly elementName: string;
+  readonly onePerBandPhrase: string;
+}
+
+const BAND_WEIGHT_VECTOR_SUBJECT: PerBandNumberListSubject = {
+  listName: "The weight vector",
+  elementName: "Weight",
+  onePerBandPhrase: "one weight per band",
+};
+
+export function validatePerBandNumberListReturnValue(
+  value: unknown,
+  bandCount: number,
+  subject: PerBandNumberListSubject,
+): number[] {
+  const list = asArrayOrThrow(value, subject.listName);
+  if (list.length !== bandCount) {
     throw new UserScriptReturnContractError(
-      `The weight vector must have one weight per band (expected ${bandCount}, got ${vector.length}).`,
+      `${subject.listName} must have ${subject.onePerBandPhrase} (expected ${bandCount}, got ${list.length}).`,
     );
   }
-  return vector.map((weight, index) => asFiniteNumberOrThrow(weight, `Weight ${index + 1}`));
+  return list.map((entry, index) =>
+    asFiniteNumberOrThrow(entry, `${subject.elementName} ${index + 1}`),
+  );
+}
+
+export function validateBandWeightVectorReturnValue(value: unknown, bandCount: number): number[] {
+  return validatePerBandNumberListReturnValue(value, bandCount, BAND_WEIGHT_VECTOR_SUBJECT);
 }
 
 export function validateBandSelectionReturnValue(

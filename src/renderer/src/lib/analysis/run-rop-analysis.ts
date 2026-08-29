@@ -17,7 +17,10 @@ import {
 import { buildUserScriptRunCubeInputFromRaster } from "@/lib/python/user-script-cube";
 import type { BusyEntryHandle } from "@/state/busy-state-context";
 
-import { computeNpcScoreShowingPanelBusy } from "./run-npc-analysis";
+import {
+  computeNpcScoreShowingPanelBusy,
+  type NpcAnalysisOutcome,
+} from "./run-npc-analysis";
 import { DEFAULT_NPC_BIN_COUNT, buildNpcCategoryMasks } from "./npc-run-request";
 import { computeCnrScore } from "./cnr-score";
 import { buildRopExecuteParams } from "./rop-run-request";
@@ -240,8 +243,17 @@ async function scoreCandidateWithBuiltinNpc(
     bindings,
     api,
   );
-  if (outcome.status === "computed") return { status: "scored", score: outcome.score };
-  return outcome;
+  return describeNpcObjectiveOutcome(outcome);
+}
+
+// CT-318: NPC returns one score per band and the candidate is a single band, so
+// the objective is the first element.
+function describeNpcObjectiveOutcome(outcome: NpcAnalysisOutcome): RopScoreOutcome {
+  if (outcome.status !== "computed") return outcome;
+  return describeFiniteScoreOutcome(
+    outcome.scores[0] ?? Number.NaN,
+    "The NPC score is not a finite number.",
+  );
 }
 
 // The custom objective contract: run(cube, wavelengths, params) receives the

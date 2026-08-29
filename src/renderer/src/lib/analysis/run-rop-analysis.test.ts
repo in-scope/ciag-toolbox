@@ -171,10 +171,12 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
     expect(outcome.status).toBe("failed");
   });
 
-  it("scores the NPC objective by running the built-in npc script over the candidate", async () => {
+  // CT-318: npc.py returns one score per band and the candidate is a single
+  // band, so the objective is the first (only) element of that list.
+  it("scores the NPC objective with the first band of the built-in script's score list", async () => {
     const recorded = buildRecordedSessionRuns();
     const api = buildCubeServingApi([0], recorded);
-    api.executeUserScriptRun = () => Promise.resolve({ status: "completed", value: 0.75 });
+    api.executeUserScriptRun = () => Promise.resolve({ status: "completed", value: [0.75] });
     const outcome = await scoreRopCandidateShowingPanelBusy(
       buildScoreRequest({ objectiveKind: "npc" }),
       rollBindings(),
@@ -183,6 +185,18 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
     expect(outcome).toEqual({ status: "scored", score: 0.75 });
     expect(recorded.beginRequests[0]?.source).toEqual({ mode: "builtin", scriptName: "npc" });
     expect(recorded.beginRequests[0]?.masks).toEqual({ count: 2 });
+  });
+
+  it("fails the NPC objective when the script returns a bare number instead of a list", async () => {
+    const recorded = buildRecordedSessionRuns();
+    const api = buildCubeServingApi([0], recorded);
+    api.executeUserScriptRun = () => Promise.resolve({ status: "completed", value: 0.75 });
+    const outcome = await scoreRopCandidateShowingPanelBusy(
+      buildScoreRequest({ objectiveKind: "npc" }),
+      rollBindings(),
+      api,
+    );
+    expect(outcome.status).toBe("failed");
   });
 
   it("runs a custom objective script with the candidate as the cube and the masks in params", async () => {

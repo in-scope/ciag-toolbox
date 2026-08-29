@@ -564,7 +564,11 @@
       "params": {
         "bins": 255
       },
-      "value": 0.9999999999999991
+      "value": [
+        1,
+        1,
+        1
+      ]
     },
     "npcCoarseBins": {
       "script": "npc",
@@ -573,7 +577,11 @@
       "params": {
         "bins": 2
       },
-      "value": 0.25
+      "value": [
+        1,
+        1,
+        1
+      ]
     },
     "rop": {
       "script": "rop",

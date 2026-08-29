@@ -110,8 +110,10 @@ def select_mask_at_index(masks, params, parameterName):
 def build_npc_scorer(masks, params):
     npc_params = {"masks": masks, "bins": int(params.get("bins", 255))}
 
+    # CT-318: npc.run returns one score per band; the candidate is one band, so
+    # the objective is the first (only) element and stays numerically unchanged.
     def score_candidate(band):
-        return npc.run(band[np.newaxis, :, :], None, npc_params)
+        return npc.run(band[np.newaxis, :, :], None, npc_params)[0]
 
     return score_candidate
 
