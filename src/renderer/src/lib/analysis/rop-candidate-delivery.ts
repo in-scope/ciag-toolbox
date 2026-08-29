@@ -5,7 +5,12 @@ import {
   runDuplicateAndApplyAtTargetIndex,
   type ApplyActionFlowBindings,
 } from "@/lib/actions/apply-action-flow";
-import { buildRopCandidateDeliveryAction, type RopKeepRequest } from "@/lib/actions/rop-keep-action";
+import {
+  buildRopCandidateDeliveryAction,
+  buildRopFrozenStackDeliveryAction,
+  type RopCandidateDeliveryAction,
+  type RopKeepRequest,
+} from "@/lib/actions/rop-keep-action";
 import { NO_PARAMETER_VALUES } from "@/lib/actions/parameter-schema";
 import type { RegisteredViewportAction } from "@/lib/actions/registered-actions";
 import type { RasterImage } from "@/lib/image/raster-image";
@@ -24,6 +29,11 @@ import { canPlaceKeptProjectionInAFreePanel } from "./rop-keep-flow";
 
 export const ROP_PRESS_NEEDS_A_FREE_PANEL_MESSAGE =
   "Every panel is in use. Close a panel before projecting.";
+
+// CT-317: a press delivers a REPLACEABLE candidate ("Projection ready"); a
+// search winner arrives already frozen ("Projection kept"). Only the toast
+// differs - the stack, its History entry, and the panel search are identical.
+export type RopDeliveryTone = "candidate" | "frozen";
 
 export interface RopLiveCandidatePanel {
   readonly viewportIndex: number;
@@ -66,6 +76,7 @@ export interface RopCandidateDeliveryPort {
   readonly deliverCandidate: (
     request: RopKeepRequest,
     replaceAtIndex: number | null,
+    tone?: RopDeliveryTone,
   ) => Promise<RopLiveCandidatePanel | null>;
 }
 
@@ -77,10 +88,10 @@ export function buildRopCandidateDeliveryPort(
     canOpenFreshCandidatePanel: () => canOpenFreshRopCandidatePanel(bindings),
     resolveReplaceIndexOrNull: (live) =>
       resolveRopCandidateReplaceIndexOrNull(live, bindings.imagesByIndex),
-    deliverCandidate: (request, replaceAtIndex) =>
+    deliverCandidate: (request, replaceAtIndex, tone) =>
       sourceIndex === null
         ? Promise.resolve(null)
-        : deliverRopCandidateToPanel(request, sourceIndex, replaceAtIndex, bindings),
+        : deliverRopCandidateToPanel(request, sourceIndex, replaceAtIndex, bindings, tone),
   };
 }
 
@@ -92,10 +103,11 @@ export async function deliverRopCandidateToPanel(
   sourceIndex: number,
   replaceAtIndex: number | null,
   bindings: ApplyActionFlowBindings,
+  tone: RopDeliveryTone = "candidate",
 ): Promise<RopLiveCandidatePanel | null> {
   const sourceContent = bindings.imagesByIndex.get(sourceIndex);
   if (!sourceContent) return null;
-  const delivery = buildRopCandidateDeliveryAction(request);
+  const delivery = buildRopStackDeliveryForTone(request, tone);
   if (reportApplyExceedsMemoryBudget(delivery.action, sourceContent.source, NO_PARAMETER_VALUES, sourceIndex, bindings)) {
     return null;
   }
@@ -130,4 +142,12 @@ async function runCandidateDeliveryReportingSuccess(
     selectResultPanel: false,
   });
   return succeeded;
+}
+
+function buildRopStackDeliveryForTone(
+  request: RopKeepRequest,
+  tone: RopDeliveryTone,
+): RopCandidateDeliveryAction {
+  if (tone === "frozen") return buildRopFrozenStackDeliveryAction(request);
+  return buildRopCandidateDeliveryAction(request);
 }

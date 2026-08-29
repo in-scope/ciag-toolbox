@@ -649,7 +649,7 @@ function ApplicationShell(): JSX.Element {
                   ropPin?.viewportIndex ?? null,
                   applyActionFlowBindings,
                 )}
-                onKeepRopCandidate={(request) =>
+                onKeepRopCandidateAsNewStack={(request) =>
                   keepRopCandidateFromPinnedPanel(request, ropPin, applyActionFlowBindings)
                 }
                 onCloseRopPanel={() => setIsRopPanelOpen(false)}
@@ -758,7 +758,7 @@ interface ApplicationStageContentProps {
   isRopPanelOpen: boolean;
   ropTarget: RopPanelTarget | null;
   ropCandidateDelivery: RopCandidateDeliveryPort;
-  onKeepRopCandidate: (request: RopKeepRequest) => void;
+  onKeepRopCandidateAsNewStack: (request: RopKeepRequest) => void;
   onCloseRopPanel: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
   onCancelAction: () => void;
@@ -808,7 +808,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
       <RopOptionsPanel
         target={props.ropTarget}
         candidateDelivery={props.ropCandidateDelivery}
-        onKeepCandidate={props.onKeepRopCandidate}
+        onKeepCandidateAsNewStack={props.onKeepRopCandidateAsNewStack}
         onClose={props.onCloseRopPanel}
       />
     );

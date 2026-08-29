@@ -71,11 +71,17 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //   - a full grid at its largest layout REFUSES the press before any run;
 //   - the CNR score matches builtinScriptReferences.ropCnr, computed by the
 //     generator with the exact locked formula over the reference candidate,
-//     and History on the candidate panel ends with exactly one ROP entry.
+//     and History on the candidate panel ends with exactly one ROP entry;
+//   - CT-317: Keep FREEZES the candidate panel - after it, Keep is disabled,
+//     the next press opens a THIRD panel instead of replacing panel 2, panel 2
+//     still reads the first seed's reference projection, panel 3 reads
+//     something else, and panel 2's History still ends with that seed's ROP
+//     entry. (Only the first seed has a pinned reference, so the second press
+//     is asserted to DIFFER from it rather than against a reference of its own.)
 
 const SOURCE_PANEL = 1;
 const CANDIDATE_PANEL = 2;
-const KEPT_PANEL = 3;
+const SECOND_CANDIDATE_PANEL = 3;
 const IMAGE = { width: multiBandTiff.width, height: multiBandTiff.height };
 const FORCED_SEED = Number(builtinScriptReferences.rop.params.seed);
 const OTHER_SEED = FORCED_SEED + 1;
@@ -151,13 +157,23 @@ test("delivers each press as a one-band stack next to the source and replaces it
   await expectCandidatePanelIsAOneBandStackWithOneRopHistoryEntry(page);
 });
 
-test("keeps the current candidate as a further stack (CT-309 keep, unchanged by CT-316)", async () => {
+test("freezes the candidate panel on Keep so the next press opens a new panel", async () => {
   const page = launched.window;
 
   await openOperation(page, ROP_PANEL_LABEL);
   await pressNewProjectionUntilProjectionReady(page, FORCED_SEED);
-  await keepTheCurrentCandidate(page, KEPT_PANEL);
-  await expectPanelMatchesTheReferenceProjection(page, KEPT_PANEL);
+  await keepTheCandidateOnScreen(page);
+  await expectKeepToBeUnavailableWithNothingLeftToFreeze(page);
+
+  await setForcedRopSeed(page, OTHER_SEED);
+  await pressNewProjectionUntilProjectionReady(page, OTHER_SEED);
+  await expectTheSecondPressToHaveOpenedAFurtherPanel(page);
+
+  await expectPanelMatchesTheReferenceProjection(page, CANDIDATE_PANEL);
+  await expectPanelToDifferFromTheReferenceProjection(page, SECOND_CANDIDATE_PANEL);
+
+  await closeRopOptions(page);
+  await expectFrozenPanelHistoryToEndWithTheFirstSeedsRopEntry(page);
 });
 
 test("refuses a press when every panel is in use and the grid cannot grow", async () => {
@@ -295,11 +311,54 @@ async function expectCnrCategoriesDefaultToParchmentOverSubstrate(page: Page): P
   });
 }
 
-async function keepTheCurrentCandidate(page: Page, keptPanel: number): Promise<void> {
-  await runAsStoryboardStep(page, `Keep the current candidate into panel ${keptPanel}`, async () => {
+// CT-317: Keep copies nothing - it drops the aside's pointer to the candidate
+// panel, so the panel count is unchanged and the stack simply stops being
+// replaceable.
+async function keepTheCandidateOnScreen(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Keep the candidate on screen", async () => {
     await ropKeepButton(page).click();
     await expect(page.getByText("Projection kept")).toBeVisible();
-    await expect(panelCanvas(page, keptPanel)).toBeVisible();
+    expect(await countPanels(page)).toBe(2);
+  });
+}
+
+async function expectKeepToBeUnavailableWithNothingLeftToFreeze(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Keep is disabled with no live candidate panel", async () => {
+    await expect(ropKeepButton(page)).toBeDisabled();
+    await expect(ropSeedReadout(page)).toHaveText(`Seed ${FORCED_SEED}`);
+  });
+}
+
+async function expectTheSecondPressToHaveOpenedAFurtherPanel(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "The next press opened panel 3 instead of replacing panel 2", async () => {
+    await expect(panelCanvas(page, SECOND_CANDIDATE_PANEL)).toBeVisible();
+    expect(await countPanels(page)).toBe(3);
+  });
+}
+
+async function expectPanelToDifferFromTheReferenceProjection(
+  page: Page,
+  panel: number,
+): Promise<void> {
+  await runAsStoryboardStep(page, `Panel ${panel} is a different projection`, async () => {
+    const reference = referenceValueAtPixel(0, 0);
+    const readout = await readPixelValueAt(page, panel, 0, 0, IMAGE);
+    expect(Math.abs(Number(readout.value) - reference)).toBeGreaterThan(readoutToleranceFor(reference));
+  });
+}
+
+// The frozen panel keeps the History it was delivered with: Keep appends
+// nothing, so the entry still names the seed of the press that made it.
+async function expectFrozenPanelHistoryToEndWithTheFirstSeedsRopEntry(page: Page): Promise<void> {
+  await selectPanel(page, CANDIDATE_PANEL);
+  await expectHistoryToRecordOperation(page, {
+    actionLabel: ROP_PANEL_LABEL,
+    detailSubstrings: [`ROP (seed ${FORCED_SEED})`],
+  });
+  await runAsStoryboardStep(page, "Keep appended nothing to the frozen panel's History", async () => {
+    const entries = await readHistoryEntries(page);
+    expect(entries[entries.length - 1]?.actionLabel).toBe(ROP_PANEL_LABEL);
+    expect(entries.filter((entry) => entry.actionLabel === ROP_PANEL_LABEL)).toHaveLength(1);
   });
 }
 

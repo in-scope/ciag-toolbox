@@ -22,6 +22,8 @@ import {
   openMasksOptions,
   openOperation,
   panelCanvas,
+  pressNewProjectionUntilProjectionReady,
+  readMetadata,
   ropOptionsPanel,
   ropProjectionCountField,
   ropSearchButton,
@@ -57,10 +59,15 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //   - History names the search, its size, the objective, and the best score
 //     (builtinScriptReferences.ropSearchScore);
 //   - a running search shows a DETERMINATE progress bar driven by the script's
-//     own per-candidate reports, and Stop ends it with nothing delivered.
+//     own per-candidate reports, and Stop ends it with nothing delivered;
+//   - CT-317: the winner arrives FROZEN. A press first opens the candidate
+//     panel; the search then REPLACES that panel (the count stays 2) with a
+//     one-band stack whose readout is the pinned winner, and a following press
+//     opens a THIRD panel rather than replacing the winner.
 
 const SOURCE_PANEL = 1;
 const RESULT_PANEL = 2;
+const FURTHER_CANDIDATE_PANEL = 3;
 const IMAGE = { width: multiBandTiff.width, height: multiBandTiff.height };
 const FORCED_SEED = builtinScriptReferences.ropSeed;
 const SEARCH_REFERENCE = builtinScriptReferences.ropSearch;
@@ -102,7 +109,7 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("searches 50 projections and delivers the best-scoring one as a new stack", async () => {
+test("searches 50 projections and delivers the best-scoring one as a frozen stack", async () => {
   const page = launched.window;
 
   await openOperation(page, ROP_PANEL_LABEL);
@@ -112,14 +119,17 @@ test("searches 50 projections and delivers the best-scoring one as a new stack",
   await enqueueOpenDialogPaths(page, [fixturePath(OBJECTIVE_SCRIPT_FILE_NAME)]);
   await importRopObjectiveScript(page, OBJECTIVE_SCRIPT_FILE_NAME);
 
+  await pressNewProjectionUntilProjectionReady(page, FORCED_SEED);
   await setRopProjectionCount(page, SEARCHED_PROJECTION_COUNT);
   await startRopProjectionSearch(page);
-  await expectTheWinnerToArriveAsANewStack(page);
+  await expectTheWinnerToHaveTakenOverTheCandidatePanel(page);
 
   await expectResultPanelMatchesThePinnedWinner(page);
   await expectResultPanelIsNotTheFirstDraw(page);
+  await expectAFurtherPressToLeaveTheWinnerAlone(page);
+
   await closeRopOptions(page);
-  await expectResultPanelHistoryNamesTheSearch(page);
+  await expectResultPanelIsAOneBandStackWhoseHistoryNamesTheSearch(page);
 });
 
 test("stops a running search, delivering nothing", async () => {
@@ -162,11 +172,24 @@ async function expectSearchLockedUntilAnObjectiveIsChosen(page: Page): Promise<v
   });
 }
 
-async function expectTheWinnerToArriveAsANewStack(page: Page): Promise<void> {
-  await runAsStoryboardStep(page, "The best projection lands in a new panel", async () => {
+// CT-317: the winner is delivered FROZEN into the live candidate panel, so no
+// third panel opens and the aside stops treating panel 2 as replaceable.
+async function expectTheWinnerToHaveTakenOverTheCandidatePanel(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "The best projection replaces the candidate panel", async () => {
     await expect(page.getByText("Projection kept")).toBeVisible({ timeout: SEARCH_TIMEOUT_MS });
     await expect(panelCanvas(page, RESULT_PANEL)).toBeVisible();
+    expect(await countPanels(page)).toBe(RESULT_PANEL);
   });
+}
+
+// The winner arrived frozen, so the next press cannot reuse its panel.
+async function expectAFurtherPressToLeaveTheWinnerAlone(page: Page): Promise<void> {
+  await pressNewProjectionUntilProjectionReady(page, FORCED_SEED);
+  await runAsStoryboardStep(page, "The next press opened a further panel", async () => {
+    await expect(panelCanvas(page, FURTHER_CANDIDATE_PANEL)).toBeVisible();
+    expect(await countPanels(page)).toBe(FURTHER_CANDIDATE_PANEL);
+  });
+  await expectResultPanelMatchesThePinnedWinner(page);
 }
 
 async function expectResultPanelMatchesThePinnedWinner(page: Page): Promise<void> {
@@ -200,8 +223,11 @@ async function expectResultPanelIsNotTheFirstDraw(page: Page): Promise<void> {
   await expect(panelCanvas(page, RESULT_PANEL)).toBeVisible();
 }
 
-async function expectResultPanelHistoryNamesTheSearch(page: Page): Promise<void> {
+async function expectResultPanelIsAOneBandStackWhoseHistoryNamesTheSearch(page: Page): Promise<void> {
   await selectPanel(page, RESULT_PANEL);
+  await runAsStoryboardStep(page, "The winner is a one-band stack", async () => {
+    expect((await readMetadata(page)).bandCount).toBe("1");
+  });
   await expectHistoryToRecordOperation(page, {
     actionLabel: ROP_PANEL_LABEL,
     detailSubstrings: [

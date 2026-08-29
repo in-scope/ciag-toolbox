@@ -45,11 +45,22 @@ export interface RopCandidateDeliveryAction {
 }
 
 export function buildRopCandidateDeliveryAction(request: RopKeepRequest): RopCandidateDeliveryAction {
+  return buildRopStackDelivery(request, ROP_CANDIDATE_READY_SUCCESS_MESSAGE);
+}
+
+// CT-317: a search winner is delivered ALREADY FROZEN - the same one-band copy
+// and History wording, announced as a kept projection because no later press
+// will replace it.
+export function buildRopFrozenStackDeliveryAction(request: RopKeepRequest): RopCandidateDeliveryAction {
+  return buildRopStackDelivery(request, ROP_KEPT_SUCCESS_MESSAGE);
+}
+
+function buildRopStackDelivery(
+  request: RopKeepRequest,
+  successMessage: string,
+): RopCandidateDeliveryAction {
   const raster = buildProjectionRasterCopy(request);
-  return {
-    action: buildRopStackAction(request, raster, ROP_CANDIDATE_READY_SUCCESS_MESSAGE),
-    raster,
-  };
+  return { action: buildRopStackAction(request, raster, successMessage), raster };
 }
 
 function buildRopStackAction(

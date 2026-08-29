@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ViewportCellContent } from "@/components/viewport-grid";
 import type { ApplyActionFlowBindings } from "@/lib/actions/apply-action-flow";
@@ -21,6 +21,12 @@ import {
 } from "./rop-candidate-delivery";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+
+// The toast mock is module-level, so a test asserting a message was NOT raised
+// needs the previous tests' calls cleared.
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function rasterOf(values: number[]): RasterImage {
   return makeFloat32RasterFromBands({ width: values.length, height: 1 }, [Float32Array.from(values)]);
@@ -164,6 +170,21 @@ describe("deliverRopCandidateToPanel", () => {
       buildErrorToastOptions(),
     );
     expect(bindings.setPendingDuplicate).not.toHaveBeenCalled();
+  });
+
+  it("announces a frozen delivery as kept, not merely ready", async () => {
+    const bindings = bindingsWith("1x2", 2, [SOURCE_INDEX]);
+    await deliverRopCandidateToPanel(REQUEST, SOURCE_INDEX, null, bindings, "frozen");
+    expect(toast.success).toHaveBeenCalledWith("Projection kept", expect.anything());
+    expect(toast.success).not.toHaveBeenCalledWith("Projection ready", expect.anything());
+  });
+
+  it("gives a frozen delivery the same stack and History entry as a candidate one", async () => {
+    const bindings = bindingsWith("1x2", 2, [SOURCE_INDEX]);
+    const live = await deliverRopCandidateToPanel(REQUEST, SOURCE_INDEX, null, bindings, "frozen");
+    expect(Array.from(live?.raster.bandPixels[0] ?? [])).toEqual([3, 4]);
+    const history = bindings.getRenderingState(CANDIDATE_INDEX).operationHistory;
+    expect(history.map((entry) => entry.appliedLabel)).toEqual(["ROP (seed 7)"]);
   });
 
   it("writes the source's History plus one ROP entry on the candidate panel", async () => {
