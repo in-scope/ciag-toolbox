@@ -13,6 +13,7 @@ import type { LaunchedApp } from "./support/launch-app";
 import {
   chooseRopObjective,
   closeMasksOptions,
+  duplicatePanelViaContextMenu,
   expectHistoryToRecordOperation,
   expectPixelReadoutToEqual,
   importMaskFromPath,
@@ -29,6 +30,7 @@ import {
   ropNewProjectionButton,
   ropObjectivePicker,
   ropOptionsPanel,
+  ropPinnedPanelReadout,
   ropScoreReadout,
   ropSeedReadout,
   ROP_NO_CANDIDATE_TEXT,
@@ -59,6 +61,7 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 
 const SOURCE_PANEL = 1;
 const KEPT_PANEL = 2;
+const DUPLICATE_PANEL = 2;
 const IMAGE = { width: multiBandTiff.width, height: multiBandTiff.height };
 const FORCED_SEED = Number(builtinScriptReferences.rop.params.seed);
 const REFERENCE_VALUES = builtinScriptReferences.rop.values;
@@ -115,10 +118,32 @@ test("previews a projection display-only, scores it with CNR, and keeps the refe
   await expectCnrCategoriesDefaultToParchmentOverSubstrate(page);
   await pressNewProjectionUntilScoreShows(page, EXPECTED_SCORE_TEXT);
 
-  await keepTheCurrentCandidate(page);
-  await expectKeptPanelMatchesTheReferenceProjection(page);
+  await keepTheCurrentCandidate(page, KEPT_PANEL);
+  await expectKeptPanelMatchesTheReferenceProjection(page, KEPT_PANEL);
   await closeRopOptions(page);
   await expectKeptPanelHistoryNamesSeedAndScore(page);
+});
+
+// CT-315: the aside pins to the panel it was opened on. A duplicate arriving
+// in panel 2 and taking the selection must not retarget it, so the ORACLES are
+// the header still naming panel 1, the candidate surviving (a retarget resets
+// the panel state to "No projection yet"), and the kept stack still matching
+// the reference projection of panel 1's cube.
+test("stays pinned to its source panel when a duplicate takes the selection", async () => {
+  const page = launched.window;
+  const PINNED_KEPT_PANEL = 3;
+
+  await openOperation(page, ROP_PANEL_LABEL);
+  await expectRopAsideToNamePanel(page, SOURCE_PANEL);
+  await pressNewProjectionUntilSeedShows(page, FORCED_SEED);
+
+  await duplicateSourcePanelAndSelectTheCopy(page);
+  await expectRopAsideToNamePanel(page, SOURCE_PANEL);
+  await expectRopCandidateToHaveSurvivedTheSelectionChange(page);
+
+  await pressNewProjectionUntilSeedShows(page, FORCED_SEED);
+  await keepTheCurrentCandidate(page, PINNED_KEPT_PANEL);
+  await expectKeptPanelMatchesTheReferenceProjection(page, PINNED_KEPT_PANEL);
 });
 
 test("locks the mask objectives until a layer with two painted categories exists", async () => {
@@ -146,6 +171,26 @@ async function importTheParchmentMask(page: Page): Promise<void> {
   await openMasksOptions(page);
   await importMaskFromPath(page, fixturePath(maskMultibandPng.fileName));
   await closeMasksOptions(page);
+}
+
+async function expectRopAsideToNamePanel(page: Page, panelNumber: number): Promise<void> {
+  await runAsStoryboardStep(page, `The ROP aside targets panel ${panelNumber}`, async () => {
+    await expect(ropPinnedPanelReadout(page)).toHaveText(`Panel ${panelNumber}`);
+  });
+}
+
+async function duplicateSourcePanelAndSelectTheCopy(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Duplicate the source panel and select the copy", async () => {
+    await duplicatePanelViaContextMenu(page, SOURCE_PANEL);
+    await expect(panelCanvas(page, DUPLICATE_PANEL)).toBeVisible();
+    await selectPanel(page, DUPLICATE_PANEL);
+  });
+}
+
+async function expectRopCandidateToHaveSurvivedTheSelectionChange(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "The candidate survived the selection change", async () => {
+    await expect(ropSeedReadout(page)).toHaveText(`Seed ${FORCED_SEED}`);
+  });
 }
 
 async function closeRopOptions(page: Page): Promise<void> {
@@ -187,15 +232,18 @@ async function expectCnrCategoriesDefaultToParchmentOverSubstrate(page: Page): P
   });
 }
 
-async function keepTheCurrentCandidate(page: Page): Promise<void> {
-  await runAsStoryboardStep(page, "Keep the current candidate as a new stack", async () => {
+async function keepTheCurrentCandidate(page: Page, keptPanel: number): Promise<void> {
+  await runAsStoryboardStep(page, `Keep the current candidate into panel ${keptPanel}`, async () => {
     await ropKeepButton(page).click();
     await expect(page.getByText("Projection kept")).toBeVisible();
-    await expect(panelCanvas(page, KEPT_PANEL)).toBeVisible();
+    await expect(panelCanvas(page, keptPanel)).toBeVisible();
   });
 }
 
-async function expectKeptPanelMatchesTheReferenceProjection(page: Page): Promise<void> {
+async function expectKeptPanelMatchesTheReferenceProjection(
+  page: Page,
+  keptPanel: number,
+): Promise<void> {
   await runAsStoryboardStep(page, "The kept stack matches the pinned reference", async () => {
     for (const pixel of [
       { x: 0, y: 0 },
@@ -205,7 +253,7 @@ async function expectKeptPanelMatchesTheReferenceProjection(page: Page): Promise
     ]) {
       const expected = referenceValueAtPixel(pixel.x, pixel.y);
       await expectPixelReadoutToEqual(page, {
-        panel: KEPT_PANEL,
+        panel: keptPanel,
         imageX: pixel.x,
         imageY: pixel.y,
         dimensions: IMAGE,

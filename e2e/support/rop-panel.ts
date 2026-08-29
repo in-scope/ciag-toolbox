@@ -16,6 +16,12 @@ export function ropOptionsPanel(page: Page): Locator {
   return page.locator('aside[aria-label="ROP options"]');
 }
 
+// CT-315: the aside pins to the panel it was opened on, and its header names
+// that panel for as long as the pin holds.
+export function ropPinnedPanelReadout(page: Page): Locator {
+  return ropOptionsPanel(page).getByText(/^Panel \d+$/);
+}
+
 export function ropObjectivePicker(page: Page): Locator {
   return ropOptionsPanel(page).getByRole("combobox", { name: "Objective" });
 }

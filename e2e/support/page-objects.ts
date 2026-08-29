@@ -519,6 +519,7 @@ export {
   ropNewProjectionButton,
   ropObjectivePicker,
   ropOptionsPanel,
+  ropPinnedPanelReadout,
   ropProjectionCountField,
   ropScoreReadout,
   ropSearchButton,

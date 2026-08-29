@@ -43,6 +43,12 @@ import {
   type RopPanelTarget,
 } from "@/components/rop-options-panel";
 import { keepRopCandidateAsNewStack } from "@/lib/analysis/rop-keep-flow";
+import {
+  hasPinnedRopPanelLostItsRaster,
+  resolveNextRopPin,
+  type RopPinnedPanel,
+  type RopPinSelection,
+} from "@/lib/analysis/rop-pinned-target";
 import type { RopKeepRequest } from "@/lib/actions/rop-keep-action";
 import { ToolOptionsThresholdEditor } from "@/components/tool-options-threshold-editor";
 import { ToolOptionsBandWeightingEditor } from "@/components/tool-options-band-weighting-editor";
@@ -387,6 +393,7 @@ function ApplicationShell(): JSX.Element {
   const [activeAction, setActiveAction] = useState<RegisteredViewportAction | null>(null);
   const [isNpcPanelOpen, setIsNpcPanelOpen] = useState(false);
   const [isRopPanelOpen, setIsRopPanelOpen] = useState(false);
+  const [pinnedRopPanel, setPinnedRopPanel] = useState<RopPinnedPanel | null>(null);
   const [pendingOpenImagesReplace, setPendingOpenImagesReplace] =
     useState<PendingOpenImagesReplace | null>(null);
   const [pendingOpenImagesReview, setPendingOpenImagesReview] =
@@ -482,6 +489,16 @@ function ApplicationShell(): JSX.Element {
     inFlightApplyRuns,
   });
   const singleSelectedSource = deriveSingleSelectedSource(selectedIndices, imagesByIndex, renderingApi);
+  const ropPin = isRopPanelOpen
+    ? resolveNextRopPin(pinnedRopPanel, toRopPinSelectionOrNull(singleSelectedSource), imagesByIndex)
+    : null;
+  useRopPinRetainedAcrossSelectionChanges(ropPin, pinnedRopPanel, setPinnedRopPanel);
+  useRopAsideClosedWithItsPinnedPanel({
+    isRopPanelOpen,
+    pinnedRopPanel,
+    imagesByIndex,
+    setIsRopPanelOpen,
+  });
   const loadedReferenceCandidates = useLoadedReferenceCandidates(imagesByIndex);
   usePublishActiveToolPreview({
     activeAction,
@@ -623,9 +640,9 @@ function ApplicationShell(): JSX.Element {
                 }
                 onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
                 isRopPanelOpen={isRopPanelOpen}
-                ropTarget={deriveRopPanelTargetOrNull(singleSelectedSource, imagesByIndex, renderingApi)}
+                ropTarget={deriveRopPanelTargetOrNull(ropPin, renderingApi)}
                 onKeepRopCandidate={(request) =>
-                  keepRopCandidateFromActivePanel(request, singleSelectedSource, applyActionFlowBindings)
+                  keepRopCandidateFromPinnedPanel(request, ropPin, applyActionFlowBindings)
                 }
                 onCloseRopPanel={() => setIsRopPanelOpen(false)}
                 rightPanelActiveSource={rightPanelActiveSource}
@@ -848,31 +865,68 @@ function deriveNpcPanelTargetOrNull(
   };
 }
 
-// CT-309: ROP reads the ACTIVE panel's cube exactly like NPC; the masks feed
-// the optional scoring objectives.
+// CT-315: ROP reads the PINNED panel's cube (CT-309 read the active panel), so
+// a result panel arriving and stealing the selection cannot retarget the aside.
+// The masks still come from that same panel and feed the scoring objectives.
 function deriveRopPanelTargetOrNull(
-  singleSelectedSource: SingleSelectedSource | null,
-  imagesByIndex: ImagesByIndexMap,
+  ropPin: RopPinnedPanel | null,
   renderingApi: ViewportRenderingApi,
 ): RopPanelTarget | null {
-  if (!singleSelectedSource) return null;
-  const content = imagesByIndex.get(singleSelectedSource.index);
-  if (!content || content.source.kind !== "raster") return null;
+  if (!ropPin) return null;
   return {
-    viewportIndex: singleSelectedSource.index,
-    viewportNumber: singleSelectedSource.summary.viewportNumber,
-    raster: content.source.raster,
-    masks: renderingApi.getRenderingState(singleSelectedSource.index).masks,
+    viewportIndex: ropPin.viewportIndex,
+    viewportNumber: ropPin.viewportNumber,
+    raster: ropPin.raster,
+    masks: renderingApi.getRenderingState(ropPin.viewportIndex).masks,
   };
 }
 
-function keepRopCandidateFromActivePanel(
-  request: RopKeepRequest,
+function toRopPinSelectionOrNull(
   singleSelectedSource: SingleSelectedSource | null,
+): RopPinSelection | null {
+  if (!singleSelectedSource) return null;
+  return {
+    viewportIndex: singleSelectedSource.index,
+    viewportNumber: singleSelectedSource.summary.viewportNumber,
+  };
+}
+
+// The pin is derived during render and merely REMEMBERED here, so the aside
+// never renders a frame against a target the selection has already moved off.
+function useRopPinRetainedAcrossSelectionChanges(
+  ropPin: RopPinnedPanel | null,
+  pinnedRopPanel: RopPinnedPanel | null,
+  setPinnedRopPanel: Dispatch<SetStateAction<RopPinnedPanel | null>>,
+): void {
+  useEffect(() => {
+    if (ropPin !== pinnedRopPanel) setPinnedRopPanel(ropPin);
+  }, [ropPin, pinnedRopPanel, setPinnedRopPanel]);
+}
+
+interface RopPinnedPanelLossBindings {
+  readonly isRopPanelOpen: boolean;
+  readonly pinnedRopPanel: RopPinnedPanel | null;
+  readonly imagesByIndex: ImagesByIndexMap;
+  readonly setIsRopPanelOpen: Dispatch<SetStateAction<boolean>>;
+}
+
+// Closing the pinned panel leaves the aside with nothing to project, so the
+// aside closes with it rather than falling back to whatever is selected.
+function useRopAsideClosedWithItsPinnedPanel(bindings: RopPinnedPanelLossBindings): void {
+  const { isRopPanelOpen, pinnedRopPanel, imagesByIndex, setIsRopPanelOpen } = bindings;
+  useEffect(() => {
+    if (!isRopPanelOpen) return;
+    if (hasPinnedRopPanelLostItsRaster(pinnedRopPanel, imagesByIndex)) setIsRopPanelOpen(false);
+  }, [isRopPanelOpen, pinnedRopPanel, imagesByIndex, setIsRopPanelOpen]);
+}
+
+function keepRopCandidateFromPinnedPanel(
+  request: RopKeepRequest,
+  ropPin: RopPinnedPanel | null,
   bindings: ApplyActionFlowBindings,
 ): void {
-  if (!singleSelectedSource) return;
-  keepRopCandidateAsNewStack(request, singleSelectedSource.index, bindings);
+  if (!ropPin) return;
+  keepRopCandidateAsNewStack(request, ropPin.viewportIndex, bindings);
 }
 
 // The score is not an operation on the stack, so nothing about the panel
