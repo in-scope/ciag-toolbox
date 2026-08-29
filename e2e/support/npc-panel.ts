@@ -4,9 +4,13 @@ import type { Locator, Page } from "@playwright/test";
 import { runAsStoryboardStep } from "./storyboard-step";
 
 // CT-308: "NPC" is a menu-only Multi-band command that opens
-// <aside aria-label="NPC options">. The panel computes a score and shows it to
+// <aside aria-label="NPC options">. The panel computes scores and shows them to
 // four significant figures; it never places a raster, so it has a Compute
 // button instead of Apply and no result-destination control.
+//
+// CT-319: the result is one score PER BAND, presented as a line plot plus a
+// "Top bands" list. There is no scalar readout to read any more: the oracle is
+// the list of rows, each <output aria-label="NPC top band N">.
 
 export const NPC_PANEL_LABEL = "NPC";
 export const NPC_NOT_COMPUTED_TEXT = "Not computed yet";
@@ -27,8 +31,16 @@ export function npcComputeButton(page: Page): Locator {
   return npcOptionsPanel(page).getByRole("button", { name: /^Compute/ });
 }
 
-export function npcScoreReadout(page: Page): Locator {
-  return npcOptionsPanel(page).locator('output[aria-label="NPC score"]');
+export function npcScoresSection(page: Page): Locator {
+  return npcOptionsPanel(page).locator('section[aria-label="NPC scores"]');
+}
+
+export function npcScorePlot(page: Page): Locator {
+  return npcScoresSection(page).locator("figure");
+}
+
+export function npcTopBandRows(page: Page): Locator {
+  return npcScoresSection(page).locator('output[aria-label^="NPC top band "]');
 }
 
 export async function setNpcBinCount(page: Page, bins: number): Promise<void> {
@@ -38,20 +50,34 @@ export async function setNpcBinCount(page: Page, bins: number): Promise<void> {
   });
 }
 
-// Compute runs the packaged Python analysis out of process, so the readout only
-// settles once the worker returns. CT-318 scores every band on its own, and two
-// runs of the same stack can legitimately read the SAME number, so "the text
-// changed" is no longer a completion signal: the run first clears the readout
-// back to its placeholder, and the score arriving there is what we wait on.
-export async function computeNpcScore(page: Page): Promise<number> {
-  return runAsStoryboardStep(page, "Compute the NPC score and read it back", async () => {
+export interface NpcTopBandRowReadout {
+  readonly bandIdentityText: string;
+  readonly scoreText: string;
+}
+
+// Compute runs the packaged Python analysis out of process, so the list only
+// settles once the worker returns. Two runs of the same stack can legitimately
+// produce the SAME numbers, so "the text changed" is no completion signal:
+// changing the bins first clears the section back to "Not computed yet", and
+// the rows arriving there are what we wait on.
+export async function computeNpcScores(page: Page): Promise<NpcTopBandRowReadout[]> {
+  return runAsStoryboardStep(page, "Compute the NPC scores and read the top bands", async () => {
     await npcComputeButton(page).click();
-    await expect(npcScoreReadout(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
-    await expect(npcScoreReadout(page)).not.toHaveText(NPC_NOT_COMPUTED_TEXT, {
-      timeout: NPC_RUN_TIMEOUT_MS,
-    });
-    return Number(await npcScoreReadout(page).innerText());
+    await expect(npcScoresSection(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
+    await expect(npcTopBandRows(page).first()).toBeVisible({ timeout: NPC_RUN_TIMEOUT_MS });
+    return readNpcTopBandRows(page);
   });
+}
+
+export async function readNpcTopBandRows(page: Page): Promise<NpcTopBandRowReadout[]> {
+  const rowTexts = await npcTopBandRows(page).allInnerTexts();
+  return rowTexts.map(splitTopBandRowText);
+}
+
+function splitTopBandRowText(rowText: string): NpcTopBandRowReadout {
+  const parts = rowText.split(/\s+/).filter((part) => part.length > 0);
+  const scoreText = parts[parts.length - 1] ?? "";
+  return { bandIdentityText: parts.slice(0, -1).join(" "), scoreText };
 }
 
 const NPC_RUN_TIMEOUT_MS = 60_000;

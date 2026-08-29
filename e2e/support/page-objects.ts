@@ -495,16 +495,20 @@ export {
   maskToastContaining,
 } from "./mask-file-transfer";
 export {
-  computeNpcScore,
+  computeNpcScores,
   expectScoreWithinRelativeTolerance,
   npcBinsField,
   npcComputeButton,
   npcMaskLayerPicker,
   npcOptionsPanel,
-  npcScoreReadout,
+  npcScorePlot,
+  npcScoresSection,
+  npcTopBandRows,
+  readNpcTopBandRows,
   NPC_NOT_COMPUTED_TEXT,
   NPC_PANEL_LABEL,
   setNpcBinCount,
+  type NpcTopBandRowReadout,
 } from "./npc-panel";
 export {
   chooseRopObjective,

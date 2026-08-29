@@ -4,6 +4,7 @@ import {
   formatNpcHistoryAppliedLabel,
   formatNpcScoreToSignificantFigures,
 } from "./npc-score-format";
+import type { PerBandScoreRow } from "./per-band-score-presentation";
 
 describe("formatNpcScoreToSignificantFigures", () => {
   it("keeps four significant figures, trailing zeros included", () => {
@@ -22,10 +23,35 @@ describe("formatNpcScoreToSignificantFigures", () => {
   });
 });
 
+function buildTopBandRows(scores: ReadonlyArray<number>): PerBandScoreRow[] {
+  return scores.map((score, bandIndex) => ({
+    bandIndex,
+    bandIdentityText: `Band ${bandIndex + 1}`,
+    score,
+  }));
+}
+
 describe("formatNpcHistoryAppliedLabel", () => {
-  it("records the mask layer, the bin count, and the score", () => {
-    expect(formatNpcHistoryAppliedLabel("Parchment mask", 255, 0.9999999999999991)).toBe(
-      "NPC (Parchment mask, 255 bins): 1.000",
+  it("records the mask layer, the bin count, and the single band it scored", () => {
+    expect(
+      formatNpcHistoryAppliedLabel("Parchment mask", 255, buildTopBandRows([0.9999999999999991])),
+    ).toBe("NPC (Parchment mask, 255 bins): Band 1 1.000");
+  });
+
+  it("names every top row in list order", () => {
+    expect(formatNpcHistoryAppliedLabel("Parchment mask", 2, buildTopBandRows([1, 0.5, 0.25]))).toBe(
+      "NPC (Parchment mask, 2 bins): Band 1 1.000, Band 2 0.5000, Band 3 0.2500",
+    );
+  });
+
+  it("names all five rows when the top list is full", () => {
+    const label = formatNpcHistoryAppliedLabel(
+      "Parchment mask",
+      255,
+      buildTopBandRows([0.9, 0.8, 0.7, 0.6, 0.5]),
+    );
+    expect(label).toBe(
+      "NPC (Parchment mask, 255 bins): Band 1 0.9000, Band 2 0.8000, Band 3 0.7000, Band 4 0.6000, Band 5 0.5000",
     );
   });
 });

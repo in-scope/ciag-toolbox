@@ -1,6 +1,12 @@
-// CT-308: NPC produces one scalar in 0..1. The panel and the History entry show
-// it to four significant figures, so trailing zeros are KEPT (toPrecision, not a
-// re-parsed number): "1.000" reads as a measured score, "1" reads as a constant.
+import {
+  formatPerBandScoreRowList,
+  type PerBandScoreRow,
+} from "./per-band-score-presentation";
+
+// CT-308: NPC produces scores in 0..1. The panel and the History entry show
+// them to four significant figures, so trailing zeros are KEPT (toPrecision, not
+// a re-parsed number): "1.000" reads as a measured score, "1" reads as a
+// constant. CT-319: the entry names the top bands rather than one pooled score.
 
 const NPC_SCORE_SIGNIFICANT_FIGURES = 4;
 const UNAVAILABLE_NPC_SCORE_TEXT = "-";
@@ -13,7 +19,8 @@ export function formatNpcScoreToSignificantFigures(score: number): string {
 export function formatNpcHistoryAppliedLabel(
   maskLayerName: string,
   bins: number,
-  score: number,
+  topBandRows: ReadonlyArray<PerBandScoreRow>,
 ): string {
-  return `NPC (${maskLayerName}, ${bins} bins): ${formatNpcScoreToSignificantFigures(score)}`;
+  const rowList = formatPerBandScoreRowList(topBandRows, formatNpcScoreToSignificantFigures);
+  return `NPC (${maskLayerName}, ${bins} bins): ${rowList}`;
 }
