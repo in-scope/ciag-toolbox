@@ -28,10 +28,20 @@ describe("buildRopExecuteParams", () => {
 });
 
 describe("readForcedRopSeedFromE2eBridgeOrNull", () => {
-  it("reads a whole seed from the e2e bridge", () => {
+  it("reads a whole seed from the e2e bridge's reader", () => {
     expect(
-      readForcedRopSeedFromE2eBridgeOrNull({ toolboxE2E: { ropForcedSeedOverride: 42 } }),
+      readForcedRopSeedFromE2eBridgeOrNull({
+        toolboxE2E: { readRopForcedSeedOverride: () => 42 },
+      }),
     ).toBe(42);
+  });
+
+  it("follows the reader when the seed changes between presses (CT-316)", () => {
+    let seed: number | null = 1;
+    const windowLike = { toolboxE2E: { readRopForcedSeedOverride: () => seed } };
+    expect(readForcedRopSeedFromE2eBridgeOrNull(windowLike)).toBe(1);
+    seed = 2;
+    expect(readForcedRopSeedFromE2eBridgeOrNull(windowLike)).toBe(2);
   });
 
   it("returns null without the bridge, without the override, or for junk", () => {
@@ -39,10 +49,14 @@ describe("readForcedRopSeedFromE2eBridgeOrNull", () => {
     expect(readForcedRopSeedFromE2eBridgeOrNull({})).toBeNull();
     expect(readForcedRopSeedFromE2eBridgeOrNull({ toolboxE2E: {} })).toBeNull();
     expect(
-      readForcedRopSeedFromE2eBridgeOrNull({ toolboxE2E: { ropForcedSeedOverride: null } }),
+      readForcedRopSeedFromE2eBridgeOrNull({
+        toolboxE2E: { readRopForcedSeedOverride: () => null },
+      }),
     ).toBeNull();
     expect(
-      readForcedRopSeedFromE2eBridgeOrNull({ toolboxE2E: { ropForcedSeedOverride: 1.5 } }),
+      readForcedRopSeedFromE2eBridgeOrNull({
+        toolboxE2E: { readRopForcedSeedOverride: () => 1.5 },
+      }),
     ).toBeNull();
   });
 });

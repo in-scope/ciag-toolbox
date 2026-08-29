@@ -174,6 +174,24 @@ describe("runDuplicateAndApplyAtTargetIndex selecting the result panel (CT-105)"
     );
     expect(selectViewportIndex).not.toHaveBeenCalled();
   });
+
+  // CT-316: the ROP candidate delivery opts out so the source panel stays
+  // selected while the user keeps pressing; the result still lands.
+  it("leaves the selection alone when selectResultPanel is false", async () => {
+    const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
+    const selectViewportIndex = vi.fn();
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeAction(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      { ...harness.bindings, selectViewportIndex },
+      { selectResultPanel: false },
+    );
+    expect(selectViewportIndex).not.toHaveBeenCalled();
+    expect(harness.findLatestRenderingStateWriteAtIndex(TARGET_INDEX).normalizationEnabled).toBe(true);
+  });
 });
 
 describe("runDuplicateAndApplyAtTargetIndex result-panel loading state (CT-106)", () => {

@@ -1,5 +1,6 @@
 import { formatRopKeptHistoryLabel } from "@/lib/analysis/rop-format";
 import { makeFloat32RasterFromBands } from "@/lib/image/make-float-raster";
+import type { RasterImage } from "@/lib/image/raster-image";
 
 import { ROP_PANEL_ICON } from "./operation-command-bindings";
 import type { RegisteredViewportAction } from "./registered-actions";
@@ -10,8 +11,15 @@ import type { RegisteredViewportAction } from "./registered-actions";
 // travels the standard duplicate-apply flow - reservation rules, memory
 // preflight, busy entry, rendering-state inheritance without masks, and the
 // History entry naming ROP, the seed, and the objective score.
+//
+// CT-316: a "New projection" press delivers its candidate through the SAME
+// action shape (same id, label, icon, History wording, one-band float copy);
+// only the toast differs, so "Projection kept" stays reserved for Keep.
 
 export const ROP_KEEP_ACTION_ID = "rop";
+
+export const ROP_KEPT_SUCCESS_MESSAGE = "Projection kept";
+export const ROP_CANDIDATE_READY_SUCCESS_MESSAGE = "Projection ready";
 
 export interface RopKeepRequest {
   readonly seed: number;
@@ -26,24 +34,44 @@ export interface RopKeepRequest {
 }
 
 export function buildRopKeepAction(request: RopKeepRequest): RegisteredViewportAction {
+  return buildRopStackAction(request, buildProjectionRasterCopy(request), ROP_KEPT_SUCCESS_MESSAGE);
+}
+
+export interface RopCandidateDeliveryAction {
+  readonly action: RegisteredViewportAction;
+  // The exact raster the action places, so the caller can later recognise the
+  // candidate panel by raster identity (CT-316 live-candidate pointer).
+  readonly raster: RasterImage;
+}
+
+export function buildRopCandidateDeliveryAction(request: RopKeepRequest): RopCandidateDeliveryAction {
+  const raster = buildProjectionRasterCopy(request);
+  return {
+    action: buildRopStackAction(request, raster, ROP_CANDIDATE_READY_SUCCESS_MESSAGE),
+    raster,
+  };
+}
+
+function buildRopStackAction(
+  request: RopKeepRequest,
+  raster: RasterImage,
+  successMessage: string,
+): RegisteredViewportAction {
   return {
     id: ROP_KEEP_ACTION_ID,
     label: "ROP",
     icon: ROP_PANEL_ICON,
-    successMessage: "Projection kept",
+    successMessage,
     appliedLabel: formatRopKeptHistoryLabel(request),
     apply: (renderingState) => renderingState,
-    transformSource: () => ({
-      kind: "raster",
-      raster: buildKeptProjectionRaster(request),
-    }),
+    transformSource: () => ({ kind: "raster", raster }),
   };
 }
 
-// The kept raster copies the candidate values: the panel retains the candidate
-// (it may still be the best-so-far), and a shared buffer would let a later
-// buffer-release of the kept panel detach the panel's retained copy too.
-function buildKeptProjectionRaster(request: RopKeepRequest) {
+// The placed raster copies the candidate values: the aside retains the
+// candidate (it may still be the best-so-far), and a shared buffer would let a
+// later buffer-release of the panel detach the aside's retained copy too.
+function buildProjectionRasterCopy(request: RopKeepRequest): RasterImage {
   return makeFloat32RasterFromBands({ width: request.width, height: request.height }, [
     request.values.slice(),
   ]);

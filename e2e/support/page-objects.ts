@@ -509,6 +509,7 @@ export {
 export {
   chooseRopObjective,
   importRopObjectiveScript,
+  pressNewProjectionUntilProjectionReady,
   pressNewProjectionUntilScoreShows,
   pressNewProjectionUntilSeedShows,
   ropBestScoreReadout,
@@ -526,6 +527,9 @@ export {
   ropSeedReadout,
   ROP_NO_CANDIDATE_TEXT,
   ROP_PANEL_LABEL,
+  ROP_PRESS_REFUSED_TEXT,
+  ROP_PROJECTION_READY_TEXT,
+  setForcedRopSeed,
   setRopProjectionCount,
   startRopProjectionSearch,
 } from "./rop-panel";

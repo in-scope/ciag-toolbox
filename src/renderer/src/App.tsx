@@ -42,6 +42,10 @@ import {
   RopOptionsPanel,
   type RopPanelTarget,
 } from "@/components/rop-options-panel";
+import {
+  buildRopCandidateDeliveryPort,
+  type RopCandidateDeliveryPort,
+} from "@/lib/analysis/rop-candidate-delivery";
 import { keepRopCandidateAsNewStack } from "@/lib/analysis/rop-keep-flow";
 import {
   hasPinnedRopPanelLostItsRaster,
@@ -641,6 +645,10 @@ function ApplicationShell(): JSX.Element {
                 onCloseNpcPanel={() => setIsNpcPanelOpen(false)}
                 isRopPanelOpen={isRopPanelOpen}
                 ropTarget={deriveRopPanelTargetOrNull(ropPin, renderingApi)}
+                ropCandidateDelivery={buildRopCandidateDeliveryPort(
+                  ropPin?.viewportIndex ?? null,
+                  applyActionFlowBindings,
+                )}
                 onKeepRopCandidate={(request) =>
                   keepRopCandidateFromPinnedPanel(request, ropPin, applyActionFlowBindings)
                 }
@@ -749,6 +757,7 @@ interface ApplicationStageContentProps {
   onCloseNpcPanel: () => void;
   isRopPanelOpen: boolean;
   ropTarget: RopPanelTarget | null;
+  ropCandidateDelivery: RopCandidateDeliveryPort;
   onKeepRopCandidate: (request: RopKeepRequest) => void;
   onCloseRopPanel: () => void;
   rightPanelActiveSource: ViewportRightPanelActiveSource | null;
@@ -798,6 +807,7 @@ function renderActiveRightSidePanel(props: ApplicationStageContentProps): JSX.El
     return (
       <RopOptionsPanel
         target={props.ropTarget}
+        candidateDelivery={props.ropCandidateDelivery}
         onKeepCandidate={props.onKeepRopCandidate}
         onClose={props.onCloseRopPanel}
       />

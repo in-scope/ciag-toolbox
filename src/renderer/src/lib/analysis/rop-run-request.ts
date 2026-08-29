@@ -20,13 +20,15 @@ export function buildRopExecuteParams(seed: number): Record<string, unknown> {
 }
 
 interface WindowCarryingRopSeedOverride {
-  readonly toolboxE2E?: { readonly ropForcedSeedOverride?: number | null };
+  readonly toolboxE2E?: { readonly readRopForcedSeedOverride?: () => unknown };
 }
 
+// The bridge exposes a READER (CT-316) because a spec may change the forced
+// seed between presses; a snapshot taken at launch could not follow it.
 export function readForcedRopSeedFromE2eBridgeOrNull(
   windowLike: unknown = globalThis.window,
 ): number | null {
   const override = (windowLike as WindowCarryingRopSeedOverride)?.toolboxE2E
-    ?.ropForcedSeedOverride;
+    ?.readRopForcedSeedOverride?.();
   return typeof override === "number" && Number.isSafeInteger(override) ? override : null;
 }
