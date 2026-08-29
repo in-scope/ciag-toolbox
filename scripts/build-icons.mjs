@@ -10,11 +10,14 @@ const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
 const STACKED_LOGO_SVG_PATH = resolve(PROJECT_ROOT, "build/logo.svg");
 const COMPACT_LOGO_SVG_PATH = resolve(PROJECT_ROOT, "build/logo-compact.svg");
 const OUTPUT_DIR = resolve(PROJECT_ROOT, "build");
+const PREVIEW_OUTPUT_DIR = resolve(OUTPUT_DIR, "preview");
 const ICO_OUTPUT_PATH = resolve(OUTPUT_DIR, "icon.ico");
 const ICNS_SOURCE_PNG_PATH = resolve(OUTPUT_DIR, "icon-source.png");
 
-const COMPACT_VARIANT_SIZES = [16, 24, 32];
-const STACKED_VARIANT_SIZES = [48, 64, 128, 256];
+const COMPACT_VARIANT_SIZES = [16, 24, 32, 48];
+const STACKED_VARIANT_SIZES = [64, 128, 256];
+const PREVIEW_SIZES = [16, 32, 48, 256, 1024];
+const COMPACT_PREVIEW_SIZE_CUTOFF = 48;
 
 async function renderSvgToHighResolutionPngBuffer(svgPath) {
   return sharp(svgPath, { density: 600 }).resize(1024, 1024).png().toBuffer();
@@ -55,12 +58,25 @@ async function removeIntermediateOutputs() {
 
 async function ensureBuildDirectoryExists() {
   await mkdir(OUTPUT_DIR, { recursive: true });
+  await mkdir(PREVIEW_OUTPUT_DIR, { recursive: true });
+}
+
+async function writePreviewPngAtSize(size) {
+  const svgPath = size <= COMPACT_PREVIEW_SIZE_CUTOFF ? COMPACT_LOGO_SVG_PATH : STACKED_LOGO_SVG_PATH;
+  const sourceBuffer = await renderSvgToHighResolutionPngBuffer(svgPath);
+  const sizedBuffer = await downsamplePngBufferToSize(sourceBuffer, size);
+  await writeFile(resolve(PREVIEW_OUTPUT_DIR, `icon-${size}.png`), sizedBuffer);
+}
+
+async function writeFinalArtworkPreviewPngs() {
+  await Promise.all(PREVIEW_SIZES.map(writePreviewPngAtSize));
 }
 
 async function buildAllApplicationIcons() {
   await ensureBuildDirectoryExists();
   await buildWindowsIcoWithPerSizeArtwork();
   await buildMacOsIcnsFromStackedArtwork();
+  await writeFinalArtworkPreviewPngs();
   await removeIntermediateOutputs();
 }
 
