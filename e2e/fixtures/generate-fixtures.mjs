@@ -39,6 +39,8 @@ function buildAllFixtures() {
     enviFloatStack: buildEnviFloatStackFixture(),
     maskMultibandPng: buildMaskForMultiBandStackFixture(),
     maskEightBySquarePng: buildMismatchedMaskFixture(),
+    maskBinary1BitPng: buildOneBitMaskFixture(),
+    maskBinary255Png: buildEightBitBinaryMaskFixture(),
     parityStackTiff: buildParityStackTiffFixture(),
   };
 }
@@ -63,6 +65,8 @@ function writeAllFixtureFiles(fixtures) {
     fixtures.maskMultibandPng.sidecarBytes,
   );
   writeFixtureFile(fixtures.maskEightBySquarePng.fileName, fixtures.maskEightBySquarePng.bytes);
+  writeFixtureFile(fixtures.maskBinary1BitPng.fileName, fixtures.maskBinary1BitPng.bytes);
+  writeFixtureFile(fixtures.maskBinary255Png.fileName, fixtures.maskBinary255Png.bytes);
   writeFixtureFile(fixtures.parityStackTiff.fileName, fixtures.parityStackTiff.bytes);
 }
 
@@ -730,6 +734,42 @@ function buildMismatchedMaskFixture() {
   };
 }
 
+// CT-325: two more masks covering multiband-12bit.tif (4x4), each with the
+// top row painted and the rest unlabeled, but written at bit depths PIL,
+// ImageJ and Photoshop actually emit for a black-and-white mask.
+// mask-binary-1bit.png is 1-bit grayscale with white (sample 1) as the top
+// row - the raw sample IS a valid category index already. mask-binary-255.png
+// is 8-bit grayscale with white (sample 255) as the top row - CT-326 remaps
+// 255 down to category 1.
+
+function buildOneBitMaskFixture() {
+  const values = buildTopRowMaskValues(1);
+  return {
+    fileName: "mask-binary-1bit.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscale1BitPngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildEightBitBinaryMaskFixture() {
+  const values = buildTopRowMaskValues(255);
+  return {
+    fileName: "mask-binary-255.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscalePngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildTopRowMaskValues(topRowValue) {
+  const values = new Uint8Array(MASK_FIXTURE_WIDTH * MASK_FIXTURE_HEIGHT);
+  for (let x = 0; x < MASK_FIXTURE_WIDTH; x += 1) values[x] = topRowValue;
+  return values;
+}
+
 // --- PNG encoding -----------------------------------------------------------
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -748,18 +788,44 @@ function encodeRgbPngBytes(width, height, samples) {
   return assemblePngBytes(width, height, PNG_COLOR_TYPE_RGB, scanlines);
 }
 
-function assemblePngBytes(width, height, colorType, rawScanlines) {
-  const header = encodePngChunk("IHDR", buildPngHeaderData(width, height, colorType));
+const PNG_BIT_DEPTH_1 = 1;
+
+// CT-325: samples are 0/1 values, packed most-significant-bit first, one row
+// of ceil(width / 8) bytes per scanline (no filtering needed at this size).
+function encodeGrayscale1BitPngBytes(width, height, samples) {
+  const scanlines = buildFiltered1BitScanlines(samples, width, height);
+  return assemblePngBytes(width, height, PNG_COLOR_TYPE_GRAYSCALE, scanlines, PNG_BIT_DEPTH_1);
+}
+
+function buildFiltered1BitScanlines(samples, width, height) {
+  const rowByteWidth = Math.ceil(width / 8);
+  const rows = [];
+  for (let y = 0; y < height; y += 1) {
+    rows.push(Buffer.concat([Buffer.from([0]), packOneBitRow(samples, y * width, width, rowByteWidth)]));
+  }
+  return Buffer.concat(rows);
+}
+
+function packOneBitRow(samples, rowStart, width, rowByteWidth) {
+  const packed = Buffer.alloc(rowByteWidth);
+  for (let x = 0; x < width; x += 1) {
+    if (samples[rowStart + x]) packed[Math.floor(x / 8)] |= 0x80 >> x % 8;
+  }
+  return packed;
+}
+
+function assemblePngBytes(width, height, colorType, rawScanlines, bitDepth = PNG_BIT_DEPTH_8) {
+  const header = encodePngChunk("IHDR", buildPngHeaderData(width, height, colorType, bitDepth));
   const data = encodePngChunk("IDAT", deflateSync(rawScanlines));
   const end = encodePngChunk("IEND", Buffer.alloc(0));
   return Buffer.concat([PNG_SIGNATURE, header, data, end]);
 }
 
-function buildPngHeaderData(width, height, colorType) {
+function buildPngHeaderData(width, height, colorType, bitDepth) {
   const data = Buffer.alloc(13);
   data.writeUInt32BE(width, 0);
   data.writeUInt32BE(height, 4);
-  data[8] = PNG_BIT_DEPTH_8;
+  data[8] = bitDepth;
   data[9] = colorType;
   return data;
 }
@@ -1249,6 +1315,8 @@ function buildFixtureManifest(fixtures, builtinScriptReferences) {
     enviFloatStack: describeEnviFloatFixture(fixtures.enviFloatStack),
     maskMultibandPng: describeMaskFixture(fixtures.maskMultibandPng),
     maskEightBySquarePng: describeMaskFixture(fixtures.maskEightBySquarePng),
+    maskBinary1BitPng: describeMaskFixture(fixtures.maskBinary1BitPng),
+    maskBinary255Png: describeMaskFixture(fixtures.maskBinary255Png),
     parityStackTiff: describeStackFixture(fixtures.parityStackTiff, "uint16"),
     builtinScriptReferences,
   };

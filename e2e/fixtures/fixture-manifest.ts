@@ -158,6 +158,8 @@ export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 export const maskMultibandPng = manifestJson.maskMultibandPng as MaskFixture;
 export const maskEightBySquarePng = manifestJson.maskEightBySquarePng as MaskFixture;
+export const maskBinary1BitPng = manifestJson.maskBinary1BitPng as MaskFixture;
+export const maskBinary255Png = manifestJson.maskBinary255Png as MaskFixture;
 export const parityStackTiff = manifestJson.parityStackTiff as SingleFileFixture;
 export const builtinScriptReferences =
   manifestJson.builtinScriptReferences as unknown as BuiltinScriptReferences;

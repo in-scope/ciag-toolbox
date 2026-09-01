@@ -523,6 +523,52 @@
       1
     ]
   },
+  "maskBinary1BitPng": {
+    "fileName": "mask-binary-1bit.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "maskBinary255Png": {
+    "fileName": "mask-binary-255.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      255,
+      255,
+      255,
+      255,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
   "parityStackTiff": {
     "fileName": "parity-16x16.tif",
     "width": 16,

@@ -6,6 +6,7 @@ import type { Page } from "@playwright/test";
 
 import {
   fixturePath,
+  maskBinary1BitPng,
   maskEightBySquarePng,
   maskMultibandPng,
   multiBandTiff,
@@ -13,6 +14,7 @@ import {
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
+  closeMasksOptions,
   createTemporaryExportDirectory,
   exportMaskButton,
   exportSelectedMaskToPath,
@@ -24,7 +26,10 @@ import {
   maskLayerOpacitySlider,
   maskLayerOptions,
   maskToastContaining,
+  npcComputeButton,
+  NPC_PANEL_LABEL,
   openMasksOptions,
+  openOperation,
   selectPanel,
 } from "./support/page-objects";
 import { runAsStoryboardStep } from "./support/storyboard-step";
@@ -71,6 +76,40 @@ test("imports a mask with its sidecar and exports it back to identical files", a
   await exportSelectedMaskToPath(page, exportPath);
   await expectExportedMaskMatchesTheFixture(page, exportPath);
 });
+
+test("imports a 1-bit black-and-white mask as a single painted category", async () => {
+  const page = launched.window;
+
+  await openMasksOptions(page);
+  await importMaskFromPath(page, fixturePath(maskBinary1BitPng.fileName));
+  await expectImportedLayerCoversExactlyTheTopRow(page);
+  await closeMasksOptions(page);
+
+  await expectNpcStaysLockedWithOneCategory(page);
+});
+
+async function expectImportedLayerCoversExactlyTheTopRow(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Check the imported 1-bit layer's single category", async () => {
+    await expect(maskLayerOptions(page)).toHaveCount(1);
+    await expect(maskCategoryNameFields(page)).toHaveCount(1);
+  });
+  const exportPath = join(await createTemporaryExportDirectory(), "exported-binary-mask.png");
+  await exportSelectedMaskToPath(page, exportPath);
+  await runAsStoryboardStep(page, "Decode the exported binary mask in Node", async () => {
+    const decoded = await sharp(exportPath)
+      .toColourspace("b-w")
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(Array.from(decoded.data)).toEqual([...maskBinary1BitPng.values]);
+  });
+}
+
+async function expectNpcStaysLockedWithOneCategory(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Check NPC stays locked with one painted category", async () => {
+    await openOperation(page, NPC_PANEL_LABEL);
+    await expect(npcComputeButton(page)).toBeDisabled();
+  });
+}
 
 test("refuses a mask whose size does not match the stack", async () => {
   const page = launched.window;
