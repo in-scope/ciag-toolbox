@@ -161,6 +161,8 @@ export {
   clickReviewModalRecombineIntoOneStack,
   confirmReviewModal,
   cancelReplaceTargetPicker,
+  chooseOpenImagesReplaceTargetPanel,
+  confirmReplaceTargetPicker,
   openImagesErrorToast,
 } from "./open-images-flow";
 export {

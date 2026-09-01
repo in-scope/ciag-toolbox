@@ -103,6 +103,36 @@ export async function cancelReplaceTargetPicker(page: Page): Promise<void> {
   });
 }
 
+// CT-323: deliberately targets a specific already-occupied panel (rather than
+// cancelling), so a spec can assert that panel's rendering state resets after
+// the replace. The single-item picker's target control is a native <select>
+// (aria-label `Replacement target for <newFileName>`), one option per occupied
+// viewport labeled "Panel N (currentFileName)" (open-image-replace-target-picker.tsx).
+export async function chooseOpenImagesReplaceTargetPanel(
+  page: Page,
+  newFileName: string,
+  panelNumber: number,
+  currentPanelFileName: string,
+): Promise<void> {
+  await runAsStoryboardStep(
+    page,
+    `Assign "${newFileName}" to replace panel ${panelNumber} (${currentPanelFileName})`,
+    async () => {
+      await openImagesReplaceTargetPicker(page)
+        .getByRole("combobox", { name: `Replacement target for ${newFileName}` })
+        .selectOption({ label: `Panel ${panelNumber} (${currentPanelFileName})` });
+    },
+  );
+}
+
+export async function confirmReplaceTargetPicker(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "Confirm the replace-panel picker", async () => {
+    const picker = openImagesReplaceTargetPicker(page);
+    await picker.getByRole("button", { name: "Replace" }).click();
+    await expect(picker).toBeHidden();
+  });
+}
+
 export function openImagesErrorToast(page: Page): Locator {
   return page.locator("[data-sonner-toast]").filter({ hasText: /Could not open/ });
 }
