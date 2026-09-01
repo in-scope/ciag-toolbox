@@ -84,15 +84,16 @@ def build_objective_scorer(wavelengths, params):
     raise ValueError(UNKNOWN_OBJECTIVE_MESSAGE)
 
 
-# (mean of text pixels - mean of background pixels) / population standard
-# deviation of the background pixels; the mask indexes address the uploaded
+# |mean of text pixels - mean of background pixels| / population standard
+# deviation of the background pixels (CT-322: absolute value, the paper's
+# definition, mirroring the app's TS implementation); the mask indexes address the uploaded
 # category masks in the order the app sent them.
 def build_cnr_scorer(masks, params):
     text = select_mask_at_index(masks, params, "text_mask_index")
     background = select_mask_at_index(masks, params, "background_mask_index")
 
     def score_candidate(band):
-        return (np.mean(band[text]) - np.mean(band[background])) / np.std(band[background])
+        return abs(np.mean(band[text]) - np.mean(band[background])) / np.std(band[background])
 
     return score_candidate
 

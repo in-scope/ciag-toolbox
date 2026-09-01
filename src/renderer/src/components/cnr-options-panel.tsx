@@ -136,9 +136,9 @@ function canComputeCnrNow(form: CnrComputeFormApi, problem: string | null): bool
 function CnrExplanation(): JSX.Element {
   return (
     <p className="text-xs text-muted-foreground">
-      Contrast-to-noise ratio, band by band: the mean of the text category minus
-      the mean of the background category, divided by the background&apos;s
-      standard deviation. Higher is better.
+      Contrast-to-noise ratio, band by band: the absolute difference between the
+      mean of the text category and the mean of the background category, divided
+      by the background&apos;s standard deviation. Higher is better.
     </p>
   );
 }

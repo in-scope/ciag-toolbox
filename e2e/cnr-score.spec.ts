@@ -41,8 +41,11 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //
 // ORACLE: manifest.json's builtinScriptReferences.cnrPerBand, computed by the
 // fixture generator in JS with the locked formula - one score per band, in band
-// order. Swapping the two categories must negate every score, which is the
-// check no "print the same list back" stub survives.
+// order. CT-322: CNR is the ABSOLUTE mean difference, so swapping the two
+// categories keeps every score positive and identical here (the fixture's two
+// classes share one spread); the check no "print the same list back" stub
+// survives is that the History detail names the swapped categories while the
+// scores stay equal to the pinned list.
 
 const PANEL = 1;
 const MASK_LAYER_NAME = maskMultibandPng.name ?? "Parchment mask";
@@ -52,9 +55,9 @@ const BAND_SCORES = builtinScriptReferences.cnrPerBand.value;
 const MAX_TOP_BAND_ROWS = 5;
 
 const CNR_EXPLANATION =
-  "Contrast-to-noise ratio, band by band: the mean of the text category minus " +
-  "the mean of the background category, divided by the background's standard " +
-  "deviation. Higher is better.";
+  "Contrast-to-noise ratio, band by band: the absolute difference between the " +
+  "mean of the text category and the mean of the background category, divided " +
+  "by the background's standard deviation. Higher is better.";
 
 // The panel shows a score to four significant figures, trailing zeros kept.
 function formatScoreAsThePanelDoes(score: number): string {
@@ -133,8 +136,8 @@ test("scores every band against the chosen categories and records each run in Hi
 
   await expectMatchingCategoriesLockCompute(page);
   const swappedRows = await swapTheCategoriesAndCompute(page);
-  expectTopBandRowsMatchReference(swappedRows, BAND_SCORES.map(negate));
-  expectTheTopRowIsTheNegatedFirstRun(swappedRows, rows);
+  expectTopBandRowsMatchReference(swappedRows, BAND_SCORES);
+  expectTheTopRowIsPositiveAndUnchanged(swappedRows, rows);
 
   await closeCnrOptions(page);
   await expectHistoryRecordsBothRuns(page);
@@ -153,10 +156,6 @@ test("keeps the controls locked until a mask layer has two painted categories", 
   await expect(cnrComputeButton(page)).toBeEnabled();
   await expect(cnrScoresSection(page)).toHaveText(CNR_NOT_COMPUTED_TEXT);
 });
-
-function negate(score: number): number {
-  return -score;
-}
 
 async function importTheParchmentMask(page: Page): Promise<void> {
   await openMasksOptions(page);
@@ -217,13 +216,17 @@ async function swapTheCategoriesAndCompute(page: Page): Promise<CnrTopBandRowRea
   return computeCnrScores(page);
 }
 
-function expectTheTopRowIsTheNegatedFirstRun(
+// CT-322: the absolute value means the swap changes only which class supplies
+// the divisor; on this fixture both classes share one spread, so the top row
+// must read the same positive number.
+function expectTheTopRowIsPositiveAndUnchanged(
   swappedRows: ReadonlyArray<CnrTopBandRowReadout>,
   rows: ReadonlyArray<CnrTopBandRowReadout>,
 ): void {
   const first = Number(rows[0]?.scoreText);
   const swapped = Number(swappedRows[0]?.scoreText);
-  expectScoreWithinRelativeTolerance(swapped, -first);
+  expect(first).toBeGreaterThan(0);
+  expectScoreWithinRelativeTolerance(swapped, first);
 }
 
 async function expectHistoryRecordsBothRuns(page: Page): Promise<void> {
@@ -232,11 +235,7 @@ async function expectHistoryRecordsBothRuns(page: Page): Promise<void> {
     const cnrEntries = entries.filter((entry) => entry.actionLabel === CNR_PANEL_LABEL);
     expect(cnrEntries.map((entry) => entry.detailLines.join(" "))).toEqual([
       describeExpectedHistoryDetail(TEXT_CATEGORY_NAME, BACKGROUND_CATEGORY_NAME, BAND_SCORES),
-      describeExpectedHistoryDetail(
-        BACKGROUND_CATEGORY_NAME,
-        TEXT_CATEGORY_NAME,
-        BAND_SCORES.map(negate),
-      ),
+      describeExpectedHistoryDetail(BACKGROUND_CATEGORY_NAME, TEXT_CATEGORY_NAME, BAND_SCORES),
     ]);
   });
 }
