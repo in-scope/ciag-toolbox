@@ -819,10 +819,11 @@ describe.skipIf(interpreterPath === null)("python worker CT-310 additions (bundl
     expect(winner.kind).toBe("completed-cube");
     if (winner.kind !== "completed-cube") return;
     const values = await readFloatsFromSpool(winner.spoolPath);
-    // Text = the top row, background = the bottom row: the winner of a CNR
-    // search must score above zero (the top row reads higher than the bottom).
+    // Text = the top row, background = the bottom row. CT-322: CNR scores the
+    // ABSOLUTE mean difference, so the winner may separate in either direction -
+    // what a real search must find is SOME separation, not a degenerate tie.
     const cnrSign = Math.sign((values[0]! + values[1]!) / 2 - (values[2]! + values[3]!) / 2);
-    expect(cnrSign).toBe(1);
+    expect(Math.abs(cnrSign)).toBe(1);
   }, 240_000);
 
   it("scores every candidate with a custom objective script's source, in-sandbox", async () => {

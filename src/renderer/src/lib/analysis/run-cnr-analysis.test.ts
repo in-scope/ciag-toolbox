@@ -7,7 +7,7 @@ import type { BusyEntryHandle, BusyEntryRegistrar } from "@/state/busy-state-con
 import { computeCnrScoresShowingPanelBusy } from "./run-cnr-analysis";
 
 // The stack: three 2x2 bands under mask [1, 1, 2, 2], so band N scores
-// (mean of pixels 0..1 - mean of pixels 2..3) / population std of 2..3.
+// abs(mean of pixels 0..1 - mean of pixels 2..3) / population std of 2..3 (CT-322).
 
 function buildThreeBandRaster(): RasterImage {
   const bands = [
@@ -101,8 +101,8 @@ describe("computeCnrScoresShowingPanelBusy", () => {
     expect(outcome.status).toBe("computed");
     if (outcome.status !== "computed") return;
     expect(outcome.scores).toHaveLength(3);
-    expect(outcome.scores[0]).toBeCloseTo(-4, 12);
-    expect(outcome.scores[1]).toBeCloseTo(-1.8, 12);
+    expect(outcome.scores[0]).toBeCloseTo(4, 12);
+    expect(outcome.scores[1]).toBeCloseTo(1.8, 12);
   });
 
   it("reports a determinate bar from 0 to 1 and clears the busy entry", async () => {
