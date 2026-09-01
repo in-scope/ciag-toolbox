@@ -17,6 +17,7 @@ import {
   type ViewportActionOutput,
   type ViewportRenderingState,
 } from "@/lib/actions/viewport-action";
+import { clampSelectedBandIndexToRaster } from "@/lib/actions/clamp-selected-band-index";
 import { composeApplySuccessMessage } from "@/lib/actions/apply-success-message";
 import { clearOperationRegionAtViewportIndex } from "@/lib/actions/operation-region";
 import type {
@@ -354,13 +355,12 @@ function writeAppliedRenderingStateForResultInAnotherPanel(
   parameterValues: ParameterValuesById,
   sourceIndex: number,
   targetIndex: number,
+  resultSource: ViewportImageSource | null,
   bindings: ApplyActionFlowBindings,
 ): void {
   const inherited = withoutMaskLayers(bindings.getRenderingState(sourceIndex));
-  bindings.setRenderingState(
-    targetIndex,
-    applyActionAndTagOperationLabel(action, parameterValues, inherited),
-  );
+  const applied = applyActionAndTagOperationLabel(action, parameterValues, inherited);
+  bindings.setRenderingState(targetIndex, clampSelectedBandIndexToRaster(applied, resultSource));
 }
 
 function withoutMaskLayers(state: ViewportRenderingState): ViewportRenderingState {
@@ -386,10 +386,8 @@ function writeAppliedRenderingStateForInPlaceResult(
   const inherited = bindings.getRenderingState(index);
   const reconciled = withMasksCarriedAcrossGeometryChange(action, parameterValues, inherited, geometry);
   notifyWhenGeometryChangeRemovedMasks(inherited, reconciled);
-  bindings.setRenderingState(
-    index,
-    applyActionAndTagOperationLabel(action, parameterValues, reconciled),
-  );
+  const applied = applyActionAndTagOperationLabel(action, parameterValues, reconciled);
+  bindings.setRenderingState(index, clampSelectedBandIndexToRaster(applied, geometry.nextSource));
 }
 
 function withMasksCarriedAcrossGeometryChange(
@@ -649,8 +647,8 @@ export async function runDuplicateAndApplyAtTargetIndex(
     : null;
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
-    await placeDuplicateOutputAtReservedTarget(action, parameterValues, sourceContent, reservation, bindings, handle, stopController?.signal);
-    finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, reservation, bindings, options);
+    const resultSource = await placeDuplicateOutputAtReservedTarget(action, parameterValues, sourceContent, reservation, bindings, handle, stopController?.signal);
+    finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, resultSource, reservation, bindings, options);
     reportApplySucceededWithToast(action, bindings, resultLandedOutsideTheSourcePanel(reservation));
   } catch (error) {
     reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
@@ -670,10 +668,10 @@ async function placeDuplicateOutputAtReservedTarget(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle | null,
   abortSignal?: AbortSignal,
-): Promise<void> {
+): Promise<ViewportImageSource> {
   const releaseSourceHold = holdSourceBuffersWhileInUse(sourceContent.source);
   try {
-    await placeDuplicateOutputWhileSourceIsHeld(action, parameterValues, sourceContent, reservation, bindings, busyHandle, abortSignal);
+    return await placeDuplicateOutputWhileSourceIsHeld(action, parameterValues, sourceContent, reservation, bindings, busyHandle, abortSignal);
   } finally {
     releaseSourceHold();
   }
@@ -687,9 +685,9 @@ async function placeDuplicateOutputWhileSourceIsHeld(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle | null,
   abortSignal?: AbortSignal,
-): Promise<void> {
+): Promise<ViewportImageSource> {
   if (actionTransformsSource(action) && busyHandle) {
-    await placeTransformedDuplicateAtReservedTarget(
+    return await placeTransformedDuplicateAtReservedTarget(
       action,
       parameterValues,
       sourceContent,
@@ -698,23 +696,23 @@ async function placeDuplicateOutputWhileSourceIsHeld(
       busyHandle,
       abortSignal,
     );
-    return;
   }
   throwStoppedWhenApplyRunIsCancelled(reservation);
-  await placeClonedSourceContentAtIndex(sourceContent, reservation.currentTargetIndex(), bindings.setImagesByIndex);
+  return await placeClonedSourceContentAtIndex(sourceContent, reservation.currentTargetIndex(), bindings.setImagesByIndex);
 }
 
 function finishDuplicateApplyBookkeeping(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
   sourceContent: ViewportCellContent,
+  resultSource: ViewportImageSource | null,
   reservation: InFlightApplyRunReservation,
   bindings: ApplyActionFlowBindings,
   options: DuplicateApplyOptions,
 ): void {
   const sourceIndex = reservation.currentSourceIndex();
   const targetIndex = reservation.currentTargetIndex();
-  writeAppliedRenderingStateForResultInAnotherPanel(action, parameterValues, sourceIndex, targetIndex, bindings);
+  writeAppliedRenderingStateForResultInAnotherPanel(action, parameterValues, sourceIndex, targetIndex, resultSource, bindings);
   clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
   placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, targetIndex, bindings);
   if (options.selectResultPanel) selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
@@ -775,7 +773,7 @@ async function placeTransformedDuplicateAtReservedTarget(
   bindings: ApplyActionFlowBindings,
   busyHandle: BusyEntryHandle,
   abortSignal?: AbortSignal,
-): Promise<void> {
+): Promise<ViewportImageSource> {
   const transformedContent = await transformImmutableSourceContent(
     sourceContent,
     action,
@@ -792,6 +790,7 @@ async function placeTransformedDuplicateAtReservedTarget(
   bindings.setImagesByIndex((previous) =>
     writeViewportContentAtIndex(previous, writeIndex, transformedContent),
   );
+  return transformedContent.source;
 }
 
 // CT-233: the source is handed to the transform directly, with no defensive

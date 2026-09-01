@@ -519,6 +519,143 @@ function buildDuplicateFlowHarnessWithSourceRoi(
   };
 }
 
+// CT-324: L2 Minimization, Local PCA/MNF and ROP hand back a stack with fewer
+// bands than the one they read, so a selected band index the result does not
+// have must not ride across the apply ("Band index 279 out of range").
+describe("clamping the selected band index to the result raster (CT-324)", () => {
+  it("writes band 0 to the target when a band-reducing duplicate apply inherits an out-of-range index", async () => {
+    const harness = buildBandReducingFlowHarnessSelectingBandIndex(279);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildBandReducingActionYieldingOneBand(),
+      NO_PARAMETER_VALUES,
+      buildThreeBandUint16RasterCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(TARGET_INDEX).selectedBandIndex).toBe(0);
+  });
+
+  it("keeps an in-range index across a duplicate apply that keeps every band", async () => {
+    const harness = buildBandReducingFlowHarnessSelectingBandIndex(2);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildActionYieldingTheSameThreeBands(),
+      NO_PARAMETER_VALUES,
+      buildThreeBandUint16RasterCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(TARGET_INDEX).selectedBandIndex).toBe(2);
+  });
+
+  it("writes band 0 in place when a band-reducing apply replaces the stack of the panel it ran on", async () => {
+    const harness = buildBandReducingFlowHarnessSelectingBandIndex(279);
+    applyActionInPlaceAtSourceIndex(
+      buildBandReducingActionYieldingOneBand(),
+      NO_PARAMETER_VALUES,
+      SOURCE_INDEX,
+      harness.bindings,
+    );
+    await waitForPendingApplyWork();
+    expect(harness.findLatestRenderingStateWriteAtIndex(SOURCE_INDEX).selectedBandIndex).toBe(0);
+  });
+
+  it("leaves the index alone when the duplicated result is not a raster", async () => {
+    const harness = buildBandReducingFlowHarnessSelectingBandIndex(279);
+    await runDuplicateAndApplyAtTargetIndex(
+      buildNormalizeAction(),
+      NO_PARAMETER_VALUES,
+      buildSinglePixelCellContent(),
+      SOURCE_INDEX,
+      TARGET_INDEX,
+      harness.bindings,
+    );
+    expect(harness.findLatestRenderingStateWriteAtIndex(TARGET_INDEX).selectedBandIndex).toBe(279);
+  });
+});
+
+function buildBandReducingFlowHarnessSelectingBandIndex(
+  selectedBandIndex: number,
+): DuplicateFlowHarness {
+  const initial = { ...buildRenderingStateWithHistory([]), selectedBandIndex };
+  const renderingByIndex = new Map<number, ViewportRenderingState>([[SOURCE_INDEX, initial]]);
+  const setRenderingState = vi.fn((index: number, next: ViewportRenderingState) =>
+    renderingByIndex.set(index, next),
+  );
+  const bindings = buildRasterBindingsBackedByMaps(renderingByIndex, setRenderingState);
+  return {
+    bindings,
+    findLatestRenderingStateWriteAtIndex: (i) => readLatestWrite(setRenderingState, i),
+  };
+}
+
+function buildRasterBindingsBackedByMaps(
+  renderingByIndex: Map<number, ViewportRenderingState>,
+  setRenderingState: ApplyActionFlowBindings["setRenderingState"],
+): ApplyActionFlowBindings {
+  let imagesByIndex: ReadonlyMap<number, ViewportCellContent> = new Map([
+    [SOURCE_INDEX, buildThreeBandUint16RasterCellContent()],
+  ]);
+  return {
+    gridLayout: "1x2",
+    cellCount: 2,
+    get imagesByIndex() {
+      return imagesByIndex;
+    },
+    setGridLayout: vi.fn(),
+    setImagesByIndex: (updater) => {
+      imagesByIndex = updater(imagesByIndex);
+    },
+    setPendingDuplicate: vi.fn(),
+    getRenderingState: (index) => renderingByIndex.get(index) ?? DEFAULT_VIEWPORT_RENDERING_STATE,
+    setRenderingState,
+    busyRegistrar: buildNoopBusyEntryRegistrarForTests(),
+    inFlightApplyRuns: createInFlightApplyRunStore(),
+  };
+}
+
+function buildBandReducingActionYieldingOneBand(): RegisteredViewportAction {
+  return {
+    id: "l2-like",
+    label: "L2 Minimization",
+    loadingMessage: "Minimizing...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "L2 Minimization",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => ({ kind: "raster", raster: buildOneBandFloat32Raster() }),
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildActionYieldingTheSameThreeBands(): RegisteredViewportAction {
+  return {
+    id: "three-band-like",
+    label: "Invert",
+    loadingMessage: "Inverting...",
+    icon: () => null,
+    successMessage: "ok",
+    appliedLabel: "Invert",
+    apply: (state: ViewportRenderingState) => state,
+    transformSource: () => ({ kind: "raster", raster: buildThreeBandUint16Raster() }),
+  } as unknown as RegisteredViewportAction;
+}
+
+function buildOneBandFloat32Raster(): RasterImage {
+  return {
+    bandPixels: [new Float32Array([1, 2, 3, 4])],
+    width: 2,
+    height: 2,
+    bitsPerSample: 32,
+    sampleFormat: "float",
+    bandCount: 1,
+  };
+}
+
+function waitForPendingApplyWork(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("transform progress reaching the busy entry (CT-221)", () => {
   it("forwards transformSourceAsync progress ticks to the busy entry as progress updates", async () => {
     const harness = buildDuplicateFlowHarness({ sourcePriorHistory: buildHistoryWithEntries([]) });
