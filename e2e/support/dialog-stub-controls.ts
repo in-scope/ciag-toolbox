@@ -4,6 +4,9 @@ interface ToolboxE2eBridge {
   enqueueOpenDialogPaths: (filePaths: ReadonlyArray<string>) => Promise<void>;
   enqueueSaveDialogPath: (filePath: string) => Promise<void>;
   resetDialogQueues: () => Promise<void>;
+  // CT-316: the forced ROP seed can be changed between presses (rop-panel.ts).
+  readRopForcedSeedOverride: () => number | null;
+  setRopForcedSeedOverride: (seed: number | null) => void;
 }
 
 declare global {

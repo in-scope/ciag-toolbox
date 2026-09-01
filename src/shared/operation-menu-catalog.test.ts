@@ -61,6 +61,7 @@ describe("operation menu structure (CT-289 Jul 30 meeting list)", () => {
 
   it("puts cross-band and whole-cube operations under Multi-band", () => {
     expect(listMenuItemLabels(findMenuByLabel("Multi-band"))).toEqual([
+      "CNR",
       "Concatenate Stacks",
       "ICA",
       "L2 Minimization",

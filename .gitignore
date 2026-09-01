@@ -18,6 +18,7 @@ out/
 dist/
 electron.vite.config.*.mjs
 build/icon-source.png
+build/preview/
 
 # Playwright E2E artifacts
 test-results/

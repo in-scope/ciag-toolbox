@@ -4,16 +4,32 @@ import type { Locator, Page } from "@playwright/test";
 import { runAsStoryboardStep } from "./storyboard-step";
 
 // CT-309: "ROP" is a menu-only Multi-band command that opens
-// <aside aria-label="ROP options">. New projection previews a fresh random
-// candidate in the source panel (display-only); Keep / Keep best commit a
-// candidate as a new stack. Launch the app with MSI_E2E_ROP_FORCED_SEED to make
-// every press reproduce the reference candidate pinned in manifest.json.
+// <aside aria-label="ROP options">. CT-316: New projection delivers a fresh
+// random candidate as a one-band stack in a candidate panel next to the source
+// (the next press replaces it); Keep / Keep best commit a candidate as a new
+// stack. Launch the app with MSI_E2E_ROP_FORCED_SEED to make every press
+// reproduce the reference candidate pinned in manifest.json, and change the
+// seed between presses with setForcedRopSeed.
 
 export const ROP_PANEL_LABEL = "ROP";
 export const ROP_NO_CANDIDATE_TEXT = "No projection yet";
+export const ROP_PROJECTION_READY_TEXT = "Projection ready";
+export const ROP_PRESS_REFUSED_TEXT = "Every panel is in use. Close a panel before projecting.";
+
+export async function setForcedRopSeed(page: Page, seed: number): Promise<void> {
+  await runAsStoryboardStep(page, `Force the next ROP seed to ${seed}`, async () => {
+    await page.evaluate((forced) => window.toolboxE2E.setRopForcedSeedOverride(forced), seed);
+  });
+}
 
 export function ropOptionsPanel(page: Page): Locator {
   return page.locator('aside[aria-label="ROP options"]');
+}
+
+// CT-315: the aside pins to the panel it was opened on, and its header names
+// that panel for as long as the pin holds.
+export function ropPinnedPanelReadout(page: Page): Locator {
+  return ropOptionsPanel(page).getByText(/^Panel \d+$/);
 }
 
 export function ropObjectivePicker(page: Page): Locator {
@@ -59,7 +75,8 @@ export async function chooseRopObjective(page: Page, optionLabel: string): Promi
 }
 
 // The first press spawns the Python worker and uploads the cube, so the
-// completion signal (the seed readout showing the pressed seed) can take a
+// completion signal (the seed readout showing the pressed seed, then the
+// button re-enabling once the candidate stack has been placed) can take a
 // while; later presses reuse the retained session and settle fast.
 export async function pressNewProjectionUntilSeedShows(
   page: Page,
@@ -83,6 +100,22 @@ export async function pressNewProjectionUntilScoreShows(
     await expect(ropScoreReadout(page)).toHaveText(expectedScoreText, {
       timeout: ROP_RUN_TIMEOUT_MS,
     });
+    await expect(ropNewProjectionButton(page)).toBeEnabled({ timeout: ROP_RUN_TIMEOUT_MS });
+  });
+}
+
+// CT-316: a press ends with the "Projection ready" toast once its candidate
+// stack has landed in the candidate panel.
+export async function pressNewProjectionUntilProjectionReady(
+  page: Page,
+  expectedSeed: number,
+): Promise<void> {
+  await runAsStoryboardStep(page, `Press New projection (seed ${expectedSeed}) and wait for the stack`, async () => {
+    await ropNewProjectionButton(page).click();
+    await expect(page.getByText(ROP_PROJECTION_READY_TEXT).last()).toBeVisible({
+      timeout: ROP_RUN_TIMEOUT_MS,
+    });
+    await expect(ropSeedReadout(page)).toHaveText(`Seed ${expectedSeed}`);
     await expect(ropNewProjectionButton(page)).toBeEnabled({ timeout: ROP_RUN_TIMEOUT_MS });
   });
 }

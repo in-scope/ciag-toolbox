@@ -579,6 +579,15 @@ describe.skipIf(interpreterPath === null)("python worker CT-307 additions (bundl
     wavelengths: null,
   };
 
+  // CT-318: two bands whose categories separate differently, and over
+  // different value ranges, so a per-band score cannot be faked by pooling.
+  const perBandNpcCube: CubeForUserScript = {
+    bands: [Float32Array.from([1, 2, 3, 4]), Float32Array.from([10, 40, 20, 30])],
+    height: 2,
+    width: 2,
+    wavelengths: null,
+  };
+
   function encodeTwoMaskCategories() {
     return encodeMaskCategoriesAsUint8Payload({
       categories: [Uint8Array.from([1, 1, 0, 0]), Uint8Array.from([0, 0, 1, 1])],
@@ -675,16 +684,19 @@ describe.skipIf(interpreterPath === null)("python worker CT-307 additions (bundl
         directory: path.join(process.cwd(), "resources", "builtin-python"),
         moduleName: "npc",
       },
-      cube: encodeCubeAsFloat32Payload(paramsCube),
+      cube: encodeCubeAsFloat32Payload(perBandNpcCube),
       masks: encodeTwoMaskCategories(),
       params: { bins: 2 },
       resultKind: "value",
       sandbox: true,
       timeoutMs: 120_000,
     });
-    // Top-row values {1, 2} and bottom-row values {3, 4} split cleanly into 2
-    // bins over [1, 4], so the multi-class NPC is exactly 1.
-    expect(outcome).toEqual({ kind: "completed", value: 1 });
+    // CT-318: one score PER BAND, each binned over THAT BAND's own min-max.
+    // Band 1 {1, 2} vs {3, 4} splits cleanly over [1, 4], so it scores 1; band 2
+    // {10, 40} vs {20, 30} straddles both bins of [10, 40], so it scores 0.
+    // Pooling the bands would read 0.5, and binning band 1 over the whole
+    // cube's [1, 40] would read 0: only per-band scoring gives [1, 0].
+    expect(outcome).toEqual({ kind: "completed", value: [1, 0] });
   }, 120_000);
 
   it("draws identical ROP projections for the same seed across two runs", async () => {

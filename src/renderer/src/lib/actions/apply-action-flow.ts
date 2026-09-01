@@ -100,7 +100,9 @@ export function applyActionInPlaceAtSourceIndex(
 // ArrayBuffer pool alongside the panels already open, BEFORE a result panel is
 // reserved or any allocation starts. An in-place apply is gated identically:
 // the transform still materializes the whole output while the source is alive.
-function reportApplyExceedsMemoryBudget(
+// Exported for flows that deliver a result outside applyActionToDuplicateOfSource
+// (the CT-316 ROP candidate delivery) so they preflight the same way.
+export function reportApplyExceedsMemoryBudget(
   action: RegisteredViewportAction,
   source: ViewportImageSource,
   parameterValues: ParameterValuesById,
@@ -479,6 +481,18 @@ function placeSecondaryOutputAtIndex(
   writeAppliedRenderingStateWithExplicitLabel(action, parameterValues, output.appliedLabel, sourceIndex, targetIndex, bindings);
 }
 
+// CT-316: the lowest free panel (respecting in-flight reservations), or the
+// first cell of the next larger layout, or null when the grid is full at its
+// largest. This is the same search applyActionToDuplicateOfSource runs before
+// it falls through to the replace-target picker.
+export function findOrOpenFreshResultPanelIndexOrNull(
+  bindings: ApplyActionFlowBindings,
+): number | null {
+  return reserveFreshViewportIndexExcluding(bindings, NO_EXCLUDED_INDEXES);
+}
+
+const NO_EXCLUDED_INDEXES: ReadonlySet<number> = new Set();
+
 function reserveFreshViewportIndexExcluding(
   bindings: ApplyActionFlowBindings,
   excludedIndexes: ReadonlySet<number>,
@@ -608,6 +622,17 @@ function tryDuplicateAndApplyByExpandingGrid(
   return true;
 }
 
+// CT-316: every menu operation selects the panel that received its result
+// (CT-105); a ROP candidate delivery passes selectResultPanel: false so the
+// source panel stays selected while the user keeps pressing.
+export interface DuplicateApplyOptions {
+  readonly selectResultPanel: boolean;
+}
+
+export const DEFAULT_DUPLICATE_APPLY_OPTIONS: DuplicateApplyOptions = {
+  selectResultPanel: true,
+};
+
 export async function runDuplicateAndApplyAtTargetIndex(
   action: RegisteredViewportAction,
   parameterValues: ParameterValuesById,
@@ -615,6 +640,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
   sourceIndex: number,
   targetIndex: number,
   bindings: ApplyActionFlowBindings,
+  options: DuplicateApplyOptions = DEFAULT_DUPLICATE_APPLY_OPTIONS,
 ): Promise<void> {
   const stopController = createStopControllerForStoppableApply(action);
   const reservation = reserveInFlightApplyRun(action, sourceIndex, targetIndex, stopController, bindings);
@@ -624,7 +650,7 @@ export async function runDuplicateAndApplyAtTargetIndex(
   try {
     if (handle) await yieldOnceSoBusyOverlayCanPaint();
     await placeDuplicateOutputAtReservedTarget(action, parameterValues, sourceContent, reservation, bindings, handle, stopController?.signal);
-    finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, reservation, bindings);
+    finishDuplicateApplyBookkeeping(action, parameterValues, sourceContent, reservation, bindings, options);
     reportApplySucceededWithToast(action, bindings, resultLandedOutsideTheSourcePanel(reservation));
   } catch (error) {
     reportApplyEndedWithoutResult(action, reservation.currentSourceIndex(), bindings, error);
@@ -684,13 +710,14 @@ function finishDuplicateApplyBookkeeping(
   sourceContent: ViewportCellContent,
   reservation: InFlightApplyRunReservation,
   bindings: ApplyActionFlowBindings,
+  options: DuplicateApplyOptions,
 ): void {
   const sourceIndex = reservation.currentSourceIndex();
   const targetIndex = reservation.currentTargetIndex();
   writeAppliedRenderingStateForResultInAnotherPanel(action, parameterValues, sourceIndex, targetIndex, bindings);
   clearConsumedSourceStateAfterDuplicateApply(action, sourceIndex, targetIndex, bindings);
   placeSecondaryActionOutputsInFreshViewports(action, parameterValues, sourceContent, sourceIndex, targetIndex, bindings);
-  selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
+  if (options.selectResultPanel) selectResultPanelHoldingTheDuplicateOutput(targetIndex, bindings);
 }
 
 // CT-276: the duplicate path normally lands in a fresh panel, but the

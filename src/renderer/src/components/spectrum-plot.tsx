@@ -27,6 +27,7 @@ import type { RasterSampleFormat } from "@/lib/image/raster-image";
 
 const SPECTRUM_PLOT_WIDTH_PX = 268;
 const SPECTRUM_PLOT_HEIGHT_PX = 160;
+const DEFAULT_SPECTRUM_PLOT_ARIA_LABEL = "Spectra plot";
 
 export interface SpectrumLinePlotInput {
   readonly id: string;
@@ -34,6 +35,14 @@ export interface SpectrumLinePlotInput {
   readonly values: ReadonlyArray<number>;
   readonly bandStandardDeviations?: ReadonlyArray<number>;
   readonly strokeDasharray?: string;
+}
+
+// An aside that plots something other than a spectrum (CT-319's per-band NPC,
+// CT-320's CNR) reuses this chart by naming it, fixing its y range, and giving
+// the hover its own band labels and value formatting.
+export interface SpectrumPlotHoverLabelOverrides {
+  readonly bandLabels: ReadonlyArray<string>;
+  readonly formatValue: (value: number) => string;
 }
 
 export interface SpectrumPlotProps {
@@ -46,6 +55,9 @@ export interface SpectrumPlotProps {
   readonly lines: ReadonlyArray<SpectrumLinePlotInput>;
   readonly sampleFormat?: RasterSampleFormat;
   readonly bandTooltipDescriptors?: ReadonlyArray<SpectrumBandTooltipDescriptor>;
+  readonly ariaLabel?: string;
+  readonly fixedValueRange?: SpectrumPlotValueRange;
+  readonly hoverLabelOverrides?: SpectrumPlotHoverLabelOverrides;
 }
 
 interface SpectrumPlotGeometry {
@@ -68,8 +80,13 @@ function buildSpectrumPlotGeometry(props: SpectrumPlotProps): SpectrumPlotGeomet
   return {
     dimensions: buildSpectrumPlotDimensions(),
     xRange: computeSpectrumPlotXRange(props.bandPositions),
-    valueRange: computeSpectrumPlotValueRange(extractAllValueListsFromLines(props.lines)),
+    valueRange: resolveSpectrumPlotValueRange(props),
   };
+}
+
+function resolveSpectrumPlotValueRange(props: SpectrumPlotProps): SpectrumPlotValueRange {
+  if (props.fixedValueRange) return props.fixedValueRange;
+  return computeSpectrumPlotValueRange(extractAllValueListsFromLines(props.lines));
 }
 
 interface PlotPointerPosition {
@@ -106,6 +123,7 @@ function SpectrumPlotInteractiveArea(props: SpectrumPlotInteractiveAreaProps): J
         tickPositions={props.plot.tickPositions}
         tickLabels={props.plot.tickLabels}
         lines={props.plot.lines}
+        ariaLabel={props.plot.ariaLabel ?? DEFAULT_SPECTRUM_PLOT_ARIA_LABEL}
         readout={readout}
         onPointerMove={(event) => setPointer(readPointerPositionInPlot(event, props.geometry.dimensions))}
         onPointerLeave={() => setPointer(null)}
@@ -188,6 +206,7 @@ interface SpectrumPlotSvgProps {
   readonly tickPositions: ReadonlyArray<number>;
   readonly tickLabels: ReadonlyArray<string>;
   readonly lines: ReadonlyArray<SpectrumLinePlotInput>;
+  readonly ariaLabel: string;
   readonly readout: SpectrumHoverReadout | null;
   readonly onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
   readonly onPointerLeave: () => void;
@@ -198,7 +217,7 @@ function SpectrumPlotSvg(props: SpectrumPlotSvgProps): JSX.Element {
   return (
     <svg
       role="img"
-      aria-label="Spectra plot"
+      aria-label={props.ariaLabel}
       viewBox={viewBox}
       className="h-[160px] w-full text-foreground"
       onPointerMove={props.onPointerMove}
@@ -485,8 +504,8 @@ interface SpectrumHoverTooltipProps {
 }
 
 function SpectrumHoverTooltip(props: SpectrumHoverTooltipProps): JSX.Element {
-  const bandLabel = describeHoverBandLabel(props.plot.bandTooltipDescriptors, props.readout.bandIndex);
-  const valueLabel = describeHoverValueLabel(props.readout.lineHit, props.plot.sampleFormat);
+  const bandLabel = describeHoverBandLabel(props.plot, props.readout.bandIndex);
+  const valueLabel = describeHoverValueLabel(props.plot, props.readout.lineHit);
   return (
     <div
       className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow-md"
@@ -506,21 +525,22 @@ function buildHoverTooltipPositionStyle(pointer: PlotPointerPosition): CSSProper
   return { left: pointer.cssX + 8, top };
 }
 
-function describeHoverBandLabel(
-  descriptors: ReadonlyArray<SpectrumBandTooltipDescriptor> | undefined,
-  bandIndex: number,
-): string {
-  const descriptor = descriptors?.[bandIndex];
+function describeHoverBandLabel(plot: SpectrumPlotProps, bandIndex: number): string {
+  const overriddenLabel = plot.hoverLabelOverrides?.bandLabels[bandIndex];
+  if (overriddenLabel) return overriddenLabel;
+  const descriptor = plot.bandTooltipDescriptors?.[bandIndex];
   if (descriptor) return formatSpectrumHoverBandLabel(descriptor);
   return `Band ${bandIndex + 1}`;
 }
 
 function describeHoverValueLabel(
+  plot: SpectrumPlotProps,
   lineHit: SpectrumLineValueHit | null,
-  sampleFormat: RasterSampleFormat | undefined,
 ): string | null {
   if (lineHit === null) return null;
-  return formatSpectrumHoverValueLabel(lineHit, sampleFormat ?? "uint");
+  const formatOverriddenValue = plot.hoverLabelOverrides?.formatValue;
+  if (formatOverriddenValue) return formatOverriddenValue(lineHit.value);
+  return formatSpectrumHoverValueLabel(lineHit, plot.sampleFormat ?? "uint");
 }
 
 interface SpectrumPlotAxisLabelsProps {

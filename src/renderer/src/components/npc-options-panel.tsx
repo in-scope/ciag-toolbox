@@ -6,6 +6,7 @@ import {
   PANEL_NUMERIC_INPUT_CLASSES,
   PANEL_SELECT_CLASSES,
 } from "@/components/form-control-classes";
+import { PerBandScoreSection } from "@/components/per-band-score-section";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NPC_PANEL_ICON } from "@/lib/actions/operation-command-bindings";
@@ -22,12 +23,14 @@ import {
   formatNpcHistoryAppliedLabel,
   formatNpcScoreToSignificantFigures,
 } from "@/lib/analysis/npc-score-format";
+import { selectTopScoringBandRows } from "@/lib/analysis/per-band-score-presentation";
 import {
   computeNpcScoreShowingPanelBusy,
   type NpcAnalysisOutcome,
 } from "@/lib/analysis/run-npc-analysis";
 import { OPERATION_STOPPED_MESSAGE } from "@/lib/image/operation-stop";
 import type { RasterImage } from "@/lib/image/raster-image";
+import type { SpectrumPlotValueRange } from "@/lib/image/spectrum-plot-geometry";
 import type { MaskLayer } from "@/lib/masks/mask-layer";
 import type { MaskPanelState } from "@/lib/masks/mask-panel";
 import { notifyError } from "@/lib/notifications/notify";
@@ -35,10 +38,15 @@ import { cn } from "@/lib/utils";
 import { useBusyEntryRegistrar, type BusyEntryRegistrar } from "@/state/busy-state-context";
 
 // CT-308: the NPC aside. NPC scores how separable the active stack's labeled
-// regions are, so it produces a NUMBER, not a raster: there is no result
+// regions are, so it produces MEASUREMENTS, not a raster: there is no result
 // destination and no Apply, only Compute plus a readout. The panel is unusable
 // until the stack carries a mask layer with two painted categories, and says so
 // in the locked vocabulary rather than silently disabling itself.
+//
+// CT-319: the readout is one score PER BAND, shown as a line plot against the
+// stack's x axis plus a list of the best bands. Any change to the layer, the
+// bin count or the stack itself returns it to the not-computed state, so a
+// plot on screen always belongs to the settings on screen.
 
 export interface NpcPanelTarget {
   readonly viewportIndex: number;
@@ -126,7 +134,7 @@ function NpcPanelBody(props: NpcPanelBodyProps): JSX.Element {
         isComputing={form.isComputing}
         onCompute={() => void form.compute(props.onRecordScoreInHistory)}
       />
-      <NpcScoreReadout score={form.score} />
+      <NpcPerBandScores raster={props.target?.raster ?? null} scores={form.scores} />
     </>
   );
 }
@@ -139,9 +147,9 @@ function canComputeNpcNow(form: NpcComputeFormApi, problem: string | null): bool
 function NpcExplanation(): JSX.Element {
   return (
     <p className="text-xs text-muted-foreground">
-      Multi-Class Normalized Potential Contrast scores how separable the mask
-      layer&apos;s painted categories are across every band of this stack. 1 is
-      perfectly separable, 0 is indistinguishable.
+      Multi-Class Normalized Potential Contrast scores, band by band, how
+      separable the mask layer&apos;s painted categories are. 1 is perfectly
+      separable, 0 is indistinguishable.
     </p>
   );
 }
@@ -226,30 +234,48 @@ function NpcComputeButton(props: NpcComputeButtonProps): JSX.Element {
   );
 }
 
-function NpcScoreReadout({ score }: { readonly score: number | null }): JSX.Element {
+interface NpcPerBandScoresProps {
+  readonly raster: RasterImage | null;
+  readonly scores: ReadonlyArray<number> | null;
+}
+
+function NpcPerBandScores(props: NpcPerBandScoresProps): JSX.Element {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground">NPC score</span>
-      <output aria-label="NPC score" className="font-mono text-sm text-foreground">
-        {score === null ? NOT_COMPUTED_YET_TEXT : formatNpcScoreToSignificantFigures(score)}
-      </output>
-    </div>
+    <PerBandScoreSection
+      scoreName={NPC_SCORE_NAME}
+      raster={props.raster}
+      scores={props.scores}
+      formatScore={formatNpcScoreToSignificantFigures}
+      notComputedText={NOT_COMPUTED_YET_TEXT}
+      fixedValueRange={NPC_SCORE_PLOT_VALUE_RANGE}
+    />
   );
 }
 
+const NPC_SCORE_NAME = "NPC";
 const NOT_COMPUTED_YET_TEXT = "Not computed yet";
+// NPC is defined on 0..1, so the plot keeps that scale rather than magnifying
+// the noise between three nearly equal bands.
+const NPC_SCORE_PLOT_VALUE_RANGE: SpectrumPlotValueRange = { minValue: 0, maxValue: 1 };
+
+// The scores are stored WITH the raster they were measured on, so a stack that
+// changed under the aside shows the not-computed state without an effect.
+interface NpcComputedScores {
+  readonly raster: RasterImage;
+  readonly scores: ReadonlyArray<number>;
+}
 
 interface NpcComputeFormState {
   readonly chosenLayerId: string | null;
   readonly binsText: string;
-  readonly score: number | null;
+  readonly computed: NpcComputedScores | null;
   readonly isComputing: boolean;
 }
 
 const INITIAL_NPC_COMPUTE_FORM_STATE: NpcComputeFormState = {
   chosenLayerId: null,
   binsText: String(DEFAULT_NPC_BIN_COUNT),
-  score: null,
+  computed: null,
   isComputing: false,
 };
 
@@ -258,7 +284,7 @@ interface NpcComputeFormApi {
   readonly selectedLayer: MaskLayer | null;
   readonly binsText: string;
   readonly binCount: number | null;
-  readonly score: number | null;
+  readonly scores: ReadonlyArray<number> | null;
   readonly isComputing: boolean;
   readonly selectLayer: (layerId: string) => void;
   readonly changeBinCount: (binsText: string) => void;
@@ -274,9 +300,9 @@ function useNpcComputeForm(target: NpcPanelTarget | null): NpcComputeFormApi {
   const selectedLayer = pickSelectedNpcMaskLayer(qualifyingLayers, state.chosenLayerId, target);
   const binCount = parseNpcBinCountOrNull(state.binsText);
   return {
-    ...buildNpcFormReadouts(state, qualifyingLayers, selectedLayer, binCount),
-    selectLayer: (layerId) => setState((previous) => ({ ...previous, chosenLayerId: layerId })),
-    changeBinCount: (binsText) => setState((previous) => ({ ...previous, binsText })),
+    ...buildNpcFormReadouts(state, qualifyingLayers, selectedLayer, binCount, target),
+    selectLayer: (layerId) => setState(forgetScoresAndSet({ chosenLayerId: layerId })),
+    changeBinCount: (binsText) => setState(forgetScoresAndSet({ binsText })),
     compute: (recordScore) =>
       runNpcComputationForForm(
         { target, selectedLayer, binCount, busyRegistrar },
@@ -286,20 +312,35 @@ function useNpcComputeForm(target: NpcPanelTarget | null): NpcComputeFormApi {
   };
 }
 
+function forgetScoresAndSet(
+  change: Partial<NpcComputeFormState>,
+): (previous: NpcComputeFormState) => NpcComputeFormState {
+  return (previous) => ({ ...previous, ...change, computed: null });
+}
+
 function buildNpcFormReadouts(
   state: NpcComputeFormState,
   qualifyingLayers: ReadonlyArray<MaskLayer>,
   selectedLayer: MaskLayer | null,
   binCount: number | null,
+  target: NpcPanelTarget | null,
 ): Omit<NpcComputeFormApi, "selectLayer" | "changeBinCount" | "compute"> {
   return {
     qualifyingLayers,
     selectedLayer,
     binsText: state.binsText,
     binCount,
-    score: state.score,
+    scores: readScoresMeasuredOnTargetOrNull(state.computed, target),
     isComputing: state.isComputing,
   };
+}
+
+function readScoresMeasuredOnTargetOrNull(
+  computed: NpcComputedScores | null,
+  target: NpcPanelTarget | null,
+): ReadonlyArray<number> | null {
+  if (computed === null || target === null) return null;
+  return computed.raster === target.raster ? computed.scores : null;
 }
 
 function listQualifyingMaskLayersForTarget(
@@ -351,10 +392,13 @@ async function runNpcComputationForForm(
 ): Promise<void> {
   const { target, selectedLayer, binCount } = inputs;
   if (target === null || selectedLayer === null || binCount === null) return;
-  setState((previous) => ({ ...previous, isComputing: true }));
+  // The plot and list return to "Not computed yet" for the duration of the run:
+  // stale scores next to a running analysis read as this run's answer.
+  setState(forgetScoresAndSet({ isComputing: true }));
   try {
     const outcome = await computeNpcScoreForTarget(inputs, target, selectedLayer, binCount);
-    reportNpcOutcome(outcome, selectedLayer, binCount, { setState, recordScore });
+    const run = { raster: target.raster, maskLayerName: selectedLayer.name, bins: binCount };
+    reportNpcOutcome(outcome, run, { setState, recordScore });
   } finally {
     setState((previous) => ({ ...previous, isComputing: false }));
   }
@@ -381,10 +425,15 @@ interface NpcOutcomeReporters {
   readonly recordScore: RecordNpcScoreCallback;
 }
 
+interface NpcCompletedRun {
+  readonly raster: RasterImage;
+  readonly maskLayerName: string;
+  readonly bins: number;
+}
+
 function reportNpcOutcome(
   outcome: NpcAnalysisOutcome,
-  maskLayer: MaskLayer,
-  bins: number,
+  run: NpcCompletedRun,
   reporters: NpcOutcomeReporters,
 ): void {
   if (outcome.status === "stopped") {
@@ -395,6 +444,24 @@ function reportNpcOutcome(
     notifyError(outcome.message);
     return;
   }
-  reporters.setState((previous) => ({ ...previous, score: outcome.score }));
-  reporters.recordScore(formatNpcHistoryAppliedLabel(maskLayer.name, bins, outcome.score));
+  reporters.setState((previous) => ({ ...previous, computed: buildComputedScores(run, outcome) }));
+  recordNpcTopBandsInHistory(outcome.scores, run, reporters.recordScore);
+}
+
+function buildComputedScores(
+  run: NpcCompletedRun,
+  outcome: Extract<NpcAnalysisOutcome, { status: "computed" }>,
+): NpcComputedScores {
+  return { raster: run.raster, scores: outcome.scores };
+}
+
+// History names the same rows the panel lists, in the same order.
+function recordNpcTopBandsInHistory(
+  scores: ReadonlyArray<number>,
+  run: NpcCompletedRun,
+  recordScore: RecordNpcScoreCallback,
+): void {
+  const topBandRows = selectTopScoringBandRows(run.raster, scores);
+  if (topBandRows.length === 0) return;
+  recordScore(formatNpcHistoryAppliedLabel(run.maskLayerName, run.bins, topBandRows));
 }

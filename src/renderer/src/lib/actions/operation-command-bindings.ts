@@ -7,6 +7,7 @@ import {
   Gauge,
   RotateCcw,
   RotateCw,
+  SignalHigh,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,6 +43,7 @@ export interface OperationCommandHandlers {
   readonly toggleBandSubset: () => void;
   readonly openActionPanel: (action: RegisteredViewportAction) => void;
   readonly openNpcPanel: () => void;
+  readonly openCnrPanel: () => void;
   readonly openRopPanel: () => void;
   readonly applyGeometricTransform: (transform: GeometricTransform) => void;
 }
@@ -69,6 +71,8 @@ function runOperationCommandBehavior(
       return openActionPanelForCommand(command, handlers);
     case "open-npc-panel":
       return handlers.openNpcPanel();
+    case "open-cnr-panel":
+      return handlers.openCnrPanel();
     case "open-rop-panel":
       return handlers.openRopPanel();
     case "apply-geometric-transform":
@@ -158,6 +162,11 @@ export const MASKS_TOGGLE_ICON: LucideIcon = Brush;
 // assignment for the score analysis (CT-308).
 export const NPC_PANEL_ICON: LucideIcon = Gauge;
 
+// Exported so the icon-uniqueness test and the CNR aside header share one icon
+// assignment for the contrast-to-noise analysis (CT-320). Not Contrast: the
+// Threshold operation already owns that one, and one icon means one operation.
+export const CNR_PANEL_ICON: LucideIcon = SignalHigh;
+
 // Exported so the icon-uniqueness test, the ROP aside header, and the kept
 // projection's action share one icon assignment (CT-309); the aside and the
 // keep action are the same operation, so sharing is deliberate (CT-295 rule).
@@ -200,6 +209,8 @@ function buildToolbarOperationItem(
     // CT-308/CT-309: the analysis panels are menu-only, so they project no
     // toolbar items.
     case "open-npc-panel":
+      return null;
+    case "open-cnr-panel":
       return null;
     case "open-rop-panel":
       return null;

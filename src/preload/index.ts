@@ -652,6 +652,21 @@ function resetDialogQueuesForTest(): Promise<void> {
   return ipcRenderer.invoke(RESET_DIALOG_QUEUES_CHANNEL) as Promise<void>;
 }
 
+// CT-309: a forced ROP seed (see src/shared/e2e-rop-seed-argument.ts) so a
+// projection press is reproducible against the pinned reference output.
+// CT-316: a spec can change it at runtime (a second press with a different
+// seed); the value lives here in the preload world, so the bridge exposes a
+// reader and a writer rather than a snapshot.
+let ropForcedSeedOverride = readRopSeedOverrideFromArguments(process.argv);
+
+function readRopForcedSeedOverrideForTest(): number | null {
+  return ropForcedSeedOverride;
+}
+
+function setRopForcedSeedOverrideForTest(seed: number | null): void {
+  ropForcedSeedOverride = seed;
+}
+
 const e2eTestBridge = {
   enqueueOpenDialogPaths: enqueueOpenDialogPathsForTest,
   enqueueSaveDialogPath: enqueueSaveDialogPathForTest,
@@ -659,9 +674,8 @@ const e2eTestBridge = {
   // CT-260: a lowered raster-memory budget (see src/shared/e2e-memory-budget-argument.ts)
   // so e2e can trigger memory refusals with tiny fixtures.
   memoryBudgetOverrideBytes: readMemoryBudgetOverrideBytesFromArguments(process.argv),
-  // CT-309: a forced ROP seed (see src/shared/e2e-rop-seed-argument.ts) so a
-  // projection press is reproducible against the pinned reference output.
-  ropForcedSeedOverride: readRopSeedOverrideFromArguments(process.argv),
+  readRopForcedSeedOverride: readRopForcedSeedOverrideForTest,
+  setRopForcedSeedOverride: setRopForcedSeedOverrideForTest,
 } as const;
 
 export type ToolboxE2eBridge = typeof e2eTestBridge;

@@ -11,7 +11,7 @@ import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
 import {
   closeMasksOptions,
-  computeNpcScore,
+  computeNpcScores,
   expectScoreWithinRelativeTolerance,
   importMaskFromPath,
   loadFixtureAsStack,
@@ -19,7 +19,8 @@ import {
   npcComputeButton,
   npcMaskLayerPicker,
   npcOptionsPanel,
-  npcScoreReadout,
+  npcScorePlot,
+  npcScoresSection,
   NPC_NOT_COMPUTED_TEXT,
   NPC_PANEL_LABEL,
   openMasksOptions,
@@ -27,6 +28,7 @@ import {
   readHistoryEntries,
   selectPanel,
   setNpcBinCount,
+  type NpcTopBandRowReadout,
 } from "./support/page-objects";
 import { runAsStoryboardStep } from "./support/storyboard-step";
 
@@ -36,14 +38,57 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //
 // ORACLE: manifest.json's builtinScriptReferences, pinned by the CT-307
 // reference runner executing the SAME packaged npc.py under the bundled Python
-// runtime, outside the app. The 255-bin score is exactly 1 (those classes never
-// share a value), so the spec also scores a COARSE 2-bin run, where the classes
-// do share bins and the reference is 0.25 - a value no stub can guess.
+// runtime, outside the app. CT-318 scores every band on its own, so each
+// reference is a LIST with one score per band; CT-319 reads every band of it
+// back through the aside's "Top bands" list, which is sorted best first with
+// ties broken by band order.
 
 const PANEL = 1;
 const MASK_LAYER_NAME = maskMultibandPng.name ?? "Parchment mask";
 const DEFAULT_BINS = builtinScriptReferences.npc.params.bins;
 const COARSE_BINS = builtinScriptReferences.npcCoarseBins.params.bins;
+const FINE_BAND_SCORES = builtinScriptReferences.npc.value;
+const COARSE_BAND_SCORES = builtinScriptReferences.npcCoarseBins.value;
+const MAX_TOP_BAND_ROWS = 5;
+
+// The panel shows a score to four significant figures, trailing zeros kept.
+function formatScoreAsThePanelDoes(score: number): string {
+  return score.toPrecision(4);
+}
+
+interface ExpectedTopBandRow {
+  readonly bandIdentityText: string;
+  readonly score: number;
+}
+
+function describeExpectedTopBandRows(
+  scores: ReadonlyArray<number>,
+): ReadonlyArray<ExpectedTopBandRow> {
+  return scores
+    .map((score, bandIndex) => ({ bandIdentityText: `Band ${bandIndex + 1}`, score, bandIndex }))
+    .sort((left, right) => right.score - left.score || left.bandIndex - right.bandIndex)
+    .slice(0, MAX_TOP_BAND_ROWS);
+}
+
+function describeExpectedHistoryDetail(bins: number, scores: ReadonlyArray<number>): string {
+  const rows = describeExpectedTopBandRows(scores)
+    .map((row) => `${row.bandIdentityText} ${formatScoreAsThePanelDoes(row.score)}`)
+    .join(", ");
+  return `NPC (${MASK_LAYER_NAME}, ${bins} bins): ${rows}`;
+}
+
+function expectTopBandRowsMatchReference(
+  rows: ReadonlyArray<NpcTopBandRowReadout>,
+  scores: ReadonlyArray<number>,
+): void {
+  const expected = describeExpectedTopBandRows(scores);
+  expect(rows.map((row) => row.bandIdentityText)).toEqual(
+    expected.map((row) => row.bandIdentityText),
+  );
+  rows.forEach((row, index) => {
+    expectScoreWithinRelativeTolerance(Number(row.scoreText), expected[index]?.score ?? Number.NaN);
+  });
+}
 
 let launched: LaunchedApp;
 
@@ -57,22 +102,23 @@ test.afterEach(async () => {
   await closeToolboxApp(launched);
 });
 
-test("scores the imported mask at both binnings and records each run in History", async () => {
+test("plots every band's score, lists the top bands, and records each run in History", async () => {
   const page = launched.window;
 
   await importTheParchmentMask(page);
   await openOperation(page, NPC_PANEL_LABEL);
   await expectPanelDefaultsToTheImportedLayer(page);
 
-  const fineScore = await computeNpcScore(page);
-  expectScoreWithinRelativeTolerance(fineScore, builtinScriptReferences.npc.value);
+  const fineRows = await computeNpcScores(page);
+  expectTopBandRowsMatchReference(fineRows, FINE_BAND_SCORES);
+  await expectThePlotIsOnScreen(page);
 
-  await setNpcBinCount(page, Number(COARSE_BINS));
-  const coarseScore = await computeNpcScore(page);
-  expectScoreWithinRelativeTolerance(coarseScore, builtinScriptReferences.npcCoarseBins.value);
+  await expectChangingTheBinsClearsTheResults(page, Number(COARSE_BINS));
+  const coarseRows = await computeNpcScores(page);
+  expectTopBandRowsMatchReference(coarseRows, COARSE_BAND_SCORES);
 
   await closeNpcOptions(page);
-  await expectHistoryRecordsBothScores(page);
+  await expectHistoryRecordsBothRuns(page);
 });
 
 test("keeps the controls disabled until a mask layer has two painted categories", async () => {
@@ -86,7 +132,7 @@ test("keeps the controls disabled until a mask layer has two painted categories"
   await openOperation(page, NPC_PANEL_LABEL);
 
   await expect(npcComputeButton(page)).toBeEnabled();
-  await expect(npcScoreReadout(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
+  await expect(npcScoresSection(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
 });
 
 async function importTheParchmentMask(page: Page): Promise<void> {
@@ -107,7 +153,7 @@ async function expectPanelDefaultsToTheImportedLayer(page: Page): Promise<void> 
     await expect(npcMaskLayerPicker(page)).toHaveValue(/.+/);
     await expect(npcMaskLayerPicker(page).locator("option")).toHaveText([MASK_LAYER_NAME]);
     await expect(npcBinsField(page)).toHaveValue(String(DEFAULT_BINS));
-    await expect(npcScoreReadout(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
+    await expect(npcScoresSection(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
     // A score is not a raster, so the panel offers no result destination.
     await expect(npcOptionsPanel(page).getByRole("button", { name: "Apply" })).toHaveCount(0);
   });
@@ -122,13 +168,27 @@ async function expectPanelBlockedWithAnExplanation(page: Page): Promise<void> {
   });
 }
 
-async function expectHistoryRecordsBothScores(page: Page): Promise<void> {
+async function expectThePlotIsOnScreen(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "See the per-band score plot", async () => {
+    await expect(npcScorePlot(page)).toBeVisible();
+    await expect(npcScorePlot(page).getByRole("img", { name: "NPC per band plot" })).toBeVisible();
+  });
+}
+
+async function expectChangingTheBinsClearsTheResults(page: Page, bins: number): Promise<void> {
+  await setNpcBinCount(page, bins);
+  await runAsStoryboardStep(page, "See the plot and list cleared by the new bin count", async () => {
+    await expect(npcScoresSection(page)).toHaveText(NPC_NOT_COMPUTED_TEXT);
+  });
+}
+
+async function expectHistoryRecordsBothRuns(page: Page): Promise<void> {
   await runAsStoryboardStep(page, "Read the two NPC entries in History", async () => {
     const entries = await readHistoryEntries(page);
     const npcEntries = entries.filter((entry) => entry.actionLabel === NPC_PANEL_LABEL);
     expect(npcEntries.map((entry) => entry.detailLines.join(" "))).toEqual([
-      `NPC (${MASK_LAYER_NAME}, ${DEFAULT_BINS} bins): 1.000`,
-      `NPC (${MASK_LAYER_NAME}, ${COARSE_BINS} bins): 0.2500`,
+      describeExpectedHistoryDetail(Number(DEFAULT_BINS), FINE_BAND_SCORES),
+      describeExpectedHistoryDetail(Number(COARSE_BINS), COARSE_BAND_SCORES),
     ]);
   });
 }

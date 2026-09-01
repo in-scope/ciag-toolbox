@@ -88,6 +88,11 @@ export interface BuiltinScriptValueReference extends BuiltinScriptReferenceBase 
   readonly value: number;
 }
 
+// CT-318: a per-band measurement pins one score per band, in band order.
+export interface BuiltinScriptValueListReference extends BuiltinScriptReferenceBase {
+  readonly value: ReadonlyArray<number>;
+}
+
 export interface BuiltinScriptCubeReference extends BuiltinScriptReferenceBase {
   readonly shape: ReadonlyArray<number>;
   readonly values: ReadonlyArray<number>;
@@ -95,16 +100,21 @@ export interface BuiltinScriptCubeReference extends BuiltinScriptReferenceBase {
 
 export interface BuiltinScriptReferences {
   readonly ropSeed: number;
-  readonly npc: BuiltinScriptValueReference;
-  // CT-308: the same fixture scored with a coarse binning, where the two mask
-  // classes share bins, so the pinned value is not the trivially separable 1.
-  readonly npcCoarseBins: BuiltinScriptValueReference;
+  readonly npc: BuiltinScriptValueListReference;
+  // CT-318: the same fixture scored with a coarse binning. Scored band by band
+  // over each band's own min-max, both binnings read [1, 1, 1] on this fixture:
+  // what the pair still pins is one score PER BAND, in band order.
+  readonly npcCoarseBins: BuiltinScriptValueListReference;
   readonly rop: BuiltinScriptCubeReference;
   // CT-309: the CNR objective score of the pinned rop candidate against the
   // mask fixture (text = category 1, background = category 2), computed by the
   // generator in JS over the float32 reference values with the exact locked
   // formula, since the app computes CNR in TS rather than in Python.
   readonly ropCnr: BuiltinScriptValueReference;
+  // CT-320: the CNR tool scores every band of multiband-12bit.tif against the
+  // mask fixture (text = category 1, background = category 2), computed by the
+  // generator in JS with the same locked formula the app runs in TS.
+  readonly cnrPerBand: BuiltinScriptValueListReference;
   // CT-310: the best of 50 seeded candidates under the committed custom
   // objective (mask-contrast-objective.py), and that winner's score computed in
   // JS. The winner is NOT the first draw, so a search that ignored its

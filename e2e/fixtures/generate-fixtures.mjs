@@ -976,6 +976,8 @@ value = module.run(cube, request.get("wavelengths"), params)
 if isinstance(value, np.ndarray):
     coerced = np.ascontiguousarray(np.asarray(value).astype("<f4", copy=False))
     out = {"kind": "cube", "shape": list(coerced.shape), "values": coerced.astype(np.float64).ravel().tolist()}
+elif isinstance(value, (list, tuple)):
+    out = {"kind": "value", "value": [float(entry) for entry in value]}
 else:
     out = {"kind": "value", "value": float(value)}
 sys.stdout.write(json.dumps(out))
@@ -1041,10 +1043,12 @@ function listBuiltinScriptReferenceRequests(fixtures) {
       params: { bins: 255 },
       request: { cube: multibandCube, masks: multibandMasks, params: { bins: 255 } },
     },
-    // CT-308: multiband-12bit's two mask classes are fully separable, so the
-    // 255-bin score is exactly 1 and a stub returning 1 would pass. A coarse
-    // binning forces the classes to share bins, pinning a score that only a
-    // real run can reproduce.
+    // CT-318: since NPC is scored BAND BY BAND over that band's own min-max,
+    // this coarse binning no longer separates the pinned values from the fine
+    // one. Each band of multiband-12bit is a ramp whose two mask classes sit in
+    // its lowest and highest quarter, so every band scores exactly 1 at every
+    // bin count and both references read [1, 1, 1]. What the pinned reference
+    // still proves is the SHAPE: one score per band, in band order.
     npcCoarseBins: {
       script: "npc",
       fixture: fixtures.multiBandTiff.fileName,
@@ -1115,6 +1119,11 @@ function computeBuiltinScriptReferenceOutputs(fixtures) {
     references[key] = describeReferenceOutput(definition, interpreterPath);
     process.stdout.write(`pinned builtin reference ${key} (${definition.script})\n`);
   }
+  references.cnrPerBand = describeCnrPerBandReference(
+    fixtures.multiBandTiff,
+    fixtures.maskMultibandPng,
+  );
+  process.stdout.write(`pinned builtin reference cnrPerBand (computed in JS per band)\n`);
   references.ropCnr = describeRopCnrReference(references.rop, fixtures.maskMultibandPng);
   process.stdout.write(`pinned builtin reference ropCnr (computed in JS from rop)\n`);
   references.ropSearchScore = describeRopSearchScoreReference(
@@ -1139,6 +1148,29 @@ function describeRopSearchScoreReference(searchReference, maskFixture) {
     params: searchReference.params,
     value: meanOf(text) - meanOf(background),
   };
+}
+
+// CT-320: CNR is a Multi-band tool of its own, scored BAND BY BAND with the
+// same locked formula. The app computes it in TS, so the reference is computed
+// here the same way, over each band's own values: text = mask category 1,
+// background = category 2. Every band of multiband-12bit.tif is the same ramp
+// at a different offset and the two mask classes are its top and bottom row, so
+// all three bands read the same score - what the pinned list still proves is one
+// score PER BAND, in band order, with the right sign and magnitude.
+function describeCnrPerBandReference(stackFixture, maskFixture) {
+  return {
+    script: 'cnr',
+    fixture: stackFixture.fileName,
+    maskFixture: maskFixture.fileName,
+    params: { textCategory: 1, backgroundCategory: 2 },
+    value: stackFixture.bands.map((band) => cnrScoreOfBand(band, maskFixture.values, 1, 2)),
+  };
+}
+
+function cnrScoreOfBand(band, maskValues, textCategory, backgroundCategory) {
+  const text = collectMaskCategoryValues(band, maskValues, textCategory);
+  const background = collectMaskCategoryValues(band, maskValues, backgroundCategory);
+  return (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
 }
 
 // CT-309: the app computes the CNR objective in TS (not Python), so its

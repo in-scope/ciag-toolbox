@@ -3,6 +3,7 @@ import { BoxSelect, FolderInput, FolderOpen, Grid2x2 } from "lucide-react";
 
 import {
   buildToolbarOperationGroups,
+  CNR_PANEL_ICON,
   MASKS_TOGGLE_ICON,
   NPC_PANEL_ICON,
   QUICK_TRANSFORM_ICONS,
@@ -31,6 +32,9 @@ const TOOLBAR_CHROME_AND_TOGGLE_ICONS: ReadonlyArray<[string, RegisteredActionIc
   ["toggle-region-tool", BoxSelect],
   ["toggle-masks", MASKS_TOGGLE_ICON],
   ["npc", NPC_PANEL_ICON],
+  // CT-320: CNR is its own Multi-band tool, so its aside header icon is tracked
+  // here alongside NPC's.
+  ["cnr", CNR_PANEL_ICON],
   // CT-309: the ROP aside and the kept-projection action share this icon on
   // purpose (same operation); the uniqueness sweep tracks it once under "rop".
   ["rop", ROP_PANEL_ICON],
@@ -64,6 +68,7 @@ function buildIdleToolbarContext(): ToolbarOperationGroupContext {
       toggleBandSubset: () => {},
       openActionPanel: () => {},
       openNpcPanel: () => {},
+      openCnrPanel: () => {},
       openRopPanel: () => {},
       applyGeometricTransform: () => {},
     },
