@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.2](https://github.com/in-scope/charm-toolbox/compare/v0.6.1...v0.6.2) (2026-09-01)
+
+
+### Features
+
+* **CT-327:** export a mask layer as a zip of per-category pngs ([960a8f8](https://github.com/in-scope/charm-toolbox/commit/960a8f818727c418fa693ecb15ea7bda6a43daea))
+* **CT-328:** import a mask from a zip or from several pngs at once ([aa27925](https://github.com/in-scope/charm-toolbox/commit/aa2792559690f5584825cc5aafad77a1fd056939))
+
+
+### Bug Fixes
+
+* **CT-322:** score cnr as the absolute mean difference over the background spread ([b953839](https://github.com/in-scope/charm-toolbox/commit/b9538392228b03110a0611c86538b7da552048d0))
+* **CT-322:** update tests for absolute-value cnr scoring ([c5c4873](https://github.com/in-scope/charm-toolbox/commit/c5c48731ad5c0beaf8d78b181f6aefeb52437e76))
+* **CT-323:** reset panel rendering state when replacing its stack ([dc8f04b](https://github.com/in-scope/charm-toolbox/commit/dc8f04b36ef95bd7c8db3178fa5484e987eba056))
+* **CT-324:** clamp a result's selected band index to the result raster ([b5d7fbf](https://github.com/in-scope/charm-toolbox/commit/b5d7fbfbd419e66001d5312cc3445b30135e8928))
+* **CT-325:** accept 1-, 2-, and 4-bit mask PNGs ([b544818](https://github.com/in-scope/charm-toolbox/commit/b5448183deb1155f4a10bdb294c5d319713deb73))
+* **CT-326:** map imported mask pixel values to ascending categories ([b4c8903](https://github.com/in-scope/charm-toolbox/commit/b4c89030ce4e524535426c5b321920edde7b9eb0))
+
+
+### Miscellaneous
+
+* release 0.6.2 ([c7b0509](https://github.com/in-scope/charm-toolbox/commit/c7b05096ff355b6b19aa3c7c5a7a9f5fa4c1f585))
+
 ## [0.6.1](https://github.com/in-scope/ciag-toolbox/compare/v0.6.0...v0.6.1) (2026-09-01)
 
 
