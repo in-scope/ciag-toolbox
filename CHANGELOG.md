@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.1](https://github.com/in-scope/ciag-toolbox/compare/v0.6.0...v0.6.1) (2026-09-01)
+
+
+### Features
+
+* **CT-315:** pin the rop aside to the panel it was opened on ([bedfede](https://github.com/in-scope/ciag-toolbox/commit/bedfedee42c2a83d0cc230e0467a5c4bc3919188))
+* **CT-316:** deliver each rop press as a one-band stack in a candidate panel ([5eaaa63](https://github.com/in-scope/ciag-toolbox/commit/5eaaa6363c5ecdb71b8c444f05a88912e95e7644))
+* **CT-317:** freeze the candidate panel on keep and deliver search winners frozen ([b3c2824](https://github.com/in-scope/ciag-toolbox/commit/b3c28244102002d96890729756e92f2ea77700f3))
+* **CT-318:** score npc per band instead of over the pooled stack ([29ee918](https://github.com/in-scope/ciag-toolbox/commit/29ee918435ead8c731b08e07d18ca4b157bc18ca))
+* **CT-319:** show npc per-band scores as a plot and a top-5 list ([87cb537](https://github.com/in-scope/ciag-toolbox/commit/87cb5373cc6128538a6a22a8d83b93fb28bd2df0))
+* **CT-320:** add cnr as its own multi-band tool, scored per band ([067e910](https://github.com/in-scope/ciag-toolbox/commit/067e91030e9320ff5a876e8fcdb7407960249684))
+* **CT-321:** make the app icon read CHARM beneath the layers symbol ([9e6ada5](https://github.com/in-scope/ciag-toolbox/commit/9e6ada598b29026dcdfe8f24527ec5f3a03653f5))
+
+
+### Miscellaneous
+
+* pin the demo fixes release to 0.6.1 ([afea41e](https://github.com/in-scope/ciag-toolbox/commit/afea41e4c555f80d6e88d199f28242f0f25fd347))
+
 ## [0.6.0](https://github.com/in-scope/ciag-toolbox/compare/v0.5.1...v0.6.0) (2026-08-23)
 
 
