@@ -4,6 +4,7 @@ import {
   buildImportedMaskLayerContent,
   describeMaskDimensionMismatchOrNull,
   MASK_TOO_MANY_CATEGORIES_MESSAGE,
+  remapMaskValuesToCategoryIndexes,
 } from "@/lib/masks/mask-import";
 import type { DecodedMaskPng } from "@/lib/masks/mask-png-decode";
 import type { MaskSidecarDocument } from "@/lib/masks/mask-sidecar";
@@ -73,10 +74,10 @@ describe("buildImportedMaskLayerContent", () => {
     ]);
   });
 
-  it("builds one category per index the mask actually paints", () => {
+  it("builds one category per distinct non-zero value the mask actually paints", () => {
     const content = buildImportedMaskLayerContent({
       fileName: "three.png",
-      decoded: buildDecodedMask([0, 3, 1, 0]),
+      decoded: buildDecodedMask([5, 3, 1, 0]),
       sidecar: null,
     });
     expect(content.categories).toHaveLength(3);
@@ -103,13 +104,50 @@ describe("buildImportedMaskLayerContent", () => {
     expect({ width: content.width, height: content.height }).toEqual({ width: 2, height: 2 });
   });
 
-  it("refuses a mask holding a category index above the five-category cap", () => {
+  it("refuses a mask holding more than five distinct non-zero pixel values", () => {
     expect(() =>
       buildImportedMaskLayerContent({
         fileName: "too-many.png",
-        decoded: buildDecodedMask([0, 6, 1, 0]),
+        decoded: buildDecodedMask([1, 2, 3, 4, 5, 6, 0, 0]),
         sidecar: null,
       }),
+    ).toThrow(MASK_TOO_MANY_CATEGORIES_MESSAGE);
+  });
+
+  it("maps a 0/255 mask (and a sidecar-less import) to a single named category", () => {
+    const content = buildImportedMaskLayerContent({
+      fileName: "binary-255.png",
+      decoded: buildDecodedMask([0, 255, 255, 0]),
+      sidecar: null,
+    });
+    expect(content.name).toBe("binary-255");
+    expect(Array.from(content.values)).toEqual([0, 1, 1, 0]);
+    expect(content.categories).toHaveLength(1);
+    expect(content.categories[0]?.name).toBe("Foreground");
+  });
+});
+
+describe("remapMaskValuesToCategoryIndexes", () => {
+  it("maps 0/255 to 0/1", () => {
+    expect(Array.from(remapMaskValuesToCategoryIndexes(Uint8Array.from([0, 255, 0, 255])))).toEqual([
+      0, 1, 0, 1,
+    ]);
+  });
+
+  it("leaves 0/1 unchanged and returns the same array", () => {
+    const values = Uint8Array.from([0, 1, 1, 0]);
+    expect(remapMaskValuesToCategoryIndexes(values)).toBe(values);
+  });
+
+  it("maps 0/127/255 to 0/1/2", () => {
+    expect(
+      Array.from(remapMaskValuesToCategoryIndexes(Uint8Array.from([0, 127, 255, 127]))),
+    ).toEqual([0, 1, 2, 1]);
+  });
+
+  it("refuses more than five distinct non-zero values", () => {
+    expect(() =>
+      remapMaskValuesToCategoryIndexes(Uint8Array.from([1, 2, 3, 4, 5, 6])),
     ).toThrow(MASK_TOO_MANY_CATEGORIES_MESSAGE);
   });
 });

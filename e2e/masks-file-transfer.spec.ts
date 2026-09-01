@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
 import {
   fixturePath,
   maskBinary1BitPng,
+  maskBinary255Png,
   maskEightBySquarePng,
   maskMultibandPng,
   multiBandTiff,
@@ -82,25 +83,45 @@ test("imports a 1-bit black-and-white mask as a single painted category", async 
 
   await openMasksOptions(page);
   await importMaskFromPath(page, fixturePath(maskBinary1BitPng.fileName));
-  await expectImportedLayerCoversExactlyTheTopRow(page);
+  await expectImportedLayerCoversExactlyTheTopRow(page, "exported-binary-1bit-mask.png");
   await closeMasksOptions(page);
 
   await expectNpcStaysLockedWithOneCategory(page);
 });
 
-async function expectImportedLayerCoversExactlyTheTopRow(page: Page): Promise<void> {
-  await runAsStoryboardStep(page, "Check the imported 1-bit layer's single category", async () => {
+test("maps a 0/255 mask to a single category covering the top row", async () => {
+  const page = launched.window;
+
+  await openMasksOptions(page);
+  await importMaskFromPath(page, fixturePath(maskBinary255Png.fileName));
+  await expectImportedLayerCoversExactlyTheTopRow(page, "exported-binary-255-mask.png");
+  await closeMasksOptions(page);
+
+  await expectNpcStaysLockedWithOneCategory(page);
+});
+
+// Both mask-binary-1bit.png (raw sample 1) and mask-binary-255.png (raw
+// sample 255, remapped to category 1 by CT-326) paint the SAME top-row
+// category, so the exported layer's re-decoded values are identical either
+// way and are asserted against the 1-bit fixture's own already-1-based values.
+const EXPECTED_TOP_ROW_CATEGORY_VALUES = maskBinary1BitPng.values;
+
+async function expectImportedLayerCoversExactlyTheTopRow(
+  page: Page,
+  exportFileName: string,
+): Promise<void> {
+  await runAsStoryboardStep(page, "Check the imported layer's single category", async () => {
     await expect(maskLayerOptions(page)).toHaveCount(1);
     await expect(maskCategoryNameFields(page)).toHaveCount(1);
   });
-  const exportPath = join(await createTemporaryExportDirectory(), "exported-binary-mask.png");
+  const exportPath = join(await createTemporaryExportDirectory(), exportFileName);
   await exportSelectedMaskToPath(page, exportPath);
   await runAsStoryboardStep(page, "Decode the exported binary mask in Node", async () => {
     const decoded = await sharp(exportPath)
       .toColourspace("b-w")
       .raw()
       .toBuffer({ resolveWithObject: true });
-    expect(Array.from(decoded.data)).toEqual([...maskBinary1BitPng.values]);
+    expect(Array.from(decoded.data)).toEqual([...EXPECTED_TOP_ROW_CATEGORY_VALUES]);
   });
 }
 

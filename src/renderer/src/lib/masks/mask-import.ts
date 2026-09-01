@@ -22,9 +22,43 @@ export interface MaskImportSource {
 }
 
 export const MASK_TOO_MANY_CATEGORIES_MESSAGE =
-  `This mask uses more than ${MAX_MASK_CATEGORY_COUNT} categories. ` +
-  `A mask layer holds at most ${MAX_MASK_CATEGORY_COUNT} categories ` +
-  `(pixel values 0 to ${MAX_MASK_CATEGORY_COUNT}).`;
+  `This mask uses more than ${MAX_MASK_CATEGORY_COUNT} distinct pixel values besides 0. ` +
+  `A mask layer holds at most ${MAX_MASK_CATEGORY_COUNT} categories.`;
+
+// CT-326: a mask from another tool rarely paints 1..N already (0/255 is the
+// common binary case). Distinct non-zero pixel values are remapped, sorted
+// ascending, to 1..N so they become valid category indexes; 0 always stays
+// unlabeled. Returns the SAME array when it is already 1..N so callers never
+// pay for a copy on the common re-import-of-our-own-export path.
+export function remapMaskValuesToCategoryIndexes(values: Uint8Array): Uint8Array {
+  const distinctNonZeroSorted = collectDistinctNonZeroValuesSorted(values);
+  if (distinctNonZeroSorted.length > MAX_MASK_CATEGORY_COUNT) {
+    throw new Error(MASK_TOO_MANY_CATEGORIES_MESSAGE);
+  }
+  if (isAlreadyAscendingFromOne(distinctNonZeroSorted)) return values;
+  const remapTable = buildRemapTableToAscendingIndexes(distinctNonZeroSorted);
+  return Uint8Array.from(values, (value) => remapTable[value] ?? 0);
+}
+
+function collectDistinctNonZeroValuesSorted(values: Uint8Array): number[] {
+  const distinct = new Set<number>();
+  for (const value of values) {
+    if (value !== 0) distinct.add(value);
+  }
+  return Array.from(distinct).sort((a, b) => a - b);
+}
+
+function isAlreadyAscendingFromOne(sortedDistinctValues: ReadonlyArray<number>): boolean {
+  return sortedDistinctValues.every((value, index) => value === index + 1);
+}
+
+function buildRemapTableToAscendingIndexes(sortedDistinctValues: ReadonlyArray<number>): Uint8Array {
+  const table = new Uint8Array(256);
+  sortedDistinctValues.forEach((rawValue, index) => {
+    table[rawValue] = index + 1;
+  });
+  return table;
+}
 
 export interface MaskGridSize {
   readonly width: number;
@@ -44,31 +78,35 @@ export function describeMaskDimensionMismatchOrNull(
 }
 
 export function buildImportedMaskLayerContent(source: MaskImportSource): MaskLayerContent {
-  const categoryCount = countCategoriesToBuildForImport(source);
+  const values = remapMaskValuesToCategoryIndexes(source.decoded.values);
+  const categoryCount = countCategoriesToBuildForImport(values, source.sidecar);
   return {
     name: source.sidecar?.name ?? stripFileExtension(source.fileName),
     width: source.decoded.width,
     height: source.decoded.height,
-    values: source.decoded.values,
+    values,
     categories: buildImportedCategories(categoryCount, source.sidecar),
     opacityPercent: source.sidecar?.opacity ?? DEFAULT_MASK_LAYER_OPACITY_PERCENT,
   };
 }
 
-// The layer needs a category per index the PNG actually paints; a sidecar may
-// name more (a category the user painted nothing with yet).
-function countCategoriesToBuildForImport(source: MaskImportSource): number {
-  const painted = findHighestCategoryValueOrThrow(source.decoded.values);
-  const described = source.sidecar?.categories.length ?? 0;
+// The layer needs a category per index the (already remapped) PNG actually
+// paints; a sidecar may name more (a category the user painted nothing with
+// yet).
+function countCategoriesToBuildForImport(
+  values: Uint8Array,
+  sidecar: MaskSidecarDocument | null,
+): number {
+  const painted = findHighestCategoryValue(values);
+  const described = sidecar?.categories.length ?? 0;
   return Math.min(MAX_MASK_CATEGORY_COUNT, Math.max(1, painted, described));
 }
 
-function findHighestCategoryValueOrThrow(values: Uint8Array): number {
+function findHighestCategoryValue(values: Uint8Array): number {
   let highest = 0;
   for (const value of values) {
     if (value > highest) highest = value;
   }
-  if (highest > MAX_MASK_CATEGORY_COUNT) throw new Error(MASK_TOO_MANY_CATEGORIES_MESSAGE);
   return highest;
 }
 
