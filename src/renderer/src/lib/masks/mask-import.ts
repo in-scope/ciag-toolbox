@@ -65,6 +65,18 @@ export interface MaskGridSize {
   readonly height: number;
 }
 
+// CT-328: a multi-file or zip import refuses on the FIRST mask that does not
+// cover the stack, so its message has to say which file was wrong.
+export function describeMaskFileDimensionMismatchOrNull(
+  fileName: string,
+  mask: MaskGridSize,
+  stackWidth: number,
+  stackHeight: number,
+): string | null {
+  const mismatch = describeMaskDimensionMismatchOrNull(mask, stackWidth, stackHeight);
+  return mismatch === null ? null : `${fileName}: ${mismatch}`;
+}
+
 export function describeMaskDimensionMismatchOrNull(
   mask: MaskGridSize,
   stackWidth: number,
@@ -131,7 +143,9 @@ function buildImportedCategoryAtIndex(
   );
 }
 
-function stripFileExtension(fileName: string): string {
+// The layer (or, in a multi-file import, the category) is named after the
+// file that carried it, without its extension.
+export function stripFileExtension(fileName: string): string {
   const lastDot = fileName.lastIndexOf(".");
   return lastDot <= 0 ? fileName : fileName.slice(0, lastDot);
 }

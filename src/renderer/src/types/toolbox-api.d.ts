@@ -102,15 +102,17 @@ interface ToolboxPng16DecodeAbortRequest {
   token: string;
 }
 
-// CT-303: the mask import dialog reply is metadata plus the small JSON
-// sidecar (mirrors MaskImportDialogResult in src/preload/index.ts).
+// CT-303/CT-328: the mask import dialog reply is one entry per picked file, in
+// pick order, each metadata plus the small JSON sidecar that sat beside it
+// (mirrors MaskImportDialogResult in src/preload/index.ts).
+interface ToolboxPickedMaskFileDescription {
+  file: ToolboxOpenImagesDialogFileMetadataEntry;
+  sidecarText: string | null;
+}
+
 type ToolboxMaskImportDialogResult =
   | { canceled: true }
-  | {
-      canceled: false;
-      file: ToolboxOpenImagesDialogFileMetadataEntry;
-      sidecarText: string | null;
-    };
+  | { canceled: false; files: ReadonlyArray<ToolboxPickedMaskFileDescription> };
 
 interface ToolboxSaveImageFileFilter {
   name: string;

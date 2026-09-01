@@ -466,6 +466,7 @@ export {
   addMaskCategoryButton,
   closeMasksOptions,
   createMaskLayer,
+  maskCategoryColorField,
   maskCategoryNameField,
   maskCategoryNameFields,
   maskLayerNameField,
@@ -498,6 +499,7 @@ export {
   findMaskZipSidecarStemOrThrow,
   importMaskButton,
   importMaskFromPath,
+  importMasksFromPaths,
   maskToastContaining,
   type DecodedMaskIndexPng,
 } from "./mask-file-transfer";

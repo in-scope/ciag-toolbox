@@ -47,3 +47,10 @@ function copyIntoPlainArrayBufferView(bytes: Uint8Array): Uint8Array<ArrayBuffer
   copied.set(bytes);
   return copied;
 }
+
+// CT-328: a zip entry compressed with the DEFLATE method carries RAW deflate
+// (RFC 1951) with no zlib wrapper around it, unlike a PNG's IDAT stream, so
+// reading one needs the "deflate-raw" format rather than "deflate".
+export async function decompressRawDeflateBytes(bytes: Uint8Array): Promise<Uint8Array> {
+  return pumpBytesThroughTransform(bytes, new DecompressionStream("deflate-raw"));
+}

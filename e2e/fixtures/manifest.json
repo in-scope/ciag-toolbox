@@ -569,6 +569,40 @@
       0
     ]
   },
+  "maskBinaryBottom255Png": {
+    "fileName": "mask-binary-bottom-255.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      255,
+      255,
+      255,
+      255
+    ]
+  },
+  "maskMultibandCategoriesZip": {
+    "fileName": "mask-multiband-categories.zip",
+    "entryNames": [
+      "Parchment.png",
+      "Substrate.png",
+      "mask-multiband.png",
+      "mask-multiband.json"
+    ],
+    "indexPngEntryName": "mask-multiband.png",
+    "sidecarEntryName": "mask-multiband.json"
+  },
   "parityStackTiff": {
     "fileName": "parity-16x16.tif",
     "width": 16,

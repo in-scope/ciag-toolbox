@@ -14,14 +14,25 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+import yazl from "yazl";
 
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
-function generateAllFixtures() {
-  const fixtures = buildAllFixtures();
+async function generateAllFixtures() {
+  const fixtures = await buildAllFixturesIncludingTheMaskCategoriesZip();
   writeAllFixtureFiles(fixtures);
   const builtinScriptReferences = computeBuiltinScriptReferenceOutputs(fixtures);
   writeManifestFile(fixtures, builtinScriptReferences);
+}
+
+// The mask categories zip is built with yazl, whose writer is a stream, so it
+// is the one fixture that cannot be produced synchronously.
+async function buildAllFixturesIncludingTheMaskCategoriesZip() {
+  const fixtures = buildAllFixtures();
+  return {
+    ...fixtures,
+    maskMultibandCategoriesZip: await buildMaskCategoriesZipFixture(fixtures.maskMultibandPng),
+  };
 }
 
 function buildAllFixtures() {
@@ -41,6 +52,7 @@ function buildAllFixtures() {
     maskEightBySquarePng: buildMismatchedMaskFixture(),
     maskBinary1BitPng: buildOneBitMaskFixture(),
     maskBinary255Png: buildEightBitBinaryMaskFixture(),
+    maskBinaryBottom255Png: buildEightBitBottomRowMaskFixture(),
     parityStackTiff: buildParityStackTiffFixture(),
   };
 }
@@ -67,6 +79,14 @@ function writeAllFixtureFiles(fixtures) {
   writeFixtureFile(fixtures.maskEightBySquarePng.fileName, fixtures.maskEightBySquarePng.bytes);
   writeFixtureFile(fixtures.maskBinary1BitPng.fileName, fixtures.maskBinary1BitPng.bytes);
   writeFixtureFile(fixtures.maskBinary255Png.fileName, fixtures.maskBinary255Png.bytes);
+  writeFixtureFile(
+    fixtures.maskBinaryBottom255Png.fileName,
+    fixtures.maskBinaryBottom255Png.bytes,
+  );
+  writeFixtureFile(
+    fixtures.maskMultibandCategoriesZip.fileName,
+    fixtures.maskMultibandCategoriesZip.bytes,
+  );
   writeFixtureFile(fixtures.parityStackTiff.fileName, fixtures.parityStackTiff.bytes);
 }
 
@@ -770,6 +790,82 @@ function buildTopRowMaskValues(topRowValue) {
   return values;
 }
 
+// CT-328: mask-binary-bottom-255.png is the other half of a two-class
+// multi-file import. Picked after mask-binary-1bit.png it becomes category 2
+// over the bottom row, which is EXACTLY the layout mask-multiband.png paints,
+// so the NPC scores of the combined layer match the pinned npc reference.
+
+function buildEightBitBottomRowMaskFixture() {
+  const values = buildBottomRowMaskValues(255);
+  return {
+    fileName: "mask-binary-bottom-255.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscalePngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildBottomRowMaskValues(bottomRowValue) {
+  const values = new Uint8Array(MASK_FIXTURE_WIDTH * MASK_FIXTURE_HEIGHT);
+  const firstIndexOfLastRow = (MASK_FIXTURE_HEIGHT - 1) * MASK_FIXTURE_WIDTH;
+  for (let x = 0; x < MASK_FIXTURE_WIDTH; x += 1) values[firstIndexOfLastRow + x] = bottomRowValue;
+  return values;
+}
+
+// CT-328: a mask zip written by a DIFFERENT tool (yazl, so every entry is
+// DEFLATED, unlike the app's own STORE-only export). It holds the same four
+// files an export does - a black-and-white PNG per category plus the index PNG
+// and its sidecar - so importing it must take the LOSSLESS path and rebuild
+// mask-multiband.png's layer exactly.
+
+async function buildMaskCategoriesZipFixture(maskFixture) {
+  const entries = buildMaskCategoriesZipEntries(maskFixture);
+  return {
+    fileName: "mask-multiband-categories.zip",
+    entryNames: entries.map((entry) => entry.name),
+    indexPngEntryName: maskFixture.fileName,
+    sidecarEntryName: maskFixture.sidecarFileName,
+    bytes: await deflateEntriesIntoZipWithYazl(entries),
+  };
+}
+
+function buildMaskCategoriesZipEntries(maskFixture) {
+  return [
+    ...maskFixture.categories.map((category) =>
+      buildCategoryBinaryZipEntry(maskFixture, category),
+    ),
+    { name: maskFixture.fileName, bytes: maskFixture.bytes },
+    { name: maskFixture.sidecarFileName, bytes: maskFixture.sidecarBytes },
+  ];
+}
+
+function buildCategoryBinaryZipEntry(maskFixture, category) {
+  const values = Uint8Array.from(maskFixture.values, (value) =>
+    value === category.index ? 255 : 0,
+  );
+  return {
+    name: `${category.name}.png`,
+    bytes: encodeGrayscalePngBytes(maskFixture.width, maskFixture.height, values),
+  };
+}
+
+function deflateEntriesIntoZipWithYazl(entries) {
+  const archive = new yazl.ZipFile();
+  for (const entry of entries) archive.addBuffer(Buffer.from(entry.bytes), entry.name);
+  archive.end();
+  return collectStreamIntoBuffer(archive.outputStream);
+}
+
+function collectStreamIntoBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
 // --- PNG encoding -----------------------------------------------------------
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -1299,6 +1395,18 @@ function describeMaskFixture(fixture) {
   };
 }
 
+// A zip fixture is described by its entry names plus which of them is the
+// index PNG and which is the sidecar, so a spec never hard-codes the layer's
+// name to find them.
+function describeMaskZipFixture(fixture) {
+  return {
+    fileName: fixture.fileName,
+    entryNames: fixture.entryNames,
+    indexPngEntryName: fixture.indexPngEntryName,
+    sidecarEntryName: fixture.sidecarEntryName,
+  };
+}
+
 function buildFixtureManifest(fixtures, builtinScriptReferences) {
   return {
     note: "Generated by e2e/fixtures/generate-fixtures.mjs - do not edit by hand.",
@@ -1317,6 +1425,8 @@ function buildFixtureManifest(fixtures, builtinScriptReferences) {
     maskEightBySquarePng: describeMaskFixture(fixtures.maskEightBySquarePng),
     maskBinary1BitPng: describeMaskFixture(fixtures.maskBinary1BitPng),
     maskBinary255Png: describeMaskFixture(fixtures.maskBinary255Png),
+    maskBinaryBottom255Png: describeMaskFixture(fixtures.maskBinaryBottom255Png),
+    maskMultibandCategoriesZip: describeMaskZipFixture(fixtures.maskMultibandCategoriesZip),
     parityStackTiff: describeStackFixture(fixtures.parityStackTiff, "uint16"),
     builtinScriptReferences,
   };
@@ -1445,4 +1555,4 @@ function computeMean(band) {
   return total / band.length;
 }
 
-generateAllFixtures();
+await generateAllFixtures();

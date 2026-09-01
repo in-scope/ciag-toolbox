@@ -7,8 +7,9 @@ import { masksOptionsPanel } from "./masks-panel";
 import { runAsStoryboardStep } from "./storyboard-step";
 import { readZipEntriesByName } from "./zip-archive";
 
-// CT-303: the Masks aside's Import/Export row. Import picks a mask PNG through
-// the stubbed open dialog (its JSON sidecar, if any, is found by name in main);
+// CT-303: the Masks aside's Import/Export row. Import picks mask files through
+// the stubbed open dialog (a PNG's JSON sidecar, if any, is found by name in
+// main; CT-328 allows several PNGs or one zip in a single pick);
 // CT-327: Export writes the SELECTED layer's zip - a black-and-white PNG per
 // category plus the index PNG and its sidecar - to the stubbed save path.
 
@@ -23,6 +24,18 @@ export function exportMaskButton(page: Page): Locator {
 export async function importMaskFromPath(page: Page, maskFilePath: string): Promise<void> {
   await runAsStoryboardStep(page, `Import the mask at ${maskFilePath}`, async () => {
     await enqueueOpenDialogPaths(page, [maskFilePath]);
+    await importMaskButton(page).click();
+  });
+}
+
+// CT-328: the picker is a multi-selection, so several PNGs (one category per
+// file, in pick order) or one zip go through the SAME button.
+export async function importMasksFromPaths(
+  page: Page,
+  maskFilePaths: ReadonlyArray<string>,
+): Promise<void> {
+  await runAsStoryboardStep(page, `Import ${maskFilePaths.length} mask files at once`, async () => {
+    await enqueueOpenDialogPaths(page, maskFilePaths);
     await importMaskButton(page).click();
   });
 }
