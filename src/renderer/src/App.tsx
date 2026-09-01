@@ -199,6 +199,7 @@ import {
   runOpenImagesDialogPhase,
 } from "@/lib/image/run-open-images-flow";
 import { buildConfirmedStackFromOrderedEntriesWithProgress } from "@/lib/image/confirm-stack-build";
+import { replaceViewportContentResettingPanelState } from "@/lib/image/replace-viewport-content";
 import type { DecodedStackEntry } from "@/lib/image/open-image-stack-types";
 import type {
   GroupedOpenedFileRow,
@@ -445,6 +446,7 @@ function ApplicationShell(): JSX.Element {
     gridLayoutRef,
     setGridLayout,
     setImagesByIndex,
+    setRenderingState: renderingApi.setRenderingState,
     setPendingOpenImagesReplace,
     setPendingOpenImagesReview,
     selectViewportFromClick,
@@ -723,6 +725,7 @@ function ApplicationShell(): JSX.Element {
         onConfirm={(plan) =>
           confirmOpenImagesReplaceWithAssignments(plan, pendingOpenImagesReplace, {
             setImagesByIndex,
+            setRenderingState: renderingApi.setRenderingState,
             setPendingOpenImagesReplace,
             selectViewportFromClick,
           })
@@ -737,6 +740,7 @@ function ApplicationShell(): JSX.Element {
             gridLayoutRef,
             setGridLayout,
             setImagesByIndex,
+            setRenderingState: renderingApi.setRenderingState,
             setPendingOpenImagesReplace,
             setPendingOpenImagesReview,
             selectViewportFromClick,
@@ -1369,6 +1373,7 @@ interface OpenImagesBindings {
   gridLayoutRef: MutableRefObject<GridLayout>;
   setGridLayout: SetGridLayout;
   setImagesByIndex: SetImagesByIndex;
+  setRenderingState: ViewportRenderingApi["setRenderingState"];
   setPendingOpenImagesReplace: SetPendingOpenImagesReplace;
   setPendingOpenImagesReview: SetPendingOpenImagesReview;
   selectViewportFromClick: SelectViewportFromClick;
@@ -1383,6 +1388,7 @@ function useOpenImagesThroughDialogHandler(
     gridLayoutRef,
     setGridLayout,
     setImagesByIndex,
+    setRenderingState,
     setPendingOpenImagesReplace,
     setPendingOpenImagesReview,
     selectViewportFromClick,
@@ -1395,6 +1401,7 @@ function useOpenImagesThroughDialogHandler(
         gridLayoutRef,
         setGridLayout,
         setImagesByIndex,
+        setRenderingState,
         setPendingOpenImagesReplace,
         setPendingOpenImagesReview,
         selectViewportFromClick,
@@ -1405,6 +1412,7 @@ function useOpenImagesThroughDialogHandler(
       gridLayoutRef,
       setGridLayout,
       setImagesByIndex,
+      setRenderingState,
       setPendingOpenImagesReplace,
       setPendingOpenImagesReview,
       selectViewportFromClick,
@@ -1527,6 +1535,7 @@ function routeSingleDecodedSourceToCell(
 
 interface ApplyLoadedImageBindings {
   setImagesByIndex: SetImagesByIndex;
+  setRenderingState: ViewportRenderingApi["setRenderingState"];
   selectViewportFromClick: SelectViewportFromClick;
 }
 
@@ -1539,13 +1548,15 @@ function applyLoadedImageAtIndex(
   // panel behaves like any other image (raster operations, histogram, tone curve). A source
   // that is already a raster (TIFF/ENVI/stack) is returned unchanged.
   const rasterSource = coerceViewportSourceToRasterSource(pending.source);
-  bindings.setImagesByIndex((previous) =>
-    assignViewportContentAtIndex(previous, index, {
+  replaceViewportContentResettingPanelState(
+    index,
+    {
       fileName: pending.fileName,
       source: rasterSource,
       originalFilePath: pending.originalFilePath,
       fileSizeBytes: pending.fileSizeBytes,
-    }),
+    },
+    bindings,
   );
   bindings.selectViewportFromClick(index, { ctrlOrMeta: false, shift: false });
   notifySuccess(`Loaded ${pending.fileName}`);
@@ -1699,16 +1710,6 @@ function placeItemsAtTargetIndices(
   for (let i = 0; i < targetIndices.length && i < items.length; i++) {
     applyLoadedImageAtIndex(targetIndices[i]!, items[i]!, bindings);
   }
-}
-
-function assignViewportContentAtIndex(
-  previous: ImagesByIndexMap,
-  index: number,
-  content: ViewportCellContent,
-): ImagesByIndexMap {
-  const next = new Map(previous);
-  next.set(index, content);
-  return next;
 }
 
 interface GridLayoutChangeBindings {
@@ -2094,15 +2095,16 @@ async function replaceViewportSourceWithReimportedFile(
       { remainingRasterBudgetBytes: remainingRasterBudgetBytesForViewports(bindings.imagesByIndexRef.current) },
     );
     const source = coerceViewportSourceToRasterSource(decoded.source);
-    bindings.setImagesByIndex((previous) =>
-      assignViewportContentAtIndex(previous, viewportIndex, {
+    replaceViewportContentResettingPanelState(
+      viewportIndex,
+      {
         fileName: file.fileName,
         source,
         originalFilePath: file.filePath,
         fileSizeBytes: file.fileSizeBytes,
-      }),
+      },
+      bindings,
     );
-    bindings.setRenderingState(viewportIndex, DEFAULT_VIEWPORT_RENDERING_STATE);
     notifySuccess(`Re-imported ${file.fileName}`);
   } catch (error) {
     notifyError(`Could not re-import ${file.fileName}: ${describeUnknownError(error)}`);

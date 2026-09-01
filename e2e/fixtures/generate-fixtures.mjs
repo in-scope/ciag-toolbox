@@ -14,14 +14,25 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+import yazl from "yazl";
 
 const FIXTURES_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
-function generateAllFixtures() {
-  const fixtures = buildAllFixtures();
+async function generateAllFixtures() {
+  const fixtures = await buildAllFixturesIncludingTheMaskCategoriesZip();
   writeAllFixtureFiles(fixtures);
   const builtinScriptReferences = computeBuiltinScriptReferenceOutputs(fixtures);
   writeManifestFile(fixtures, builtinScriptReferences);
+}
+
+// The mask categories zip is built with yazl, whose writer is a stream, so it
+// is the one fixture that cannot be produced synchronously.
+async function buildAllFixturesIncludingTheMaskCategoriesZip() {
+  const fixtures = buildAllFixtures();
+  return {
+    ...fixtures,
+    maskMultibandCategoriesZip: await buildMaskCategoriesZipFixture(fixtures.maskMultibandPng),
+  };
 }
 
 function buildAllFixtures() {
@@ -39,6 +50,9 @@ function buildAllFixtures() {
     enviFloatStack: buildEnviFloatStackFixture(),
     maskMultibandPng: buildMaskForMultiBandStackFixture(),
     maskEightBySquarePng: buildMismatchedMaskFixture(),
+    maskBinary1BitPng: buildOneBitMaskFixture(),
+    maskBinary255Png: buildEightBitBinaryMaskFixture(),
+    maskBinaryBottom255Png: buildEightBitBottomRowMaskFixture(),
     parityStackTiff: buildParityStackTiffFixture(),
   };
 }
@@ -63,6 +77,16 @@ function writeAllFixtureFiles(fixtures) {
     fixtures.maskMultibandPng.sidecarBytes,
   );
   writeFixtureFile(fixtures.maskEightBySquarePng.fileName, fixtures.maskEightBySquarePng.bytes);
+  writeFixtureFile(fixtures.maskBinary1BitPng.fileName, fixtures.maskBinary1BitPng.bytes);
+  writeFixtureFile(fixtures.maskBinary255Png.fileName, fixtures.maskBinary255Png.bytes);
+  writeFixtureFile(
+    fixtures.maskBinaryBottom255Png.fileName,
+    fixtures.maskBinaryBottom255Png.bytes,
+  );
+  writeFixtureFile(
+    fixtures.maskMultibandCategoriesZip.fileName,
+    fixtures.maskMultibandCategoriesZip.bytes,
+  );
   writeFixtureFile(fixtures.parityStackTiff.fileName, fixtures.parityStackTiff.bytes);
 }
 
@@ -730,6 +754,118 @@ function buildMismatchedMaskFixture() {
   };
 }
 
+// CT-325: two more masks covering multiband-12bit.tif (4x4), each with the
+// top row painted and the rest unlabeled, but written at bit depths PIL,
+// ImageJ and Photoshop actually emit for a black-and-white mask.
+// mask-binary-1bit.png is 1-bit grayscale with white (sample 1) as the top
+// row - the raw sample IS a valid category index already. mask-binary-255.png
+// is 8-bit grayscale with white (sample 255) as the top row - CT-326 remaps
+// 255 down to category 1.
+
+function buildOneBitMaskFixture() {
+  const values = buildTopRowMaskValues(1);
+  return {
+    fileName: "mask-binary-1bit.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscale1BitPngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildEightBitBinaryMaskFixture() {
+  const values = buildTopRowMaskValues(255);
+  return {
+    fileName: "mask-binary-255.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscalePngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildTopRowMaskValues(topRowValue) {
+  const values = new Uint8Array(MASK_FIXTURE_WIDTH * MASK_FIXTURE_HEIGHT);
+  for (let x = 0; x < MASK_FIXTURE_WIDTH; x += 1) values[x] = topRowValue;
+  return values;
+}
+
+// CT-328: mask-binary-bottom-255.png is the other half of a two-class
+// multi-file import. Picked after mask-binary-1bit.png it becomes category 2
+// over the bottom row, which is EXACTLY the layout mask-multiband.png paints,
+// so the NPC scores of the combined layer match the pinned npc reference.
+
+function buildEightBitBottomRowMaskFixture() {
+  const values = buildBottomRowMaskValues(255);
+  return {
+    fileName: "mask-binary-bottom-255.png",
+    width: MASK_FIXTURE_WIDTH,
+    height: MASK_FIXTURE_HEIGHT,
+    values,
+    bytes: encodeGrayscalePngBytes(MASK_FIXTURE_WIDTH, MASK_FIXTURE_HEIGHT, values),
+  };
+}
+
+function buildBottomRowMaskValues(bottomRowValue) {
+  const values = new Uint8Array(MASK_FIXTURE_WIDTH * MASK_FIXTURE_HEIGHT);
+  const firstIndexOfLastRow = (MASK_FIXTURE_HEIGHT - 1) * MASK_FIXTURE_WIDTH;
+  for (let x = 0; x < MASK_FIXTURE_WIDTH; x += 1) values[firstIndexOfLastRow + x] = bottomRowValue;
+  return values;
+}
+
+// CT-328: a mask zip written by a DIFFERENT tool (yazl, so every entry is
+// DEFLATED, unlike the app's own STORE-only export). It holds the same four
+// files an export does - a black-and-white PNG per category plus the index PNG
+// and its sidecar - so importing it must take the LOSSLESS path and rebuild
+// mask-multiband.png's layer exactly.
+
+async function buildMaskCategoriesZipFixture(maskFixture) {
+  const entries = buildMaskCategoriesZipEntries(maskFixture);
+  return {
+    fileName: "mask-multiband-categories.zip",
+    entryNames: entries.map((entry) => entry.name),
+    indexPngEntryName: maskFixture.fileName,
+    sidecarEntryName: maskFixture.sidecarFileName,
+    bytes: await deflateEntriesIntoZipWithYazl(entries),
+  };
+}
+
+function buildMaskCategoriesZipEntries(maskFixture) {
+  return [
+    ...maskFixture.categories.map((category) =>
+      buildCategoryBinaryZipEntry(maskFixture, category),
+    ),
+    { name: maskFixture.fileName, bytes: maskFixture.bytes },
+    { name: maskFixture.sidecarFileName, bytes: maskFixture.sidecarBytes },
+  ];
+}
+
+function buildCategoryBinaryZipEntry(maskFixture, category) {
+  const values = Uint8Array.from(maskFixture.values, (value) =>
+    value === category.index ? 255 : 0,
+  );
+  return {
+    name: `${category.name}.png`,
+    bytes: encodeGrayscalePngBytes(maskFixture.width, maskFixture.height, values),
+  };
+}
+
+function deflateEntriesIntoZipWithYazl(entries) {
+  const archive = new yazl.ZipFile();
+  for (const entry of entries) archive.addBuffer(Buffer.from(entry.bytes), entry.name);
+  archive.end();
+  return collectStreamIntoBuffer(archive.outputStream);
+}
+
+function collectStreamIntoBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
 // --- PNG encoding -----------------------------------------------------------
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -748,18 +884,44 @@ function encodeRgbPngBytes(width, height, samples) {
   return assemblePngBytes(width, height, PNG_COLOR_TYPE_RGB, scanlines);
 }
 
-function assemblePngBytes(width, height, colorType, rawScanlines) {
-  const header = encodePngChunk("IHDR", buildPngHeaderData(width, height, colorType));
+const PNG_BIT_DEPTH_1 = 1;
+
+// CT-325: samples are 0/1 values, packed most-significant-bit first, one row
+// of ceil(width / 8) bytes per scanline (no filtering needed at this size).
+function encodeGrayscale1BitPngBytes(width, height, samples) {
+  const scanlines = buildFiltered1BitScanlines(samples, width, height);
+  return assemblePngBytes(width, height, PNG_COLOR_TYPE_GRAYSCALE, scanlines, PNG_BIT_DEPTH_1);
+}
+
+function buildFiltered1BitScanlines(samples, width, height) {
+  const rowByteWidth = Math.ceil(width / 8);
+  const rows = [];
+  for (let y = 0; y < height; y += 1) {
+    rows.push(Buffer.concat([Buffer.from([0]), packOneBitRow(samples, y * width, width, rowByteWidth)]));
+  }
+  return Buffer.concat(rows);
+}
+
+function packOneBitRow(samples, rowStart, width, rowByteWidth) {
+  const packed = Buffer.alloc(rowByteWidth);
+  for (let x = 0; x < width; x += 1) {
+    if (samples[rowStart + x]) packed[Math.floor(x / 8)] |= 0x80 >> x % 8;
+  }
+  return packed;
+}
+
+function assemblePngBytes(width, height, colorType, rawScanlines, bitDepth = PNG_BIT_DEPTH_8) {
+  const header = encodePngChunk("IHDR", buildPngHeaderData(width, height, colorType, bitDepth));
   const data = encodePngChunk("IDAT", deflateSync(rawScanlines));
   const end = encodePngChunk("IEND", Buffer.alloc(0));
   return Buffer.concat([PNG_SIGNATURE, header, data, end]);
 }
 
-function buildPngHeaderData(width, height, colorType) {
+function buildPngHeaderData(width, height, colorType, bitDepth) {
   const data = Buffer.alloc(13);
   data.writeUInt32BE(width, 0);
   data.writeUInt32BE(height, 4);
-  data[8] = PNG_BIT_DEPTH_8;
+  data[8] = bitDepth;
   data[9] = colorType;
   return data;
 }
@@ -1156,7 +1318,8 @@ function describeRopSearchScoreReference(searchReference, maskFixture) {
 // background = category 2. Every band of multiband-12bit.tif is the same ramp
 // at a different offset and the two mask classes are its top and bottom row, so
 // all three bands read the same score - what the pinned list still proves is one
-// score PER BAND, in band order, with the right sign and magnitude.
+// score PER BAND, in band order, with the right magnitude (CT-322: CNR is the
+// ABSOLUTE mean difference, so it is never negative).
 function describeCnrPerBandReference(stackFixture, maskFixture) {
   return {
     script: 'cnr',
@@ -1170,19 +1333,19 @@ function describeCnrPerBandReference(stackFixture, maskFixture) {
 function cnrScoreOfBand(band, maskValues, textCategory, backgroundCategory) {
   const text = collectMaskCategoryValues(band, maskValues, textCategory);
   const background = collectMaskCategoryValues(band, maskValues, backgroundCategory);
-  return (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
+  return Math.abs(meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
 }
 
 // CT-309: the app computes the CNR objective in TS (not Python), so its
 // reference is computed here the same way, over the float32 rop reference
-// values: (mean(text px) - mean(background px)) / population std(background px)
-// with ddof = 0; text = mask category 1, background = category 2.
+// values: |mean(text px) - mean(background px)| / population std(background px)
+// with ddof = 0 (CT-322: absolute value); text = mask category 1, background = category 2.
 function describeRopCnrReference(ropReference, maskFixture) {
   const candidate = Float32Array.from(ropReference.values);
   const text = collectMaskCategoryValues(candidate, maskFixture.values, 1);
   const background = collectMaskCategoryValues(candidate, maskFixture.values, 2);
   const value =
-    (meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
+    Math.abs(meanOf(text) - meanOf(background)) / populationStandardDeviationOf(background);
   return {
     script: ropReference.script,
     fixture: ropReference.fixture,
@@ -1232,6 +1395,18 @@ function describeMaskFixture(fixture) {
   };
 }
 
+// A zip fixture is described by its entry names plus which of them is the
+// index PNG and which is the sidecar, so a spec never hard-codes the layer's
+// name to find them.
+function describeMaskZipFixture(fixture) {
+  return {
+    fileName: fixture.fileName,
+    entryNames: fixture.entryNames,
+    indexPngEntryName: fixture.indexPngEntryName,
+    sidecarEntryName: fixture.sidecarEntryName,
+  };
+}
+
 function buildFixtureManifest(fixtures, builtinScriptReferences) {
   return {
     note: "Generated by e2e/fixtures/generate-fixtures.mjs - do not edit by hand.",
@@ -1248,6 +1423,10 @@ function buildFixtureManifest(fixtures, builtinScriptReferences) {
     enviFloatStack: describeEnviFloatFixture(fixtures.enviFloatStack),
     maskMultibandPng: describeMaskFixture(fixtures.maskMultibandPng),
     maskEightBySquarePng: describeMaskFixture(fixtures.maskEightBySquarePng),
+    maskBinary1BitPng: describeMaskFixture(fixtures.maskBinary1BitPng),
+    maskBinary255Png: describeMaskFixture(fixtures.maskBinary255Png),
+    maskBinaryBottom255Png: describeMaskFixture(fixtures.maskBinaryBottom255Png),
+    maskMultibandCategoriesZip: describeMaskZipFixture(fixtures.maskMultibandCategoriesZip),
     parityStackTiff: describeStackFixture(fixtures.parityStackTiff, "uint16"),
     builtinScriptReferences,
   };
@@ -1376,4 +1555,4 @@ function computeMean(band) {
   return total / band.length;
 }
 
-generateAllFixtures();
+await generateAllFixtures();

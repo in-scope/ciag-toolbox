@@ -1,9 +1,6 @@
+import { concatenateByteArrays } from "@/lib/bytes/concatenate-byte-arrays";
 import { compressBytesToZlibBytes } from "@/lib/compression/zlib-web-streams";
-import {
-  buildPngChunkBytes,
-  concatenateByteArrays,
-  PNG_SIGNATURE,
-} from "@/lib/masks/png-chunks";
+import { buildPngChunkBytes, PNG_SIGNATURE } from "@/lib/masks/png-chunks";
 
 // CT-303: a mask layer exports as an 8-bit GRAYSCALE PNG whose pixel values
 // ARE the category indexes (0 = unlabeled, 1..5 = the category's position), so

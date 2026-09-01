@@ -71,6 +71,16 @@ export interface MaskFixture {
   readonly values: ReadonlyArray<number>;
 }
 
+// CT-328: a mask zip fixture written by another tool (yazl, so DEFLATED). It
+// names its entries plus which of them is the index PNG and which is the JSON
+// sidecar, the pair a lossless re-import rebuilds the layer from.
+export interface MaskZipFixture {
+  readonly fileName: string;
+  readonly entryNames: ReadonlyArray<string>;
+  readonly indexPngEntryName: string;
+  readonly sidecarEntryName: string;
+}
+
 // CT-307: reference outputs pinned by the generate-fixtures.mjs reference
 // runner, which executes the built-in algorithm scripts with the bundled
 // Python runtime. The parity oracle for CT-308 through CT-313: app results
@@ -158,6 +168,11 @@ export const enviStack = manifestJson.enviStack as EnviFixture;
 export const enviFloatStack = manifestJson.enviFloatStack as EnviFixture;
 export const maskMultibandPng = manifestJson.maskMultibandPng as MaskFixture;
 export const maskEightBySquarePng = manifestJson.maskEightBySquarePng as MaskFixture;
+export const maskBinary1BitPng = manifestJson.maskBinary1BitPng as MaskFixture;
+export const maskBinary255Png = manifestJson.maskBinary255Png as MaskFixture;
+export const maskBinaryBottom255Png = manifestJson.maskBinaryBottom255Png as MaskFixture;
+export const maskMultibandCategoriesZip =
+  manifestJson.maskMultibandCategoriesZip as MaskZipFixture;
 export const parityStackTiff = manifestJson.parityStackTiff as SingleFileFixture;
 export const builtinScriptReferences =
   manifestJson.builtinScriptReferences as unknown as BuiltinScriptReferences;

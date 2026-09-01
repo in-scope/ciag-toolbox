@@ -12,10 +12,12 @@ import { exportMaskLayerThroughSaveDialog } from "@/lib/masks/run-mask-export-fl
 import { importMaskLayerThroughOpenDialog } from "@/lib/masks/run-mask-import-flow";
 import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 
-// CT-303: the Masks aside's file row. Import adds the picked PNG as a new
+// CT-303: the Masks aside's file row. Import adds the picked files as ONE new
 // layer on the active panel (refusing a mask that does not cover the stack);
-// Export writes the SELECTED layer as a PNG of category indexes plus its JSON
-// sidecar.
+// CT-327: Export writes the SELECTED layer as one zip holding a black-and-white
+// PNG per category plus the index PNG of category indexes and its JSON sidecar.
+// CT-328: a pick is one PNG, several PNGs (one category per file), or one zip,
+// so the button's label stays "Import mask" while the flow decides the shape.
 
 export interface MaskFileTransferButtonsProps {
   readonly width: number;

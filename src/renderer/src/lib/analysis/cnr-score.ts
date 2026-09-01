@@ -2,8 +2,10 @@ import type { RasterImage, RasterTypedArray } from "@/lib/image/raster-image";
 
 // CT-309: Contrast-to-Noise Ratio of one candidate band against two mask
 // categories, computed exactly as the locked decision states:
-// (mean of text pixels - mean of background pixels) / population standard
-// deviation of background pixels (numpy std with ddof=0). The score is the ROP
+// |mean of text pixels - mean of background pixels| / population standard
+// deviation of background pixels (numpy std with ddof=0). CT-322: the absolute
+// value is the paper's definition (Anna, 2026-09-01), so CNR is never negative
+// and swapping the two categories leaves it unchanged. The score is the ROP
 // panel's cheapest objective, so it runs in TS over the candidate values the
 // worker already returned instead of a second Python round trip.
 //
@@ -23,7 +25,7 @@ export function computeCnrScore(request: CnrScoreRequest): number {
   assertMaskCoversCandidate(request);
   const text = summarizeCategoryPixels(request, request.textCategoryValue);
   const background = summarizeCategoryPixels(request, request.backgroundCategoryValue);
-  return (text.mean - background.mean) / populationStandardDeviation(background);
+  return Math.abs(text.mean - background.mean) / populationStandardDeviation(background);
 }
 
 function assertMaskCoversCandidate(request: CnrScoreRequest): void {

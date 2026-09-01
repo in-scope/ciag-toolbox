@@ -112,13 +112,16 @@ export interface OpenedImagesFileEntry {
 
 // CT-303: the mask import dialog reply is metadata plus the small JSON
 // sidecar; the PNG bytes stream through the chunked opened-image read.
+// CT-328: the pick is a multi-selection of PNGs and zips, replied to in pick
+// order; a zip carries its sidecar inside itself, so its sidecarText is null.
+export interface PickedMaskFileDescription {
+  file: OpenImagesDialogFileMetadataEntry;
+  sidecarText: string | null;
+}
+
 export type MaskImportDialogResult =
   | { canceled: true }
-  | {
-      canceled: false;
-      file: OpenImagesDialogFileMetadataEntry;
-      sidecarText: string | null;
-    };
+  | { canceled: false; files: ReadonlyArray<PickedMaskFileDescription> };
 
 export type OpenBundleDialogResult =
   | { canceled: true }

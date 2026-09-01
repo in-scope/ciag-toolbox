@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
-import sharp from "sharp";
 import type { Page } from "@playwright/test";
 
 import {
@@ -20,7 +19,7 @@ import {
   createTemporaryExportDirectory,
   createTemporaryProjectBundleDirectory,
   expectPixelReadoutToEqual,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
   importMaskFromPath,
   loadFixtureAsStack,
   maskCategoryNameField,
@@ -39,7 +38,8 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 // mask-multiband.png (4x4 over multiband-12bit.tif, top row category 1, bottom
 // row category 2, categories Parchment/Substrate, opacity 60) onto the stack,
 // saves the bundle, reopens it, and exports the restored mask; the oracle is a
-// REFERENCE DECODER (sharp) reading the exported PNG back sample-for-sample
+// REFERENCE DECODER (sharp) reading the exported zip's index PNG back
+// sample-for-sample
 // against the fixture's pinned values. The second test opens a hand-built
 // version 2 bundle (no masks array at all) to prove an older project still
 // loads, with the status-bar pixel readout as the oracle.
@@ -134,25 +134,19 @@ function readCategoryName(position: number): string {
 }
 
 async function expectExportedMaskMatchesTheFixture(page: Page): Promise<void> {
-  const exportPath = join(await createTemporaryExportDirectory(), "restored-mask.png");
-  await exportSelectedMaskToPath(page, exportPath);
-  await runAsStoryboardStep(page, "Decode the restored mask's export in Node", async () => {
-    // sharp's default pipeline converts to 3-channel sRGB; "b-w" keeps the
-    // single 8-bit channel whose samples ARE the category indexes.
-    const decoded = await sharp(exportPath)
-      .toColourspace("b-w")
-      .raw()
-      .toBuffer({ resolveWithObject: true });
+  const exportPath = join(await createTemporaryExportDirectory(), "restored-mask.zip");
+  const decoded = await exportSelectedMaskAndDecodeIndexPng(page, exportPath);
+  await runAsStoryboardStep(page, "Check the restored mask's exported index PNG", async () => {
     expect({
-      width: decoded.info.width,
-      height: decoded.info.height,
-      channels: decoded.info.channels,
+      width: decoded.width,
+      height: decoded.height,
+      channels: decoded.channels,
     }).toEqual({
       width: maskMultibandPng.width,
       height: maskMultibandPng.height,
       channels: 1,
     });
-    expect(Array.from(decoded.data)).toEqual([...maskMultibandPng.values]);
+    expect(decoded.values).toEqual([...maskMultibandPng.values]);
   });
 }
 

@@ -51,6 +51,12 @@ export function maskCategoryNameField(page: Page, position: number): Locator {
   return masksOptionsPanel(page).getByRole("textbox", { name: `Category ${position} name` });
 }
 
+// CT-328: the round trip has to prove the category COLOURS survived, so the
+// swatch (an <input type="color"> whose value is the hex) is a readout too.
+export function maskCategoryColorField(page: Page, position: number): Locator {
+  return masksOptionsPanel(page).getByLabel(`Category ${position} color`);
+}
+
 export function addMaskCategoryButton(page: Page): Locator {
   return masksOptionsPanel(page).getByRole("button", { name: /^Add category/ });
 }

@@ -152,6 +152,7 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
   it("computes CNR in TS without any worker run", async () => {
     // Text pixel 10, background pixel 20 with std 0: numpy gives -Inf, which
     // is reported as a failure; use two background pixels for a finite pin.
+    // CT-322: CNR is the absolute mean difference over the background spread.
     const request = buildScoreRequest({
       candidateValues: Float32Array.from([10, 20, 30]),
       width: 3,
@@ -159,7 +160,7 @@ describe("scoreRopCandidateShowingPanelBusy", () => {
     });
     const outcome = await scoreRopCandidateShowingPanelBusy(request, rollBindings());
     expect(outcome.status).toBe("scored");
-    if (outcome.status === "scored") expect(outcome.score).toBeCloseTo((10 - 25) / 5, 10);
+    if (outcome.status === "scored") expect(outcome.score).toBeCloseTo(Math.abs((10 - 25) / 5), 10);
   });
 
   it("fails a CNR score that is not finite instead of retaining it", async () => {

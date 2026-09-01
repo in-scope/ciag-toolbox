@@ -8,49 +8,67 @@ import {
   type OpenedImageFileMetadataEntry,
 } from "./opened-image-file-metadata";
 
-// CT-303: picks a mask PNG to import. The reply is METADATA ONLY (the CT-234
-// rule): the PNG's bytes stream to the renderer through the chunked
-// opened-image read protocol like any other picked file. The JSON sidecar is
-// the one thing that travels here, because it is a handful of category names
-// and colours and the renderer cannot read the disk itself.
+// CT-303: picks the mask files to import. The reply is METADATA ONLY (the
+// CT-234 rule): every picked file's bytes stream to the renderer through the
+// chunked opened-image read protocol like any other picked file. The JSON
+// sidecar is the one thing that travels here, because it is a handful of
+// category names and colours and the renderer cannot read the disk itself.
+//
+// CT-328: the pick is a MULTI-selection of PNGs and zips, replied to in pick
+// order, because a person's per-class masks are several files and the toolbox's
+// own export is one zip. A zip has no sidecar beside it (its sidecar is inside
+// it), so only a PNG's neighbour is looked up.
+
+export interface PickedMaskFileDescription {
+  file: OpenedImageFileMetadataEntry;
+  sidecarText: string | null;
+}
 
 export type MaskImportDialogResult =
   | { canceled: true }
-  | {
-      canceled: false;
-      file: OpenedImageFileMetadataEntry;
-      sidecarText: string | null;
-    };
+  | { canceled: false; files: ReadonlyArray<PickedMaskFileDescription> };
 
 const MASK_IMPORT_DIALOG_CHANNEL = "mask:import-dialog";
 
 const MASK_SIDECAR_EXTENSION = "json";
+const MASK_ZIP_EXTENSION = ".zip";
 
 // A sidecar is a few hundred bytes of labelling; anything larger is not one,
 // and the import falls back to default category names and colours.
 const MAX_MASK_SIDECAR_BYTES = 1024 * 1024;
 
-const MASK_PNG_FILTER: Electron.FileFilter = { name: "Mask PNG", extensions: ["png"] };
+const MASK_FILE_FILTER: Electron.FileFilter = {
+  name: "Mask files",
+  extensions: ["png", "zip"],
+};
 
-async function chooseMaskFileAndReadSidecar(
+async function chooseMaskFilesAndReadSidecars(
   window: BrowserWindow,
 ): Promise<MaskImportDialogResult> {
   const dialogResult = await showOpenDialogOrStub(window, {
     title: "Import Mask",
-    properties: ["openFile"],
-    filters: [MASK_PNG_FILTER],
+    properties: ["openFile", "multiSelections"],
+    filters: [MASK_FILE_FILTER],
   });
-  const [pickedPath] = dialogResult.filePaths;
-  if (dialogResult.canceled || pickedPath === undefined) return { canceled: true };
-  return describePickedMaskFile(pickedPath);
-}
-
-async function describePickedMaskFile(pickedPath: string): Promise<MaskImportDialogResult> {
+  if (dialogResult.canceled || dialogResult.filePaths.length === 0) return { canceled: true };
   return {
     canceled: false,
-    file: await readFileMetadataForOpenedImagePath(pickedPath),
-    sidecarText: await readMaskSidecarTextOrNull(buildSidecarPathFor(pickedPath)),
+    files: await Promise.all(dialogResult.filePaths.map(describePickedMaskFile)),
   };
+}
+
+async function describePickedMaskFile(pickedPath: string): Promise<PickedMaskFileDescription> {
+  return {
+    file: await readFileMetadataForOpenedImagePath(pickedPath),
+    sidecarText: await readSidecarTextBesidePickedMaskOrNull(pickedPath),
+  };
+}
+
+async function readSidecarTextBesidePickedMaskOrNull(
+  pickedPath: string,
+): Promise<string | null> {
+  if (pickedPath.toLowerCase().endsWith(MASK_ZIP_EXTENSION)) return null;
+  return readMaskSidecarTextOrNull(buildSidecarPathFor(pickedPath));
 }
 
 function buildSidecarPathFor(maskFilePath: string): string {
@@ -74,7 +92,7 @@ async function handleMaskImportDialogIpc(
 ): Promise<MaskImportDialogResult> {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (!window) return { canceled: true };
-  return chooseMaskFileAndReadSidecar(window);
+  return chooseMaskFilesAndReadSidecars(window);
 }
 
 export function registerMaskImportDialogIpcHandler(): void {

@@ -161,6 +161,8 @@ export {
   clickReviewModalRecombineIntoOneStack,
   confirmReviewModal,
   cancelReplaceTargetPicker,
+  chooseOpenImagesReplaceTargetPanel,
+  confirmReplaceTargetPicker,
   openImagesErrorToast,
 } from "./open-images-flow";
 export {
@@ -464,6 +466,7 @@ export {
   addMaskCategoryButton,
   closeMasksOptions,
   createMaskLayer,
+  maskCategoryColorField,
   maskCategoryNameField,
   maskCategoryNameFields,
   maskLayerNameField,
@@ -488,12 +491,19 @@ export {
   setMaskBrushSizeToOnePixel,
 } from "./mask-brush";
 export {
+  decodeIndexPngInsideMaskZip,
+  decodeSingleChannelPngBuffer,
   exportMaskButton,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
+  exportSelectedMaskToZipPath,
+  findMaskZipSidecarStemOrThrow,
   importMaskButton,
   importMaskFromPath,
+  importMasksFromPaths,
   maskToastContaining,
+  type DecodedMaskIndexPng,
 } from "./mask-file-transfer";
+export { listZipEntryNames, readZipEntriesByName } from "./zip-archive";
 export {
   chooseCnrBackgroundCategory,
   chooseCnrTextCategory,

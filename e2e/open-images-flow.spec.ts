@@ -5,33 +5,46 @@ import {
   fixturePath,
   flatFieldReferenceTiff,
   lowContrastGrayPng,
+  maskMultibandPng,
   multiBandTiff,
   rgbPng,
 } from "./fixtures/fixture-manifest";
 import { writeTemporaryGrayscalePngVariantFixtures } from "./support/create-temporary-png-fixture";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
 import type { LaunchedApp } from "./support/launch-app";
+import { toggleChannelView } from "./support/channel-view";
 import {
   clickReviewModalRecombineIntoOneStack,
   reviewModalRecombineIntoOneStackButton,
   applicationToolbar,
   cancelReplaceTargetPicker,
+  chooseOpenImagesReplaceTargetPanel,
   chooseReviewModalGroupMode,
+  confirmReplaceTargetPicker,
   confirmReviewModal,
   DISTINCT_VALUE_BAND_FIXTURE_SIDE,
   enqueueAndTriggerOpenImages,
+  exportMaskButton,
   expectPanelHoldsFile,
+  goToBandNumberInputInPanel,
+  historyEntryCount,
+  importMaskFromPath,
   loadFixtureAsStack,
+  maskLayerOptions,
   openImagesErrorToast,
   openImagesReplaceTargetPicker,
   openImagesReviewModal,
+  openMasksOptions,
+  panelCell,
   readMetadata,
   readPixelValueAt,
   readReviewModalRowFileNamesInOrder,
   reviewModalGroupModeSelect,
   reviewModalGroups,
   reviewModalRows,
+  selectActiveBandNumberInPanel,
   selectGridLayout,
+  selectPanel,
   clickGridBackgroundToClearSelection,
   writeTemporaryCorruptImageFixture,
   writeTemporaryDistinctValueWavelengthBandFixtures,
@@ -138,6 +151,77 @@ test("opening a new image into a full 2x3 grid prompts the replace-target picker
     await closeToolboxApp(app);
   }
 });
+
+// CT-323: opening a file into an already-occupied panel through the replace-target
+// picker must reset that panel's rendering state exactly like an empty-panel open -
+// masks, band selection, and History must never carry over from the stack that just
+// got replaced. Panel 1 starts as multiband-12bit.tif (a real 3-band scientific stack,
+// so the mask-multiband.png fixture's 4x4 mask fits and the band navigator is real,
+// not hidden) with a mask layer and band 3 selected; rgb.png then replaces it through
+// the picker. rgb.png is a true-colour photo (CT-159: no band navigator while shown as
+// a composite), so the reset band index is read by toggling "view channels
+// separately" (CT-248), which makes the composite scroll like any 3-band stack.
+test("opening a file into an occupied panel through the replace picker resets the panel's state", async () => {
+  const app = await launchToolboxApp();
+  try {
+    await test.step("fill a 2x3 grid with panel 1 holding multiband-12bit.tif", async () => {
+      await fillMaxGridWithMultiBandTiffInPanelOne(app);
+    });
+    await test.step("give panel 1 a mask layer and select band 3", async () => {
+      await selectPanel(app.window, 1);
+      await openMasksOptions(app.window);
+      await importMaskFromPath(app.window, fixturePath(maskMultibandPng.fileName));
+      await expect(maskLayerOptions(app.window)).toHaveCount(1);
+      await selectActiveBandNumberInPanel(app.window, 1, 3);
+      await expect(goToBandNumberInputInPanel(app.window, 1)).toHaveValue("3");
+    });
+    await test.step("open rgb.png into panel 1 through the replace-target picker", async () => {
+      await enqueueAndTriggerOpenImages(app.window, [fixturePath(rgbPng.fileName)]);
+      await expect(openImagesReplaceTargetPicker(app.window)).toBeVisible();
+      await chooseOpenImagesReplaceTargetPanel(
+        app.window,
+        rgbPng.fileName,
+        1,
+        multiBandTiff.fileName,
+      );
+      await confirmReplaceTargetPicker(app.window);
+      await expectPanelHoldsFile(app.window, 1, rgbPng.fileName);
+    });
+    await expectPanelOneStateIsFullyReset(app);
+  } finally {
+    await closeToolboxApp(app);
+  }
+});
+
+async function fillMaxGridWithMultiBandTiffInPanelOne(app: LaunchedApp): Promise<void> {
+  await selectGridLayout(app.window, "2x3");
+  await clickGridBackgroundToClearSelection(app.window);
+  await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+  await loadFixtureAsStack(app.window, lowContrastGrayPng.fileName);
+  await loadFixtureAsStack(app.window, flatFieldReferenceTiff.fileName);
+  await loadFixtureAsStack(app.window, enviStack.headerFileName);
+  await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+  await loadFixtureAsStack(app.window, multiBandTiff.fileName);
+  await expectPanelHoldsFile(app.window, 1, multiBandTiff.fileName);
+  await expectPanelHoldsFile(app.window, 6, multiBandTiff.fileName);
+}
+
+async function expectPanelOneStateIsFullyReset(app: LaunchedApp): Promise<void> {
+  await test.step("the Masks aside lists no layers for panel 1 and Export mask is disabled", async () => {
+    await expect(maskLayerOptions(app.window)).toHaveCount(0);
+    await expect(exportMaskButton(app.window)).toBeDisabled();
+  });
+  await test.step("the band navigator reads band 1 of 3", async () => {
+    await toggleChannelView(app.window, 1);
+    const navigator = panelCell(app.window, 1).getByTestId("viewport-band-navigator");
+    await expect(navigator).toBeVisible();
+    await expect(navigator).toContainText("/ 3");
+    await expect(goToBandNumberInputInPanel(app.window, 1)).toHaveValue("1");
+  });
+  await test.step("History is empty", async () => {
+    expect(await historyEntryCount(app.window)).toBe(0);
+  });
+}
 
 function collectPageErrors(app: LaunchedApp): string[] {
   const errors: string[] = [];

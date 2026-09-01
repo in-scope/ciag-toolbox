@@ -523,6 +523,86 @@
       1
     ]
   },
+  "maskBinary1BitPng": {
+    "fileName": "mask-binary-1bit.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "maskBinary255Png": {
+    "fileName": "mask-binary-255.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      255,
+      255,
+      255,
+      255,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "maskBinaryBottom255Png": {
+    "fileName": "mask-binary-bottom-255.png",
+    "width": 4,
+    "height": 4,
+    "values": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      255,
+      255,
+      255,
+      255
+    ]
+  },
+  "maskMultibandCategoriesZip": {
+    "fileName": "mask-multiband-categories.zip",
+    "entryNames": [
+      "Parchment.png",
+      "Substrate.png",
+      "mask-multiband.png",
+      "mask-multiband.json"
+    ],
+    "indexPngEntryName": "mask-multiband.png",
+    "sidecarEntryName": "mask-multiband.json"
+  },
   "parityStackTiff": {
     "fileName": "parity-16x16.tif",
     "width": 16,
@@ -1222,9 +1302,9 @@
         "backgroundCategory": 2
       },
       "value": [
-        -10.73312629199899,
-        -10.73312629199899,
-        -10.73312629199899
+        10.73312629199899,
+        10.73312629199899,
+        10.73312629199899
       ]
     },
     "ropCnr": {

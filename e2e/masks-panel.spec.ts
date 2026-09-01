@@ -1,6 +1,5 @@
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import sharp from "sharp";
 
 import { maskMultibandPng, multiBandTiff, fixturePath } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
@@ -12,7 +11,7 @@ import {
   applyQuickGeometricTransform,
   createMaskLayer,
   createTemporaryExportDirectory,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
   importMaskFromPath,
   loadFixtureAsStack,
   maskCategoryNameField,
@@ -26,7 +25,6 @@ import {
   openOperation,
   selectPanel,
 } from "./support/page-objects";
-import { runAsStoryboardStep } from "./support/storyboard-step";
 
 // CT-302: mask layers annotate a stack's spatial grid. This spec drives the
 // Masks options aside on multiband-12bit.tif (4x4, 3 bands): create a layer,
@@ -116,13 +114,7 @@ test("rotates the panel's masks with an in-place apply that rotates the stack", 
   await expect(masksRemovedToast(page)).toHaveCount(0);
   await expect(maskLayerOptions(page)).toHaveCount(1);
 
-  const exportPath = join(await createTemporaryExportDirectory(), "rotated-mask.png");
-  await exportSelectedMaskToPath(page, exportPath);
-  await runAsStoryboardStep(page, "Decode the exported mask in Node", async () => {
-    const decoded = await sharp(exportPath)
-      .toColourspace("b-w")
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    expect(Array.from(decoded.data)).toEqual(EXPECTED_ROTATED_MASK_VALUES);
-  });
+  const exportPath = join(await createTemporaryExportDirectory(), "rotated-mask.zip");
+  const decoded = await exportSelectedMaskAndDecodeIndexPng(page, exportPath);
+  expect(decoded.values).toEqual(EXPECTED_ROTATED_MASK_VALUES);
 });

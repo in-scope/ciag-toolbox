@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { join } from "node:path";
+import sharp from "sharp";
 import type { Page } from "@playwright/test";
 
 import { builtinScriptReferences, fixturePath, maskMultibandPng, multiBandTiff } from "./fixtures/fixture-manifest";
@@ -23,6 +25,11 @@ import {
   expectL2MinimizationDefaultsToTheLayer,
   L2_MINIMIZATION_LABEL,
 } from "./support/l2-minimization-operation";
+import { selectActiveBandNumber } from "./support/band-navigator";
+import {
+  createTemporaryExportDirectory,
+  exportSelectedStackThroughSaveDialog,
+} from "./support/save-image-flow";
 import { runAsStoryboardStep } from "./support/storyboard-step";
 
 // CT-313: L2 minimization - the client's L2 binarization approximation
@@ -102,6 +109,55 @@ test("blocks Apply until the stack has a mask layer with two painted categories"
   await openOperation(page, L2_MINIMIZATION_LABEL);
   expect(await isApplyEnabled(page, L2_MINIMIZATION_LABEL)).toBe(true);
 });
+
+// CT-324: the result inherits the source panel's rendering state, and this
+// source is being viewed at its LAST band while the result has only one. An
+// inherited band index the result raster does not have used to break the save
+// with "Band index N out of range" (the reason Anna could not export an L2 /
+// Local PCA-MNF / ROP result).
+//
+// ORACLE: the saved PNG decodes (sharp, an independent decoder) to the result
+// raster's width x height, which is only reachable if the save read a band the
+// result actually has.
+test("saves a one-band result exported after viewing the source at its last band", async () => {
+  const page = launched.window;
+
+  await importTheParchmentMask(page);
+  await viewTheLastBandOfTheSource(page);
+  await openOperation(page, L2_MINIMIZATION_LABEL);
+  await applyOperation(page, L2_MINIMIZATION_LABEL);
+
+  await selectPanel(page, RESULT_PANEL);
+  await expectResultIsASingleFloatBand(page);
+  await expectTheResultSavesAsAPngOfItsOwnSize(page);
+});
+
+async function viewTheLastBandOfTheSource(page: Page): Promise<void> {
+  await runAsStoryboardStep(page, "View the last band of the source stack", async () => {
+    await selectActiveBandNumber(page, multiBandTiff.bandCount);
+  });
+}
+
+async function expectTheResultSavesAsAPngOfItsOwnSize(page: Page): Promise<void> {
+  const destinationPath = join(await createTemporaryExportDirectory(), "l2-result.png");
+  await exportSelectedStackThroughSaveDialog({
+    app: launched.app,
+    page,
+    formatLabel: "PNG (8-bit)",
+    destinationPath,
+  });
+  await expectSavedPngToDecodeToTheResultSize(page, destinationPath);
+}
+
+async function expectSavedPngToDecodeToTheResultSize(
+  page: Page,
+  destinationPath: string,
+): Promise<void> {
+  await runAsStoryboardStep(page, "Reference-decode the saved result PNG", async () => {
+    const metadata = await sharp(destinationPath).metadata();
+    expect(metadata).toMatchObject({ width: IMAGE.width, height: IMAGE.height });
+  });
+}
 
 async function importTheParchmentMask(page: Page): Promise<void> {
   await openMasksOptions(page);

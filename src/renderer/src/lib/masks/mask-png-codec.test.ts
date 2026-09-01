@@ -21,6 +21,10 @@ import { encodeMaskValuesAsGrayscalePngBytes } from "@/lib/masks/mask-png-encode
 // committed e2e fixture mask-multiband.png, written by generate-fixtures.mjs.
 
 const MASK_FIXTURE_PATH = join(__dirname, "../../../../../e2e/fixtures/mask-multiband.png");
+const MASK_BINARY_1BIT_FIXTURE_PATH = join(
+  __dirname,
+  "../../../../../e2e/fixtures/mask-binary-1bit.png",
+);
 
 const PNG_SIGNATURE = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -80,6 +84,36 @@ describe("decodeMaskPngBytes", () => {
   it("refuses a 16-bit PNG", async () => {
     const bytes = buildMaskPngWithHeaderOverrides(2, 1, [[0, 0, 0, 0, 0]], { bitDepth: 16 });
     await expect(decodeMaskPngBytes(bytes)).rejects.toThrow(MASK_PNG_BIT_DEPTH_MESSAGE);
+  });
+
+  it("reads the committed 1-bit mask fixture's known category assignments", async () => {
+    const decoded = await decodeMaskPngBytes(
+      new Uint8Array(readFileSync(MASK_BINARY_1BIT_FIXTURE_PATH)),
+    );
+    expect({ width: decoded.width, height: decoded.height }).toEqual({ width: 4, height: 4 });
+    expect(Array.from(decoded.values)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("decodes a 2-bit grayscale PNG", async () => {
+    // Row [0,1,2,3] packed MSB-first into one byte: 00 01 10 11 = 0x1B.
+    const bytes = buildMaskPngWithHeaderOverrides(4, 1, [[0, 0x1b]], { bitDepth: 2 });
+    const decoded = await decodeMaskPngBytes(bytes);
+    expect(Array.from(decoded.values)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("decodes a 4-bit grayscale PNG", async () => {
+    // Row [3, 15] packed MSB-first into one byte: 0011 1111 = 0x3F.
+    const bytes = buildMaskPngWithHeaderOverrides(2, 1, [[0, 0x3f]], { bitDepth: 4 });
+    const decoded = await decodeMaskPngBytes(bytes);
+    expect(Array.from(decoded.values)).toEqual([3, 15]);
+  });
+
+  it("unpacks a sub-byte width without reading the row's padding bits", async () => {
+    // width 5 at 1-bit needs one packed byte with 3 trailing padding bits;
+    // values 1,0,1,1,0 occupy the top 5 bits, padding (111) fills the rest.
+    const bytes = buildMaskPngWithHeaderOverrides(5, 1, [[0, 0b10110111]], { bitDepth: 1 });
+    const decoded = await decodeMaskPngBytes(bytes);
+    expect(Array.from(decoded.values)).toEqual([1, 0, 1, 1, 0]);
   });
 
   it("refuses a colour PNG", async () => {
