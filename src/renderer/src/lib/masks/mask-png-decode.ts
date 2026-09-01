@@ -6,8 +6,9 @@ import {
 } from "@shared/png-header";
 import { reconstructScanlineBytesInPlace } from "@shared/png-scanline-filters";
 
+import { concatenateByteArrays } from "@/lib/bytes/concatenate-byte-arrays";
 import { decompressZlibBytes } from "@/lib/compression/zlib-web-streams";
-import { concatenateByteArrays, listPngChunksAfterSignature } from "@/lib/masks/png-chunks";
+import { listPngChunksAfterSignature } from "@/lib/masks/png-chunks";
 
 // CT-303: reads an imported mask PNG back to the category indexes it stores.
 // Grayscale samples ARE the indexes; an INDEXED (palette) PNG stores the same

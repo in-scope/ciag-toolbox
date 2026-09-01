@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
-import sharp from "sharp";
 
 import { bimodalGrayPng } from "./fixtures/fixture-manifest";
 import { closeToolboxApp, launchToolboxApp } from "./support/launch-app";
@@ -10,7 +9,7 @@ import {
   clickPanelToSelect,
   createMaskLayer,
   createTemporaryExportDirectory,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
   loadFixtureAsStack,
   noQualifyingThresholdResultHint,
   openMasksOptions,
@@ -70,16 +69,15 @@ test("promotes the white pixels of a threshold result into the selected category
   await clickPanelToSelect(page, SOURCE_PANEL);
   await promoteFirstQualifyingThresholdResult(page);
 
-  const exportPath = join(await createTemporaryExportDirectory(), "promoted-mask.png");
-  await exportSelectedMaskToPath(page, exportPath);
+  const exportPath = join(await createTemporaryExportDirectory(), "promoted-mask.zip");
+  const decoded = await exportSelectedMaskAndDecodeIndexPng(page, exportPath);
 
-  const decoded = await sharp(exportPath).toColourspace("b-w").raw().toBuffer({ resolveWithObject: true });
-  expect({ width: decoded.info.width, height: decoded.info.height, channels: decoded.info.channels }).toEqual({
+  expect({ width: decoded.width, height: decoded.height, channels: decoded.channels }).toEqual({
     width: FIXTURE.width,
     height: FIXTURE.height,
     channels: 1,
   });
-  expect(Array.from(decoded.data)).toEqual(expectedPromotedMaskValues());
+  expect(decoded.values).toEqual(expectedPromotedMaskValues());
 });
 
 // The dark cluster (indexes 0..7) sits below the pinned Otsu cutoff (55) and

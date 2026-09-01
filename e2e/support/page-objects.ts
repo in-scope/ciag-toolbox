@@ -490,12 +490,18 @@ export {
   setMaskBrushSizeToOnePixel,
 } from "./mask-brush";
 export {
+  decodeIndexPngInsideMaskZip,
+  decodeSingleChannelPngBuffer,
   exportMaskButton,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
+  exportSelectedMaskToZipPath,
+  findMaskZipSidecarStemOrThrow,
   importMaskButton,
   importMaskFromPath,
   maskToastContaining,
+  type DecodedMaskIndexPng,
 } from "./mask-file-transfer";
+export { listZipEntryNames, readZipEntriesByName } from "./zip-archive";
 export {
   chooseCnrBackgroundCategory,
   chooseCnrTextCategory,

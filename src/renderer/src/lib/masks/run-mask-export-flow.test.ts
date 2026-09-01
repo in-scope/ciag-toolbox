@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildMaskLayerZipBytes } from "@/lib/masks/mask-export-zip";
 import { createMaskLayer, type MaskLayer } from "@/lib/masks/mask-layer";
-import { decodeMaskPngBytes } from "@/lib/masks/mask-png-decode";
-import { parseMaskSidecarDocumentOrNull } from "@/lib/masks/mask-sidecar";
 import {
   buildSuggestedMaskFileName,
   exportMaskLayerThroughSaveDialog,
 } from "@/lib/masks/run-mask-export-flow";
 
-// CT-303: the export drives the chunked save-image protocol - begin (which
-// resolves the save dialog before any bytes move), the PNG and sidecar parts
-// in bounded chunks, then finish. A failure releases the session so no partial
-// files survive.
+// CT-303/CT-327: the export drives the chunked save-image protocol - begin
+// (which resolves the save dialog before any bytes move), the zip as the
+// PRIMARY part in bounded chunks, then finish. A failure releases the session
+// so no partial file survives.
 
 interface RecordedChunk {
   readonly part: string;
@@ -35,7 +34,7 @@ function createFakeSaveApi(overrides: Partial<Record<string, unknown>> = {}) {
     sendSaveImageChunk: vi.fn(async (request: { part: string; bytes: Uint8Array }) => {
       chunks.push({ part: request.part, bytes: request.bytes });
     }),
-    finishSaveImage: vi.fn(async () => ({ filePath: "C:/tmp/parchment-mask.png" })),
+    finishSaveImage: vi.fn(async () => ({ filePath: "C:/tmp/parchment-mask.zip" })),
     releaseSaveImage: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -54,31 +53,30 @@ function joinChunksForPart(chunks: ReadonlyArray<RecordedChunk>, part: string): 
 }
 
 describe("exportMaskLayerThroughSaveDialog", () => {
-  it("uploads the mask PNG and its sidecar, then finishes", async () => {
+  it("uploads the zip as the primary part, with no sidecar part", async () => {
     const { api, chunks, requests } = createFakeSaveApi();
     const result = await exportMaskLayerThroughSaveDialog(buildLayerToExport(), api);
 
-    expect(result).toEqual({ canceled: false, filePath: "C:/tmp/parchment-mask.png" });
+    expect(result).toEqual({ canceled: false, filePath: "C:/tmp/parchment-mask.zip" });
     expect(requests[0]).toMatchObject({
-      suggestedFileName: "Parchment mask.png",
-      fileFilter: { name: "PNG Image", extensions: ["png"] },
-      sidecar: { extension: "json" },
+      suggestedFileName: "Parchment mask.zip",
+      fileFilter: { name: "Zip archive", extensions: ["zip"] },
     });
-    const decoded = await decodeMaskPngBytes(joinChunksForPart(chunks, "primary"));
-    expect(Array.from(decoded.values)).toEqual([0, 1, 1, 0, 2, 2, 0, 0]);
-    const sidecarText = new TextDecoder().decode(joinChunksForPart(chunks, "sidecar"));
-    expect(parseMaskSidecarDocumentOrNull(sidecarText)?.name).toBe("Parchment mask");
+    expect(requests[0]).not.toHaveProperty("sidecar");
+    expect(chunks.every((chunk) => chunk.part === "primary")).toBe(true);
+    expect(Array.from(joinChunksForPart(chunks, "primary"))).toEqual(
+      Array.from(await buildMaskLayerZipBytes(buildLayerToExport())),
+    );
   });
 
-  it("describes both parts' byte lengths before any bytes move", async () => {
+  it("describes the zip's byte length before any bytes move", async () => {
     const { api, chunks, requests } = createFakeSaveApi();
     await exportMaskLayerThroughSaveDialog(buildLayerToExport(), api);
-    const request = requests[0] as { primaryByteLength: number; sidecar: { byteLength: number } };
+    const request = requests[0] as { primaryByteLength: number };
     expect(request.primaryByteLength).toBe(joinChunksForPart(chunks, "primary").byteLength);
-    expect(request.sidecar.byteLength).toBe(joinChunksForPart(chunks, "sidecar").byteLength);
   });
 
-  it("splits a part across chunks that respect the chunk ceiling", async () => {
+  it("splits the zip across chunks that respect the chunk ceiling", async () => {
     const { api, chunks } = createFakeSaveApi();
     await exportMaskLayerThroughSaveDialog(buildLayerToExport(), api, 8);
     expect(chunks.length).toBeGreaterThan(2);
@@ -110,10 +108,10 @@ describe("exportMaskLayerThroughSaveDialog", () => {
 
 describe("buildSuggestedMaskFileName", () => {
   it("cleans characters a file name cannot hold", () => {
-    expect(buildSuggestedMaskFileName("ink/paper: layer")).toBe("ink-paper- layer.png");
+    expect(buildSuggestedMaskFileName("ink/paper: layer")).toBe("ink-paper- layer.zip");
   });
 
   it("falls back when the layer name cleans away to nothing", () => {
-    expect(buildSuggestedMaskFileName("   ")).toBe("mask.png");
+    expect(buildSuggestedMaskFileName("   ")).toBe("mask.zip");
   });
 });

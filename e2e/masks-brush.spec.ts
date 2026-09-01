@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
-import sharp from "sharp";
 import type { Page } from "@playwright/test";
 
 import { multiBandTiff } from "./fixtures/fixture-manifest";
@@ -11,7 +10,7 @@ import {
   createMaskLayer,
   createTemporaryExportDirectory,
   enableMaskEraser,
-  exportSelectedMaskToPath,
+  exportSelectedMaskAndDecodeIndexPng,
   loadFixtureAsStack,
   openMasksOptions,
   paintMaskDotAtPagePoint,
@@ -36,7 +35,8 @@ import { runAsStoryboardStep } from "./support/storyboard-step";
 //   - the DATA is untouched: the status-bar pixel readout at the painted pixel
 //     still reports the value it reported before the stroke;
 //   - the right pixels carry the right category: the CT-303 export flow writes
-//     the mask out and sharp decodes it back sample-for-sample in this spec.
+//     the mask out and a reference decoder reads the zip's index PNG back
+//     sample-for-sample in this spec.
 // The brush is set to 1 image pixel so a drag between two pixel CENTRES paints
 // exactly those pixels. The zoom case cannot use the fit-view mapping at all,
 // so it asks the READOUT which pixel sits under the cursor and then paints
@@ -204,15 +204,7 @@ async function expectExportedMaskValues(
   page: Page,
   expectedValues: ReadonlyArray<number>,
 ): Promise<void> {
-  const exportPath = join(await createTemporaryExportDirectory(), "painted-mask.png");
-  await exportSelectedMaskToPath(page, exportPath);
-  await runAsStoryboardStep(page, "Decode the exported mask in Node", async () => {
-    // "b-w" keeps the single 8-bit channel whose samples ARE the category
-    // indexes; sharp's default pipeline would expand it to three channels.
-    const decoded = await sharp(exportPath)
-      .toColourspace("b-w")
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    expect(Array.from(decoded.data)).toEqual([...expectedValues]);
-  });
+  const exportPath = join(await createTemporaryExportDirectory(), "painted-mask.zip");
+  const decoded = await exportSelectedMaskAndDecodeIndexPng(page, exportPath);
+  expect(decoded.values).toEqual([...expectedValues]);
 }

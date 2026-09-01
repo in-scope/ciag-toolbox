@@ -14,8 +14,8 @@ import { notifyError, notifySuccess } from "@/lib/notifications/notify";
 
 // CT-303: the Masks aside's file row. Import adds the picked PNG as a new
 // layer on the active panel (refusing a mask that does not cover the stack);
-// Export writes the SELECTED layer as a PNG of category indexes plus its JSON
-// sidecar.
+// CT-327: Export writes the SELECTED layer as one zip holding a black-and-white
+// PNG per category plus the index PNG of category indexes and its JSON sidecar.
 
 export interface MaskFileTransferButtonsProps {
   readonly width: number;
