@@ -7,21 +7,9 @@ A Toolbox for Cultural Heritage Analysis and Recovery of Multispectral & Hypersp
 
 CHARM Toolbox is a desktop application for inspecting, processing and comparing images, built for image analysis in cultural heritage imaging: museum imaging scientists, conservators, and researchers in cultural heritage labs. If you are used to viewing images in MATLAB, Python (matplotlib / OpenCV), or Hoku, this tool aims to give you a fast, focused side-by-side viewing surface without having to write a script every time you want to compare two renderings.
 
-This is an early release. It does the things listed below, and only those things. Future versions will add more.
+This is an early release and still in the stage of testing for a beta version. 
 
-## What the application does today
-
-- Runs as a native desktop app on Windows and macOS.
-- Opens **PNG** and **JPEG** images from your computer. New images land in the next empty cell automatically; if the grid is full, you are asked which cell to replace.
-- Lays out a grid of **1, 2, 4, or 6** viewing cells. Available layouts are **1x1, 1x2, 2x1, 2x2, 2x3, and 3x2** (rows by columns). Empty cells show an **Open image** button so you always have a clear next step.
-- Each cell is independent: it has its own image, its own pan/zoom, and its own display settings.
-- **Pan** with click-and-drag inside a cell. **Zoom** with the mouse wheel, centered on your cursor so you can drill into a feature just by hovering over it. **Double-click** to reset the cell to fit the image.
-- **Duplicate** a cell's image into another cell from the right-click menu. The duplicate auto-routes to the next empty cell, expands the grid if all cells are full, or prompts you to pick a cell to replace if the grid is already at its maximum size. Each copy is independent, so you can compare different display settings on the same image.
-- Toggle a cell between **raw** display and **Normalized viewing** using the contrast icon in the cell's header strip. Normalized viewing stretches each band to its own minimum and maximum across the full display range, which can pull faint detail out of a low-contrast capture. It is a display aid only: it never changes the underlying data and is not recorded in the operation history.
-- Step through the bands of a multi-band image with the **band control** at the bottom of the cell: drag the slider, type a band number, use the left/right step buttons, use the arrow keys, or scroll the mouse wheel over the control. Sweeping the slider or scrolling across many bands loads only the band you settle on, so jumping from band 1 to band 8 loads band 8 rather than every band in between. The control shows the current band and the total, and scales smoothly to images with hundreds of bands. Single-band images do not show it.
-- Switch between **Light**, **Dark**, and **System** themes from **View > Theme**.
-
-The application never modifies the image file on disk. All adjustments are visual, applied only to what you see in the cell.
+Note: The application never modifies the image file on disk. All adjustments are visual, applied only to what you see in the cell.
 
 ## Installation
 
