@@ -5,7 +5,7 @@ A Toolbox for Cultural Heritage Analysis and Recovery of Multispectral & Hypersp
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](../../releases)
 [![Downloads](https://img.shields.io/github/downloads/in-scope/ciag-toolbox/total)](../../releases)
 
-CHARM Toolbox is a desktop application for inspecting and comparing images, built for image analysis in cultural heritage imaging: museum imaging scientists, conservators, and researchers in cultural heritage labs. If you are used to viewing images in MATLAB, Python (matplotlib / OpenCV), or Hoku, this tool aims to give you a fast, focused side-by-side viewing surface without having to write a script every time you want to compare two renderings.
+CHARM Toolbox is a desktop application for inspecting, processing and comparing images, built for image analysis in cultural heritage imaging: museum imaging scientists, conservators, and researchers in cultural heritage labs. If you are used to viewing images in MATLAB, Python (matplotlib / OpenCV), or Hoku, this tool aims to give you a fast, focused side-by-side viewing surface without having to write a script every time you want to compare two renderings.
 
 This is an early release. It does the things listed below, and only those things. Future versions will add more.
 
@@ -25,13 +25,13 @@ The application never modifies the image file on disk. All adjustments are visua
 
 ## Installation
 
-Download the latest installer for your computer from the [Releases page](../../releases). Pick the file that matches your operating system, run it, and launch **MSI Toolbox** from your Start menu (Windows) or Applications folder (macOS).
+Download the latest installer for your computer from the [Releases page](../../releases). Pick the file that matches your operating system, run it, and launch **CHARM Toolbox** from your Start menu (Windows) or Applications folder (macOS).
 
 ### Windows
 
 1. From the [Releases page](../../releases), download the file ending in `Setup.exe`.
 2. Double-click the installer and follow the prompts. Choose an install location and whether to add Start menu and desktop shortcuts.
-3. Launch **MSI Toolbox** from the Start menu.
+3. Launch **CHARM Toolbox** from the Start menu.
 
 ### macOS
 
@@ -40,8 +40,8 @@ Download the latest installer for your computer from the [Releases page](../../r
    - **Intel**: the file ending in `x64.dmg`.
 
    If you are not sure which you have, click the Apple menu in the top-left of your screen, choose **About This Mac**, and look at the **Chip** or **Processor** line.
-2. Open the `.dmg` and drag the **MSI Toolbox** icon into your **Applications** folder.
-3. **First launch only**: double-click **MSI Toolbox** in your Applications folder. macOS will block it with a dialog saying it cannot be opened. Click **Done** to dismiss the dialog.
+2. Open the `.dmg` and drag the **CHARM Toolbox** icon into your **Applications** folder.
+3. **First launch only**: double-click **CHARM Toolbox** in your Applications folder. macOS will block it with a dialog saying it cannot be opened. Click **Done** to dismiss the dialog.
 4. Click the Apple menu in the top-left of your screen and choose **System Settings**. In the sidebar, click **Privacy & Security**, then scroll down. Near the bottom you will see a message: *"MSI Toolbox was blocked to protect your Mac."* Click the **Open Anyway** button next to it.
 5. macOS will prompt you to authenticate with Touch ID or your password, then show one more dialog. Click **Open Anyway** in that dialog too.
 6. The app launches. From now on, double-clicking the icon works normally; this approval is one-time.
